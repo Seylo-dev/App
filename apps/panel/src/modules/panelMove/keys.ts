@@ -3,8 +3,8 @@
 // the moved panel starts from a copy of panel.db:
 //
 //   panelMoveArrival  written into the COPY only: the moved panel waits for
-//                     its first agent, then turns it into panelMoveDone
-//                     (arrival.ts).
+//                     the switch and its first agent, then turns it into
+//                     panelMoveDone (arrival.ts).
 //   panelMoveDone     the moved panel: the result card and "Delete the old
 //                     copy". While its old copy is not deleted (and its node
 //                     still exists) no other move starts (oldCopyLeft), so
@@ -63,7 +63,7 @@ export interface PanelMoveDone {
   retireTries?: number;
 }
 
-export type PanelMoveOutPhase = "registry" | "shipping" | "starting" | "staging" | "switching" | "moved";
+export type PanelMoveOutPhase = "registry" | "shipping" | "starting" | "staging" | "committing" | "aborting" | "switching" | "moved";
 
 export interface PanelMoveOut {
   moveId: string;
@@ -73,19 +73,29 @@ export interface PanelMoveOut {
   fromNodeId: string;
   fromNodeName: string;
   /**
-   * registry, shipping, starting: no node knows the new address yet; a restart here
-   * cleans up the target and carries on as before. staging and later: some
-   * node may switch to the new panel by itself, so a restarted old panel
-   * stays retired (it takes no agents and no changes) and the move ends on
-   * the new one.
+   * registry, shipping, starting, staging, aborting: nothing is committed
+   * (the moved panel takes no agent before CommitMovedPanel), so a restart
+   * here undoes the move (the target and the staged nodes when they are
+   * back) and carries on as before. committing: CommitMovedPanel was sent
+   * and may have landed, so a restart sends it again until the target
+   * answers. switching and moved: past the point of no return, a restarted
+   * old panel stays retired (it takes no agents and no changes) and the
+   * move ends on the new one.
    */
   phase: PanelMoveOutPhase;
-  /** Nodes told the new address so far. */
+  /** Nodes that may hold the new address: every node a StagePanelAddress went to, before it was sent. */
   staged: string[];
   leftBehind: string[];
   domain: string | null;
   startedAt: number;
   at: number;
+  /** Who started it, for the audit rows after a restart. */
+  by?: string;
+  /** phase committing: epoch ms the first CommitMovedPanel failed without a definite answer. */
+  waitingSince?: number;
+  /** phase aborting: the step that failed and why, for the card after a restart. */
+  abortStep?: panelMove.PanelMoveStep;
+  abortMessage?: string;
   /** phase "moved": the old node's agent did not confirm that it stops this panel. */
   oldPanelRunning?: boolean;
 }

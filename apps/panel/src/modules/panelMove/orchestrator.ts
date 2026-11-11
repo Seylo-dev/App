@@ -2,8 +2,8 @@
 // job runner is held while it runs, and its rows are in the database being
 // copied). The steps, with the agent calls of panel_move.proto:
 //
-//   pausing    the write pause (pause.ts) and the job runner held; jobs in
-//              flight finish first
+//   pausing    the write pause (pause.ts) and the job runner held; jobs and
+//              changes in flight finish first
 //   registry   ExportRegistry on the panel's node piped into
 //              ImportRegistry on the target (staged there)
 //   snapshot   consistent copies of the databases, edited for the target,
@@ -14,18 +14,27 @@
 //   starting   StartMovedPanel: the target starts the moved panel, waits
 //              until it is healthy and checks it presents the agents' TLS
 //              key every node pins
-//   staging    StagePanelAddress on every node that follows: the address
-//              it switches to once this panel goes away (probed first)
+//   staging    StagePanelAddress on every node that follows, then on nodes
+//              left behind that came back meanwhile: the address it
+//              switches to once this panel goes away (probed first: the
+//              panel there must answer as the moved copy of this move)
+//   committing CommitMovedPanel on the target: the switch. Until it, the
+//              moved panel answers agents with 503, so a node that dials it
+//              early comes back here; from its answer on the moved panel
+//              takes agents and nothing undoes the move. An answer that
+//              never comes (a timeout, the target away) is no answer: it is
+//              sent again every few seconds while this panel stays
+//              read-only and keeps every node, and only a definite refusal
+//              ("notStarted") or, after 10 minutes, a cancel with force
+//              undoes the move.
 //   switching  agents' connects answer 503, every session but the panel
 //              node's own closes, RetirePanel stops this panel
 //
-// A failure (or panelMove.cancel) before the switch undoes everything:
-// AbortMovedPanel on the target first (a node that already went over by
-// itself then finds nothing there and comes back), ClearPanelAddress on
-// every node staged so far, then writes resume. Calls that fail because a
-// node is away are kept in panelMoveCleanups and finished when it is back
-// (cleanup.ts). From the switch on there is no way back: some nodes may be
-// on the moved panel, which takes changes from its first agent on.
+// A failure (or panelMove.cancel) before the commit undoes everything:
+// AbortMovedPanel on the target, ClearPanelAddress on every node staged so
+// far, the target's desired state released, then writes resume. Calls that
+// fail because a node is away are kept in panelMoveCleanups and finished
+// when it is back (cleanup.ts).
 //
 // panelMoveOut in this panel's own database (the offline edit drops it from
 // the copy, so the moved panel never sees it) records how far the move got,
@@ -36,19 +45,21 @@ import { join } from "node:path";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import { OpError, type panelMove } from "@seylo/ops";
 import { eq } from "drizzle-orm";
+import { agentRefusalOf } from "../../agent-hub/calls";
 import { dialedUrlOf, dialsLoopback, dialsPlainHttp } from "../../agent-hub/dialed";
-import { auditLog, nodes } from "../../db/schema";
+import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { newId } from "../../ids";
 import { deleteSetting, setSetting } from "../../settings";
 import { urlHost } from "../domains/lookup";
 import { panelServiceId } from "../nodes/panel-service";
 import { panelPortOf } from "../settings/ip-access";
-import { addCleanup } from "./cleanup";
+import { writeMoveAudit } from "./audit";
+import { addCleanup, refusedAsCommitted, reportForcedCancelConflict } from "./cleanup";
 import type { PanelMoveFailure, PanelMoveOut, PanelMoveOutPhase } from "./keys";
-import { setWritePause } from "./pause";
+import { setWritePause, writesSettled } from "./pause";
 import { bytesNeeded, dataFiles, editSnapshot, freeBytes, type ManifestEntry, panelSpecFromCopy, writeArchive } from "./snapshot";
-import { activeMove, type RunningMove, setActiveMove } from "./state";
+import { activeMove, canForceCancel, type RunningMove, setActiveMove } from "./state";
 
 /** How long jobs in flight may take to finish before the move gives up. */
 export const holdTimeoutMs = 2 * 60_000;
@@ -59,12 +70,22 @@ export const healthTimeoutMs = 3 * 60_000;
 export const startTimeoutMs = 8 * 60_000;
 /** StagePanelAddress probes with a 10 s dial. */
 const stageTimeoutMs = 30_000;
+/** One CommitMovedPanel; the agent answers at once (it writes a journal and a marker file). */
+const commitTimeoutMs = 30_000;
 const abortTimeoutMs = 2 * 60_000;
 const clearTimeoutMs = 30_000;
 const retireTimeoutMs = 30_000;
 const retireAttempts = 3;
 /** Progress events at most this often while bytes move. */
 const progressEveryMs = 500;
+
+/** Timings tests shorten. */
+export const moveTiming = {
+  /** How long changes that passed the gate (ops, webhooks) may take to finish before the move gives up. */
+  writesTimeoutMs: 2 * 60_000,
+  /** The pause between two CommitMovedPanel calls that got no answer. */
+  commitRetryMs: 5_000,
+};
 
 const stepOrder: panelMove.PanelMoveStep[] = ["pausing", "registry", "snapshot", "shipping", "starting", "staging", "switching"];
 
@@ -98,42 +119,6 @@ export function publishStatus(deps: Pick<Deps, "live">): void {
   deps.live.publish("panel", { type: "invalidate", ops: ["panelMove.status", "panelMove.check"] });
 }
 
-/** An audit row the move writes itself (actor "system", or who started it in `input.by`). */
-export function writeMoveAudit(
-  deps: Pick<Deps, "db" | "logger">,
-  opId: string,
-  input: Record<string, unknown>,
-  error: string | null = null,
-): void {
-  try {
-    deps.db
-      .insert(auditLog)
-      .values({
-        at: new Date(),
-        actorType: "system",
-        actorId: null,
-        credentialId: null,
-        actorLabel: "system",
-        opId,
-        targetType: null,
-        targetId: null,
-        targetLabel: null,
-        projectId: null,
-        transport: "http",
-        input,
-        outcome: error ? "error" : "ok",
-        errorCode: error,
-        durationMs: 0,
-        ip: null,
-        userAgent: null,
-        approvalId: null,
-      })
-      .run();
-  } catch (failure) {
-    deps.logger.error({ err: failure, opId }, "writing the panel move's audit row failed");
-  }
-}
-
 /** Starts a move whose checks passed; answers at once, the steps run in the background. */
 export function beginMove(deps: Deps, plan: MovePlan): RunningMove {
   if (activeMove(deps.db)) throw new OpError("CONFLICT", "The panel is moving already.", { reason: "moveRunning" });
@@ -152,6 +137,8 @@ export function beginMove(deps: Deps, plan: MovePlan): RunningMove {
     bytesDone: 0,
     bytesTotal: 0,
     abort: new AbortController(),
+    committing: false,
+    waitingSince: null,
     switching: false,
     staged: new Set(),
     doneAt: null,
@@ -168,10 +155,63 @@ export function beginMove(deps: Deps, plan: MovePlan): RunningMove {
   return move;
 }
 
-/** panelMove.cancel: stops what runs; runMove undoes the rest. */
-export function cancelMove(move: RunningMove, by: string): void {
-  if (move.switching || move.abort.signal.aborted) return;
+/**
+ * After a restart of this panel with the commit sent (recover.ts): the
+ * panel is read-only again, the job runner and the target's desired state
+ * are held again, and CommitMovedPanel goes out until the target answers,
+ * then the switch, as if the panel never stopped.
+ */
+export function resumeCommit(deps: Deps, out: PanelMoveOut): RunningMove {
+  const move: RunningMove = {
+    moveId: out.moveId,
+    targetNodeId: out.targetNodeId,
+    targetNodeName: out.targetNodeName,
+    address: out.address,
+    fromNodeId: out.fromNodeId,
+    fromNodeName: out.fromNodeName,
+    domain: out.domain,
+    follow: out.staged.filter((id) => !out.leftBehind.includes(id)),
+    leftBehind: out.leftBehind.map((id) => ({ id, name: nodeName(deps, id) })),
+    startedAt: out.startedAt,
+    step: "switching",
+    bytesDone: 0,
+    bytesTotal: 0,
+    abort: new AbortController(),
+    committing: true,
+    waitingSince: out.waitingSince ?? null,
+    switching: false,
+    staged: new Set(out.staged),
+    doneAt: null,
+    oldPanelRunning: false,
+    by: out.by ?? "the owner",
+  };
+  setActiveMove(deps.db, move);
+  setWritePause(deps.db, { reason: "moving", targetName: move.targetNodeName, agentsClosed: false });
+  // Before the target reconnects: its first full sync from here would drop the moved panel's spec.
+  move.releaseTarget = deps.agents.desired.hold(move.targetNodeId);
+  // Nothing runs yet at start, so this resolves at once; the main start then starts a held runner.
+  if (deps.jobControl) void deps.jobControl.hold();
+  deps.logger.warn({ moveId: move.moveId, to: move.targetNodeId }, "the panel restarted during a move's switch; sending it again");
+  void commitAndSwitch(deps, move, deps.jobControl !== undefined).catch((error) =>
+    deps.logger.error({ err: error, moveId: move.moveId }, "the panel move ended badly"),
+  );
+  return move;
+}
+
+/**
+ * panelMove.cancel: stops what runs; the move undoes the rest. Once the
+ * commit was sent only with force, after the target left it unconfirmed for
+ * 10 minutes (canForceCancel); false when the cancel was not taken.
+ */
+export function cancelMove(move: RunningMove, by: string, force = false): boolean {
+  if (move.switching || move.abort.signal.aborted) return false;
+  if (move.committing) {
+    if (!force || !canForceCancel(move)) return false;
+    move.abort.abort(new MoveFailure(`Cancelled with force by ${by}: ${move.targetNodeName} never confirmed the switch.`));
+    return true;
+  }
   move.abort.abort(new MoveFailure(`Cancelled by ${by}.`));
+  return true;
 }
 
 function setStep(deps: Deps, move: RunningMove, step: panelMove.PanelMoveStep): void {
@@ -217,11 +257,25 @@ async function within<T>(promise: Promise<T>, ms: number, signal: AbortSignal, t
   }
 }
 
+/** Waits `ms`, or less once the move was cancelled. */
+async function sleepUnlessCancelled(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 function nodeName(deps: Pick<Deps, "db">, nodeId: string): string {
   return deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? nodeId;
 }
 
-function writeOut(deps: Deps, move: RunningMove, phase: PanelMoveOutPhase): void {
+function writeOut(deps: Deps, move: RunningMove, phase: PanelMoveOutPhase, extra: Partial<PanelMoveOut> = {}): void {
   const out: PanelMoveOut = {
     moveId: move.moveId,
     targetNodeId: move.targetNodeId,
@@ -230,12 +284,15 @@ function writeOut(deps: Deps, move: RunningMove, phase: PanelMoveOutPhase): void
     fromNodeId: move.fromNodeId,
     fromNodeName: move.fromNodeName,
     phase,
-    staged: [...new Set([...move.staged, ...(phase === "staging" ? move.follow : [])])],
+    staged: [...move.staged],
     leftBehind: move.leftBehind.map((node) => node.id),
     domain: move.domain,
     startedAt: move.startedAt,
     at: Date.now(),
+    by: move.by,
+    ...(move.waitingSince !== null ? { waitingSince: move.waitingSince } : {}),
     ...(move.oldPanelRunning ? { oldPanelRunning: true } : {}),
+    ...extra,
   };
   setSetting(deps.db, "panelMoveOut", out);
 }
@@ -257,6 +314,13 @@ async function runMove(deps: Deps, move: RunningMove): Promise<void> {
       held = true;
       await within(deps.jobControl.hold(), holdTimeoutMs, signal, "Jobs that were running did not finish within 2 minutes. Try again.");
     }
+    // Ops and webhooks that passed the gate a moment ago may still write: the copy must have their rows.
+    await within(
+      writesSettled(deps.db),
+      moveTiming.writesTimeoutMs,
+      signal,
+      "Changes that were being saved when the move started did not finish in time. Try again.",
+    );
     // Desired-state sends in flight write revisions: let them land before the copy.
     await within(deps.agents.desired.settled(), 30_000, signal, "The panel could not finish sending desired state to the nodes.");
     cancelled(move);
@@ -352,18 +416,40 @@ async function runMove(deps: Deps, move: RunningMove): Promise<void> {
     }
     cancelled(move);
 
-    // ---- staging: from here a restart of this panel ends the move on the new one (recover.ts)
+    // ---- staging: the journal names every node first, since a call that fails may have staged it anyway.
+    // The target first: it reaches the moved panel on loopback, so a failure there says the most.
+    const order = [move.targetNodeId, ...move.follow.filter((id) => id !== move.targetNodeId)];
+    for (const nodeId of order) move.staged.add(nodeId);
     writeOut(deps, move, "staging");
     setStep(deps, move, "staging");
-    await stageAll(deps, move, pin, agentPort);
+    await stageAll(deps, move, order, pin, agentPort);
     cancelled(move);
+    await stageLateNodes(deps, move, pin, agentPort);
+    cancelled(move);
+  } catch (error) {
+    await abortMove(deps, move, error, held, log);
+    return;
+  } finally {
+    if (workDir) rmSync(workDir, { recursive: true, force: true });
+  }
+  await commitAndSwitch(deps, move, held);
+}
+
+/** Committing and switching: from a running move, or after a restart in the committing phase (resumeCommit). */
+async function commitAndSwitch(deps: Deps, move: RunningMove, held: boolean): Promise<void> {
+  const log = deps.logger.child({ component: "panel-move", moveId: move.moveId });
+  try {
+    // ---- committing: written before the first call, since any call may land
+    move.committing = true;
+    writeOut(deps, move, "committing");
+    setStep(deps, move, "switching");
+    await commit(deps, move, log);
 
     // ---- switching: no way back from here
     move.switching = true;
-    setStep(deps, move, "switching");
-    setWritePause(deps.db, { reason: "moving", targetName: move.targetNodeName, agentsClosed: true });
-    await stageLateNodes(deps, move, pin, agentPort);
     writeOut(deps, move, "switching");
+    setWritePause(deps.db, { reason: "moving", targetName: move.targetNodeName, agentsClosed: true });
+    publishStatus(deps);
     for (const nodeId of deps.agents.onlineNodeIds()) {
       if (nodeId !== move.fromNodeId) deps.agents.reconnect(nodeId, "The panel moved to another server: connecting to its new address.");
     }
@@ -384,8 +470,50 @@ async function runMove(deps: Deps, move: RunningMove): Promise<void> {
     } else {
       await abortMove(deps, move, error, held, log);
     }
-  } finally {
-    if (workDir) rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The target refused the switch for sure, so nothing was committed there:
+ * it runs no healthy moved panel of this move ("notStarted"), the request
+ * was refused as it is, or its agent does not know the call. Anything else
+ * (a timeout, the target away, an error half way) may have landed.
+ */
+function refusedForSure(error: unknown): boolean {
+  if (error instanceof OpError && error.details?.reason === "capability") return true;
+  const refusal = agentRefusalOf(error);
+  if (!refusal) return false;
+  if (refusal.status === "FAILED_PRECONDITION") return refusal.reason === "notStarted";
+  return refusal.status === "INVALID_ARGUMENT" || refusal.status === "UNIMPLEMENTED";
+}
+
+/** CommitMovedPanel until the target answers it; a definite refusal or a forced cancel throws. */
+async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promise<void> {
+  const signal = move.abort.signal;
+  let forceable = false;
+  for (;;) {
+    cancelled(move);
+    try {
+      await deps.agents.call(move.targetNodeId, "commitMovedPanel", { moveId: move.moveId }, { timeoutMs: commitTimeoutMs, signal });
+      if (move.waitingSince !== null) log.info({ nodeId: move.targetNodeId }, "the target confirmed the switch after all");
+      return;
+    } catch (error) {
+      cancelled(move);
+      if (refusedForSure(error)) {
+        throw new MoveFailure(`${move.targetNodeName} did not take the switch: ${failureMessage(error).replace(/\.$/, "")}.`);
+      }
+      if (move.waitingSince === null) {
+        move.waitingSince = Date.now();
+        writeOut(deps, move, "committing");
+        publishStatus(deps);
+      }
+      if (!forceable && canForceCancel(move)) {
+        forceable = true;
+        publishStatus(deps);
+      }
+      log.warn({ err: error, nodeId: move.targetNodeId }, "the target did not confirm the switch; asking again");
+    }
+    await sleepUnlessCancelled(moveTiming.commitRetryMs, signal);
   }
 }
 
@@ -488,10 +616,8 @@ async function stageOne(deps: Deps, move: RunningMove, nodeId: string, pin: stri
   );
 }
 
-/** Every node that follows gets the new address; one that cannot ends the move, by name. */
-async function stageAll(deps: Deps, move: RunningMove, pin: string, agentPort: number): Promise<void> {
-  // The target first: it reaches the moved panel on loopback, so a failure there says the most.
-  const order = [move.targetNodeId, ...move.follow.filter((id) => id !== move.targetNodeId)];
+/** Every node that follows gets the new address, the target first; one that cannot ends the move, by name. */
+async function stageAll(deps: Deps, move: RunningMove, order: readonly string[], pin: string, agentPort: number): Promise<void> {
   const results = await Promise.allSettled(order.map((nodeId) => stageOne(deps, move, nodeId, pin, agentPort, stageTimeoutMs)));
   const failed = results.findIndex((result) => result.status === "rejected");
   if (failed < 0) return;
@@ -506,7 +632,8 @@ async function stageAll(deps: Deps, move: RunningMove, pin: string, agentPort: n
 /**
  * Nodes left behind that came back during the move: told the new address
  * too when they can take it, so they follow after all. Best effort: one
- * that cannot stays left behind, as the owner accepted.
+ * that cannot stays left behind, as the owner accepted (and is cleared too
+ * if the move is undone, since its call may have landed).
  */
 async function stageLateNodes(deps: Deps, move: RunningMove, pin: string, agentPort: number): Promise<void> {
   const late = move.leftBehind.filter((node) => {
@@ -514,13 +641,15 @@ async function stageLateNodes(deps: Deps, move: RunningMove, pin: string, agentP
     const url = dialedUrlOf(deps, node.id);
     return !(dialsPlainHttp(url) && !dialsLoopback(url));
   });
+  if (late.length === 0) return;
+  for (const node of late) move.staged.add(node.id);
+  writeOut(deps, move, "staging");
   await Promise.all(
     late.map(async (node) => {
       try {
         await stageOne(deps, move, node.id, pin, agentPort, 10_000);
         move.leftBehind = move.leftBehind.filter((other) => other.id !== node.id);
       } catch (error) {
-        move.staged.delete(node.id);
         deps.logger.info({ err: error, nodeId: node.id }, "a node that came back during the move could not take the new address");
       }
     }),
@@ -547,7 +676,7 @@ async function retire(deps: Deps, move: RunningMove): Promise<boolean> {
   return false;
 }
 
-/** Undoes a move that stopped before the switch, then lets the panel take changes again. */
+/** Undoes a move that stopped before the commit, then lets the panel take changes again. */
 async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: boolean, log: Deps["logger"]): Promise<void> {
   const step = move.step;
   const message = failureMessage(move.abort.signal.aborted && move.abort.signal.reason ? move.abort.signal.reason : error);
@@ -556,14 +685,29 @@ async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: bo
   // Whatever still runs (a stream, a call) stops now.
   if (!move.abort.signal.aborted) move.abort.abort(new MoveFailure(message));
 
-  // The target first (once it stopped, a node that went over by itself finds nothing there and comes back).
+  // From the registry step on the target may hold staged data, and from staging on nodes may hold the address.
+  const onTarget = stepOrder.indexOf(step) >= stepOrder.indexOf("registry");
+  if (onTarget) {
+    // A restart from here finishes the undo (recover.ts), never resumes or retires.
+    try {
+      writeOut(deps, move, "aborting", { abortStep: step, abortMessage: message });
+    } catch (failed) {
+      log.error({ err: failed }, "recording the undo of the move failed");
+    }
+  }
   let targetCleaned = true;
-  if (stepOrder.indexOf(step) >= stepOrder.indexOf("registry")) {
+  if (onTarget) {
     try {
       await deps.agents.call(move.targetNodeId, "abortMovedPanel", { moveId: move.moveId }, { timeoutMs: abortTimeoutMs });
     } catch (failure) {
-      targetCleaned = false;
-      log.warn({ err: failure, nodeId: move.targetNodeId }, "the target did not take AbortMovedPanel; retrying when it is back");
+      if (refusedAsCommitted(failure)) {
+        // A forced cancel came after all: the target had taken the switch. Its own address stays with it.
+        reportForcedCancelConflict(deps, move.moveId, move.targetNodeId, move.targetNodeName);
+        move.staged.delete(move.targetNodeId);
+      } else {
+        targetCleaned = false;
+        log.warn({ err: failure, nodeId: move.targetNodeId }, "the target did not take AbortMovedPanel; retrying when it is back");
+      }
     }
   }
   // The target gets this panel's desired state again (a full sync).
@@ -613,7 +757,16 @@ async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: bo
   publishStatus(deps);
 }
 
-/** The step a stored phase stands for, for a failure after a restart. */
-export function phaseStep(phase: PanelMoveOutPhase): panelMove.PanelMoveStep {
-  return phase === "moved" ? "switching" : phase;
+/** The step a stored phase stands for, for a failure or a status after a restart. */
+export function phaseStep(out: Pick<PanelMoveOut, "phase" | "abortStep">): panelMove.PanelMoveStep {
+  switch (out.phase) {
+    case "aborting":
+      return out.abortStep ?? "staging";
+    case "committing":
+    case "switching":
+    case "moved":
+      return "switching";
+    default:
+      return out.phase;
+  }
 }

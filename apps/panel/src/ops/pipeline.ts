@@ -20,7 +20,7 @@ import { describePrincipal, type Principal, type PrincipalUser } from "../auth/p
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
 import { readMcpSafety } from "../modules/mcp/keys";
-import { pauseRefusal } from "../modules/panelMove/pause";
+import { beginWrite, pauseRefusal } from "../modules/panelMove/pause";
 import { anonymousErrorRows, firstOverCapThisHour, takeAnonymousErrorRow, targetLabel, targetProject, writeAudit } from "./audit";
 import { type HttpEffects, maxViaLoginLength, type OpContext, type OpHandler, type OpVia } from "./implement";
 import type { RateLimiter } from "./rate-limit";
@@ -97,6 +97,8 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       if (input === undefined) return marked ? extra : input;
       return input && typeof input === "object" ? { ...(input as object), ...extra } : input;
     };
+    // Set once a change passed the move's gate: a move waits for it before it copies the database.
+    let written: (() => void) | undefined;
 
     try {
       const handler = handlers.get(op.id);
@@ -121,6 +123,8 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       if (op.kind !== "query") {
         const paused = pauseRefusal(deps.db, op.id);
         if (paused) throw paused;
+        // Counted until its audit row is written, so a move that starts meanwhile waits for both.
+        written = beginWrite(deps.db);
       }
       if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId && !autoMode && !approvalWaived(deps, principal)) {
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
@@ -147,6 +151,8 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       logRefusal(deps, call, principal, actor.user, error);
       audit(deps, call, principal, actor.user, audited(), { target, label, projectId }, error.code, started);
       return { ok: false, error };
+    } finally {
+      written?.();
     }
   };
 }

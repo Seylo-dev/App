@@ -4,10 +4,17 @@
 // ClearPanelAddress, each on its next connect. Entries live in
 // panelMoveCleanups (keys.ts) so a restart of the panel keeps them, and are
 // dropped once done or after a week.
+//
+// A target that refuses AbortMovedPanel with "committed" took the switch
+// after all (a forced cancel undid a move whose CommitMovedPanel had
+// landed): its moved panel takes agents and nothing here can stop it. That
+// is logged as an error with an audit row naming the node, and dropped.
 
 import { OpError } from "@seylo/ops";
+import { agentRefusalOf } from "../../agent-hub/calls";
 import type { Deps } from "../../deps";
 import { deleteSetting, getSetting, setSetting } from "../../settings";
+import { writeMoveAudit } from "./audit";
 import { cleanupKeepMs, type PanelMoveCleanup } from "./keys";
 
 /** Nodes with a cleanup call in flight, per panel. */
@@ -32,6 +39,36 @@ function hopeless(error: unknown): boolean {
   return error instanceof OpError && (error.code === "NOT_IMPLEMENTED" || error.code === "NOT_FOUND");
 }
 
+/** AbortMovedPanel refused because the target took the switch of that move (CommitMovedPanel landed). */
+export function refusedAsCommitted(error: unknown): boolean {
+  const refusal = agentRefusalOf(error);
+  return refusal?.status === "FAILED_PRECONDITION" && refusal.reason === "committed";
+}
+
+/** A forced cancel undid a move the target had committed: the owner must hear of it. */
+export function reportForcedCancelConflict(
+  deps: Pick<Deps, "db" | "logger">,
+  moveId: string,
+  nodeId: string,
+  nodeName: string | null = null,
+): void {
+  deps.logger.error(
+    { moveId, nodeId },
+    "the target took the switch of a panel move that was cancelled with force: its moved panel takes agents",
+  );
+  writeMoveAudit(
+    deps,
+    "panelMove.forcedCancelConflict",
+    {
+      moveId,
+      target: nodeId,
+      ...(nodeName ? { targetName: nodeName } : {}),
+      reason: "The target had taken the switch: its moved panel takes the nodes that reach it.",
+    },
+    "CONFLICT",
+  );
+}
+
 /** Runs what waits for `nodeId`; every failure is logged and kept for its next connect. */
 export async function runCleanups(deps: Pick<Deps, "db" | "agents" | "logger">, nodeId: string): Promise<void> {
   const list = getSetting(deps.db, "panelMoveCleanups") ?? [];
@@ -49,6 +86,12 @@ export async function runCleanups(deps: Pick<Deps, "db" | "agents" | "logger">, 
           update(deps, entry.moveId, (e) => ({ ...e, abortNodeId: null }));
           deps.logger.info({ nodeId, moveId: entry.moveId }, "removed the staged copy of a failed panel move");
         } catch (error) {
+          if (refusedAsCommitted(error)) {
+            // Its staged address leads to its own moved panel, which holds the switch: it stays too.
+            update(deps, entry.moveId, (e) => ({ ...e, abortNodeId: null, clearNodeIds: e.clearNodeIds.filter((id) => id !== nodeId) }));
+            reportForcedCancelConflict(deps, entry.moveId, nodeId);
+            continue;
+          }
           if (hopeless(error)) update(deps, entry.moveId, (e) => ({ ...e, abortNodeId: null }));
           deps.logger.warn({ err: error, nodeId, moveId: entry.moveId }, "removing the staged copy of a failed panel move failed");
         }

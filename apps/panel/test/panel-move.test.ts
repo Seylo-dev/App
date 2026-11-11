@@ -2,9 +2,12 @@
 // fake fleet (move-fleet.ts): who may move it and what refuses it, the
 // write pause while it moves, the copy it ships (consistent databases, the
 // offline edit, the archive and its manifest), the switch, and undoing a
-// move that failed or was cancelled at each step. The moved panel's side
-// (arrival), the offline alerts' grace, deleting the old copy, a restart
-// of the old panel in the middle and the agents' protocol during a move
+// move that failed or was cancelled at each step. The switch is
+// CommitMovedPanel on the target: a definite refusal undoes the move, an
+// answer that never comes is asked again until the owner cancels with
+// force. The moved panel's side (standby until the commit marker, then the
+// arrival), the offline alerts' grace, deleting the old copy, a restart of
+// the old panel in the middle and the agents' protocol during a move
 // (joins, reports, 503 at the switch) are at the end.
 
 import { Database } from "bun:sqlite";
@@ -14,23 +17,40 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { create, toBinary } from "@bufbuild/protobuf";
-import { panelMove, settings } from "@seylo/ops";
+import { defineOp, panelMove, permission, settings } from "@seylo/ops";
 import { EventSchema, PanelService, ReportEventRequestSchema, ReportEventResponseSchema, StatusCode } from "@seylo/proto";
+import { Type } from "@sinclair/typebox";
 import { and, desc, eq } from "drizzle-orm";
+import { Elysia } from "elysia";
+import { agentStatusError, nodeOffline } from "../src/agent-hub/calls";
 import { recordDialedUrl } from "../src/agent-hub/dialed";
 import { openDatabases } from "../src/db/client";
-import { auditLog, deployments, jobs, nodes, servicePlacements, services, sessions, updateRuns } from "../src/db/schema";
+import {
+  auditLog,
+  deployments,
+  jobs,
+  nodes,
+  servicePlacements,
+  services,
+  sessions,
+  settings as settingsTable,
+  updateRuns,
+} from "../src/db/schema";
 import { panelWebsocket } from "../src/http/ws-guard";
 import { nodeOfflineJob, nodeOfflineJobType } from "../src/modules/alerts/events";
+import { modules } from "../src/modules/index.gen";
+import { defineModule } from "../src/modules/module";
 import { ensurePanelService, panelServiceId } from "../src/modules/nodes/panel-service";
 import { checkMoveCommit, commitArrival } from "../src/modules/panelMove/arrival";
 import { runCleanups } from "../src/modules/panelMove/cleanup";
 import type { PanelMoveArrival, PanelMoveDone, PanelMoveOut } from "../src/modules/panelMove/keys";
-import { setWritePause, writePause } from "../src/modules/panelMove/pause";
+import { moveTiming } from "../src/modules/panelMove/orchestrator";
+import { setWritePause, writePause, writesInFlight } from "../src/modules/panelMove/pause";
 import { recoverMoveOut } from "../src/modules/panelMove/recover";
 import { dataFiles, editSnapshot, tarHeader, writeArchive } from "../src/modules/panelMove/snapshot";
-import { activeMove } from "../src/modules/panelMove/state";
+import { activeMove, forceCancelAfterMs } from "../src/modules/panelMove/state";
 import { moveStatus } from "../src/modules/panelMove/status";
+import { implement } from "../src/ops/implement";
 import { agentTlsPinOf, newAgentTlsKey } from "../src/security/agent-tls";
 import { getSetting, setSetting } from "../src/settings";
 import { agentKey, FakeAgent } from "./fake-agent";
@@ -100,8 +120,9 @@ const check = (targetNodeId: string | undefined = targetId, options: { cookie?: 
 
 const codes = (blocks: { code: string }[]) => blocks.map((block) => block.code);
 
-beforeEach(async () => {
-  panel = testPanel();
+/** The old panel with its three nodes, online, and its owner; again with other modules for a test that needs them. */
+async function build(options: Parameters<typeof testPanel>[0] = {}) {
+  panel = testPanel(options);
   dataDir = mkdtempSync(join(tmpdir(), "panel-move-"));
   seedDataDir(dataDir);
   panel.deps.config.dataDir = dataDir;
@@ -118,15 +139,25 @@ beforeEach(async () => {
   // The moved panel answers /api/health with this panel's version.
   fleet.answers.set("startMovedPanel", () => ({ version: panel.deps.config.version }));
   owner = await createUser(panel, "owner");
-});
+}
 
-afterEach(async () => {
+/** Closes what build made. */
+async function tearDown() {
   // A move still running is cancelled and waited for, so nothing touches the database after it closed.
   const move = activeMove(panel.deps.db);
   if (move && !move.doneAt && !move.switching) move.abort.abort(new Error("test over"));
   for (let i = 0; i < 200 && activeMove(panel.deps.db) && !activeMove(panel.deps.db)?.doneAt; i++) await Bun.sleep(5);
   panel.close();
   rmSync(dataDir, { recursive: true, force: true });
+}
+
+const timing = { ...moveTiming };
+
+beforeEach(() => build());
+
+afterEach(async () => {
+  await tearDown();
+  Object.assign(moveTiming, timing);
 });
 
 describe("who may move the panel and what refuses it", () => {
@@ -415,6 +446,12 @@ describe("the move", () => {
     const cleanups = [{ moveId: "e".repeat(16), abortNodeId: otherId, clearNodeIds: [fromId], at: Date.now() }];
     setSetting(panel.deps.db, "panelMoveCleanups", cleanups);
     const before = panel.deps.db.select().from(services).where(eq(services.id, panelServiceId)).get();
+    // At the commit every node is staged, this panel still takes agents, and a restart would send it again.
+    let atCommit: unknown;
+    fleet.answers.set("commitMovedPanel", () => {
+      atCommit = { pause: writePause(panel.deps.db), out: getSetting(panel.deps.db, "panelMoveOut") };
+      return {};
+    });
 
     const started = await start();
     expect(started.status).toBe(200);
@@ -445,10 +482,15 @@ describe("the move", () => {
       "stagePanelAddress@new",
       "stagePanelAddress@b",
       "stagePanelAddress@old",
+      "commitMovedPanel@new",
       "retirePanel@old",
     ]);
     expect(fleet.uploads.get("importRegistry")).toEqual(fleet.registry);
     const moveId = done.moveId as string;
+    expect(atCommit).toMatchObject({
+      pause: { reason: "moving", agentsClosed: false },
+      out: { moveId, phase: "committing", staged: expect.arrayContaining([fromId, targetId, otherId]) },
+    });
     for (const call of fleet.calls.filter((c) => c.method !== "startMovedPanel")) expect(call.request.moveId).toBe(moveId);
 
     // Every node is told the new address with the pin; the target reaches it on loopback.
@@ -755,6 +797,285 @@ describe("the move", () => {
     const done = await waitForState("done");
     expect(done.leftBehind).toEqual([]);
     expect(fleet.of("stagePanelAddress").map((c) => c.nodeId)).toContain(otherId);
+  });
+});
+
+describe("the switch: CommitMovedPanel on the target", () => {
+  test("a target that refuses it for sure undoes the move; nothing was committed", async () => {
+    fleet.answers.set("commitMovedPanel", (nodeId) => {
+      throw agentStatusError(nodeId, {
+        code: StatusCode.FAILED_PRECONDITION,
+        message: "No healthy moved panel of this move runs here.",
+        details: { reason: "notStarted" },
+      });
+    });
+    await start();
+    const failed = await waitForState("failed");
+    expect(failed.error).toEqual({
+      step: "switching",
+      message: "new did not take the switch: No healthy moved panel of this move runs here.",
+    });
+    const order = fleet.sequence();
+    expect(order.indexOf("commitMovedPanel")).toBeLessThan(order.indexOf("abortMovedPanel"));
+    expect(fleet.of("commitMovedPanel")).toHaveLength(1);
+    expect(fleet.of("retirePanel")).toEqual([]);
+    expect(fleet.reconnects).toEqual([]);
+    expect(
+      fleet
+        .of("clearPanelAddress")
+        .map((c) => c.nodeId)
+        .sort(),
+    ).toEqual([fromId, otherId, targetId].sort());
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(false);
+    expect(writePause(panel.deps.db)).toBeNull();
+    expect(panel.runner.held).toBe(false);
+  });
+
+  test("an answer that never comes is no answer: asked again while the panel stays read-only and keeps every node", async () => {
+    moveTiming.commitRetryMs = 20;
+    let tries = 0;
+    fleet.answers.set("commitMovedPanel", (nodeId) => {
+      tries++;
+      if (tries === 1) throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+      if (tries === 2) throw nodeOffline(nodeId);
+      if (tries < 5) throw agentStatusError(nodeId, { code: StatusCode.INTERNAL, message: "", details: {} });
+      return {};
+    });
+    let seen: any;
+    fleet.answers.set("retirePanel", () => {
+      seen = { ...moveStatus(panel.deps, true), pause: writePause(panel.deps.db) };
+      return {};
+    });
+    await start();
+    const done = await waitForState("done");
+    expect(tries).toBe(5);
+    expect(done.oldPanelRunning).toBe(false);
+    expect(seen.pause).toMatchObject({ agentsClosed: true });
+    // Nothing undid it on the way.
+    expect(fleet.of("abortMovedPanel")).toEqual([]);
+    expect(fleet.of("clearPanelAddress")).toEqual([]);
+  });
+
+  test("while it waits: no plain cancel, agents still taken, a cancel with force only after 10 minutes", async () => {
+    moveTiming.commitRetryMs = 20;
+    fleet.answers.set("commitMovedPanel", () => {
+      throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+    });
+    await start();
+    for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.waitingSince; i++) await Bun.sleep(5);
+    const move = activeMove(panel.deps.db);
+    expect(move?.waitingSince).toBeNumber();
+    const waiting = (await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body;
+    expect(waiting).toMatchObject({ state: "running", step: "switching", canCancel: false, canForceCancel: false });
+    expect(waiting.waitingSince).toBe(new Date(move?.waitingSince ?? 0).toISOString());
+    expect(getSetting(panel.deps.db, "panelMoveOut")).toMatchObject({ phase: "committing", waitingSince: move?.waitingSince });
+    // The old panel still serves every node and takes no change.
+    expect(writePause(panel.deps.db)).toMatchObject({ reason: "moving", agentsClosed: false });
+    expect((await callOp(panel, settings.updateGeneral, { name: "x" }, { cookie: owner.cookie })).body.error.details.reason).toBe(
+      "panelMoving",
+    );
+    const plain = await callOp(panel, panelMove.cancel, {}, { cookie: owner.cookie });
+    expect(plain.body.error.details.reason).toBe("switching");
+    const early = await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie });
+    expect(early.body.error.details.reason).toBe("switching");
+    expect(early.body.error.message).toContain("10 minutes");
+
+    // Ten minutes without an answer.
+    if (move) move.waitingSince = Date.now() - forceCancelAfterMs - 1000;
+    expect((await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body.canForceCancel).toBe(true);
+    // The target is gone: its abort waits for it.
+    fleet.online.delete(targetId);
+    const forced = await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie });
+    expect(forced.status).toBe(200);
+    const failed = await waitForState("failed");
+    expect(failed.error).toMatchObject({ step: "switching", message: expect.stringContaining("Cancelled with force by") });
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toEqual([
+      { moveId: failed.moveId, abortNodeId: targetId, clearNodeIds: [targetId], at: expect.any(Number) },
+    ]);
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(false);
+    expect(writePause(panel.deps.db)).toBeNull();
+    expect(panel.runner.held).toBe(false);
+    const audit = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.cancel")).orderBy(desc(auditLog.id)).get();
+    expect(audit).toMatchObject({ outcome: "ok", input: expect.objectContaining({ forced: true }) });
+  });
+
+  test("a forced cancel the target contradicts (it had committed) is reported and dropped", async () => {
+    moveTiming.commitRetryMs = 20;
+    let tries = 0;
+    // The first commit landed, but its answer was lost; then the target went away.
+    fleet.answers.set("commitMovedPanel", (nodeId, request) => {
+      tries++;
+      if (tries === 1) fleet.committed.add(`${nodeId}/${request.moveId}`);
+      throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+    });
+    await start();
+    for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.waitingSince; i++) await Bun.sleep(5);
+    const move = activeMove(panel.deps.db);
+    if (move) move.waitingSince = Date.now() - forceCancelAfterMs - 1000;
+    fleet.online.delete(targetId);
+    expect((await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie })).status).toBe(200);
+    const failed = await waitForState("failed");
+    // Back: the queued abort is refused, since the switch landed there.
+    fleet.online.add(targetId);
+    await runCleanups(panel.deps, targetId);
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toBeUndefined();
+    const conflict = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.forcedCancelConflict")).get();
+    expect(conflict).toMatchObject({ outcome: "error", input: expect.objectContaining({ moveId: failed.moveId, target: targetId }) });
+    // Its staged address leads to its own moved panel: it is not cleared.
+    expect(fleet.of("clearPanelAddress").filter((c) => c.nodeId === targetId)).toEqual([]);
+  });
+
+  test("a forced cancel the target contradicts at once is reported too, and its address is left alone", async () => {
+    moveTiming.commitRetryMs = 20;
+    let tries = 0;
+    fleet.answers.set("commitMovedPanel", (nodeId, request) => {
+      tries++;
+      if (tries === 1) fleet.committed.add(`${nodeId}/${request.moveId}`);
+      throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+    });
+    await start();
+    for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.waitingSince; i++) await Bun.sleep(5);
+    const move = activeMove(panel.deps.db);
+    if (move) move.waitingSince = Date.now() - forceCancelAfterMs - 1000;
+    expect((await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie })).status).toBe(200);
+    const failed = await waitForState("failed");
+    expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.forcedCancelConflict")).get()).toMatchObject({
+      input: expect.objectContaining({ moveId: failed.moveId, target: targetId, targetName: "new" }),
+    });
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toBeUndefined();
+    expect(
+      fleet
+        .of("clearPanelAddress")
+        .map((c) => c.nodeId)
+        .sort(),
+    ).toEqual([fromId, otherId].sort());
+  });
+});
+
+describe("changes in flight when the move starts", () => {
+  /** A change that passed the gate and awaits something (an agent, a provider, a body) before it writes. */
+  const slowWrite = defineOp({
+    id: "moveTestSlow.write",
+    kind: "mutation",
+    summary: "Slow write",
+    description: "A change that awaits before it writes, used only by the panel move tests.",
+    input: Type.Object({}),
+    output: Type.Object({ done: Type.Boolean() }),
+    permission: permission.global("settings.manage"),
+    mcp: false,
+    audit: true,
+  });
+  const deferred = () => {
+    let release!: () => void;
+    let begin!: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      begin = resolve;
+    });
+    return { release, wait, begin, started };
+  };
+  let opGate = deferred();
+  let hookGate = deferred();
+  const written = (db: TestPanel["deps"]["db"], key: string) => db.insert(settingsTable).values({ key, value: "written" }).run();
+  const slow = defineModule({
+    name: "moveTestSlow",
+    ops: [
+      implement(slowWrite, async (_input, ctx) => {
+        opGate.begin();
+        await opGate.wait;
+        written(ctx.db, "moveTestOp");
+        return { done: true };
+      }),
+    ],
+    http: (deps) =>
+      new Elysia({ name: "move-test-slow" }).post("/hooks/move-test", async () => {
+        hookGate.begin();
+        await hookGate.wait;
+        written(deps.db, "moveTestHook");
+        return "ok";
+      }),
+  });
+
+  beforeEach(async () => {
+    await tearDown();
+    opGate = deferred();
+    hookGate = deferred();
+    await build({ modules: [...modules, slow] });
+  });
+
+  /** The settings rows of the panel.db the move shipped. */
+  const shippedSetting = (key: string): unknown => {
+    const files = untar(fleet.uploads.get("importPanelData") as Buffer);
+    const copyPath = join(dataDir, "shipped.db");
+    writeFileSync(copyPath, files.get("panel.db") as Buffer);
+    const sqlite = new Database(copyPath);
+    try {
+      const row = sqlite.query<{ value: string }, [string]>("SELECT value FROM settings WHERE key = ?").get(key);
+      return row ? JSON.parse(row.value) : undefined;
+    } finally {
+      sqlite.close();
+    }
+  };
+
+  test("an op and a webhook that passed the gate finish before the copy, and their rows are in it", async () => {
+    const key = createApiKey(panel, owner.user.id);
+    const op = panel.execute({
+      op: slowWrite,
+      rawInput: {},
+      credentials: { bearerToken: key },
+      transport: "http",
+      coerce: false,
+      ip: null,
+      userAgent: null,
+      http: null,
+    });
+    const hook = panel.app.handle(new Request("http://panel.test/hooks/move-test", { method: "POST", body: "{}" }));
+    await Promise.all([opGate.started, hookGate.started]);
+    expect(writesInFlight(panel.deps.db)).toBe(2);
+
+    expect((await start()).status).toBe(200);
+    await Bun.sleep(50);
+    // Still pausing: nothing left this panel yet.
+    expect(moveStatus(panel.deps, true).step).toBe("pausing");
+    expect(fleet.calls).toEqual([]);
+    opGate.release();
+    expect(await op).toEqual({ ok: true, output: { done: true } });
+    await Bun.sleep(50);
+    expect(fleet.calls).toEqual([]);
+    hookGate.release();
+    expect((await hook).status).toBe(200);
+
+    await waitForState("done");
+    expect(writesInFlight(panel.deps.db)).toBe(0);
+    expect(shippedSetting("moveTestOp")).toBe("written");
+    expect(shippedSetting("moveTestHook")).toBe("written");
+  });
+
+  test("a change that never finishes fails the move cleanly within the bound", async () => {
+    moveTiming.writesTimeoutMs = 100;
+    const hook = panel.app.handle(new Request("http://panel.test/hooks/move-test", { method: "POST", body: "{}" }));
+    await hookGate.started;
+    await start();
+    const failed = await waitForState("failed");
+    expect(failed.error).toMatchObject({ step: "pausing", message: expect.stringContaining("did not finish in time") });
+    expect(fleet.calls).toEqual([]);
+    expect(writePause(panel.deps.db)).toBeNull();
+    expect(panel.runner.held).toBe(false);
+    hookGate.release();
+    expect((await hook).status).toBe(200);
+    // Counted down once the response is out (Elysia's afterResponse, a moment after).
+    for (let i = 0; i < 100 && writesInFlight(panel.deps.db) > 0; i++) await Bun.sleep(5);
+    expect(writesInFlight(panel.deps.db)).toBe(0);
+  });
+
+  test("a webhook while the panel moves is refused and counts nothing", async () => {
+    setWritePause(panel.deps.db, { reason: "moving", targetName: "new", agentsClosed: false });
+    const refused = await panel.app.handle(new Request("http://panel.test/hooks/move-test", { method: "POST", body: "{}" }));
+    expect(refused.status).toBe(503);
+    expect(writesInFlight(panel.deps.db)).toBe(0);
+    setWritePause(panel.deps.db, null);
   });
 });
 
@@ -1137,8 +1458,109 @@ describe("a restart of the old panel in the middle", () => {
     },
   );
 
-  test("once nodes may have switched: stay retired so two panels never run", async () => {
-    setSetting(panel.deps.db, "panelMoveOut", out("staging"));
+  test("restarted while nodes were told the address: nothing was committed, so the move is undone everywhere", async () => {
+    // The journal names every node a StagePanelAddress went to, landed or not.
+    setSetting(panel.deps.db, "panelMoveOut", { ...out("staging"), staged: [targetId, otherId, fromId] });
+    expect(recoverMoveOut(panel.deps)).toBe("undone");
+    expect(writePause(panel.deps.db)).toBeNull();
+    expect(panel.runner.held).toBe(false);
+    expect(getSetting(panel.deps.db, "panelMoveOut")).toBeUndefined();
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toEqual([
+      { moveId: "q".repeat(16), abortNodeId: targetId, clearNodeIds: [targetId, otherId, fromId], at: expect.any(Number) },
+    ]);
+    const status = (await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body;
+    expect(status).toMatchObject({ state: "failed", error: { step: "staging", message: expect.stringContaining("undone") } });
+    expect((await callOp(panel, settings.updateGeneral, { name: "back" }, { cookie: owner.cookie })).status).toBe(200);
+    for (const id of [targetId, otherId, fromId]) await runCleanups(panel.deps, id);
+    expect(fleet.of("abortMovedPanel").map((c) => c.nodeId)).toEqual([targetId]);
+    expect(
+      fleet
+        .of("clearPanelAddress")
+        .map((c) => c.nodeId)
+        .sort(),
+    ).toEqual([fromId, otherId, targetId].sort());
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toBeUndefined();
+  });
+
+  test("restarted while it undid a move: the undo finishes from the journal, with the failure it had", async () => {
+    setSetting(panel.deps.db, "panelMoveOut", {
+      ...out("aborting"),
+      staged: [targetId, otherId],
+      abortStep: "staging",
+      abortMessage: "b could not reach the moved panel.",
+    });
+    expect(recoverMoveOut(panel.deps)).toBe("undone");
+    expect(writePause(panel.deps.db)).toBeNull();
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toEqual([
+      { moveId: "q".repeat(16), abortNodeId: targetId, clearNodeIds: [targetId, otherId], at: expect.any(Number) },
+    ]);
+    expect(getSetting(panel.deps.db, "panelMoveFailure")).toMatchObject({ step: "staging", message: "b could not reach the moved panel." });
+  });
+
+  test("a failure records the undo before it starts, so a restart in the middle finishes it", async () => {
+    const gate = held({});
+    fleet.answers.set("stagePanelAddress", (nodeId) => {
+      if (nodeId === otherId) throw agentRefusal("UNAVAILABLE", "no route");
+      return {};
+    });
+    fleet.answers.set("abortMovedPanel", gate.answer);
+    await start();
+    await gate.started;
+    expect(getSetting(panel.deps.db, "panelMoveOut")).toMatchObject({ phase: "aborting", abortStep: "staging" });
+    gate.release();
+    await waitForState("failed");
+    expect(getSetting(panel.deps.db, "panelMoveOut")).toBeUndefined();
+  });
+
+  test("restarted after the commit was sent: read-only again, the commit goes out again, then the switch", async () => {
+    const release = held({});
+    fleet.answers.set("commitMovedPanel", release.answer);
+    setSetting(panel.deps.db, "panelMoveOut", {
+      ...out("committing"),
+      staged: [targetId, otherId, fromId],
+      by: "owner@example.com",
+      waitingSince: Date.now() - 60_000,
+    });
+    expect(recoverMoveOut(panel.deps)).toBe("resumed");
+    // Before any agent is back: nothing goes to the target from here, no job runs, changes wait.
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(true);
+    expect(panel.runner.held).toBe(true);
+    expect(writePause(panel.deps.db)).toMatchObject({ reason: "moving", agentsClosed: false });
+    await release.started;
+    const waiting = moveStatus(panel.deps, true);
+    expect(waiting).toMatchObject({ state: "running", step: "switching", canCancel: false, canForceCancel: false });
+    expect(waiting.waitingSince).toBe(new Date(getSetting(panel.deps.db, "panelMoveOut")?.waitingSince ?? 0).toISOString());
+    expect((await callOp(panel, settings.updateGeneral, { name: "x" }, { cookie: owner.cookie })).body.error.details.reason).toBe(
+      "panelMoving",
+    );
+    release.release();
+    const done = await waitForState("done");
+    expect(done).toMatchObject({ side: "old", moveId: "q".repeat(16) });
+    expect(fleet.sequence()).toEqual(["commitMovedPanel", "retirePanel"]);
+    expect(fleet.reconnects.sort()).toEqual([otherId, targetId].sort());
+    expect(writePause(panel.deps.db)).toMatchObject({ reason: "moved", agentsClosed: true });
+  });
+
+  test("restarted after the commit was sent and the target refuses it for sure: undone, the hold released", async () => {
+    // No moved panel of this move runs there (the fleet answers notStarted).
+    setSetting(panel.deps.db, "panelMoveOut", { ...out("committing"), staged: [targetId, otherId] });
+    expect(recoverMoveOut(panel.deps)).toBe("resumed");
+    const failed = await waitForState("failed");
+    expect(failed.error).toMatchObject({ step: "switching", message: expect.stringContaining("new did not take the switch") });
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(false);
+    expect(panel.runner.held).toBe(false);
+    expect(writePause(panel.deps.db)).toBeNull();
+    expect(fleet.of("abortMovedPanel").map((c) => c.nodeId)).toEqual([targetId]);
+    expect(
+      fleet
+        .of("clearPanelAddress")
+        .map((c) => c.nodeId)
+        .sort(),
+    ).toEqual([otherId, targetId].sort());
+  });
+
+  test.each(["switching", "moved"] as const)("restarted at %s, past the commit: stay retired so two panels never run", async (phase) => {
+    setSetting(panel.deps.db, "panelMoveOut", out(phase));
     expect(recoverMoveOut(panel.deps)).toBe("retired");
     expect(writePause(panel.deps.db)).toMatchObject({ reason: "moved", agentsClosed: true });
     expect(panel.runner.held).toBe(true);

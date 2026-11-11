@@ -14,7 +14,7 @@ import type { Deps } from "../../deps";
 import { getSetting } from "../../settings";
 import { newIpUrl, phaseStep } from "./orchestrator";
 import "./keys";
-import { activeMove } from "./state";
+import { activeMove, canForceCancel } from "./state";
 
 type Status = panelMove.PanelMoveStatus;
 
@@ -78,7 +78,9 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
       fromNodeId: move.fromNodeId,
       fromNodeName: move.fromNodeName,
       domain: move.domain,
-      canCancel: !done && !move.switching && !move.abort.signal.aborted,
+      canCancel: !done && !move.committing && !move.switching && !move.abort.signal.aborted,
+      waitingSince: done ? null : iso(move.waitingSince),
+      canForceCancel: !done && canForceCancel(move),
       oldPanelRunning: done && move.oldPanelRunning,
     };
   }
@@ -93,7 +95,7 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
       targetNodeId: out.targetNodeId,
       targetNodeName: out.targetNodeName,
       targetAddress: out.address,
-      step: phaseStep(out.phase),
+      step: phaseStep(out),
       startedAt: iso(out.startedAt),
       leftBehind: named(deps, out.leftBehind),
       doneAt: iso(out.at),

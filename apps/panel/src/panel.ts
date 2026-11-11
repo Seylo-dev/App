@@ -37,7 +37,7 @@ import { modules } from "./modules/index.gen";
 import { mcpPath } from "./modules/mcp/server";
 import type { PanelModule } from "./modules/module";
 import { createNotifier } from "./modules/notifications/email";
-import { agentsRefused, joinsRefused, pauseMessage, writePause } from "./modules/panelMove/pause";
+import { agentsRefused, beginWrite, joinsRefused, pauseMessage, writePause } from "./modules/panelMove/pause";
 import { appContentSecurityPolicy, injectBoot, readBoot } from "./modules/settings/boot";
 import { tailnetIdentity } from "./modules/tailscale/facts";
 import { collectHandlers } from "./ops/handlers";
@@ -173,6 +173,7 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
         Object.assign(set.headers, securityHeaders({ hsts: https && !options.tailnet }));
       })
       .onRequest(({ request }) => pausedWrite(deps, request))
+      .onAfterResponse({ as: "global" }, ({ request }) => writeFinished(request))
       .use(health(deps))
       .use(opRoutes(allOps, httpOpHandler(execute, deps)))
       .use(modules)
@@ -190,22 +191,43 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
   );
 }
 
+/** Module endpoints that write and still run, until their response is out (the move waits for them). */
+const moduleWrites = new WeakMap<Request, () => void>();
+
+/** A request to a module endpoint that changes things (not an op, MCP or an agent's connect). */
+function writesThroughModule(request: Request): boolean {
+  if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return false;
+  const path = new URL(request.url).pathname;
+  return !(path.startsWith(`${apiPrefix}/`) || path === mcpPath || path === agentConnectPath);
+}
+
 /**
  * While the panel moves (modules/panelMove/pause.ts), module endpoints that
  * change things (webhooks, deploy trigger URLs, source uploads) answer 503
  * with Retry-After: what they would write is missing from the copy. Ops
  * refuse in the pipeline with their own CONFLICT, and MCP calls run ops.
+ * One that passes counts as a write in flight until its response is out
+ * (writeFinished), since it may await a provider or the body before it
+ * writes and a move starting meanwhile must not copy the database first.
  */
 function pausedWrite(deps: Deps, request: Request): Response | undefined {
+  if (!writesThroughModule(request)) return undefined;
   const pause = writePause(deps.db);
-  if (!pause || request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return undefined;
-  const path = new URL(request.url).pathname;
-  if (path.startsWith(`${apiPrefix}/`) || path === mcpPath || path === agentConnectPath) return undefined;
+  if (!pause) {
+    moduleWrites.set(request, beginWrite(deps.db));
+    return undefined;
+  }
   const reason = pause.reason === "moved" ? "panelMoved" : "panelMoving";
   return Response.json(
     { error: { code: "UNAVAILABLE", message: pauseMessage(pause), details: { reason } } },
     { status: 503, headers: { "retry-after": "60" } },
   );
+}
+
+/** Ends the count pausedWrite started; Elysia runs it after every response, errors included. */
+function writeFinished(request: Request): void {
+  moduleWrites.get(request)?.();
+  moduleWrites.delete(request);
 }
 
 /** Next to Wings, the panel sits behind the fork's Traefik: its name comes with the panel node's facts. */

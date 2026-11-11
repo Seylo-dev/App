@@ -26,6 +26,13 @@ export interface RunningMove {
   bytesTotal: number;
   /** The owner cancelled, or the move failed: everything still running stops. */
   readonly abort: AbortController;
+  /**
+   * CommitMovedPanel was sent: the target may have taken the switch, so only
+   * a definite refusal or a forced cancel undoes the move from here.
+   */
+  committing: boolean;
+  /** Epoch ms the first CommitMovedPanel failed without a definite answer; null while none did. */
+  waitingSince: number | null;
   /** From the switch on the move can no longer be undone. */
   switching: boolean;
   /** Nodes that hold the staged address of this move. */
@@ -38,6 +45,20 @@ export interface RunningMove {
   oldPanelRunning: boolean;
   /** Who started it, for the audit rows the move writes itself. */
   by: string;
+}
+
+/** How long the target may leave the switch unconfirmed before panelMove.cancel takes force: true. */
+export const forceCancelAfterMs = 10 * 60_000;
+
+/** panelMove.cancel with force: true may undo this move now. */
+export function canForceCancel(move: RunningMove, now = Date.now()): boolean {
+  return (
+    move.committing &&
+    !move.switching &&
+    !move.abort.signal.aborted &&
+    move.waitingSince !== null &&
+    now - move.waitingSince >= forceCancelAfterMs
+  );
 }
 
 const moves = new WeakMap<object, RunningMove>();

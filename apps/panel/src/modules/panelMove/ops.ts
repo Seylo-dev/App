@@ -8,7 +8,7 @@ import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { beginMove, cancelMove, publishStatus } from "./orchestrator";
 import { callerBlocks, checkAddress, moveCheck, panelNodeRow, refusal } from "./preflight";
-import { activeMove } from "./state";
+import { activeMove, canForceCancel } from "./state";
 import { moveStatus } from "./status";
 
 function refuseCaller(ctx: OpContext): void {
@@ -59,7 +59,7 @@ export const start = implement(panelMove.start, (input, ctx) => {
   return moveStatus(ctx, true);
 });
 
-export const cancel = implement(panelMove.cancel, (_input, ctx) => {
+export const cancel = implement(panelMove.cancel, (input, ctx) => {
   refuseCaller(ctx);
   const move = activeMove(ctx.db);
   if (!move || move.doneAt !== null || move.abort.signal.aborted) {
@@ -68,8 +68,19 @@ export const cancel = implement(panelMove.cancel, (_input, ctx) => {
   if (move.switching) {
     throw new OpError("CONFLICT", "The switch to the new server has started; it cannot be cancelled any more.", { reason: "switching" });
   }
-  cancelMove(move, by(ctx));
-  ctx.auditDetails?.({ moveId: move.moveId });
+  // Once the switch was sent the target may have taken it: only force, and only for a target silent for 10 minutes.
+  const forced = move.committing && input.force === true && canForceCancel(move);
+  if (move.committing && !forced) {
+    throw new OpError(
+      "CONFLICT",
+      move.waitingSince === null
+        ? "The switch to the new server has started; it cannot be cancelled any more."
+        : `The switch waits for ${move.targetNodeName} to confirm it. It can be cancelled with force once it has not answered for 10 minutes.`,
+      { reason: "switching" },
+    );
+  }
+  if (!cancelMove(move, by(ctx), forced)) throw new OpError("CONFLICT", "No panel move is running.", { reason: "notRunning" });
+  ctx.auditDetails?.({ moveId: move.moveId, ...(forced ? { forced: true } : {}) });
   return moveStatus(ctx, true);
 });
 

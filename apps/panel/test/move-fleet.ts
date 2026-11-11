@@ -4,11 +4,16 @@
 // the raw streams (ExportRegistry, ImportRegistry, ImportPanelData). What
 // the panel sent is kept for the assertions: every call in order and the
 // bytes of each upload.
+//
+// Without a script, CommitMovedPanel and AbortMovedPanel answer as the
+// agent does: the commit is refused FAILED_PRECONDITION "notStarted" on a
+// node where no moved panel of that move started (or it was aborted), and
+// once committed an abort is refused FAILED_PRECONDITION "committed".
 
 import { gunzipSync } from "node:zlib";
 import { OpError } from "@seylo/ops";
-import { AgentService } from "@seylo/proto";
-import { callCancelled, methodCapability, nodeOffline } from "../src/agent-hub/calls";
+import { AgentService, StatusCode } from "@seylo/proto";
+import { agentStatusError, callCancelled, methodCapability, nodeOffline } from "../src/agent-hub/calls";
 import type { AgentHub } from "../src/agent-hub/hub";
 import type { TestPanel } from "./helpers";
 
@@ -27,6 +32,10 @@ export class MoveFleet {
   /** Bytes each upload received, by method. */
   readonly uploads = new Map<string, Buffer>();
   readonly reconnects: string[] = [];
+  /** "<nodeId>/<moveId>" of moved panels StartMovedPanel started and no abort removed. */
+  readonly started = new Set<string>();
+  /** "<nodeId>/<moveId>" of moves CommitMovedPanel switched. */
+  readonly committed = new Set<string>();
   /** What ExportRegistry streams. */
   registry = Buffer.from("registry-archive-bytes".repeat(100));
   readonly hub: AgentHub;
@@ -44,12 +53,17 @@ export class MoveFleet {
       reconnect(nodeId: string) {
         fleet.reconnects.push(nodeId);
       },
-      async call(nodeId: string, method: string, request: unknown, options: { signal?: AbortSignal } = {}) {
+      async call(nodeId: string, method: string, request: any, options: { signal?: AbortSignal } = {}) {
         if (!fleet.online.has(nodeId)) throw nodeOffline(nodeId);
         if (options.signal?.aborted) throw callCancelled(nodeId);
         fleet.calls.push({ nodeId, method, request });
         const answer = fleet.answers.get(method);
-        return answer ? await answer(nodeId, request, { signal: options.signal }) : {};
+        if (answer) {
+          const result = await answer(nodeId, request, { signal: options.signal });
+          if (method === "startMovedPanel") fleet.started.add(`${nodeId}/${request.moveId}`);
+          return result;
+        }
+        return fleet.asAgent(nodeId, method, request);
       },
       openRaw(nodeId: string, method: string, request: any, options: { signal?: AbortSignal } = {}) {
         if (!fleet.online.has(nodeId)) throw nodeOffline(nodeId);
@@ -69,6 +83,33 @@ export class MoveFleet {
   /** The methods called, in order, with the node they went to. */
   sequence(): string[] {
     return this.calls.map((call) => call.method);
+  }
+
+  /** An unscripted unary call, answered the way the agent does for the move's calls. */
+  private asAgent(nodeId: string, method: string, request: any): unknown {
+    const key = `${nodeId}/${request?.moveId}`;
+    if (method === "startMovedPanel") this.started.add(key);
+    if (method === "commitMovedPanel") {
+      if (!this.started.has(key) && !this.committed.has(key)) {
+        throw agentStatusError(nodeId, {
+          code: StatusCode.FAILED_PRECONDITION,
+          message: "No moved panel of this move runs here.",
+          details: { reason: "notStarted" },
+        });
+      }
+      this.committed.add(key);
+    }
+    if (method === "abortMovedPanel") {
+      if (this.committed.has(key)) {
+        throw agentStatusError(nodeId, {
+          code: StatusCode.FAILED_PRECONDITION,
+          message: "The moved panel took the switch; it cannot be undone.",
+          details: { reason: "committed" },
+        });
+      }
+      this.started.delete(key);
+    }
+    return {};
   }
 
   private raw(nodeId: string, method: string, request: any, signal?: AbortSignal) {
