@@ -67,9 +67,9 @@ TITLES=(
   "Build default: Add node's box decides Can build, a refused join exits 3; Serve on IP address off over the domain, CLI and domain-death reopen"
   "Panel on Tailscale (Headscale): Serve over HTTP to the panel's socket, reached from C, Lock to Tailscale, automatic and CLI recovery"
   "Move the panel A -> B in the browser: data, keys, registry and sign-ins come along, every node follows; a failed move rolls back; back to A"
+  "Export a service from e2e-exports with a passphrase, import it into e2e-imports on C: env, cron job, volume (empty), basic auth; refusals"
+  "Database version: patch update and a MongoDB major upgrade keep the data"
 )
-# 0.2.9 checks by number: another 0.2.9 change adds 42.
-TITLES[43]="Database version: patch update and a MongoDB major upgrade keep the data"
 # The highest check number. Check 31 gives the panel a domain and puts
 # everything back afterwards; it runs last (after 32..41) so a failed
 # cleanup cannot spoil the others. Checks 39, 40 and 41 put back what they
@@ -4311,6 +4311,119 @@ p41_run() {
   out=$(session_op panelMove.removeOldCopy '{}')
   expect "the old copy on B is gone" on "$E2E_B" "test ! -e $BRAND_DATA_DIR/panel/master.key && [ -z \"\$(docker ps -aq --filter label=$SLUG.service=panel00000000000)\" ]"
   rm -f "$E2E_STATE/p41-panel-on"
+}
+
+# ---------------------------------------------------------------- 42 export and import a service
+
+# sha_of: sha256 of stdin on the host (sha256sum on Linux, shasum on macOS).
+sha_of() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
+
+# p42_begin <zip> <passphrase> <manifest text>: importBegin's input from what unzip -p prints.
+p42_begin() {
+  jq -nc --arg p "$(project_id e2e-imports)" --arg m "$3" --arg s "$(unzip -p "$1" manifest.sig)" --arg e "$(unzip -p "$1" secrets.enc)" --arg pw "$2" \
+    '{projectId:$p, manifest:$m, signature:$s, secretsEnc:$e, passphrase:$pw}'
+}
+
+# has_text <text> <needle>: the text contains the needle.
+has_text() { case $1 in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
+# Check 42 (0.2.9): export a service from project e2e-exports on B with a
+# passphrase, check the zip with unzip, Python and its manifest, and import
+# it the way the CLI will (unzip -p the small entries into importBegin)
+# into e2e-imports on C: the env, the cron job, the volume (empty) and the
+# basic auth (on C's automatic domain, its own domain being in use here)
+# come along, and it deploys. A wrong passphrase and an edited manifest are
+# refused. Volume data is not in 0.2.9's files; it comes with volume export.
+check_42() {
+  need_key || return 3
+  local nc src host dom domid secret dir zip out code mf ok path want got imp ref newid st envsrc envnew auto prevwild preview link
+  nc=$(node_id c)
+  [ -n "$nc" ] || { blocked "node C is not joined"; return 3; }
+  project_id e2e-exports >/dev/null
+  project_id e2e-imports >/dev/null
+  delete_service e2e-exports xfer
+  delete_service e2e-imports xfer
+  src=$(image_service e2e-exports xfer b traefik/whoami:v1.10.3 80) || { bad "services.create xfer failed"; return 1; }
+  secret=xfer-secret-$(openssl rand -hex 8)
+  api env.set "$(jq -nc --arg s "$src" --arg v "$secret" '{serviceId:$s, text:("PLAIN=1\nSECRET=" + $v + "\nSELF=http://xfer:80/\n")}')" >/dev/null || bad "env.set on xfer failed"
+  api services.setVolumes "{\"serviceId\":\"$src\",\"volumes\":[{\"name\":\"data\",\"mountPath\":\"/data\"}]}" >/dev/null || bad "services.setVolumes on xfer failed"
+  dom=$(api domains.addAuto "{\"serviceId\":\"$src\",\"subdomain\":\"xfer\",\"targetPort\":80}") || { bad "domains.addAuto failed"; return 1; }
+  domid=$(printf '%s' "$dom" | jq -r .id)
+  host=$(printf '%s' "$dom" | jq -r .host)
+  api domains.update "{\"serviceId\":\"$src\",\"domainId\":\"$domid\",\"https\":\"off\",\"redirectToHttps\":false}" >/dev/null || bad "domains.update https off failed"
+  api domains.setMiddlewares "$(jq -nc --arg s "$src" --arg d "$domid" '{serviceId:$s, domainId:$d, basicAuth:{users:[{username:"e2e", password:"e2e-basic-pass"}]}}')" >/dev/null ||
+    bad "basic auth on xfer's domain failed"
+  api cron.create "{\"serviceId\":\"$src\",\"name\":\"tick\",\"schedule\":\"0 3 * * *\",\"timeZone\":\"UTC\",\"command\":\"echo tick\",\"timeoutSeconds\":60,\"concurrency\":\"forbid\",\"enabled\":true}" >/dev/null ||
+    bad "cron.create on xfer failed"
+  api deployments.deploy "{\"serviceId\":\"$src\"}" >/dev/null || { bad "deploying xfer failed"; return 1; }
+  st=$(wait_deploy "$src" 300)
+  [ "$st" = live ] || { bad "xfer did not go live ($st)"; return 1; }
+  good "xfer runs on B with env, a volume, basic auth on $host and a cron job"
+
+  # Export with a passphrase; an API key needs no fresh sign-in.
+  dir=$(mktemp -d)
+  zip="$dir/xfer.zip"
+  out=$(api serviceTransfer.export "{\"serviceId\":\"$src\",\"secrets\":\"encrypted\",\"passphrase\":\"e2e passphrase 42\"}") || { bad "serviceTransfer.export failed"; return 1; }
+  link="$(panel_url)$(printf '%s' "$out" | jq -r .download.url)"
+  code=$(curl -sS -m 120 -o "$zip" -w '%{http_code}' "$link") || code=000
+  expect "the download answered 200 as $(printf '%s' "$out" | jq -r .fileName)" test "$code" = 200
+  expect "unzip -t passes" unzip -tq "$zip"
+  expect "python's zipfile reads it" python3 -m zipfile -t "$zip"
+  mf=$(unzip -p "$zip" manifest.json)
+  ok=1
+  for path in $(printf '%s' "$mf" | jq -r '.entries[].path'); do
+    want=$(printf '%s' "$mf" | jq -r --arg p "$path" '.entries[] | select(.path==$p) | .sha256')
+    got=$(unzip -p "$zip" "$path" | sha_of)
+    [ "$want" = "$got" ] || {
+      ok=0
+      ev "entry $path: sha256 $got, the manifest says $want"
+    }
+  done
+  expect "every entry matches its sha256 in manifest.json" test "$ok" = 1
+  expect "the secret value is nowhere in the zip, packed or unpacked" sh -c '! grep -aq "$1" "$2" && ! unzip -p "$2" | grep -aq "$1"' _ "$secret" "$zip"
+  expect "with a passphrase the settings are not in clear either (no service.json, no host name)" sh -c '! unzip -l "$2" | grep -q service.json && ! unzip -p "$2" | grep -aq "$1"' _ "$host" "$zip"
+  expect "a second download of the same link is refused" test "$(http_code "$link")" = 401
+
+  # Import into e2e-imports on C.
+  prevwild=$(api nodes.get "{\"nodeId\":\"$nc\"}" | jq -r '.wildcardDomain // empty')
+  [ -n "$prevwild" ] || api nodes.updateSettings "{\"nodeId\":\"$nc\",\"wildcardDomain\":\"$(wildcard_of c)\"}" >/dev/null || bad "C's wildcard domain could not be set"
+  out=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "not the passphrase" "$mf")" 2>&1 || true)
+  expect "a wrong passphrase is refused (FORBIDDEN passphrase)" has_text "$out" '"passphrase"'
+  out=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42" "$(printf '%s' "$mf" | jq -c '.exportedAt="2000-01-01T00:00:00.000Z"')")" 2>&1 || true)
+  expect "an edited manifest is refused (tampered)" has_text "$out" '"tampered"'
+  preview=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42" "$mf")") || { bad "serviceTransfer.importBegin failed"; return 1; }
+  imp=$(printf '%s' "$preview" | jq -r .importId)
+  ev "import preview: $(printf '%s' "$preview" | jq -c '{service: .service.name, blockers, needs, domains: [.domains[] | {host, status, action}], autoDomain, samePanel: .file.samePanel}')"
+  expect "its own domain is in use on this panel, so it is skipped" json_ok "$preview" "[.domains[] | select(.host==\"$host\" and .status==\"usedHere\" and .action==\"skip\")] | length == 1"
+  expect "nothing blocks it" json_ok "$preview" '(.blockers | length) == 0 and (.needs | length) == 0'
+  ref=$(jq -nc --arg p "$(project_id e2e-imports)" --arg i "$imp" '{projectId:$p, importId:$i}')
+  preview=$(api serviceTransfer.setChoices "$(printf '%s' "$ref" | jq -c --arg n "$nc" '. + {choices:{nodeId:$n, autoDomain:true, deployWhenReady:false}}')") ||
+    bad "serviceTransfer.setChoices failed"
+  auto=$(printf '%s' "$preview" | jq -r '.autoDomain.host // empty')
+  expect "C's automatic domain is offered ($auto)" test -n "$auto"
+  out=$(api serviceTransfer.import "$ref") || { bad "serviceTransfer.import failed"; return 1; }
+  newid=$(printf '%s' "$out" | jq -r .service.id)
+  expect "it is created stopped, with nothing left to upload" json_ok "$out" '.service.stopped and (.pending | length) == 0'
+  envsrc=$(api env.get "{\"serviceId\":\"$src\"}" | jq -r .text)
+  envnew=$(api env.get "{\"serviceId\":\"$newid\"}" | jq -r .text)
+  expect "the env came along as it was" test "$envsrc" = "$envnew"
+  expect "the cron job came along" json_ok "$(api cron.list "{\"serviceId\":\"$newid\"}")" '[.jobs[] | select(.name=="tick" and .enabled)] | length == 1'
+  expect "the volume came along, empty (volume data is not in this version's files)" json_ok "$(api services.get "{\"serviceId\":\"$newid\"}")" '[.volumes[] | select(.name=="data" and .kind=="volume")] | length == 1'
+  api services.start "{\"serviceId\":\"$newid\"}" >/dev/null || bad "services.start (first deploy of the import) failed"
+  st=$(wait_deploy "$newid" 300)
+  expect "the import's first deploy on C went live" test "$st" = live
+  if [ -n "$auto" ]; then
+    wait_for 60 "the automatic domain's route" sh -c '[ "$(curl -s -o /dev/null -m 5 -w "%{http_code}" -H "Host: $1" "http://$2/")" = 401 ]' _ "$auto" "$(node_ip c)" || true
+    expect "$auto answers 401 without the basic auth password" test "$(curl -s -o /dev/null -m 5 -w '%{http_code}' -H "Host: $auto" "http://$(node_ip c)/")" = 401
+    expect "and 200 with it (the hash came along)" sh -c 'curl -fsS -m 5 -u e2e:e2e-basic-pass -H "Host: $1" "http://$2/" | grep -q Hostname' _ "$auto" "$(node_ip c)"
+  fi
+  expect "the source still answers on B" sh -c 'curl -fsS -m 5 -u e2e:e2e-basic-pass -H "Host: $1" "http://$2/" | grep -q Hostname' _ "$host" "$(node_ip b)"
+  expect "the audit log has the finished download" json_ok "$(api audit.list '{"opId":"serviceTransfer.exportFinished","limit":5}')" '.entries | length >= 1'
+
+  [ -n "$prevwild" ] || api nodes.updateSettings "{\"nodeId\":\"$nc\",\"wildcardDomain\":null}" >/dev/null || true
+  delete_service e2e-imports xfer
+  delete_service e2e-exports xfer
+  rm -rf "$dir"
 }
 
 # Check 43 (0.2.9): databases.setVersion on the real panel and B. A MongoDB
