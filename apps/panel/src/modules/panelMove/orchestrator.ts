@@ -26,7 +26,8 @@
 //              sent again every few seconds while this panel stays
 //              read-only and keeps every node, and only a definite refusal
 //              ("notStarted") or, after 10 minutes, a cancel with force
-//              undoes the move.
+//              undoes the move. A forced cancel the target answers with
+//              "committed" goes on with the switch instead.
 //   switching  agents' connects answer 503, every session but the panel
 //              node's own closes, RetirePanel stops this panel
 //
@@ -55,7 +56,7 @@ import { urlHost } from "../domains/lookup";
 import { panelServiceId } from "../nodes/panel-service";
 import { panelPortOf } from "../settings/ip-access";
 import { writeMoveAudit } from "./audit";
-import { addCleanup, refusedAsCommitted, reportForcedCancelConflict } from "./cleanup";
+import { addCleanup, refusedAsCommitted } from "./cleanup";
 import type { PanelMoveFailure, PanelMoveOut, PanelMoveOutPhase } from "./keys";
 import { setWritePause, writesSettled } from "./pause";
 import { bytesNeeded, dataFiles, editSnapshot, freeBytes, type ManifestEntry, panelSpecFromCopy, writeArchive } from "./snapshot";
@@ -444,8 +445,20 @@ async function commitAndSwitch(deps: Deps, move: RunningMove, held: boolean): Pr
     writeOut(deps, move, "committing");
     setStep(deps, move, "switching");
     await commit(deps, move, log);
+  } catch (error) {
+    await abortMove(deps, move, error, held, log);
+    return;
+  }
+  await switchOver(deps, move, log);
+}
 
-    // ---- switching: no way back from here
+/**
+ * Switching, once the target took the switch: no way back from here.
+ * `undoSkipped` is the cancel or failure that came after the target had
+ * taken it, for the audit row.
+ */
+async function switchOver(deps: Deps, move: RunningMove, log: Deps["logger"], undoSkipped?: string): Promise<void> {
+  try {
     move.switching = true;
     writeOut(deps, move, "switching");
     setWritePause(deps.db, { reason: "moving", targetName: move.targetNodeName, agentsClosed: true });
@@ -459,17 +472,13 @@ async function commitAndSwitch(deps: Deps, move: RunningMove, held: boolean): Pr
       deps.agents.reconnect(move.fromNodeId, "The panel moved to another server: connecting to its new address.");
     }
     move.oldPanelRunning = !retired;
-    finishSwitch(deps, move);
+    finishSwitch(deps, move, undoSkipped);
     log.info({ to: move.targetNodeId, retired }, "the panel moved; this copy is retired");
   } catch (error) {
-    if (move.switching) {
-      // Some nodes may be on the moved panel already: this copy stays retired whatever failed.
-      log.error({ err: error }, "the switch to the moved panel failed half way; this copy stays retired");
-      move.oldPanelRunning = true;
-      finishSwitch(deps, move);
-    } else {
-      await abortMove(deps, move, error, held, log);
-    }
+    // Some nodes may be on the moved panel already: this copy stays retired whatever failed.
+    log.error({ err: error }, "the switch to the moved panel failed half way; this copy stays retired");
+    move.oldPanelRunning = true;
+    finishSwitch(deps, move, undoSkipped);
   }
 }
 
@@ -531,7 +540,7 @@ async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promi
   }
 }
 
-function finishSwitch(deps: Deps, move: RunningMove): void {
+function finishSwitch(deps: Deps, move: RunningMove, undoSkipped?: string): void {
   move.doneAt = Date.now();
   try {
     writeOut(deps, move, "moved");
@@ -551,6 +560,7 @@ function finishSwitch(deps: Deps, move: RunningMove): void {
     leftBehind: move.leftBehind.map((node) => node.id),
     oldPanelRunning: move.oldPanelRunning,
     by: move.by,
+    ...(undoSkipped ? { undoSkipped } : {}),
   });
   publishStatus(deps);
 }
@@ -690,7 +700,24 @@ async function retire(deps: Deps, move: RunningMove): Promise<boolean> {
   return false;
 }
 
-/** Undoes a move that stopped before the commit, then lets the panel take changes again. */
+/** AbortMovedPanel on the target: done, refused because it took the switch of this move, or no answer (kept for later). */
+async function abortOnTarget(deps: Deps, move: RunningMove, log: Deps["logger"]): Promise<"removed" | "committed" | "unknown"> {
+  try {
+    await deps.agents.call(move.targetNodeId, "abortMovedPanel", { moveId: move.moveId }, { timeoutMs: abortTimeoutMs });
+    return "removed";
+  } catch (failure) {
+    if (refusedAsCommitted(failure)) return "committed";
+    log.warn({ err: failure, nodeId: move.targetNodeId }, "the target did not take AbortMovedPanel; retrying when it is back");
+    return "unknown";
+  }
+}
+
+/**
+ * Undoes a move that stopped before the commit, then lets the panel take
+ * changes again. A target that took the switch after all (a forced cancel,
+ * or a failure here, while its answer was lost) sends the move on with the
+ * switch instead: nothing is undone then.
+ */
 async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: boolean, log: Deps["logger"]): Promise<void> {
   const step = move.step;
   const message = failureMessage(move.abort.signal.aborted && move.abort.signal.reason ? move.abort.signal.reason : error);
@@ -701,29 +728,28 @@ async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: bo
 
   // From the registry step on the target may hold staged data, and from staging on nodes may hold the address.
   const onTarget = stepOrder.indexOf(step) >= stepOrder.indexOf("registry");
-  if (onTarget) {
+  let onTargetAnswer: "removed" | "committed" | "unknown" = "removed";
+  if (onTarget && move.committing) {
+    // The commit may have landed: the target is asked first, with the journal still at committing, so a
+    // restart meanwhile sends the commit again rather than undo a move the target may have switched to.
+    onTargetAnswer = await abortOnTarget(deps, move, log);
+  }
+  if (onTarget && onTargetAnswer !== "committed") {
     // A restart from here finishes the undo (recover.ts), never resumes or retires.
     try {
       writeOut(deps, move, "aborting", { abortStep: step, abortMessage: message });
     } catch (failed) {
       log.error({ err: failed }, "recording the undo of the move failed");
     }
+    if (!move.committing) onTargetAnswer = await abortOnTarget(deps, move, log);
   }
-  let targetCleaned = true;
-  if (onTarget) {
-    try {
-      await deps.agents.call(move.targetNodeId, "abortMovedPanel", { moveId: move.moveId }, { timeoutMs: abortTimeoutMs });
-    } catch (failure) {
-      if (refusedAsCommitted(failure)) {
-        // A forced cancel came after all: the target had taken the switch. Its own address stays with it.
-        reportForcedCancelConflict(deps, move.moveId, move.targetNodeId, move.targetNodeName);
-        move.staged.delete(move.targetNodeId);
-      } else {
-        targetCleaned = false;
-        log.warn({ err: failure, nodeId: move.targetNodeId }, "the target did not take AbortMovedPanel; retrying when it is back");
-      }
-    }
+  if (onTargetAnswer === "committed") {
+    // Its answer is the one the commit waited for: nothing was undone yet, so the switch goes on.
+    log.warn({ nodeId: move.targetNodeId, reason: message }, "the target had taken the switch; switching instead of undoing the move");
+    await switchOver(deps, move, log, message);
+    return;
   }
+  const targetCleaned = onTargetAnswer === "removed";
   // The target gets this panel's desired state again (a full sync).
   move.releaseTarget?.();
   move.releaseTarget = undefined;

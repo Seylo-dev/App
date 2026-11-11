@@ -925,30 +925,48 @@ describe("the switch: CommitMovedPanel on the target", () => {
     expect(fleet.of("clearPanelAddress").filter((c) => c.nodeId === targetId)).toEqual([]);
   });
 
-  test("a forced cancel the target contradicts at once is reported too, and its address is left alone", async () => {
+  test('a forced cancel the target answers with "committed" goes on with the switch: nothing is undone', async () => {
     moveTiming.commitRetryMs = 20;
     let tries = 0;
+    // The first commit landed, its answer was lost; the target is back, but its answers to the retries never come.
     fleet.answers.set("commitMovedPanel", (nodeId, request) => {
       tries++;
       if (tries === 1) fleet.committed.add(`${nodeId}/${request.moveId}`);
       throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+    });
+    let atAbort: unknown;
+    fleet.answers.set("abortMovedPanel", (nodeId) => {
+      atAbort = { out: getSetting(panel.deps.db, "panelMoveOut")?.phase, held: panel.deps.agents.desired.isHeld(targetId) };
+      throw agentStatusError(nodeId, {
+        code: StatusCode.FAILED_PRECONDITION,
+        message: "The moved panel took the switch; it cannot be undone.",
+        details: { reason: "committed" },
+      });
     });
     await start();
     for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.waitingSince; i++) await Bun.sleep(5);
     const move = activeMove(panel.deps.db);
     if (move) move.waitingSince = Date.now() - forceCancelAfterMs - 1000;
     expect((await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie })).status).toBe(200);
-    const failed = await waitForState("failed");
-    expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.forcedCancelConflict")).get()).toMatchObject({
-      input: expect.objectContaining({ moveId: failed.moveId, target: targetId, targetName: "new" }),
-    });
+    const done = await waitForState("done");
+    expect(done).toMatchObject({ side: "old", step: "switching", newUrl: "http://203.0.113.20:3000", error: null });
+    // The target was asked before anything was undone, with the journal still at committing (a restart sends the commit again).
+    expect(atAbort).toEqual({ out: "committing", held: true });
+    expect(fleet.of("clearPanelAddress")).toEqual([]);
+    expect(fleet.of("retirePanel")).toHaveLength(1);
+    expect(fleet.reconnects.sort()).toEqual([otherId, targetId].sort());
+    expect(getSetting(panel.deps.db, "panelMoveOut")).toMatchObject({ phase: "moved" });
     expect(getSetting(panel.deps.db, "panelMoveCleanups")).toBeUndefined();
-    expect(
-      fleet
-        .of("clearPanelAddress")
-        .map((c) => c.nodeId)
-        .sort(),
-    ).toEqual([fromId, otherId].sort());
+    expect(getSetting(panel.deps.db, "panelMoveFailure")).toBeUndefined();
+    // Retired like any switch: no changes, no jobs, nothing goes to the target from here.
+    expect(writePause(panel.deps.db)).toMatchObject({ reason: "moved", agentsClosed: true });
+    expect(panel.runner.held).toBe(true);
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(true);
+    expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.forcedCancelConflict")).get()).toBeUndefined();
+    expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.failed")).get()).toBeUndefined();
+    expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.switched")).get()).toMatchObject({
+      input: expect.objectContaining({ undoSkipped: expect.stringContaining("Cancelled with force") }),
+    });
   });
 
   test("a local database failure while it records the wait is no answer: the commit is asked again", async () => {
