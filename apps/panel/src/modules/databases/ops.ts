@@ -22,13 +22,12 @@ import { readServiceEnv } from "../env/store";
 import { assertCreateRights } from "../services/create-rights";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
-import { defaultContainer } from "../services/spec";
 import terminalsModule from "../terminals";
 import { missingExposureCapability, nodeHasCapability } from "./capability";
 import { edgeToolLink } from "./edge-ticket";
 import {
   changePasswordExec,
-  containerCommand,
+  databaseSpec,
   defaultDatabaseName,
   engines,
   enginesCapability,
@@ -38,7 +37,6 @@ import {
   exposureRefusal,
   generatePassword,
   generateUserName,
-  healthProbe,
 } from "./engines";
 import {
   adminPasswordSecret,
@@ -186,20 +184,7 @@ export const create = implement(dbOps.create, (input, ctx) => {
       nodeId: input.nodeId,
       createdBy: user?.id ?? null,
       volumes: [{ name: "data", mountPath: version.dataPath }],
-      spec: {
-        source: { type: "image", image: version.image, registryId: null },
-        container: { ...defaultContainer, command: containerCommand(input.engine), entrypoint: [], stopGraceSeconds: 30 },
-        ports: [{ containerPort: engine.port, protocol: "tcp" }],
-        healthCheck: {
-          probe: healthProbe(input.engine),
-          intervalSeconds: 10,
-          timeoutSeconds: 5,
-          startPeriodSeconds: 60,
-          failureThreshold: 6,
-        },
-        // Two copies must never share one data folder.
-        deploy: { mode: "recreate", healthTimeoutSeconds: 300 },
-      },
+      spec: databaseSpec(input.engine, version),
     });
     tx.insert(serviceDatabases)
       .values({

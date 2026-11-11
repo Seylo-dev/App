@@ -16,7 +16,8 @@ import { ingestRun, pruneJob, pruneJobType, type RunRow, toRun } from "./runs";
 
 type JobRow = typeof cronJobs.$inferSelect;
 
-function checkSchedule(schedule: string, timeZone: string) {
+/** BAD_REQUEST unless a cron job's schedule fires in its time zone (on the node too). */
+export function checkSchedule(schedule: string, timeZone: string) {
   if (!isTimeZone(timeZone)) throw new OpError("BAD_REQUEST", `${timeZone} is not a time zone this panel knows.`, { field: "timeZone" });
   const problem = nodeCronProblem(schedule, timeZone);
   if (problem) throw new OpError("BAD_REQUEST", `The schedule is not valid: ${problem}.`, { field: "schedule" });

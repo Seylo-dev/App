@@ -25,9 +25,9 @@ export interface UploadTicket extends DownloadTicket {
   createParents: boolean;
 }
 
-const errorBody = (code: string, message: string) => ({ error: { code, message } });
+export const errorBody = (code: string, message: string) => ({ error: { code, message } });
 
-const httpStatus: Record<string, number> = {
+export const httpStatus: Record<string, number> = {
   BAD_REQUEST: 400,
   NOT_FOUND: 404,
   CONFLICT: 409,
@@ -36,7 +36,7 @@ const httpStatus: Record<string, number> = {
   NOT_IMPLEMENTED: 501,
 };
 
-function fail(set: { status?: number | string }, error: unknown) {
+export function fail(set: { status?: number | string }, error: unknown) {
   if (error instanceof OpError) {
     set.status = httpStatus[error.code] ?? 500;
     return errorBody(error.code, error.message);
@@ -45,8 +45,8 @@ function fail(set: { status?: number | string }, error: unknown) {
   return errorBody("INTERNAL", "The transfer failed.");
 }
 
-/** RFC 6266 filename for Content-Disposition. */
-function disposition(path: string): string {
+/** RFC 6266 filename for Content-Disposition (the last part of `path`). */
+export function disposition(path: string): string {
   const name = path.split("/").filter(Boolean).pop() ?? "download";
   const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;

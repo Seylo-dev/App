@@ -8,6 +8,7 @@
 import type { services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import type { DatabaseEngine } from "../../db/schema";
+import { defaultContainer } from "../services/spec";
 
 export interface EngineVersion {
   /** Major version as people pick it, for example "17". */
@@ -339,6 +340,29 @@ export const engines: Record<DatabaseEngine, Engine> = {
     exposureNeedsCapability: false,
   },
 };
+
+/**
+ * What a database service runs, derived from its engine and version only:
+ * the image, command, port, health probe and the recreate strategy (two
+ * copies must never share one data folder). databases.create and imports
+ * build it here; nothing of it comes from a person or a file.
+ */
+export function databaseSpec(engine: DatabaseEngine, version: EngineVersion) {
+  const e = engines[engine];
+  return {
+    source: { type: "image" as const, image: version.image, registryId: null },
+    container: { ...defaultContainer, command: containerCommand(engine), entrypoint: [], stopGraceSeconds: 30 },
+    ports: [{ containerPort: e.port, protocol: "tcp" as const }],
+    healthCheck: {
+      probe: healthProbe(engine),
+      intervalSeconds: 10,
+      timeoutSeconds: 5,
+      startPeriodSeconds: 60,
+      failureThreshold: 6,
+    },
+    deploy: { mode: "recreate" as const, healthTimeoutSeconds: 300 },
+  };
+}
 
 /** The image list of an engine or of one of its variants; null for a variant it does not have. */
 export function engineVersions(engine: DatabaseEngine, variant: string | null | undefined): EngineVersion[] | null {

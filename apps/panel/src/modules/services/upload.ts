@@ -58,39 +58,10 @@ export function uploadRoutes(deps: Deps) {
       if (!request.body) throw new OpError("BAD_REQUEST", "Send the archive as the request body.");
       const fileName = (request.headers.get("x-file-name") ?? "upload.tar.gz").replace(/[^\w.\- ]/g, "_").slice(0, 120);
 
-      const id = newId();
-      const dir = join(deps.config.dataDir, "uploads");
-      await mkdir(dir, { recursive: true });
-      const tmp = join(dir, `${id}.part`);
-      const hash = createHash("sha256");
-      let size = 0;
-      const sink = Bun.file(tmp).writer();
-      try {
-        for await (const chunk of request.body as unknown as AsyncIterable<Uint8Array>) {
-          size += chunk.byteLength;
-          if (size > maxUploadBytes) throw new OpError("BAD_REQUEST", `Archives are limited to ${maxUploadBytes / 1024 / 1024} MB.`);
-          hash.update(chunk);
-          sink.write(chunk);
-        }
-        await sink.end();
-      } catch (error) {
-        await sink.end();
-        await rm(tmp, { force: true });
-        throw error;
-      }
-      // gzip magic: anything else is not a .tar.gz.
-      const head = new Uint8Array(await Bun.file(tmp).slice(0, 2).arrayBuffer());
-      if (size === 0 || head[0] !== 0x1f || head[1] !== 0x8b) {
-        await rm(tmp, { force: true });
-        throw new OpError("BAD_REQUEST", "Upload a .tar.gz archive.");
-      }
-      await rename(tmp, join(dir, `${id}.tar.gz`));
-
-      deps.db
-        .insert(sourceUploads)
-        .values({ id, serviceId: svc.id, fileName, sizeBytes: size, sha256: hash.digest("hex"), uploadedBy: user.id })
-        .run();
-      await pruneUploads(deps, svc.id, dir);
+      const { id, sizeBytes: size } = await storeUpload(deps, svc.id, request.body as unknown as AsyncIterable<Uint8Array>, {
+        fileName,
+        userId: user.id,
+      });
       writeSpec(deps.db, svc.id, { ...readSpec(svc.spec), source: { type: "upload", fileName } });
       publishService(deps, svc);
       const actor = principal.type === "apiKey" ? `${user.email} via key ${principal.keyName}` : user.email;
@@ -108,6 +79,68 @@ export function uploadRoutes(deps: Deps) {
       return fail(new OpError("INTERNAL", "The upload failed."));
     }
   });
+}
+
+/**
+ * Stores an archive for a service: streamed to <dataDir>/uploads/<id>.part
+ * with its sha256, checked to be gzip, renamed to <id>.tar.gz and recorded
+ * in source_uploads; older archives are pruned. With `expected` (an
+ * imported archive) the body must have exactly that size and sha256, or
+ * nothing is kept.
+ */
+export async function storeUpload(
+  deps: Pick<Deps, "db" | "config">,
+  serviceId: string,
+  body: AsyncIterable<Uint8Array>,
+  options: { fileName: string; userId: string | null; expected?: { sizeBytes: number; sha256: string } },
+): Promise<{ id: string; sizeBytes: number; sha256: string }> {
+  const tooLarge = () => new OpError("BAD_REQUEST", `Archives are limited to ${maxUploadBytes / 1024 / 1024} MB.`);
+  const limit = Math.min(maxUploadBytes, options.expected?.sizeBytes ?? maxUploadBytes);
+  const id = newId();
+  const dir = join(deps.config.dataDir, "uploads");
+  await mkdir(dir, { recursive: true });
+  const tmp = join(dir, `${id}.part`);
+  const hash = createHash("sha256");
+  let size = 0;
+  const sink = Bun.file(tmp).writer();
+  try {
+    for await (const chunk of body) {
+      size += chunk.byteLength;
+      if (size > limit) {
+        throw options.expected
+          ? new OpError("BAD_REQUEST", "The archive is larger than the file's manifest says.", { reason: "size" })
+          : tooLarge();
+      }
+      hash.update(chunk);
+      sink.write(chunk);
+    }
+    await sink.end();
+  } catch (error) {
+    await sink.end();
+    await rm(tmp, { force: true });
+    throw error;
+  }
+  const sha256 = hash.digest("hex");
+  const refuse = async (error: OpError) => {
+    await rm(tmp, { force: true });
+    throw error;
+  };
+  if (options.expected && size !== options.expected.sizeBytes) {
+    await refuse(new OpError("BAD_REQUEST", "The archive is smaller than the file's manifest says.", { reason: "size" }));
+  }
+  if (options.expected && sha256 !== options.expected.sha256) {
+    await refuse(new OpError("BAD_REQUEST", "The archive does not match the file's manifest (sha256).", { reason: "sha256" }));
+  }
+  // gzip magic: anything else is not a .tar.gz.
+  const head = new Uint8Array(await Bun.file(tmp).slice(0, 2).arrayBuffer());
+  if (size === 0 || head[0] !== 0x1f || head[1] !== 0x8b) await refuse(new OpError("BAD_REQUEST", "Upload a .tar.gz archive."));
+  await rename(tmp, join(dir, `${id}.tar.gz`));
+  deps.db
+    .insert(sourceUploads)
+    .values({ id, serviceId, fileName: options.fileName, sizeBytes: size, sha256, uploadedBy: options.userId })
+    .run();
+  await pruneUploads(deps, serviceId, dir);
+  return { id, sizeBytes: size, sha256 };
 }
 
 /** Archives a service keeps: the newest ones, plus any a deployment still builds from. */

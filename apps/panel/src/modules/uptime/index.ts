@@ -72,7 +72,7 @@ const status = implement(uptime.status, (_input, ctx) => {
  * A name that does not resolve yet may be saved (a new domain): every probe checks it again and
  * sends nothing until it resolves to a public address.
  */
-async function assertTarget(ctx: OpContext, url: string): Promise<void> {
+export async function assertTarget(ctx: Pick<OpContext, "db">, url: string): Promise<void> {
   const target = await checkTarget(ctx, url);
   if (!target.ok && target.reason !== "unresolvable") {
     throw new OpError("BAD_REQUEST", blockedMessage(target), { field: "url", reason: "internalTarget" });
@@ -83,7 +83,7 @@ async function assertTarget(ctx: OpContext, url: string): Promise<void> {
 export const maxChecksPerService = 10;
 
 /** A probe may wait at most half its interval, so a slow target cannot pile up probes. */
-function assertTimeout(intervalSeconds: number, timeoutMs: number): void {
+export function assertTimeout(intervalSeconds: number, timeoutMs: number): void {
   if (timeoutMs > (intervalSeconds * 1000) / 2) {
     throw new OpError("BAD_REQUEST", `The timeout can be at most half the interval (${(intervalSeconds * 1000) / 2} ms).`, {
       field: "timeoutMs",

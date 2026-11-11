@@ -116,7 +116,7 @@ const reorder = implement(serviceOps.reorder, (input, ctx) => {
 const get = implement(serviceOps.get, (input, ctx) => toDetail(ctx.db, ctx.agents, loadService(ctx.db, input.serviceId)));
 
 /** A cron service's schedule as the node reads it: Sunday stored as 0, refused when the node could not run it. */
-function cronSettings(cron: NonNullable<ServiceSpecJson["cron"]>): NonNullable<ServiceSpecJson["cron"]> {
+export function cronSettings(cron: NonNullable<ServiceSpecJson["cron"]>): NonNullable<ServiceSpecJson["cron"]> {
   if (!isTimeZone(cron.timeZone))
     throw new OpError("BAD_REQUEST", `${cron.timeZone} is not a time zone this panel knows.`, { field: "cron.timeZone" });
   const schedule = normalizeCronSchedule(cron.schedule.trim());
@@ -218,16 +218,22 @@ const setSource = implement(serviceOps.setSource, async (input, ctx) => {
   return toDetail(ctx.db, ctx.agents, next);
 });
 
+/** Watch paths as stored: normalised, BAD_REQUEST on a pattern that cannot match. */
+export function checkWatchPaths(patterns: readonly string[]): string[] {
+  const watchPaths = normalizeWatchPaths([...patterns]);
+  for (const [index, pattern] of watchPaths.entries()) {
+    const problem = watchPatternProblem(pattern);
+    if (problem) throw new OpError("BAD_REQUEST", `${pattern}: ${problem}`, { field: `watchPaths.${index}` });
+  }
+  return watchPaths;
+}
+
 const setWatchPaths = implement(serviceOps.setWatchPaths, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (row.parentId) throw new OpError("CONFLICT", `${row.name} belongs to a compose stack: set watch paths on the stack.`);
   if (row.kind !== "app" && row.kind !== "cron" && row.kind !== "compose")
     throw new OpError("CONFLICT", `A ${row.kind} service does not deploy on push.`);
-  const watchPaths = normalizeWatchPaths(input.watchPaths);
-  for (const [index, pattern] of watchPaths.entries()) {
-    const problem = watchPatternProblem(pattern);
-    if (problem) throw new OpError("BAD_REQUEST", `${pattern}: ${problem}`, { field: `watchPaths.${index}` });
-  }
+  const watchPaths = checkWatchPaths(input.watchPaths);
   const next = updateSpec(ctx, row.id, (spec) => ({ ...spec, watchPaths }));
   return { watchPaths: readSpec(next.spec).watchPaths };
 });

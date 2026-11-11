@@ -37,6 +37,17 @@ const boxEntrypoint = [
   'mkdir -p /home/coder/project; if [ -n "$BOX_REPOSITORY" ] && [ -z "$(ls -A /home/coder/project)" ]; then git clone "$BOX_REPOSITORY" /home/coder/project || true; fi; exec /usr/bin/entrypoint.sh --auth none --bind-addr 0.0.0.0:8080 /home/coder/project',
 ];
 
+/** What a Box runs; boxes.create and imports build it here, nothing of it comes from a person or a file. */
+export function boxSpec() {
+  return {
+    source: { type: "image" as const, image: boxImage, registryId: null },
+    container: { ...defaultContainer, entrypoint: boxEntrypoint, command: [], user: "", workingDir: "" },
+    ports: [{ containerPort: boxPort, protocol: "tcp" as const }],
+    // One copy per workspace volume.
+    deploy: { mode: "recreate" as const, healthTimeoutSeconds: 300 },
+  };
+}
+
 function boxState(ctx: OpContext, service: typeof services.$inferSelect): Box["state"] {
   if (service.stopped) return "stopped";
   const phases = ctx.agents.state.serviceStatuses(service.id).map((s) => s.status.phase);
@@ -78,13 +89,7 @@ export const create = implement(boxOps.create, (input, ctx) => {
       nodeId: input.nodeId,
       createdBy: user?.id ?? null,
       volumes: [{ name: boxWorkspaceVolume, mountPath: "/home/coder" }],
-      spec: {
-        source: { type: "image", image: boxImage, registryId: null },
-        container: { ...defaultContainer, entrypoint: boxEntrypoint, command: [], user: "", workingDir: "" },
-        ports: [{ containerPort: boxPort, protocol: "tcp" }],
-        // One copy per workspace volume.
-        deploy: { mode: "recreate", healthTimeoutSeconds: 300 },
-      },
+      spec: boxSpec(),
     });
     tx.insert(serviceBoxes)
       .values({ serviceId: row.id, repository: input.repository ?? null, idleMinutes: input.idleMinutes ?? 30 })
