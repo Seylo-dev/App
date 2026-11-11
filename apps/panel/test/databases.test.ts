@@ -79,6 +79,24 @@ describe("engines", () => {
 });
 
 describe("databases ops", () => {
+  // The sidebar and the dashboard read projects.list (panel topic); before, a new database only told the
+  // project's own screens, so the sidebar kept showing the project with no services.
+  test("create tells the sidebar (panel topic) and the project's screens at once", async () => {
+    const received: { topic: string; ops: string[] }[] = [];
+    panel.deps.live.subscribe(
+      {
+        id: "tab",
+        send: (m: { type: string; topic?: string; event?: { ops?: string[] } }) => {
+          if (m.type === "event" && m.topic) received.push({ topic: m.topic, ops: m.event?.ops ?? [] });
+        },
+      } as never,
+      "panel",
+    );
+    const { res } = await createDb("postgres");
+    expect(res.status).toBe(200);
+    expect(received).toContainEqual({ topic: "panel", ops: ["projects.list"] });
+  });
+
   test("create writes a pinned image, a data volume and sealed credentials", async () => {
     const { res, node } = await createDb("postgres");
     expect(res.status).toBe(200);

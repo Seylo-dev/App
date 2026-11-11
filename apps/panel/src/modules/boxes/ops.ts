@@ -3,7 +3,7 @@
 // the node's edge, which a signed one-time link opens (no password of its
 // own: code-server runs with --auth none behind the edge ticket).
 
-import { boxes as boxOps, OpError, services as serviceOps } from "@seylo/ops";
+import { boxes as boxOps, OpError } from "@seylo/ops";
 import { ServicePhase } from "@seylo/proto";
 import type { Static } from "@sinclair/typebox";
 import { eq } from "drizzle-orm";
@@ -92,7 +92,8 @@ export const create = implement(boxOps.create, (input, ctx) => {
     return row.id;
   });
   queueDeploy(ctx, { serviceId, trigger: "manual", actor: user?.email ?? null, triggeredBy: user?.id ?? null });
-  ctx.live.publish(`project:${input.projectId}`, { type: "invalidate", ops: [serviceOps.list.id] });
+  // The sidebar and the dashboard count it at once (the panel topic), the project's screens list it.
+  publishService(ctx, { id: serviceId, projectId: input.projectId });
   return toBox(ctx, serviceId);
 });
 

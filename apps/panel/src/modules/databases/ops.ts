@@ -6,15 +6,7 @@
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { parseEnv } from "@seylo/env-analyzer";
-import {
-  databases as dbOps,
-  domains as domainOps,
-  env as envOps,
-  exposures as exposureOps,
-  OpError,
-  services as serviceOps,
-  terminals,
-} from "@seylo/ops";
+import { databases as dbOps, domains as domainOps, env as envOps, exposures as exposureOps, OpError, terminals } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, ne } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
@@ -29,6 +21,7 @@ import { issuerName } from "../domains/rows";
 import { readServiceEnv } from "../env/store";
 import { assertCreateRights } from "../services/create-rights";
 import { insertService } from "../services/insert";
+import { publishService } from "../services/ops";
 import { defaultContainer } from "../services/spec";
 import terminalsModule from "../terminals";
 import { nodeHasCapability } from "./capability";
@@ -221,7 +214,9 @@ export const create = implement(dbOps.create, (input, ctx) => {
   });
   // Start it right away: a database has nothing to build.
   queueDeploy(ctx, { serviceId, trigger: "manual", actor: user?.email ?? null, triggeredBy: user?.id ?? null });
-  ctx.live.publish(`project:${input.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, envOps.references.id] });
+  // The sidebar and the dashboard count it at once (the panel topic), the project's screens list it.
+  publishService(ctx, { id: serviceId, projectId: input.projectId });
+  ctx.live.publish(`project:${input.projectId}`, { type: "invalidate", ops: [envOps.references.id] });
   return toDatabase(loadDatabase(ctx, serviceId), ctx.agents);
 });
 
