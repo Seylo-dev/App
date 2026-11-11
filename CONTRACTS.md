@@ -2273,7 +2273,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Signed backups against real providers: presigned PUT/UploadPart/GET/DELETE and the panel's own multipart and list/delete steps match minio-go's signer (vectors in `apps/panel/test/fixtures/s3-presign-vectors.json`) and Bun's, and ran against fake buckets; not yet against AWS S3, R2 or MinIO through a real panel and agent. The multipart steps and retention need the panel to reach the bucket (as the connection test already does) | Unit and fake-bucket tests |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
-| Exposed databases with their own user (0.2.9): before, they had a separate TLS-only user (e2e checks 10 and 37 ran that through the real panel for Postgres, Valkey and ClickHouse). Now the port is the database's own login and the portgate keeps Postgres, MySQL and MariaDB TLS only (VM-tested with real psql, mysql and mariadb clients); e2e checks 10 and 37 were changed for it (own user, the gate's message for `sslmode=disable`, an old `external` role losing LOGIN) but did not run in 0.2.9. Retiring the old exposed user is VM-tested per engine, not through a real panel upgrade. A user the owner created by hand named like the old exposed user (`external`) in a database from before 0.2.9 is locked too. The panel holds the retirement while any service's live or target deployment env carries the old user's password (services that used `EXPOSED_URL` before the update), so a service nobody redeploys keeps the old user working; clients outside the panel lose it at once. MariaDB 10.11 cannot be exposed (no TLS), and an exposure from before 0.2.9 reads as closed with its port row left until it is turned off by the API. MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests, browser tests |
+| Exposed databases with their own user (0.2.9): before, they had a separate TLS-only user (e2e checks 10 and 37 ran that through the real panel for Postgres, Valkey and ClickHouse). Now the port is the database's own login and the portgate keeps Postgres, MySQL and MariaDB TLS only (VM-tested with real psql, mysql and mariadb clients); e2e checks 10 and 37 were changed for it (own user, the gate's message for `sslmode=disable`, an old `external` role losing LOGIN) but did not run in 0.2.9. Retiring the old exposed user is VM-tested per engine, not through a real panel upgrade. A user the owner created by hand named like the old exposed user (`external`) in a database from before 0.2.9 is locked too. The panel holds the retirement while any running service's live or target deployment env carries the old user's password (services that used `EXPOSED_URL` before the update), so a service nobody redeploys keeps the old user working; clients outside the panel lose it at once. A stopped service does not hold it: started again without a redeploy it runs the old user's URL, which no longer signs in. A held retirement is sent once released: when a deployment goes live or a service is stopped or deleted, in any project, else within a minute. MariaDB 10.11 cannot be exposed (no TLS), and an exposure from before 0.2.9 reads as closed with its port row left until it is turned off by the API. MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests, browser tests |
 | The engines added in 0.2 ran through the agent's VM package tests (create, client, web UI, exposure, backup and restore through MinIO; every offered version), the panel's unit tests and Playwright; Valkey 9.1, ClickHouse 26.8 and Postgres 18 with pgvector also ran through `make e2e` (check 37: created by the panel, an app reaching them by references, the database shells, TLS exposure, backups to MinIO and restores). KeyDB and Dragonfly did not run through a real panel | Unit, VM package, browser and e2e tests |
 | Engine changes in place: a Postgres database cannot switch to or from pgvector (the pgvector images are Debian, the plain ones Alpine: a different collation library under the same data) or change major version; no engine changes major in place | Create a new database and restore a dump into it |
 | Dragonfly has no append-only file: it runs with `--dbfilename dump --df_snapshot_format=false --snapshot_cron "*/5 * * * *"`, so a crash loses up to five minutes of writes (a stop saves first). Only Dragonfly 2.0 is offered | Behaviour as described |
@@ -2401,7 +2401,7 @@ the node is offline (`modules/databases/capability.ts`).
 | Capability | Means |
 |---|---|
 | `database.engines.v2` | Valkey, KeyDB, Dragonfly and ClickHouse (`DatabaseEngine` 6-9): shells, web UIs, backups and TLS on the exposed port. The panel creates, moves or clones such a database only onto a node that advertised it, refuses exposure elsewhere, and the desired state never sends their exposure to an agent without it (an older one would relay the port without TLS) |
-| `database.exposure.v2` (0.2.9, `dbengine.ExposureCapability`, `wire_jobs.go`) | The exposed port uses the database's own user over TLS for every engine: the portgate refuses Postgres, MySQL and MariaDB clients that do not ask for TLS (`portgate.TLSCheck`), `dbtools.ExposedTLS` turns TLS on in Postgres and MySQL without a user, and the agent retires `DatabaseSpec.retired_exposed_user`. The panel sends exposure on for Postgres, MySQL and MariaDB only to agents that advertised it (`missingExposureCapability`) and `databases.setExposure` refuses them elsewhere (CONFLICT `agentTooOld`): an older agent would relay them without the check, and with no user sent it skips the TLS job too. Mongo, ClickHouse and the Redis-like engines keep their exposure on older agents (TLS at the gate; no user sent, so an older agent's user job skips them) |
+| `database.exposure.v2` (0.2.9, `dbengine.ExposureCapability`, `wire_jobs.go`) | The exposed port uses the database's own user over TLS for every engine: the portgate refuses Postgres, MySQL and MariaDB clients that do not ask for TLS (`portgate.TLSCheck`), `dbtools.ExposedTLS` turns TLS on in Postgres and MySQL without a user, and the agent retires `DatabaseSpec.retired_exposed_user`. The panel sends exposure on for Postgres, MySQL and MariaDB only to agents that advertised it (`missingExposureCapability`), reads an exposure there as closed (`databases.get exposure.state` `waitingForNodeUpdate`, no exposed URL) and `databases.setExposure` refuses them elsewhere (CONFLICT `agentTooOld`): an older agent would relay them without the check, and with no user sent it skips the TLS job too. Mongo, ClickHouse and the Redis-like engines keep their exposure on older agents (TLS at the gate; no user sent, so an older agent's user job skips them) |
 | `backup.signed.v1` | Backup destinations without keys (`BackupDestination.signing_id`): the agent asks `PanelService.SignBackupRequests` for each S3 step (`backup.SignedStore`). The panel sends backups and restores only to agents that advertised it |
 | `panel.publish-bind.v1` (0.2.1, `reconcile.PanelPublishBindCapability`, `wire_runtime.go`) | The agent publishes the protected panel's ports on `PublicPort.bind_address` (empty = every address; only a loopback address, only on the protected panel service: `validateSpec` refuses anything else), adopts an installer-started panel container only when its actual bindings match the desired list (HostIP included; otherwise it rolls), and reports the bindings in `seylo panel status`. The panel closes IP access only on a panel node that is online and advertised it (`panelNodeState.capable`; else block `agentTooOld` and `decidePanelIpAccess` keeps it open); an older agent ignores the field and keeps every address |
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
@@ -3661,7 +3661,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - `openFirstRun(tx, serviceId)` (`exposures/logic.ts`) is for the
   services module to call when it creates an app with a port.
 - Recurring work (60 s schedules): `exposures.sweep`, `backups.schedule`,
-  `tunnels.expire`, `domains.recheckWaiting`; restores run as the `backups.restore` job (one
+  `tunnels.expire`, `domains.recheckWaiting`, `databases.retirements`; restores run as the `backups.restore` job (one
   attempt). Backup results come from durable `BackupResult` events;
   `backup_id` is the policy id, or `manual` for one-off runs (kept until
   deleted). A result's `object_key` must name that run's object,
@@ -3730,10 +3730,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   deployment's env is sealed when it starts, so a service that used
   `${{db.EXPOSED_URL}}` runs the old user's URL until it deploys again:
   `databases/retire.ts` names the user only once no live or target
-  deployment's env holds `exposed_password` (as it is or percent-encoded;
-  one scan per compile, `CompileMemo`), and a deployment going live sends
-  its project's databases with an old user again (`watchRetirements`,
-  `onDeploymentChange`). A version without TLS (`EngineVersion.noExposure`,
+  deployment's env of a service that is not stopped holds
+  `exposed_password` (as it is or percent-encoded; one scan per compile,
+  `CompileMemo`; a stopped service starts again with its old URL, so it
+  has to be redeployed rather than started). The compile remembers the
+  databases it held back, in memory, and `releaseHeldRetirements` checks
+  them again and marks the ones nothing holds any more dirty, once each:
+  when a deployment goes live (`watchRetirements`, `onDeploymentChange`),
+  a service is stopped (`services.stop`) or deleted (`deleteServiceTree`),
+  in any project, and every 60 s (`databases.retirements`), which reads
+  nothing while none is held back. A version without TLS (`EngineVersion.noExposure`,
   MariaDB 10.11) is never exposed: `setExposure` refuses it (CONFLICT
   `noTls`) and `loadDatabase` reads an exposure row from before 0.2.9 as
   closed.
@@ -3743,7 +3749,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (`capability.ts` `missingExposureCapability`, `Engine.exposureNeedsCapability`):
   `setExposure` refuses it elsewhere (`agentTooOld`) and the desired state
   sends `{ enabled: false }` there, so an exposed database on a node that
-  was not updated is closed until its agent is.
+  was not updated is closed until its agent is. The readers say the same
+  (`loadDatabase` `exposureWaitsFor`, the same check on the node's stored
+  facts): `databases.get` has `exposure.state` `waitingForNodeUpdate` with
+  `enabled` true and no host or port, `databases.connection .exposed` and
+  `exposures.get .database` are null, and `EXPOSED_URL`, `EXPOSED_HOST`
+  and `EXPOSED_PORT` resolve empty (env.analyze: `empty-reference`; a
+  running service keeps the env it was sealed with until it deploys
+  again). The row is kept, so the port opens with the node's sync once it
+  is updated; the Connection tab says "Closed until <node> updates".
 - Databases and Boxes are created with `insertService` and `queueDeploy`.
   Credentials live in `service_secrets` (`admin_password`, purpose
   `service.secret`; `exposed_password` only in databases from before
