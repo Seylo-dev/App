@@ -522,7 +522,7 @@ async function lookAtMovedPanel(deps: Deps, move: RunningMove, log: Deps["logger
   let seen: MovedPanelSeen = "noAnswer";
   if (pin && agentPort) {
     try {
-      seen = await movedPanelProbe.see(movedPanelUrl(move, agentPort), pin, move.moveId);
+      seen = await movedPanelProbe.see(movedPanelUrl(move, agentPort), pin, move.moveId, undefined, deps.healthProof);
     } catch (error) {
       log.warn({ err: error }, "looking at the moved panel failed");
     }

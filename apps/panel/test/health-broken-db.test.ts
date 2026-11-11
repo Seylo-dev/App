@@ -23,3 +23,27 @@ test("other routes never answer 200 when the database cannot be read", async () 
   // The session lookup fails closed (401); before, the request hook's error came back as a 200.
   expect(res.status).toBeGreaterThanOrEqual(400);
 });
+
+// The panel domain check proves a domain reaches this panel: with ?proof=<nonce>
+// /api/health answers what only this panel's key gives (http/health-proof.ts).
+test("/api/health?proof answers this panel's proof of the nonce, and nothing for a bad one", async () => {
+  const panel = testPanel();
+  const other = testPanel();
+  try {
+    const nonce = "abcDEF0123456789_-xyz";
+    const ask = async (p: typeof panel, query: string) =>
+      (await (await p.app.handle(new Request(`http://panel.test/api/health${query}`))).json()) as { status: string; proof?: string };
+    const answer = await ask(panel, `?proof=${nonce}`);
+    expect(answer.status).toBe("ok");
+    expect(panel.deps.healthProof.proves(nonce, answer.proof)).toBe(true);
+    // Another panel's answer for the same nonce proves nothing here.
+    expect(panel.deps.healthProof.proves(nonce, (await ask(other, `?proof=${nonce}`)).proof)).toBe(false);
+    expect(panel.deps.healthProof.proves("abcDEF0123456789_-xyZ", answer.proof)).toBe(false);
+    for (const query of ["", "?proof=", "?proof=short", `?proof=${"a".repeat(200)}`, "?proof=has%20space%20in%20it%20ok"]) {
+      expect((await ask(panel, query)).proof).toBeUndefined();
+    }
+  } finally {
+    panel.close();
+    other.close();
+  }
+});

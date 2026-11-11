@@ -9,6 +9,9 @@
 // too, read on the spot: the old panel looks for it when the target's
 // answer to CommitMovedPanel never came (modules/panelMove/probe.ts). This
 // answer is served on the panel port and on the agents' TLS port alike.
+//
+// With ?proof=<nonce> it also answers "proof" (http/health-proof.ts), which
+// only this panel process can compute: the panel domain check needs it.
 
 import { sql } from "drizzle-orm";
 import { Elysia } from "elysia";
@@ -18,10 +21,14 @@ import { arrivalMoveId } from "../modules/panelMove/pause";
 
 export const healthPath = "/api/health";
 
-export function health(deps: Pick<Deps, "db" | "config" | "logger">) {
-  return new Elysia({ name: "health" }).get(healthPath, () => {
+export function health(deps: Pick<Deps, "db" | "config" | "logger" | "healthProof">) {
+  return new Elysia({ name: "health" }).get(healthPath, ({ query }) => {
     const moveId = arrivalMoveId(deps.db);
-    const move = moveId ? { moveId, ...(checkMoveCommit(deps) ? { switched: true } : {}) } : {};
+    const proof = typeof query?.proof === "string" ? deps.healthProof.proofOf(query.proof) : null;
+    const move = {
+      ...(moveId ? { moveId, ...(checkMoveCommit(deps) ? { switched: true } : {}) } : {}),
+      ...(proof ? { proof } : {}),
+    };
     try {
       deps.db.get(sql`select 1`);
       return Response.json({ status: "ok", version: deps.config.version, ...move }, { headers: { "cache-control": "no-store" } });

@@ -4,6 +4,7 @@
 import type { AgentHub } from "./agent-hub/hub";
 import type { Config } from "./config";
 import type { Databases, MetricsDb, PanelDb } from "./db/client";
+import type { HealthProof } from "./http/health-proof";
 import type { ProxyTrust } from "./http/proxy-trust";
 import type { JobControl, JobQueue } from "./jobs/queue";
 import type { Schedules } from "./jobs/schedules";
@@ -49,6 +50,8 @@ export interface Deps {
   proxy: ProxyTrust;
   /** The agents' TLS listener (security/agent-tls.ts), or null when it is off. */
   agentTls: { port: number; pin: string } | null;
+  /** Proves /api/health answers come from this panel (http/health-proof.ts). */
+  healthProof: HealthProof;
   /**
    * The listener these deps serve: "tailnet" for the copy panel.ts gives
    * the unix socket Tailscale Serve proxies to (http/tailnet-host.ts),

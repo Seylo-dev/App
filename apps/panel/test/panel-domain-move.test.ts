@@ -12,7 +12,7 @@ import { nodes } from "../src/db/schema";
 import type { JobContext } from "../src/jobs/queue";
 import { defaultProbes, domainCheckJob, setDomainProbes, testCa, testCaFile } from "../src/modules/settings/domain";
 import { issueCertificate, newKeyPair, toPem } from "../src/security/x509";
-import { setSetting } from "../src/settings";
+import { getSetting, setSetting } from "../src/settings";
 import type { FakeAgent } from "./fake-agent";
 import { type TestPanel, testPanel } from "./helpers";
 import { joinAgent, listen } from "./hub-helpers";
@@ -100,7 +100,7 @@ test("only a test build trusts the data dir's test CA", () => {
   }
 });
 
-test("the HTTPS probe passes with a private CA only when it is given that CA", async () => {
+test("the HTTPS probe passes with a private CA only when it is given that CA, and only for this panel", async () => {
   const ca = newKeyPair();
   const caCert = toPem(
     issueCertificate({
@@ -125,13 +125,60 @@ test("the HTTPS probe passes with a private CA only when it is given that CA", a
     hostname: "127.0.0.1",
     port: 0,
     tls: { cert: leafCert, key: leaf.privateKey.export({ type: "pkcs8", format: "pem" }).toString() },
-    fetch: () => Response.json({ status: "ok" }),
+    // This panel's own health route behind the domain, like Traefik serves it.
+    fetch: (request) => panel.app.handle(request),
   });
+  // Another server on the domain that answers like a panel: another Seylo panel (an old one of the same
+  // install), any app with {"status":"ok"}, one that echoes the nonce back.
+  const other = testPanel();
+  const impostors = [
+    (request: Request) => other.app.handle(request),
+    () => Response.json({ status: "ok", version: panel.deps.config.version }),
+    (request: Request) => Response.json({ status: "ok", proof: new URL(request.url).searchParams.get("proof") }),
+  ].map((fetch) =>
+    Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      tls: { cert: leafCert, key: leaf.privateKey.export({ type: "pkcs8", format: "pem" }).toString() },
+      fetch,
+    }),
+  );
   try {
     const host = `localhost:${server.port}`;
-    expect(await defaultProbes.https(host)).toBe(false);
-    expect(await defaultProbes.https(host, caCert)).toBe(true);
+    expect(await defaultProbes.https(host, null, panel.deps.healthProof)).toBe(false);
+    expect(await defaultProbes.https(host, caCert, panel.deps.healthProof)).toBe(true);
+    for (const impostor of impostors) {
+      expect(await defaultProbes.https(`localhost:${impostor.port}`, caCert, panel.deps.healthProof)).toBe(false);
+    }
+    // The other panel proves itself, not this one.
+    expect(await defaultProbes.https(`localhost:${impostors[0]?.port}`, caCert, other.deps.healthProof)).toBe(true);
   } finally {
     server.stop(true);
+    for (const impostor of impostors) impostor.stop(true);
+    other.close();
+  }
+});
+
+test("a domain that answers for another server never goes active: IP:port keeps serving and no node is asked to move", async () => {
+  const panelNode = await joinAgent(panel, url);
+  const other = await joinAgent(panel, url);
+  agents.push(panelNode, other);
+  setSetting(panel.deps.db, "panelDomain", "panel.example.com");
+  // Proxied by Cloudflare (the address check is skipped), and the origin behind it is another panel.
+  const stranger = testPanel();
+  setDomainProbes({
+    resolve: async () => ["104.16.1.1"],
+    https: async (_host, _ca, proof) => {
+      const nonce = "n".repeat(24);
+      const answer = (await (await stranger.app.handle(new Request(`http://x/api/health?proof=${nonce}`))).json()) as { proof?: string };
+      return proof.proves(nonce, answer.proof);
+    },
+  });
+  try {
+    await domainCheckJob.run({}, panel.deps as JobContext);
+    expect(getSetting(panel.deps.db, "panelDomainStatus")).toMatchObject({ state: "issuing_certificate", proxied: true });
+    expect(other.closed).toBe(false);
+  } finally {
+    stranger.close();
   }
 });

@@ -23,6 +23,7 @@ import { nodes } from "./db/schema";
 import type { Deps, OpRunner } from "./deps";
 import { domainRedirect } from "./http/domain-redirect";
 import { health } from "./http/health";
+import { createHealthProof } from "./http/health-proof";
 import { securityHeaders, servedOverHttps } from "./http/https";
 import { httpOpHandler } from "./http/ops-http";
 import { createProxyTrust, type ProxyTrust } from "./http/proxy-trust";
@@ -106,6 +107,7 @@ export function createPanel(options: PanelOptions): Panel {
       options.proxy ??
       createProxyTrust({ always: config.trustProxy, proxies: config.trustedProxies, moreProxies: () => panelNodeProxies(db) }),
     agentTls: options.agentTls ?? null,
+    healthProof: createHealthProof(),
   };
 
   const panelModules = options.modules ?? modules;

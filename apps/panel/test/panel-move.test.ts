@@ -1469,6 +1469,9 @@ describe("the moved panel", () => {
     const moveId = "m".repeat(16);
     try {
       expect(await probeMovedPanel(base, tls.pin, moveId)).toBe("standby");
+      // The address leads back to the asking panel itself (its own proof): never the moved panel.
+      expect(await probeMovedPanel(base, tls.pin, moveId, 10_000, moved.deps.healthProof)).toBe("noAnswer");
+      expect(await probeMovedPanel(base, tls.pin, moveId, 10_000, panel.deps.healthProof)).toBe("standby");
       // Another key at that address, or the copy of another move, counts for nothing.
       expect(await probeMovedPanel(base, newAgentTlsKey().pin, moveId)).toBe("noAnswer");
       expect(await probeMovedPanel(base, tls.pin, "z".repeat(16))).toBe("noAnswer");

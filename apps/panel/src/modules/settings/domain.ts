@@ -1,6 +1,8 @@
 // The panel domain's state: pending_dns until the hostname resolves to a
 // node of this panel, issuing_certificate until HTTPS answers with this
-// panel's health endpoint, then active. A recurring job re-checks it:
+// panel's health endpoint (proven: /api/health?proof=<nonce> must answer
+// what only this panel process can compute, http/health-proof.ts), then
+// active. A recurring job re-checks it:
 // every 5 minutes while it is not active or while IP access is closed (or
 // meant to be), hourly otherwise; "Check now" (settings.checkDomain) runs
 // the same check at once.
@@ -31,6 +33,7 @@ import { askNodesToMove } from "../../agent-hub/move-target";
 import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { healthPath } from "../../http/health";
+import { type HealthProof, newProofNonce } from "../../http/health-proof";
 import { defineJob } from "../../jobs/queue";
 import { getSetting, setSetting } from "../../settings";
 import { classifyRecords } from "../domains/dns";
@@ -89,22 +92,25 @@ export const domainCheckJobType = "settings.checkDomain";
 export interface DomainProbes {
   resolve(host: string): Promise<string[]>;
   /**
-   * True when https://<host>/api/health answers like a panel, with a
-   * certificate the public roots trust (or, in test builds, `extraCa`).
+   * True when https://<host>/api/health proves it is this panel (the proof
+   * of a fresh nonce), with a certificate the public roots trust (or, in
+   * test builds, `extraCa`). Another panel, or any server answering
+   * {"status":"ok"}, does not pass.
    */
-  https(host: string, extraCa?: string | null): Promise<boolean>;
+  https(host: string, extraCa: string | null | undefined, proof: HealthProof): Promise<boolean>;
 }
 
-async function answersLikePanel(host: string, ca?: string): Promise<boolean> {
+async function answersLikePanel(host: string, proof: HealthProof, ca?: string): Promise<boolean> {
+  const nonce = newProofNonce();
   try {
-    const response = await fetch(`https://${host}${healthPath}`, {
+    const response = await fetch(`https://${host}${healthPath}?proof=${nonce}`, {
       signal: AbortSignal.timeout(8000),
       redirect: "error",
       ...(ca ? { tls: { ca } } : {}),
     });
     if (!response.ok) return false;
-    const body = (await response.json()) as { status?: string };
-    return body.status === "ok";
+    const body = (await response.json()) as { status?: string; proof?: unknown };
+    return body.status === "ok" && proof.proves(nonce, body.proof);
   } catch {
     return false;
   }
@@ -116,9 +122,9 @@ export const defaultProbes: DomainProbes = {
     const [v4, v6] = await Promise.all([resolve4(host).catch(() => []), resolve6(host).catch(() => [])]);
     return [...v4, ...v6];
   },
-  async https(host, extraCa) {
-    if (await answersLikePanel(host)) return true;
-    return extraCa ? answersLikePanel(host, extraCa) : false;
+  async https(host, extraCa, proof) {
+    if (await answersLikePanel(host, proof)) return true;
+    return extraCa ? answersLikePanel(host, proof, extraCa) : false;
   },
 };
 
@@ -179,7 +185,7 @@ function nodeAddresses(deps: Pick<Deps, "db">): { all: Set<string>; panel: strin
 }
 
 export async function checkDomain(
-  deps: Pick<Deps, "db" | "live"> & { config?: Pick<Deps["config"], "dataDir"> },
+  deps: Pick<Deps, "db" | "live" | "healthProof"> & { config?: Pick<Deps["config"], "dataDir"> },
   now = new Date(),
 ): Promise<StoredDomainStatus | null> {
   const domain = getSetting(deps.db, "panelDomain") ?? null;
@@ -228,7 +234,7 @@ export async function checkDomain(
   } catch {
     found = [];
   }
-  const answers = () => probes.https(domain, testCa(deps.config?.dataDir));
+  const answers = () => probes.https(domain, testCa(deps.config?.dataDir), deps.healthProof);
   switch (classifyRecords(found, all)) {
     case "missing":
       return save(
