@@ -12,6 +12,8 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-8
 
 - **GitHub page.** A connected account can switch to a personal access token, or replace its token, right on Settings > GitHub. Before, the token option only showed with no account connected.
 - **Joining behind a firewall that decrypts HTTPS.** A network doing TLS inspection (a FortiGate, Zscaler or the like) replaces the panel domain's certificate, and the agent refuses it. Add node now also offers the same token over the panel's IP address and its pinned key ("Network decrypts HTTPS? Join over the panel's IP instead"), and the agent and installer name who issued the certificate they got and say it looks like TLS inspection, instead of advice about open ports.
+- **A service can reference its own domain.** `${{<service>.DOMAIN}}`, `URL` and the other built-ins work in the service's own environment (n8n's `N8N_HOST`, `WEBHOOK_URL`). Before, the editor called it an error and the deploy left it as written.
+- **Service pages.** The usage strip shows on every tab, so the tabs no longer jump when you switch; the Domains tab shows a red count of domains that still need DNS or a certificate; the node chip and the domain link in the header have icons. Project settings use two columns on wide screens.
 - **MCP setup for Claude.** The Claude Code command adds the panel for every project (`--scope user`), and Copy the URL and open Claude puts the server URL on the clipboard on the way to Claude's connectors page. Claude has no install link to go further.
 
 ## Fixed
