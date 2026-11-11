@@ -29,6 +29,7 @@ import { Field } from "../field";
 import { formatBytes, formatDateTime, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { ConsoleCard, consoleCardHeight } from "../overview/overview-page";
 import { DatabaseShell } from "../terminal/console-pages";
 import type { ServiceDetail } from "../use-service";
 import { maskUrlPassword } from "./mask-url";
@@ -78,6 +79,8 @@ export function ConnectionPage({ service }: { service: ServiceDetail }) {
       <div className="flex min-w-0 flex-[999_1_520px] flex-col gap-4">
         <InternalCard service={service} db={db.data} conn={conn.data ?? null} connError={conn.error} />
         <ExposedCard service={service} db={db.data} conn={conn.data ?? null} />
+        {/* The database's own output, watched like an app's Overview console (a shell is under Tools). */}
+        <ConsoleCard service={service} height={consoleCardHeight} fullLink={false} />
       </div>
       <div className="flex max-w-[400px] min-w-0 flex-[1_1_320px] flex-col gap-4">
         <ToolsCard service={service} db={db.data} />
@@ -144,6 +147,17 @@ function Tile({ label, value, secret = false }: { label: string; value: string; 
   );
 }
 
+/** The password, hidden until the eye shows it (the Connection URL's field), with copy; dots while it loads. */
+function PasswordTile({ password }: { password: string | null }) {
+  if (password === null) return <Tile label={t("serviceDatabase.password")} value="" secret />;
+  return (
+    <div className="flex min-w-[180px] max-w-full flex-[1_1_auto] flex-col gap-[5px]">
+      <span className="text-xs text-muted-foreground">{t("serviceDatabase.password")}</span>
+      <CopyField value={password} secret aria-label={t("serviceDatabase.password")} />
+    </div>
+  );
+}
+
 function InternalCard({ service, db, conn, connError }: { service: ServiceDetail; db: Db; conn: Connection | null; connError: unknown }) {
   const [reset, setReset] = useState(false);
   return (
@@ -195,7 +209,7 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
         {db.internal.httpPort != null && <Tile label={t("serviceDatabase.httpPort")} value={String(db.internal.httpPort)} />}
         {db.internal.database !== "" && <Tile label={t("serviceDatabase.database")} value={db.internal.database} />}
         <Tile label={t("serviceDatabase.user")} value={db.internal.user} />
-        <Tile label={t("serviceDatabase.password")} value="" secret />
+        <PasswordTile password={conn?.internal.password ?? null} />
       </div>
       {db.variant === "pgvector" && (
         <p className="m-0 text-[12.5px] leading-normal text-ink-strong">
@@ -235,10 +249,8 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             checked={e.enabled}
             disabled={set.isPending}
             onCheckedChange={(on) =>
-              // An engine that may only be exposed to listed addresses asks for them first.
-              on && e.needsAllowedCidrs && e.allowedCidrs.length === 0
-                ? setEditing(true)
-                : set.mutate({ serviceId: service.id, enabled: on })
+              // On: the port (and who may connect) first; the switch turns on once the dialog exposes it.
+              on ? setEditing(true) : set.mutate({ serviceId: service.id, enabled: false })
             }
           />
           <label htmlFor="db-exposed" className="cursor-pointer">
@@ -291,9 +303,14 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             </span>
           </div>
           {/* The same kind of button as the internal card's Reset password (muted, as buttons inside a card are). */}
-          <Button size="sm" className="self-start bg-muted shadow-none" onClick={() => setReset(true)}>
-            {t("serviceDatabase.reset.exposedButton")}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" className="bg-muted shadow-none" onClick={() => setEditing(true)}>
+              {t("serviceDatabase.portAndAccess")}
+            </Button>
+            <Button size="sm" className="bg-muted shadow-none" onClick={() => setReset(true)}>
+              {t("serviceDatabase.reset.exposedButton")}
+            </Button>
+          </div>
         </>
       )}
       {editing && <ExposureDialog service={service} db={db} onClose={() => setEditing(false)} />}
@@ -302,7 +319,14 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
   );
 }
 
+/**
+ * Exposure settings, and the step before exposing: the port the node opens
+ * (empty lets it pick a free one), who may connect and the certificate's
+ * name. Submitting exposes a database that is not exposed yet.
+ */
 function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: Db; onClose: () => void }) {
+  const exposing = !db.exposure.enabled;
+  const node = service.placements[0]?.nodeName ?? "";
   const [cidrs, setCidrs] = useState(db.exposure.allowedCidrs.join("\n"));
   const [tlsHostname, setTls] = useState(db.exposure.tlsHostname ?? "");
   const [port, setPort] = useState(db.exposure.port ? String(db.exposure.port) : "");
@@ -329,14 +353,33 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
                 .map((s) => s.trim())
                 .filter(Boolean),
               tlsHostname: tlsHostname.trim() || null,
-              ...(Number.isInteger(p) && p >= 1024 ? { port: p } : {}),
+              ...(validPort(port) ? { port: p } : {}),
             });
           }}
         >
           <div className="flex flex-col gap-1">
-            <DialogTitle>{t("serviceDatabase.exposureTitle")}</DialogTitle>
-            <DialogDescription>{t("serviceDatabase.exposureBody")}</DialogDescription>
+            <DialogTitle>
+              {exposing ? t("serviceDatabase.exposeTitle", { name: service.name }) : t("serviceDatabase.exposureTitle")}
+            </DialogTitle>
+            <DialogDescription>
+              {exposing ? t("serviceDatabase.exposeBody", { node }) : t("serviceDatabase.exposureBody")}
+            </DialogDescription>
           </div>
+          <Field
+            label={t("serviceDatabase.publicPort")}
+            htmlFor="x-port"
+            hint={t(exposing ? "serviceDatabase.publicPortNewHint" : "serviceDatabase.publicPortHint")}
+          >
+            <Input
+              id="x-port"
+              inputMode="numeric"
+              className="max-w-[200px] font-mono"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              placeholder={t("serviceDatabase.publicPortAuto")}
+              autoFocus={exposing}
+            />
+          </Field>
           {db.exposure.needsAllowedCidrs && (
             <p role="note" className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-[12.5px] leading-normal text-chip-amber-fg">
               {t("serviceDatabase.allowlistRequired")}
@@ -345,31 +388,32 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
           <Field label={t("serviceDatabase.allowedIps")} htmlFor="x-cidrs" hint={t("serviceDomains.access.allowlistHint")}>
             <Textarea id="x-cidrs" mono rows={3} value={cidrs} onChange={(e) => setCidrs(e.target.value)} />
           </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label={t("serviceDatabase.tlsHostname")} htmlFor="x-tls" hint={t("serviceDatabase.tlsHostnameHint")}>
-              <Input
-                id="x-tls"
-                className="font-mono"
-                value={tlsHostname}
-                onChange={(e) => setTls(e.target.value)}
-                placeholder="db.example.com"
-              />
-            </Field>
-            <Field label={t("serviceDatabase.publicPort")} htmlFor="x-port" hint={t("serviceDatabase.publicPortHint")}>
-              <Input id="x-port" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} />
-            </Field>
-          </div>
+          <Field label={t("serviceDatabase.tlsHostname")} htmlFor="x-tls" hint={t("serviceDatabase.tlsHostnameHint")}>
+            <Input
+              id="x-tls"
+              className="font-mono"
+              value={tlsHostname}
+              onChange={(e) => setTls(e.target.value)}
+              placeholder="db.example.com"
+            />
+          </Field>
           <MutationError error={set.error} />
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>{t("service.cancel")}</Button>
-            <Button type="submit" variant="primary" disabled={set.isPending}>
-              {t("service.save")}
+            <Button type="submit" variant="primary" disabled={set.isPending || (port.trim() !== "" && !validPort(port))}>
+              {exposing ? t("serviceDatabase.exposeButton") : t("service.save")}
             </Button>
           </div>
         </form>
       </DialogContent>
     </Dialog>
   );
+}
+
+/** A port the node may open for it: a whole number from 1024 to 65535. */
+function validPort(text: string): boolean {
+  const p = Number(text.trim());
+  return text.trim() !== "" && Number.isInteger(p) && p >= 1024 && p <= 65535;
 }
 
 function ResetPassword({ service, which, onClose }: { service: ServiceDetail; which: "internal" | "exposed"; onClose: () => void }) {

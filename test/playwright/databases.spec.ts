@@ -152,16 +152,62 @@ test.describe("database engines", () => {
     await exposed.getByLabel("Exposed").click();
     // No request yet: the settings open with the reason.
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Exposure settings" })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: /^Expose / })).toBeVisible();
     await expect(dialog.getByRole("note")).toContainText("no security fixes");
     expect(exposure).toBeNull();
     await dialog.getByLabel("Allowed IPs").fill("198.51.100.24/32");
     // The dialog fades in.
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${shots}/keydb-exposure.png` });
-    await dialog.getByRole("button", { name: "Save" }).click();
+    await dialog.getByRole("button", { name: "Expose" }).click();
     await expect.poll(() => exposure).not.toBeNull();
     expect(exposure).toMatchObject({ serviceId: svc.redis, enabled: true, allowedCidrs: ["198.51.100.24/32"] });
+  });
+
+  test("exposing asks for the port first; nothing opens until Expose", async ({ page }) => {
+    let exposure: Record<string, unknown> | null = null;
+    const closed = () => ({
+      ...databaseOf(svc.db),
+      exposure: { ...databaseOf(svc.db).exposure, enabled: false, host: null, port: null, certificate: "none" },
+    });
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? closed() : databaseOf(String(input.serviceId))),
+        "databases.setExposure": (input) => {
+          exposure = input;
+          return closed();
+        },
+      },
+    });
+    await page.goto(connection(svc.db));
+    const exposed = page.getByRole("region", { name: "Exposed connection" });
+    await exposed.getByLabel("Exposed").click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: /^Expose / })).toBeVisible();
+    await expect(dialog.getByLabel("Port")).toBeFocused();
+    await expect(dialog.getByLabel("Port")).toHaveAttribute("placeholder", "Any free port");
+    expect(exposure).toBeNull();
+    // A port the node may not open keeps Expose off.
+    await dialog.getByLabel("Port").fill("80");
+    await expect(dialog.getByRole("button", { name: "Expose" })).toBeDisabled();
+    await dialog.getByLabel("Port").fill("25432");
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/expose-port.png` });
+    await dialog.getByRole("button", { name: "Expose" }).click();
+    await expect.poll(() => exposure).not.toBeNull();
+    expect(exposure).toMatchObject({ serviceId: svc.db, enabled: true, port: 25432 });
+  });
+
+  test("the password shows with the eye, and the database's console is on its main tab", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(connection(svc.db));
+    const internal = page.getByRole("region", { name: "Internal connection" });
+    await expect(internal.getByText("Password", { exact: true })).toBeVisible();
+    // The URL's field and the password's each have their eye: two of them now.
+    await expect(internal.getByRole("button", { name: /show/i })).toHaveCount(2);
+    // The console card, without the way to a Console tab a database does not have.
+    await expect(page.getByText(/Console/).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open full/ })).toHaveCount(0);
   });
 
   test("a pgvector database says how to turn the extension on", async ({ page }) => {

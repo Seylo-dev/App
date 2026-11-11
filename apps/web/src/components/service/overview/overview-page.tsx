@@ -214,7 +214,7 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
  * shell), never takes focus until clicked, and offers only the modes the
  * person may open: none at all hides it.
  */
-function ConsoleCard({ service, height }: { service: ServiceDetail; height: number }) {
+export function ConsoleCard({ service, height, fullLink = true }: { service: ServiceDetail; height: number; fullLink?: boolean }) {
   const modes = useTerminalModes(service);
   const [wanted, setWanted] = useState<TerminalMode>("console");
   // The person used the switch: the mode they picked opens at once, a shell too.
@@ -251,16 +251,19 @@ function ConsoleCard({ service, height }: { service: ServiceDetail; height: numb
       // Looking at the Overview is no console use: output only, until a line is sent.
       watch
       actions={
-        <Link
-          to="/p/$projectId/s/$serviceId/console"
-          params={{ projectId: service.projectId, serviceId: service.id }}
-          search={{ mode: mode === "shell" ? "shell" : undefined }}
-          className="ml-1 inline-flex cursor-pointer items-center gap-1 rounded-chip px-2 py-[5px] text-[12.5px] font-medium text-terminal-muted hover:text-terminal-foreground max-sm:ml-0 max-sm:p-[7px]"
-        >
-          <IconArrowUpRight size={14} stroke={1.9} aria-hidden="true" />
-          {/* Just the arrow on a phone, so the switch and the buttons share one row. */}
-          <span className="max-sm:sr-only">{t("serviceTerminal.openFull")}</span>
-        </Link>
+        // Kinds without a Console tab (databases) show the card without the way to it.
+        fullLink && (
+          <Link
+            to="/p/$projectId/s/$serviceId/console"
+            params={{ projectId: service.projectId, serviceId: service.id }}
+            search={{ mode: mode === "shell" ? "shell" : undefined }}
+            className="ml-1 inline-flex cursor-pointer items-center gap-1 rounded-chip px-2 py-[5px] text-[12.5px] font-medium text-terminal-muted hover:text-terminal-foreground max-sm:ml-0 max-sm:p-[7px]"
+          >
+            <IconArrowUpRight size={14} stroke={1.9} aria-hidden="true" />
+            {/* Just the arrow on a phone, so the switch and the buttons share one row. */}
+            <span className="max-sm:sr-only">{t("serviceTerminal.openFull")}</span>
+          </Link>
+        )
       }
     />
   );
