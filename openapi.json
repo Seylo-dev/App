@@ -19606,7 +19606,7 @@
       "post": {
         "operationId": "databases.create",
         "summary": "Create a database",
-        "description": "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions, variants and notices (KeyDB gets no security fixes; prefer Valkey). Other services on the same node reach it at <name>:<port>; services on other nodes need exposure. It starts right away, which needs services.deploy in the project.",
+        "description": "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions, variants and notices (KeyDB gets no security fixes; prefer Valkey). image runs any tag or digest of the engine's own repository instead of the catalog's image (not tested by Seylo; a floating tag such as latest can change on the next deploy); its version is the line the tag names, or custom. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure. It starts right away, which needs services.deploy in the project.",
         "tags": [
           "databases"
         ],
@@ -19693,6 +19693,11 @@
                     "minLength": 1,
                     "maxLength": 30,
                     "pattern": "^[a-z0-9-]+$",
+                    "type": "string"
+                  },
+                  "image": {
+                    "minLength": 1,
+                    "maxLength": 200,
                     "type": "string"
                   },
                   "nodeId": {
@@ -21240,7 +21245,7 @@
       "post": {
         "operationId": "databases.setVersion",
         "summary": "Change a database's version",
-        "description": "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie). MySQL 8.4 ships mysql_native_password off: before a change from 8.0 the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command.",
+        "description": "Moves a database to another version line of its engine, to the newest pinned image of its own line (a patch update), or to any image of its engine's own repository (image: any tag or digest, not tested by Seylo), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Refused outright: another repository, a database not placed, stopped or deploying, and the image that runs (nothing to change) unless keepNativePassword changes alone. Every other change the rules would not make by themselves is a risk the caller takes with acceptRisk: true, else it is refused with reason riskNotAccepted (details.risk, details.risks, details.message): downgrades and older releases, Postgres majors (pg_upgrade is not run), skipped MongoDB, MariaDB or MySQL lines, KeyDB and Dragonfly beyond patches, lines outside the catalog, another Postgres base system (text indexes may need REINDEX), floating tags (latest, 8.2) and digests. A new version that never gets healthy brings the old container back on the same data. MongoDB's featureCompatibilityVersion is raised to the running version first for a one-step upgrade between catalog lines, never for other moves. Every change but a newer patch of the line it runs needs a successful backup from the last 24 hours, or confirmNoBackup: true. MySQL 8.4 ships mysql_native_password off (9.0 removed it): before a change from 8.0 to 8.4 or later the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command.",
         "tags": [
           "databases"
         ],
@@ -21260,8 +21265,7 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "serviceId",
-                  "version"
+                  "serviceId"
                 ],
                 "properties": {
                   "serviceId": {
@@ -21278,6 +21282,9 @@
                     "minLength": 1,
                     "maxLength": 200,
                     "type": "string"
+                  },
+                  "acceptRisk": {
+                    "type": "boolean"
                   },
                   "confirmNoBackup": {
                     "type": "boolean"
@@ -21638,7 +21645,7 @@
       "get": {
         "operationId": "databases.versionChoices",
         "summary": "List the versions a database can change to",
-        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup; nativePassword (MySQL only) says whether the database runs with mysql_native_password logins on and which lines take setVersion's keepNativePassword.",
+        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or the risk it takes, which setVersion needs acceptRisk for (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches, a release that runs which Seylo cannot tell); the image that runs is refused as current. anyImage says that setVersion also takes any tag or digest of repository as image, and release is the release of the image that runs. blocked says why no change can start now (not placed, stopped, a deploy running); recentBackupAt is the newest successful database backup, which every change but a newer patch of the line it runs needs from the last 24 hours unless confirmNoBackup; nativePassword (MySQL only) says whether the database runs with mysql_native_password logins on and which lines take setVersion's keepNativePassword.",
         "tags": [
           "databases"
         ],
@@ -21675,6 +21682,9 @@
                     "version",
                     "variant",
                     "image",
+                    "release",
+                    "repository",
+                    "anyImage",
                     "pendingImage",
                     "choices",
                     "blocked",
@@ -21743,6 +21753,29 @@
                     "image": {
                       "type": "string"
                     },
+                    "release": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "repository": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "anyImage": {
+                      "type": "boolean"
+                    },
                     "pendingImage": {
                       "anyOf": [
                         {
@@ -21798,6 +21831,9 @@
                             "type": "boolean"
                           },
                           "reason": {
+                            "type": "string"
+                          },
+                          "risk": {
                             "type": "string"
                           },
                           "message": {

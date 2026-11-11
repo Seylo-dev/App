@@ -1,11 +1,13 @@
 // Version changes of a database: which catalog versions it may move to
-// (judgeVersion, the engines' upgrade rules in one pure function), custom
-// images of the engine's own official repository, MongoDB's
+// (judgeVersion, the engines' upgrade rules in one pure function), any
+// image of the engine's own repository (judgeImage: the rules' refusals
+// become risks the caller accepts, 0.2.11), MongoDB's
 // featureCompatibilityVersion step, MySQL 8.4's mysql_native_password
 // check and opt-in, and the databases.versionChoices and
 // databases.setVersion ops. A change writes service_databases.version and
 // the spec's image (the variant stays) and deploys; databases deploy in
-// recreate mode on the same data volume.
+// recreate mode on the same data volume, and a new version that never gets
+// healthy brings the old container back.
 
 import { databases as dbOps, OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
@@ -20,12 +22,13 @@ import { actorOf, publishService } from "../services/ops";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
 import { engines, engineVersion, engineVersions, hasNativePassword, rootPasswordVariable, withNativePassword } from "./engines";
+import { baseOfTag, customLine, engineImage, engineRepository, hasOfficialRepository, imageTag, tagRelease } from "./images";
 import { type DatabaseInfo, loadDatabase } from "./info";
 import { toDatabase } from "./ops";
 
 type Choice = Static<typeof dbOps.VersionChoice>;
 export type VersionKind = Choice["kind"];
-export type Judgement = Pick<Choice, "kind" | "allowed" | "reason" | "message">;
+export type Judgement = Pick<Choice, "kind" | "allowed" | "reason" | "risk" | "message">;
 
 /** A change of version line needs a successful backup this recent (or confirmNoBackup). */
 export const backupMaxAgeMs = 24 * 60 * 60 * 1000;
@@ -138,19 +141,118 @@ function engineRule(engine: DatabaseEngine, kind: VersionKind, from: VersionPoin
   }
 }
 
-/** The official repository of an engine's images (and variant's); null when only the catalog's image is taken. */
-export function officialRepository(engine: DatabaseEngine, variant: string | null): string | null {
-  if (engine === "postgres") return variant === "pgvector" ? "pgvector/pgvector" : variant ? null : "postgres";
-  if (variant) return null;
-  const repos: Partial<Record<DatabaseEngine, string>> = {
-    mysql: "mysql",
-    mariadb: "mariadb",
-    mongo: "mongo",
-    redis: "redis",
-    valkey: "valkey/valkey",
-    clickhouse: "clickhouse/clickhouse-server",
+/** A version point and what its image's tag says (images.ts engineImage); catalog images are neither. */
+export interface ImagePoint extends VersionPoint {
+  /** The tag can point at other bytes on the next deploy (latest, "8.2"), so its release is unknown. */
+  floating?: boolean;
+  /** The image names a digest, which does not show its release. */
+  digest?: boolean;
+}
+
+/** What a change can risk (VersionChoice.risk), the most serious first. */
+export const riskOrder = [
+  "downgrade",
+  "olderImage",
+  "postgresMajor",
+  "dataPath",
+  "patchOnly",
+  "oneStep",
+  "otherLine",
+  "postgresBase",
+  "floatingTag",
+  "digest",
+] as const;
+export type Risk = (typeof riskOrder)[number];
+
+/** A judgement with every risk it found, the most serious (risk) first. */
+export type Judged = Judgement & { risks: Risk[] };
+
+/**
+ * judgeVersion for any image of the engine (0.2.11). Only the image that
+ * runs stays refused (current, nothing to change); each refusal of the
+ * rules is a risk instead, and so are a line outside the catalog on either
+ * side (otherLine: not tested by Seylo, and the catalog's one-step rule
+ * says nothing about it), another Postgres base system (postgresBase), a
+ * floating tag (floatingTag: what it points at can change, so the release
+ * is unknown) and a digest (digest: its release does not show), as the
+ * target or as what runs. A tag that names no release (customLine) cannot
+ * be judged against the other side at all. risk is the most serious one
+ * (riskOrder) and message says all of them.
+ */
+export function judgeImage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, lines: readonly string[]): Judged {
+  if (to.image === from.image) return { ...judgeVersion(engine, from, to, lines), risks: [] };
+  const unknown = from.version === customLine || to.version === customLine;
+  const sameLine = !unknown && compareVersions(to.version, from.version) === 0;
+  // A floating tag's release is unknown: the rules compare releases on the same line.
+  const base: Judgement = unknown
+    ? { kind: "upgrade", allowed: true }
+    : sameLine && (from.floating || to.floating)
+      ? { kind: "patch", allowed: true }
+      : judgeVersion(engine, from, to, lines);
+  const risks = new Set<Risk>();
+  if (!base.allowed && base.reason) risks.add(base.reason as Risk);
+  if (!unknown && !sameLine && (!lines.includes(to.version) || !lines.includes(from.version))) {
+    risks.delete("oneStep");
+    risks.add("otherLine");
+  }
+  // from.dataPath is where the volume is; a tag that names no release has no known folder.
+  if (to.version !== customLine && to.dataPath !== from.dataPath) risks.add("dataPath");
+  if (engine === "postgres") {
+    const a = imageTag(from.image);
+    const b = imageTag(to.image);
+    if (a !== null && b !== null && baseOfTag(a) !== baseOfTag(b)) risks.add("postgresBase");
+  }
+  if (from.floating || to.floating) risks.add("floatingTag");
+  if (to.digest || (from.digest && from.version === customLine)) risks.add("digest");
+  const ordered = riskOrder.filter((r) => risks.has(r));
+  const [risk] = ordered;
+  if (!risk) return { ...base, risks: [] };
+  return { kind: base.kind, allowed: true, risk, message: riskMessage(engine, from, to, ordered, lines), risks: ordered };
+}
+
+/** The risks of a change in sentences, the most serious first, and what protects the data. */
+function riskMessage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, risks: readonly Risk[], lines: readonly string[]): string {
+  const label = engines[engine].label;
+  const next = lines.filter((v) => compareVersions(v, from.version) > 0).sort(compareVersions)[0];
+  const sentence: Record<Risk, () => string> = {
+    downgrade: () =>
+      `${label} ${to.version} is older than the ${from.version} that runs: it may not open data files a newer version wrote.`,
+    olderImage: () => `${to.image} is older than ${from.image}, which runs: it may not open data files a newer release wrote.`,
+    postgresMajor: () =>
+      `${label} ${to.version} does not open ${label} ${from.version} data files without pg_upgrade or a dump and restore, which do not run here, so it will most likely not start.`,
+    dataPath: () =>
+      `${label} ${to.version} keeps its data in another folder than ${from.version}: it may start without the data (which stays on the volume), or not start.`,
+    patchOnly: () => `${label} takes patch updates only: ${to.version} may not read the data files of ${from.version}.`,
+    oneStep: () => `${label} upgrades one version at a time: ${to.version} skips ${next ?? "a version"}, and may refuse the data files.`,
+    otherLine: () =>
+      lines.includes(to.version)
+        ? `The ${label} ${from.version} that runs is not in Seylo's catalog, so this change is not tested by Seylo.`
+        : `${label} ${to.version} is not in Seylo's catalog, so this change is not tested by Seylo.`,
+    postgresBase: () =>
+      `${to.image} is built on another base system than ${from.image}: its C library may sort text in another order, so indexes on text columns may need REINDEX.`,
+    floatingTag: () =>
+      to.floating
+        ? `${to.image} is a floating tag: the release behind it can change on the next deploy, and Seylo cannot tell which release it is.`
+        : `${from.image}, which runs, is a floating tag: Seylo cannot tell which release runs, so it cannot check this change.`,
+    digest: () =>
+      to.digest
+        ? `A digest does not show which release ${to.image} is, so Seylo cannot check this change.`
+        : `${from.image}, which runs, is a digest: Seylo cannot tell which release runs, so it cannot check this change.`,
   };
-  return repos[engine] ?? null;
+  const out = risks.map((r) => sentence[r]());
+  // Only a one-step upgrade between catalog lines takes no risk, and only that one gets the step.
+  if (engine === "mongo" && (to.version !== from.version || to.version === customLine)) {
+    out.push(
+      "MongoDB may refuse data whose featureCompatibilityVersion it does not support: Seylo sets it only for a one-step upgrade between its catalog versions.",
+    );
+  }
+  out.push("If the new version never gets healthy, the old container comes back on the same data.");
+  return out.join(" ");
+}
+
+/** The official repository of an engine's images (and variant's); null for KeyDB and Dragonfly, which have none (engineRepository). */
+export function officialRepository(engine: DatabaseEngine, variant: string | null): string | null {
+  return hasOfficialRepository(engine) ? engineRepository(engine, variant) : null;
 }
 
 /**
@@ -370,6 +472,43 @@ export function nativePasswordPlan(
 }
 
 /**
+ * Whether a MySQL change lists the running database's accounts on
+ * mysql_native_password first (assertNoNativePasswordUsers):
+ * nativePasswordPlan's check, and every change to a line from 8.4 on that
+ * the catalog does not have (9.0 removed the plugin; a tag that names no
+ * release counts as one), from a line that has the plugin on by itself
+ * (before 8.4) or a command that turns it on.
+ */
+export function nativePasswordCheckNeeded(
+  engine: DatabaseEngine,
+  command: readonly string[],
+  from: string,
+  to: string,
+  plan: { on: boolean; check: boolean },
+): boolean {
+  if (plan.check) return true;
+  if (engine !== "mysql" || plan.on) return false;
+  const off = (version: string) => version === customLine || compareVersions(version, "8.4") >= 0;
+  return off(to) && (hasNativePassword(command) || !off(from));
+}
+
+/**
+ * Refuses keepNativePassword for a MySQL line from 9.0 on, or a tag that
+ * names no release: 9.0 removed the plugin, so there is nothing to keep on
+ * (nativePasswordPlan refuses it for the other lines without the option).
+ */
+export function assertNativePasswordKeepable(engine: DatabaseEngine, to: string, keep: boolean | undefined): void {
+  if (engine !== "mysql" || keep !== true) return;
+  if (to !== customLine && compareVersions(to, "9.0") < 0) return;
+  const lines = engines.mysql.versions.filter((v) => v.nativePasswordOption).map((v) => v.version);
+  throw new OpError(
+    "BAD_REQUEST",
+    `${to === customLine ? "The MySQL this image runs may have" : `MySQL ${to} has`} no mysql_native_password plugin to keep on: keepNativePassword is for MySQL ${lines.join(", ")}.`,
+    { field: "keepNativePassword" },
+  );
+}
+
+/**
  * The version line an image belongs to: the catalog line with that very
  * image, else the line its tag starts with ("mongo:8.0.40" is 8.0; pgvector
  * tags name it as "-pg17"). Null when neither says.
@@ -388,7 +527,7 @@ export function lineOfImage(image: string, catalog: readonly { version: string; 
 interface VersionState {
   info: DatabaseInfo;
   /** What the database runs: its live deployment's image (else what it is set to run, before a first deploy). */
-  from: VersionPoint;
+  from: ImagePoint;
   /** What it is set to run when that is not what runs: a change whose deploy is running or failed. */
   pending: { version: string; image: string } | null;
   lines: string[];
@@ -416,7 +555,10 @@ function versionState(ctx: OpContext, serviceId: string): VersionState {
         ?.imageRef ?? null)
     : null;
   const pending = running !== null && running !== image ? { version: info.row.version, image } : null;
-  const from = pending && running ? { version: lineOfImage(running, catalog) ?? info.row.version, image: running, dataPath } : null;
+  const from =
+    pending && running
+      ? { version: lineOfRunning(info, running, catalog), image: running, dataPath, ...imageFlags(info, running, catalog) }
+      : null;
   const active = activeDeploy(ctx, serviceId);
   const blocked = !info.node
     ? { reason: "noNode", message: "The database is not placed on a node." }
@@ -444,7 +586,7 @@ function versionState(ctx: OpContext, serviceId: string): VersionState {
     .get();
   return {
     info,
-    from: from ?? { version: info.row.version, image, dataPath },
+    from: from ?? { version: info.row.version, image, dataPath, ...imageFlags(info, image, catalog) },
     pending,
     lines: catalog.map((v) => v.version),
     blocked,
@@ -454,16 +596,81 @@ function versionState(ctx: OpContext, serviceId: string): VersionState {
 }
 
 /**
- * judgeVersion from what runs. After a change whose deploy failed, the
+ * The line of the image that still runs after a change whose deploy
+ * failed: the catalog's, else the one its tag names (engineImage), else
+ * what the row says.
+ */
+function lineOfRunning(info: DatabaseInfo, running: string, catalog: readonly { version: string; image: string }[]): string {
+  const known = lineOfImage(running, catalog);
+  if (known) return known;
+  try {
+    return engineImage(info.row.engine, info.row.variant, running).version;
+  } catch {
+    return info.row.version;
+  }
+}
+
+/** Whether an image's tag floats or it names a digest, for judgeImage; neither for a catalog image or another repository's. */
+function imageFlags(info: DatabaseInfo, image: string, catalog: readonly { image: string }[]): { floating: boolean; digest: boolean } {
+  if (catalog.some((v) => v.image === image)) return { floating: false, digest: false };
+  try {
+    const parsed = engineImage(info.row.engine, info.row.variant, image);
+    return { floating: parsed.floating, digest: parsed.digest !== null };
+  } catch {
+    return { floating: false, digest: false };
+  }
+}
+
+/**
+ * What setVersion moves to: any image of the engine's repository (the
+ * line its tag names, or customLine), else the catalog line's image.
+ */
+function targetOf(info: DatabaseInfo, version: string | undefined, image: string | undefined): ImagePoint {
+  const catalog = engineVersions(info.row.engine, info.row.variant) ?? [];
+  if (image !== undefined) {
+    const parsed = engineImage(info.row.engine, info.row.variant, image);
+    return { version: parsed.version, image: parsed.image, dataPath: parsed.dataPath, ...imageFlags(info, parsed.image, catalog) };
+  }
+  const line = catalog.find((v) => v.version === version);
+  if (!line) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `${version === undefined ? "Give a version or an image." : `${info.engine.label}${info.row.variant ? ` with ${info.row.variant}` : ""} ${version} is not offered.`} Pick one of ${catalog.map((v) => v.version).join(", ")}, or give any image of ${engineRepository(info.row.engine, info.row.variant) ?? "its repository"}.`,
+      { field: "version" },
+    );
+  }
+  return { version: line.version, image: line.image, dataPath: line.dataPath };
+}
+
+/**
+ * judgeImage from what runs. After a change whose deploy failed, the
  * image that still runs may be set again (it only restarts the database),
  * and the change itself runs again under the same rules.
  */
-function judge(state: VersionState, to: VersionPoint): Judgement {
-  const j = judgeVersion(state.info.row.engine, state.from, to, state.lines);
+function judge(state: VersionState, to: ImagePoint): Judged {
+  const j = judgeImage(state.info.row.engine, state.from, to, state.lines);
   if (j.reason === "current" && state.pending) {
-    return { kind: "current", allowed: true, message: `Stay on ${to.image}: the change to ${state.pending.image} did not finish.` };
+    return {
+      kind: "current",
+      allowed: true,
+      message: `Stay on ${to.image}: the change to ${state.pending.image} did not finish.`,
+      risks: [],
+    };
   }
   return j;
+}
+
+/** The refusal of a change that takes a risk without acceptRisk: what can go wrong, and that nothing changed. */
+export function riskRefusal(verdict: Judged, to: ImagePoint, backupRequired: boolean): OpError {
+  return new OpError("CONFLICT", `${verdict.message ?? ""} Nothing changed: accept the risk (acceptRisk) to go ahead.`.trim(), {
+    reason: "riskNotAccepted",
+    risk: verdict.risk ?? "",
+    risks: verdict.risks.join(","),
+    message: verdict.message ?? "",
+    version: to.version,
+    image: to.image,
+    backupRequired: String(backupRequired),
+  });
 }
 
 function backupFresh(state: VersionState, now: Date): boolean {
@@ -473,18 +680,23 @@ function backupFresh(state: VersionState, now: Date): boolean {
 export const versionChoices = implement(dbOps.versionChoices, (input, ctx) => {
   const state = versionState(ctx, input.serviceId);
   const catalog = engineVersions(state.info.row.engine, state.info.row.variant) ?? [];
+  const repository = engineRepository(state.info.row.engine, state.info.row.variant);
+  const tag = imageTag(state.from.image);
   return {
     engine: state.info.row.engine,
     version: state.from.version,
     variant: state.info.row.variant,
     image: state.from.image,
+    release: tag ? tagRelease(tag) : null,
+    repository,
+    anyImage: repository !== null,
     pendingImage: state.pending?.image ?? null,
-    choices: catalog.map((v) => ({ version: v.version, image: v.image, ...judge(state, v) })),
+    choices: catalog.map((v) => {
+      const { risks: _, ...j } = judge(state, v);
+      return { version: v.version, image: v.image, ...j };
+    }),
     blocked: state.blocked,
-    customOnCurrent:
-      state.blocked === null &&
-      officialRepository(state.info.row.engine, state.info.row.variant) !== null &&
-      catalog.some((v) => v.version === state.from.version),
+    customOnCurrent: state.blocked === null && repository !== null,
     recentBackupAt: state.recentBackupAt?.toISOString() ?? null,
     backupFresh: backupFresh(state, new Date()),
     nativePassword:
@@ -501,17 +713,9 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   const state = versionState(ctx, input.serviceId);
   const { info } = state;
   if (state.blocked) throw new OpError("CONFLICT", state.blocked.message, { reason: state.blocked.reason });
-  const catalog = engineVersions(info.row.engine, info.row.variant) ?? [];
-  const line = catalog.find((v) => v.version === input.version);
-  if (!line) {
-    throw new OpError(
-      "BAD_REQUEST",
-      `${info.engine.label}${info.row.variant ? ` with ${info.row.variant}` : ""} ${input.version} is not offered. Pick one of ${catalog.map((v) => v.version).join(", ")}.`,
-      { field: "version" },
-    );
-  }
-  const image = input.image ? customImage(info.row.engine, info.row.variant, input.version, input.image) : line.image;
-  const to = { version: input.version, image, dataPath: line.dataPath };
+  const to = targetOf(info, input.version, input.image);
+  const image = to.image;
+  assertNativePasswordKeepable(info.row.engine, to.version, input.keepNativePassword);
   const native = nativePasswordPlan(info.row.engine, state.command, state.from.version, to.version, input.keepNativePassword);
   const verdict = judge(state, to);
   // The image that runs with mysql_native_password turned on or off (keepNativePassword): the command is the change.
@@ -519,7 +723,11 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   if (!verdict.allowed && !flagOnly)
     throw new OpError("CONFLICT", verdict.message ?? "This version change is not allowed.", { reason: verdict.reason ?? "" });
   const lineChange = to.version !== state.from.version;
-  if (lineChange && !input.confirmNoBackup && !backupFresh(state, new Date())) {
+  // Every change but a newer patch of the line it runs: another line, or a risk taken.
+  const needsBackup = lineChange || verdict.risk !== undefined;
+  const fresh = backupFresh(state, new Date());
+  if (verdict.risk && !input.acceptRisk) throw riskRefusal(verdict, to, needsBackup && !fresh);
+  if (needsBackup && !input.confirmNoBackup && !fresh) {
     throw new OpError(
       "CONFLICT",
       "Back up the database first: there is no successful backup from the last 24 hours, and a new version cannot be undone. Or confirm the change without a backup.",
@@ -527,8 +735,11 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
     );
   }
   const node = info.node;
-  if (lineChange && info.row.engine === "mongo" && node) await raiseFeatureCompatibility(ctx, info, node.id, state.from.version);
-  if (native.check && node) await assertNoNativePasswordUsers(ctx, info, node.id, to.version);
+  // Only a one-step upgrade between catalog lines takes no risk: other MongoDB moves get no compatibility step.
+  if (lineChange && !verdict.risk && info.row.engine === "mongo" && node)
+    await raiseFeatureCompatibility(ctx, info, node.id, state.from.version);
+  if (nativePasswordCheckNeeded(info.row.engine, state.command, state.from.version, to.version, native) && node)
+    await assertNoNativePasswordUsers(ctx, info, node.id, to.version);
   // Another change may have queued its deploy while the MongoDB or MySQL step ran.
   assertNoActiveDeploy(ctx, info.service.id);
 
@@ -551,6 +762,7 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
     triggeredBy: user?.id ?? null,
     notes: [
       ...(flagOnly ? [] : [`Version change: ${state.from.image || state.from.version} to ${image}.`]),
+      ...(verdict.risk ? [`Risk accepted: ${verdict.risks.join(", ")}.`] : []),
       ...(native.command
         ? [
             `mysql_native_password logins ${native.on ? "on (--mysql-native-password=ON)" : "off"}${flagOnly ? `, on the image it runs (${image})` : ""}.`,
@@ -582,10 +794,12 @@ async function raiseFeatureCompatibility(ctx: OpContext, info: DatabaseInfo, nod
  */
 async function assertNoNativePasswordUsers(ctx: OpContext, info: DatabaseInfo, nodeId: string, version: string): Promise<void> {
   const exec = mysqlNativeUsersExec(info.admin.user, info.admin.password);
+  // MySQL 9.0 and later have no such plugin to keep on (nativePasswordCheckNeeded).
+  const keepable = engineVersion("mysql", version)?.nativePasswordOption === true;
   const refuse = (detail: string) =>
     new OpError(
       "CONFLICT",
-      `Could not list the MySQL accounts that sign in with mysql_native_password, which MySQL ${version} has off, so nothing changed. Check that the database is running and healthy, then try again, or keep mysql_native_password logins on in MySQL ${version} (keepNativePassword), which needs no list. ${detail}`.trim(),
+      `Could not list the MySQL accounts that sign in with mysql_native_password, which MySQL ${version} has off, so nothing changed. Check that the database is running and healthy, then try again${keepable ? `, or keep mysql_native_password logins on in MySQL ${version} (keepNativePassword), which needs no list` : ""}. ${detail}`.trim(),
       { reason: "nativePasswordCheckFailed" },
     );
   const stdout = await execStep(ctx, info, nodeId, exec, refuse, "mysql native password check failed");
@@ -593,7 +807,23 @@ async function assertNoNativePasswordUsers(ctx: OpContext, info: DatabaseInfo, n
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  if (accounts.length > 0) throw nativePasswordRefusal(accounts, version);
+  if (accounts.length > 0) throw keepable ? nativePasswordRefusal(accounts, version) : nativePasswordGoneRefusal(accounts, version);
+}
+
+/**
+ * The refusal of a change to a MySQL without mysql_native_password to keep
+ * on (9.0 removed it; a tag that names no release), while accounts sign in
+ * with it: they must switch first.
+ */
+export function nativePasswordGoneRefusal(accounts: readonly string[], version: string): OpError {
+  const named = accounts.slice(0, namedAccounts);
+  const more = accounts.length - named.length;
+  const which = version === customLine ? "the MySQL it would run may not have" : `MySQL ${version} does not have`;
+  return new OpError(
+    "CONFLICT",
+    `${accounts.length === 1 ? "This account signs" : `These ${accounts.length} accounts sign`} in with mysql_native_password, a plugin ${which}, so ${accounts.length === 1 ? "it" : "they"} could not sign in after the change: ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}. Nothing changed. Switch them to caching_sha2_password first (ALTER USER 'user'@'host' IDENTIFIED WITH caching_sha2_password BY '<password>', which needs each account's password).`,
+    { reason: "nativePasswordUsers", accounts: named.join("\n"), count: String(accounts.length) },
+  );
 }
 
 /**

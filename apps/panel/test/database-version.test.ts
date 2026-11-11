@@ -545,15 +545,17 @@ describe("databases.versionChoices and setVersion", () => {
     expect(res.body).toMatchObject({ engine: "mongo", version: "7.0", image: "mongo:7.0.45", pendingImage: null, blocked: null });
     expect(res.body.backupFresh).toBe(false);
     expect(res.body.recentBackupAt).toBeNull();
+    expect(res.body).toMatchObject({ release: point("mongo", "7.0").image.split(":")[1], repository: "mongo", anyImage: true });
+    // A skipped line is a risk to accept (0.2.11); only what runs is refused.
     expect(
-      res.body.choices.map((c: { version: string; kind: string; allowed: boolean; reason?: string }) => [
+      res.body.choices.map((c: { version: string; kind: string; allowed: boolean; reason?: string; risk?: string }) => [
         c.version,
         c.kind,
         c.allowed,
-        c.reason ?? null,
+        c.reason ?? c.risk ?? null,
       ]),
     ).toEqual([
-      ["9.0", "major", false, "oneStep"],
+      ["9.0", "major", true, "oneStep"],
       ["8.0", "major", true, null],
       ["7.0", "current", false, "current"],
     ]);
@@ -890,25 +892,27 @@ describe("databases.versionChoices and setVersion", () => {
     agent.disconnect();
   });
 
-  test("downgrades, Postgres majors and skipped lines are refused; custom images are checked", async () => {
+  test("downgrades, Postgres majors and skipped lines are risks to accept; custom images are checked", async () => {
     const mongo = await createDb("mongo", "8.0");
+    const risk = (res: { status: number; body: { error: { details: Record<string, string> } } }) => ({
+      status: res.status,
+      reason: res.body.error.details.reason,
+      risk: res.body.error.details.risk,
+    });
     const down = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "7.0", confirmNoBackup: true }, { cookie });
-    expect(down.status).toBe(409);
-    expect(down.body.error.details.reason).toBe("downgrade");
+    expect(risk(down)).toEqual({ status: 409, reason: "riskNotAccepted", risk: "downgrade" });
     const unknown = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "6.0" }, { cookie });
     expect(unknown.status).toBe(400);
     const latest = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "8.0", image: "mongo:latest" }, { cookie });
-    expect(latest.status).toBe(400);
-    expect(latest.body.error.details.reason).toBe("customImage");
-    // A digest-only image of another version would pass as a patch of the line it claims.
+    expect(risk(latest)).toEqual({ status: 409, reason: "riskNotAccepted", risk: "floatingTag" });
+    // A digest-only image does not show its release: it could be a downgrade or a major.
     const digest = await callOp(
       panel,
       dbOps.setVersion,
       { serviceId: mongo.serviceId, version: "8.0", image: `mongo@sha256:${"b".repeat(64)}` },
       { cookie },
     );
-    expect(digest.status).toBe(400);
-    expect(digest.body.error.details.reason).toBe("customImage");
+    expect(risk(digest)).toEqual({ status: 409, reason: "riskNotAccepted", risk: "digest" });
     expect(specImage(mongo.serviceId)).toBe("mongo:8.0.38");
     // A custom image of the same line is a patch update.
     const custom = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "8.0", image: "mongo:8.0.40" }, { cookie });
@@ -917,19 +921,17 @@ describe("databases.versionChoices and setVersion", () => {
 
     const pg = await createDb("postgres", "17");
     const major = await callOp(panel, dbOps.setVersion, { serviceId: pg.serviceId, version: "18", confirmNoBackup: true }, { cookie });
-    expect(major.status).toBe(409);
-    expect(major.body.error.details.reason).toBe("postgresMajor");
+    expect(risk(major)).toEqual({ status: 409, reason: "riskNotAccepted", risk: "postgresMajor" });
     expect(major.body.error.message).toContain("dump and restore");
-    // The Debian image of the same major is no patch: its C library sorts text in another order.
+    // The Debian image of the same major is no plain patch: its C library sorts text in another order.
     const debian = await callOp(
       panel,
       dbOps.setVersion,
       { serviceId: pg.serviceId, version: "17", image: "postgres:17.7-bookworm" },
       { cookie },
     );
-    expect(debian.status).toBe(400);
-    expect(debian.body.error.details.reason).toBe("customImage");
-    expect(debian.body.error.message).toContain("sorts text differently");
+    expect(risk(debian)).toEqual({ status: 409, reason: "riskNotAccepted", risk: "postgresBase" });
+    expect(debian.body.error.message).toContain("REINDEX");
     expect(specImage(pg.serviceId)).toBe("postgres:17.6-alpine");
     const alpine = await callOp(
       panel,
@@ -942,7 +944,7 @@ describe("databases.versionChoices and setVersion", () => {
 
     const maria = await createDb("mariadb", "10.11");
     const skip = await callOp(panel, dbOps.setVersion, { serviceId: maria.serviceId, version: "11.8", confirmNoBackup: true }, { cookie });
-    expect(skip.body.error.details.reason).toBe("oneStep");
+    expect(risk(skip)).toEqual({ status: 409, reason: "riskNotAccepted", risk: "oneStep" });
     // The change deploys with the container env that upgrades MariaDB's system tables.
     const env = Object.fromEntries(resolveServiceEnv(panel.deps, maria.serviceId).map((v) => [v.name, v.value]));
     expect(env.MARIADB_AUTO_UPGRADE).toBe("1");
@@ -951,7 +953,7 @@ describe("databases.versionChoices and setVersion", () => {
     expect(specImage(maria.serviceId)).toBe("mariadb:11.4.7");
   });
 
-  test("the line it runs on its newest catalog image takes another exact tag of it: newer is a patch, the same or an older one is refused", async () => {
+  test("the line it runs on its newest catalog image takes another tag of it: newer is a patch, the same is refused, an older one is a risk", async () => {
     const { serviceId } = await createDb("postgres", "17");
     const choices = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
     expect(choices.body).toMatchObject({ version: "17", image: "postgres:17.6-alpine", customOnCurrent: true, backupFresh: false });
@@ -968,21 +970,23 @@ describe("databases.versionChoices and setVersion", () => {
     }
     const older = await set("postgres:17.5-alpine");
     expect(older.status).toBe(409);
-    expect(older.body.error.details.reason).toBe("olderImage");
-    for (const refused of [
-      "postgres:17.7",
-      "postgres:17.7-bookworm",
-      `postgres@sha256:${"c".repeat(64)}`,
-      "bitnami/postgresql:17.7.0",
-      "postgres:17",
+    expect(older.body.error.details).toMatchObject({ reason: "riskNotAccepted", risk: "olderImage" });
+    for (const [image, risk] of [
+      ["postgres:17.7", "postgresBase"],
+      ["postgres:17.7-bookworm", "postgresBase"],
+      [`postgres@sha256:${"c".repeat(64)}`, "digest"],
+      ["postgres:17-alpine", "floatingTag"],
     ]) {
-      const res = await set(refused);
-      expect({ refused, status: res.status, reason: res.body.error.details.reason }).toEqual({
-        refused,
-        status: 400,
-        reason: "customImage",
+      const res = await set(image as string);
+      expect({ image, status: res.status, details: res.body.error.details }).toMatchObject({
+        image,
+        status: 409,
+        details: { reason: "riskNotAccepted", risk },
       });
     }
+    // Another repository is refused outright: Seylo's settings are made for the engine's own image.
+    const other = await set("bitnami/postgresql:17.7.0");
+    expect({ status: other.status, reason: other.body.error.details.reason }).toEqual({ status: 400, reason: "customImage" });
     expect(deployCount(serviceId)).toBe(before);
     expect(specImage(serviceId)).toBe("postgres:17.6-alpine");
 
@@ -1002,24 +1006,36 @@ describe("databases.versionChoices and setVersion", () => {
     expect(after.body).toMatchObject({ image: "postgres:17.7-alpine", pendingImage: null, customOnCurrent: true });
     expect(after.body.choices.find((c: { version: string }) => c.version === "17")).toMatchObject({
       kind: "downgrade",
-      allowed: false,
-      reason: "olderImage",
+      allowed: true,
+      risk: "olderImage",
     });
-    expect((await set("postgres:17.6-alpine")).body.error.details.reason).toBe("olderImage");
+    expect((await set("postgres:17.6-alpine")).body.error.details.risk).toBe("olderImage");
     expect((await set("postgres:17.7-alpine")).body.error.details.reason).toBe("current");
     expect((await set("postgres:17.8-alpine")).status).toBe(200);
   });
 
-  test("another tag of the line it runs: not for KeyDB or Dragonfly, nor while blocked", async () => {
-    for (const [engine, version, image] of [
-      ["keydb", "6.3", "eqalpha/keydb:x86_64_v6.3.5"],
-      ["dragonfly", "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.3"],
+  test("another tag of the line it runs: KeyDB and Dragonfly take their own repositories (0.2.11), nothing while blocked", async () => {
+    for (const [engine, version, image, other] of [
+      ["keydb", "6.3", "eqalpha/keydb:x86_64_v6.3.5", "redis:7.4.5"],
+      ["dragonfly", "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.3", "docker.io/dragonflydb/dragonfly:v2.0.3"],
     ] as const) {
       const { serviceId } = await createDb(engine, version);
       const choices = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
-      expect({ engine, customOnCurrent: choices.body.customOnCurrent }).toEqual({ engine, customOnCurrent: false });
+      expect({ engine, customOnCurrent: choices.body.customOnCurrent, anyImage: choices.body.anyImage }).toEqual({
+        engine,
+        customOnCurrent: true,
+        anyImage: true,
+      });
       const res = await callOp(panel, dbOps.setVersion, { serviceId, version, image }, { cookie });
-      expect({ engine, status: res.status, reason: res.body.error.details.reason }).toEqual({ engine, status: 400, reason: "customImage" });
+      expect({ engine, status: res.status, version: res.body.database.version }).toEqual({ engine, status: 200, version });
+      await settleDeploys(panel);
+      goLive(serviceId);
+      const refused = await callOp(panel, dbOps.setVersion, { serviceId, image: other }, { cookie });
+      expect({ engine, status: refused.status, reason: refused.body.error.details.reason }).toEqual({
+        engine,
+        status: 400,
+        reason: "customImage",
+      });
     }
     const { serviceId } = await createDb("mongo", "8.0");
     expect((await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie })).body.customOnCurrent).toBe(true);
@@ -1113,10 +1129,12 @@ describe("databases.versionChoices and setVersion", () => {
     setImage(serviceId, "mongo:8.0.38");
     const res = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
     expect(res.body).toMatchObject({ version: "7.0", image: "mongo:7.0.45", pendingImage: "mongo:8.0.38" });
-    expect(res.body.choices.map((c: { version: string; allowed: boolean }) => [c.version, c.allowed])).toEqual([
-      ["9.0", false],
-      ["8.0", true],
-      ["7.0", true],
+    expect(
+      res.body.choices.map((c: { version: string; allowed: boolean; risk?: string }) => [c.version, c.allowed, c.risk ?? null]),
+    ).toEqual([
+      ["9.0", true, "oneStep"],
+      ["8.0", true, null],
+      ["7.0", true, null],
     ]);
     // Staying on 7.0 is no line change: no backup, no exec.
     const stay = await callOp(panel, dbOps.setVersion, { serviceId, version: "7.0" }, { cookie });
@@ -1139,11 +1157,11 @@ describe("databases.versionChoices and setVersion", () => {
       blocked: null,
       customOnCurrent: true,
     });
-    // The catalog's image of 17 cannot be the way to stay: it is older than what runs.
-    expect(res.body.choices.find((c: { version: string }) => c.version === "17")).toMatchObject({ allowed: false, reason: "olderImage" });
+    // The catalog's image of 17 is no way to stay: it is older than what runs, a risk.
+    expect(res.body.choices.find((c: { version: string }) => c.version === "17")).toMatchObject({ allowed: true, risk: "olderImage" });
 
     const set = (image: string) => callOp(panel, dbOps.setVersion, { serviceId, version: "17", image }, { cookie });
-    expect((await set("postgres:17.6-alpine")).body.error.details.reason).toBe("olderImage");
+    expect((await set("postgres:17.6-alpine")).body.error.details.risk).toBe("olderImage");
     // The tag it runs, given as the image of its own line: no backup, the spec runs it again.
     const before = deployCount(serviceId);
     const stay = await set("postgres:17.7-alpine");

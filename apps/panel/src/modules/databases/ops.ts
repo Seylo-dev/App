@@ -1,5 +1,6 @@
 // Database op handlers: the engine catalog, create a database service with
-// generated credentials, read it, its connection details, password resets
+// generated credentials (on a catalog version, or any image of the
+// engine's repository), read it, its connection details, password resets
 // (applied inside the running database through the agent's Exec, or by the
 // restart a new environment causes), the web UI and shell links, and TLS
 // exposure through the agent's portgate, which uses the database's own user.
@@ -40,6 +41,7 @@ import {
   rootPasswordVariable,
   rootUnchangedMarker,
 } from "./engines";
+import { imageVersion } from "./images";
 import {
   adminPasswordSecret,
   type DatabaseInfo,
@@ -155,7 +157,11 @@ export const create = implement(dbOps.create, (input, ctx) => {
       { field: "variant" },
     );
   }
-  const version = engineVersion(input.engine, input.version, input.variant);
+  // Any image of the engine's repository runs as the line its tag names (not tested by Seylo).
+  const version =
+    input.image !== undefined
+      ? imageVersion(input.engine, input.variant ?? null, input.image)
+      : engineVersion(input.engine, input.version, input.variant);
   if (!version) {
     throw new OpError(
       "BAD_REQUEST",

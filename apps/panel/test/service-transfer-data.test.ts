@@ -772,13 +772,13 @@ describe("import with volume data", () => {
     });
     expect(b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, newId)).get()?.version).toBe("8.0");
     expect((await put(b, ref, "services/my/volumes/data.tar.gz", 0, rows)).body.done).toBe(true);
-    // The Version card judges from what it runs: the catalog's 8.0.43 is a downgrade.
+    // The Version card judges from what it runs: the catalog's 8.0.43 is a downgrade, a risk to accept.
     const choices = await callOp(b.panel, dbOps.versionChoices, { serviceId: newId }, { cookie: b.cookie });
     expect(choices.body.image).toBe("mysql:8.0.44");
     expect(choices.body.choices.find((c: { version: string }) => c.version === "8.0")).toMatchObject({
       image: catalog,
-      allowed: false,
-      reason: "olderImage",
+      allowed: true,
+      risk: "olderImage",
     });
 
     // Without the data an empty database starts on the catalog image, and can move up once it runs.

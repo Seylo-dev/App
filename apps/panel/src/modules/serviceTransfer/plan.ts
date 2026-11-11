@@ -36,12 +36,12 @@ import {
   type EngineVersion,
   engines,
   enginesCapability,
-  engineVersion,
   exposureCapability,
   exposureRefusal,
   generatePassword,
   hasNativePassword,
 } from "../databases/engines";
+import { importedVersion } from "../databases/images";
 import { adminPasswordSecret } from "../databases/info";
 import { compareVersions, customImage, imageRelease } from "../databases/version";
 import { hasBuildx } from "../deployments/source";
@@ -256,7 +256,9 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     const engineName = doc.kind as DatabaseEngine;
     const engine = engines[engineName];
     const db = doc.database;
-    const version = db && db.engine === engineName ? engineVersion(engineName, db.version, db.variant) : null;
+    // A line outside the catalog (any image, 0.2.11) starts on the image the file ran.
+    const ran = doc.spec.source.type === "image" ? doc.spec.source.image : null;
+    const version = db && db.engine === engineName ? importedVersion(engineName, db.version, db.variant, ran) : null;
     if (!db || db.engine !== engineName)
       blockers.push({ reason: "badDocument", message: "The file's database settings do not match its kind." });
     else if (!version)

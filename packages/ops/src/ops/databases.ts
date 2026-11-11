@@ -101,7 +101,11 @@ export const Database = Type.Object({
   projectId: Id,
   name: DatabaseName,
   engine: DatabaseEngine,
-  /** Engine version as chosen, for example "17" for Postgres. */
+  /**
+   * Engine version as chosen, for example "17" for Postgres. For an image
+   * outside the catalog (0.2.11), the line its tag names, which the catalog
+   * may not have ("8.2"), or "custom" when the tag names none (latest, a digest).
+   */
   version: Type.String(),
   /** Image variant ("pgvector"); null for the engine's plain image. */
   variant: Type.Union([DatabaseVariant, Type.Null()]),
@@ -206,7 +210,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Create a database",
   description:
-    "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions, variants and notices (KeyDB gets no security fixes; prefer Valkey). Other services on the same node reach it at <name>:<port>; services on other nodes need exposure. It starts right away, which needs services.deploy in the project.",
+    "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions, variants and notices (KeyDB gets no security fixes; prefer Valkey). image runs any tag or digest of the engine's own repository instead of the catalog's image (not tested by Seylo; a floating tag such as latest can change on the next deploy); its version is the line the tag names, or custom. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure. It starts right away, which needs services.deploy in the project.",
   input: Type.Object({
     projectId: Id,
     name: DatabaseName,
@@ -215,6 +219,17 @@ export const create = defineOp({
     version: Type.Optional(Type.String({ maxLength: 20, pattern: "^[0-9A-Za-z._-]+$" })),
     /** An image variant of the engine, for example "pgvector" for Postgres; left out for the plain image. */
     variant: Type.Optional(DatabaseVariant),
+    /**
+     * Any tag or digest of the engine's (or variant's) own repository
+     * instead of the catalog's image (0.2.11), for example "mongo:8.2.12",
+     * "mongo:latest" or "docker.io/library/postgres:17.7-alpine": mongo,
+     * postgres (pgvector/pgvector with pgvector), mysql, mariadb, redis,
+     * valkey/valkey, eqalpha/keydb, ghcr.io/dragonflydb/dragonfly or
+     * clickhouse/clickhouse-server. Not tested by Seylo. The version
+     * recorded is the line its tag names ("8.2"), or "custom"; version is
+     * not used then.
+     */
+    image: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     nodeId: Id,
     /** Default database to create; defaults to the service name. Ignored for the Redis-like engines. */
     database: Type.Optional(Identifier),
@@ -239,8 +254,10 @@ export const VersionChoice = Type.Object({
   /**
    * current: the database runs this very image. patch: the same version
    * line, a newer pinned image. upgrade: a newer line of the same major
-   * (MariaDB 11.4 to 11.8). major: a newer major (MongoDB 7.0 to 8.0).
-   * downgrade: an older line, never allowed.
+   * (MariaDB 11.4 to 11.8), also when the release that runs is unknown
+   * (latest, a digest). major: a newer major (MongoDB 7.0 to 8.0).
+   * downgrade: an older line or an older image (taken with acceptRisk
+   * since 0.2.11).
    */
   kind: Type.Union([
     Type.Literal("current"),
@@ -249,14 +266,26 @@ export const VersionChoice = Type.Object({
     Type.Literal("downgrade"),
     Type.Literal("major"),
   ]),
+  /** databases.setVersion takes it: right away, or with acceptRisk when risk is set. */
   allowed: Type.Boolean(),
   /**
-   * Why not, when allowed is false: current, downgrade, olderImage,
-   * postgresMajor, oneStep (one version line at a time), patchOnly or
-   * dataPath.
+   * Why not, when allowed is false: current (nothing to change). Before
+   * 0.2.11 also downgrade, olderImage, postgresMajor, oneStep, patchOnly
+   * and dataPath, which are risks now.
    */
   reason: Type.Optional(Type.String()),
-  /** The reason in a sentence. */
+  /**
+   * What can go wrong, when setVersion needs acceptRisk for it (0.2.11),
+   * the most serious one: downgrade (an older line), olderImage (an older
+   * release of the line), postgresMajor (pg_upgrade is not run), dataPath
+   * (the line keeps its data in another folder), patchOnly (KeyDB and
+   * Dragonfly beyond patches), oneStep (a skipped MongoDB, MariaDB or
+   * MySQL line), otherLine (a line outside the catalog), postgresBase
+   * (another base system: text indexes may need REINDEX), floatingTag or
+   * digest (the release that runs or would run is unknown).
+   */
+  risk: Type.Optional(Type.String()),
+  /** The reason or the risks in sentences. */
   message: Type.Optional(Type.String()),
 });
 
@@ -265,7 +294,7 @@ export const versionChoices = defineOp({
   kind: "query",
   summary: "List the versions a database can change to",
   description:
-    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup; nativePassword (MySQL only) says whether the database runs with mysql_native_password logins on and which lines take setVersion's keepNativePassword.",
+    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or the risk it takes, which setVersion needs acceptRisk for (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches, a release that runs which Seylo cannot tell); the image that runs is refused as current. anyImage says that setVersion also takes any tag or digest of repository as image, and release is the release of the image that runs. blocked says why no change can start now (not placed, stopped, a deploy running); recentBackupAt is the newest successful database backup, which every change but a newer patch of the line it runs needs from the last 24 hours unless confirmNoBackup; nativePassword (MySQL only) says whether the database runs with mysql_native_password logins on and which lines take setVersion's keepNativePassword.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     engine: DatabaseEngine,
@@ -273,6 +302,12 @@ export const versionChoices = defineOp({
     variant: Type.Union([DatabaseVariant, Type.Null()]),
     /** The image the database runs (its live deployment's). */
     image: Type.String(),
+    /** The release that image's tag names ("8.0.34"); null for latest, a digest and other tags without one (0.2.11). */
+    release: Type.Union([Type.String(), Type.Null()]),
+    /** The repository whose tags and digests setVersion's image takes (0.2.11): mongo, postgres, pgvector/pgvector, ... */
+    repository: Type.Union([Type.String(), Type.Null()]),
+    /** setVersion takes any image of repository, not only the catalog's (0.2.11). */
+    anyImage: Type.Boolean(),
     /** The image it is set to run when that is not what runs: a change whose deploy is running or failed. */
     pendingImage: Type.Union([Type.String(), Type.Null()]),
     /** Newest first, like databases.engines. */
@@ -280,10 +315,10 @@ export const versionChoices = defineOp({
     /** Why no change can start now (noNode, stopped, deployRunning); null when one can. */
     blocked: Type.Union([Type.Object({ reason: Type.String(), message: Type.String() }), Type.Null()]),
     /**
-     * databases.setVersion takes another exact release tag (image) of the
-     * version line the database runs, even when no catalog choice of that
-     * line is allowed (it runs the newest pinned image). False for KeyDB and
-     * Dragonfly (no official repository) and while blocked.
+     * Deprecated (0.2.11): anyImage while not blocked, since setVersion
+     * takes any image. It said that setVersion takes another exact release
+     * tag (image) of the version line the database runs, even when no
+     * catalog choice of that line is allowed; false while blocked.
      */
     customOnCurrent: Type.Boolean(),
     /** When the newest successful database backup finished; null when there is none. */
@@ -317,14 +352,21 @@ export const setVersion = defineOp({
   kind: "destructive",
   summary: "Change a database's version",
   description:
-    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie). MySQL 8.4 ships mysql_native_password off: before a change from 8.0 the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command.",
+    "Moves a database to another version line of its engine, to the newest pinned image of its own line (a patch update), or to any image of its engine's own repository (image: any tag or digest, not tested by Seylo), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Refused outright: another repository, a database not placed, stopped or deploying, and the image that runs (nothing to change) unless keepNativePassword changes alone. Every other change the rules would not make by themselves is a risk the caller takes with acceptRisk: true, else it is refused with reason riskNotAccepted (details.risk, details.risks, details.message): downgrades and older releases, Postgres majors (pg_upgrade is not run), skipped MongoDB, MariaDB or MySQL lines, KeyDB and Dragonfly beyond patches, lines outside the catalog, another Postgres base system (text indexes may need REINDEX), floating tags (latest, 8.2) and digests. A new version that never gets healthy brings the old container back on the same data. MongoDB's featureCompatibilityVersion is raised to the running version first for a one-step upgrade between catalog lines, never for other moves. Every change but a newer patch of the line it runs needs a successful backup from the last 24 hours, or confirmNoBackup: true. MySQL 8.4 ships mysql_native_password off (9.0 removed it): before a change from 8.0 to 8.4 or later the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command.",
   input: Type.Object({
     serviceId: Id,
-    /** A catalog version of the database's engine, for example "8.0". */
-    version: Type.String({ maxLength: 20, pattern: "^[0-9A-Za-z._-]+$" }),
-    /** The engine's official image with an exact release tag, for example "mongo:8.0.40"; never latest or a digest. */
+    /** A catalog version of the database's engine, for example "8.0". Not needed with image (0.2.11). */
+    version: Type.Optional(Type.String({ maxLength: 20, pattern: "^[0-9A-Za-z._-]+$" })),
+    /**
+     * Any tag or digest of the engine's (or variant's) own repository, for
+     * example "mongo:8.2.12", "mongo:latest" or "mongo@sha256:..." (0.2.11;
+     * before, an exact release tag of version). The line recorded is the
+     * one its tag names, or "custom"; version is not used then.
+     */
     image: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-    /** Change the version line without a backup from the last 24 hours. */
+    /** Make a change whose risk (versionChoices, or a riskNotAccepted refusal) says what can go wrong (0.2.11). */
+    acceptRisk: Type.Optional(Type.Boolean()),
+    /** Change without a backup from the last 24 hours. */
     confirmNoBackup: Type.Optional(Type.Boolean()),
     /**
      * MySQL 8.4 only (versionChoices nativePassword.lines, 0.2.11): true

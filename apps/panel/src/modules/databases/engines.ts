@@ -388,9 +388,32 @@ export function engineVersion(engine: DatabaseEngine, version: string | undefine
   return list.find((v) => v.version === version) ?? null;
 }
 
-/** Why the database's version cannot be exposed (EngineVersion.noExposure); null when it can. */
+/**
+ * Why the database's version cannot be exposed (EngineVersion.noExposure);
+ * null when it can. A line the catalog does not have (any image, 0.2.11)
+ * goes by the newest catalog line not newer than it, or the oldest one
+ * (MariaDB 10.6 and 11.2 have no TLS of their own either); a tag that
+ * names no release ("custom") by none.
+ */
 export function exposureRefusal(row: { engine: DatabaseEngine; version: string; variant: string | null }): string | null {
-  return engineVersion(row.engine, row.version, row.variant)?.noExposure ?? null;
+  const line = engineVersion(row.engine, row.version, row.variant) ?? lineAtOrBelow(row.engine, row.version, row.variant);
+  if (!line?.noExposure) return null;
+  const label = engines[row.engine].label;
+  return line.version === row.version ? line.noExposure : line.noExposure.replace(`${label} ${line.version}`, `${label} ${row.version}`);
+}
+
+/** The newest catalog line not newer than version, else the oldest; null for one that is not numbers ("custom"). */
+function lineAtOrBelow(engine: DatabaseEngine, version: string, variant: string | null): EngineVersion | null {
+  if (!/^\d+(\.\d+)*$/.test(version)) return null;
+  const numbers = (v: string) => v.split(".").map(Number);
+  const older = (a: string, b: string) => {
+    const [x, y] = [numbers(a), numbers(b)];
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+    return false;
+  };
+  // Newest first, like the catalog.
+  const list = engineVersions(engine, variant) ?? [];
+  return list.find((v) => !older(version, v.version)) ?? list.at(-1) ?? null;
 }
 
 export interface Credentials {
