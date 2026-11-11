@@ -60,18 +60,29 @@ type FormKind = Exclude<NewServiceKind, CatalogKind>;
 type AppSource = "image" | "github" | "git" | "none";
 type Engine = (typeof databases.DatabaseEngine)["static"];
 
-/** note: a word on the card; notice: what to know before picking it, under the version. */
-const engines: readonly { engine: Engine; label: MessageKey; tag: string; note?: MessageKey; notice?: MessageKey }[] = [
+/**
+ * note: a word on the card; notice: what to know before picking it, under the version. hidden: not offered in
+ * the form for now (the owner's call, 2026-11-11); databases.create, templates and existing databases still use them.
+ */
+const engines: readonly { engine: Engine; label: MessageKey; tag: string; note?: MessageKey; notice?: MessageKey; hidden?: true }[] = [
   { engine: "postgres", label: "newService.engines.postgres", tag: "PG" },
   { engine: "mysql", label: "newService.engines.mysql", tag: "MY" },
   { engine: "mariadb", label: "newService.engines.mariadb", tag: "MDB" },
   { engine: "mongo", label: "newService.engines.mongo", tag: "MGO" },
   { engine: "redis", label: "newService.engines.redis", tag: "RDS" },
   { engine: "valkey", label: "newService.engines.valkey", tag: "VK" },
-  { engine: "keydb", label: "newService.engines.keydb", tag: "KDB", note: "newService.keydbNote", notice: "newService.keydbNotice" },
-  { engine: "dragonfly", label: "newService.engines.dragonfly", tag: "DF" },
-  { engine: "clickhouse", label: "newService.engines.clickhouse", tag: "CH" },
+  {
+    engine: "keydb",
+    label: "newService.engines.keydb",
+    tag: "KDB",
+    note: "newService.keydbNote",
+    notice: "newService.keydbNotice",
+    hidden: true,
+  },
+  { engine: "dragonfly", label: "newService.engines.dragonfly", tag: "DF", hidden: true },
+  { engine: "clickhouse", label: "newService.engines.clickhouse", tag: "CH", hidden: true },
 ];
+const offeredEngines = engines.filter((item) => !item.hidden);
 
 /** The Postgres image variant the form offers as a checkbox. */
 const pgvector = "pgvector";
@@ -600,7 +611,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
               aria-labelledby="ns-engine-label"
               className="grid grid-cols-2 gap-2 sm:grid-cols-3"
             >
-              {engines.map((item) => (
+              {offeredEngines.map((item) => (
                 <RadioCard
                   key={item.engine}
                   value={item.engine}

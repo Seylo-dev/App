@@ -1,6 +1,6 @@
-// The database engines on screen: the New database form (every engine,
-// versions from databases.engines on the real panel, pgvector for Postgres,
-// KeyDB's unmaintained notice and its digest pin), KeyDB's exposure asking
+// The database engines on screen: the New database form (the offered engines,
+// versions from databases.engines on the real panel, pgvector for Postgres;
+// KeyDB, Dragonfly and ClickHouse are hidden from it for now), KeyDB's exposure asking
 // for allowed IPs first, and the Connection tab of a ClickHouse database
 // (native and HTTP URLs) and of a pgvector one. Demo data (demo/*.ts) stands in for the fleet;
 // databases.create is answered here so nothing is deployed.
@@ -30,7 +30,7 @@ test.describe("database engines", () => {
   test.use({ storageState: stateFile });
   test.beforeAll(() => mkdirSync(shots, { recursive: true }));
 
-  test("the form offers every engine with its pinned versions and pgvector", async ({ page }) => {
+  test("the form offers its engines with their pinned versions and pgvector", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     let created: Record<string, unknown> | null = null;
@@ -43,37 +43,25 @@ test.describe("database engines", () => {
       },
     });
     const dialog = await openNewDatabase(page);
-    for (const name of ["Postgres", "MySQL", "MariaDB", "MongoDB", "Redis", "Valkey", "KeyDB", "Dragonfly", "ClickHouse"]) {
+    for (const name of ["Postgres", "MySQL", "MariaDB", "MongoDB", "Redis", "Valkey"]) {
       await expect(dialog.getByRole("radio", { name })).toBeVisible();
     }
+    // Hidden for now: existing databases of these engines keep working, the form does not offer them.
+    for (const name of ["KeyDB", "Dragonfly", "ClickHouse"]) {
+      await expect(dialog.getByRole("radio", { name: new RegExp(name) })).toHaveCount(0);
+    }
+    await expect(dialog.getByRole("radio")).toHaveCount(6);
     // Versions come from the panel's catalog once it answers; the placeholder is shaped like the select.
     const version = dialog.getByRole("combobox", { name: "Version" });
     await expect(version).toContainText("18 (newest)");
     await expect(dialog.getByText("Include pgvector")).toBeVisible();
 
-    await dialog.getByRole("radio", { name: "ClickHouse" }).click();
-    await expect(version).toContainText("26.8 (newest)");
-    await expect(dialog.getByText("Include pgvector")).toHaveCount(0);
-    await version.click();
-    await expect(page.getByRole("option", { name: /26\.3/ })).toContainText("clickhouse/clickhouse-server:26.3.62.3");
-    await page.keyboard.press("Escape");
-
     await dialog.getByRole("radio", { name: "Valkey" }).click();
     await expect(version).toContainText("9.1 (newest)");
+    await expect(dialog.getByText("Include pgvector")).toHaveCount(0);
     await expect(dialog.getByRole("note")).toHaveCount(0);
-
-    // KeyDB: unmaintained, said on the card and under the version; its digest pin shows shortened.
-    const keydb = dialog.getByRole("radio", { name: /KeyDB/ });
-    await expect(keydb).toContainText("Unmaintained");
-    await keydb.click();
-    await expect(dialog.getByRole("note")).toContainText("no security fixes");
-    await expect(dialog.getByRole("note")).toContainText("Prefer Valkey");
-    await expect(version).toContainText("6.3 (newest)");
     await version.click();
-    const pinned = page.getByRole("option", { name: /^6\.3/ }).locator("[title]");
-    await expect(pinned).toHaveText("eqalpha/keydb@sha256:6537505c4235…");
-    await expect(pinned).toHaveAttribute("title", /^eqalpha\/keydb@sha256:[0-9a-f]{64}$/);
-    await page.screenshot({ path: `${shots}/new-database-keydb.png` });
+    await expect(page.getByRole("option", { name: /^8\.1/ })).toContainText("valkey/valkey:8.1");
     await page.keyboard.press("Escape");
 
     // Postgres with pgvector: the versions list the pgvector images.
