@@ -1101,11 +1101,45 @@ describe("databases.versionChoices and setVersion", () => {
     expect(rb.body.error.message).toContain("mysql:8.0.43");
     expect(deployCount(serviceId)).toBe(2);
 
-    // A deployment of the image it runs only restarts it.
-    panel.deps.db.update(deployments).set({ imageRef: "mysql:8.4.6" }).where(eq(deployments.id, old.id)).run();
+    // A deployment of the image it runs (the same release: the same digest) only restarts it.
+    const digest = `sha256:${"a".repeat(64)}`;
+    panel.deps.db.update(deployments).set({ imageDigest: digest }).where(eq(deployments.id, res.body.deploymentId)).run();
+    panel.deps.db.update(deployments).set({ imageRef: "mysql:8.4.6", imageDigest: digest }).where(eq(deployments.id, old.id)).run();
     expect(await rollbackFlags()).toEqual({ get: true, list: true });
     const same = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: old.id }, { cookie });
     expect(same.status).toBe(200);
+  });
+
+  test("a floating tag counts by the release it pulled: an earlier digest of the same tag is not offered", async () => {
+    const { serviceId } = await createDb("mongo", "8.0");
+    await settleDeploys(panel);
+    const first = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, serviceId)).get();
+    if (!first) throw new Error("no deployment");
+    // Two deployments of mongo:latest: the earlier one pulled an older release than the live one.
+    const older = `sha256:${"1".repeat(64)}`;
+    const newer = `sha256:${"2".repeat(64)}`;
+    panel.deps.db
+      .update(deployments)
+      .set({ status: "superseded", imageRef: "mongo:latest", imageDigest: older })
+      .where(eq(deployments.id, first.id))
+      .run();
+    const liveId = "deplatest0000002";
+    panel.deps.db
+      .insert(deployments)
+      .values({ ...first, id: liveId, generation: first.generation + 1, status: "live", imageRef: "mongo:latest", imageDigest: newer })
+      .run();
+    panel.deps.db.update(services).set({ liveDeploymentId: liveId, targetDeploymentId: liveId }).where(eq(services.id, serviceId)).run();
+
+    const view = await callOp(panel, deploymentOps.get, { serviceId, deploymentId: first.id }, { cookie });
+    expect(view.body.deployment.canRollback).toBe(false);
+    const rb = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: first.id }, { cookie });
+    expect({ status: rb.status, reason: rb.body.error.details.reason }).toEqual({ status: 409, reason: "databaseVersion" });
+    expect(rb.body.error.message).toContain("earlier release of mongo:latest");
+
+    // The same release of the tag is a restart, as before.
+    panel.deps.db.update(deployments).set({ imageDigest: newer }).where(eq(deployments.id, first.id)).run();
+    const again = await callOp(panel, deploymentOps.get, { serviceId, deploymentId: first.id }, { cookie });
+    expect(again.body.deployment.canRollback).toBe(true);
   });
 
   test("a database with no live deployment offers no rollback, and refuses one for its version", async () => {

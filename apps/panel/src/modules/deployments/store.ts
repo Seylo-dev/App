@@ -91,7 +91,7 @@ function keptIds(db: PanelDb, serviceId: string): Set<string> {
  * deployment of this image (deployments.rollback, reason databaseVersion),
  * and canRollback is false for the others. undefined for every other kind.
  */
-export function databaseRollbackImage(db: PanelDb, serviceId: string): string | null | undefined {
+export function databaseRollbackImage(db: PanelDb, serviceId: string): DatabaseImage | null | undefined {
   const svc = db
     .select({ kind: services.kind, liveDeploymentId: services.liveDeploymentId })
     .from(services)
@@ -99,9 +99,33 @@ export function databaseRollbackImage(db: PanelDb, serviceId: string): string | 
     .get();
   if (!svc || !databaseKinds.has(svc.kind)) return undefined;
   if (!svc.liveDeploymentId) return null;
-  return (
-    db.select({ imageRef: deployments.imageRef }).from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get()?.imageRef ?? null
-  );
+  const live = db
+    .select({ imageRef: deployments.imageRef, imageDigest: deployments.imageDigest, nodeResults: deployments.nodeResults })
+    .from(deployments)
+    .where(eq(deployments.id, svc.liveDeploymentId))
+    .get();
+  return live ? { ref: live.imageRef ?? null, digest: deploymentDigest(live) } : null;
+}
+
+/** What a database's live deployment runs: its image reference and the digest it pulled (null when not recorded). */
+export interface DatabaseImage {
+  ref: string | null;
+  digest: string | null;
+}
+
+/**
+ * True when a database's deployment ran the same image as its live one. The
+ * reference alone is not enough: a rollback pins the deployment's digest, so
+ * an earlier deployment of a floating tag (mongo:latest, postgres:17) would run
+ * the older release the tag pointed at then, on newer data. A digest recorded
+ * on one side only counts as different.
+ */
+export function sameDatabaseImage(
+  row: Pick<DeploymentRow, "imageRef" | "imageDigest" | "nodeResults">,
+  live: DatabaseImage | null,
+): boolean {
+  if (!live || row.imageRef !== live.ref) return false;
+  return deploymentDigest(row) === live.digest;
 }
 
 /**
@@ -124,7 +148,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
   const names = nodeNames(db, [...nodeIds]);
   const ref = (id: string | null) => (id ? { id, name: names.get(id) ?? "removed node" } : null);
   const kept = new Map<string, Set<string>>();
-  const databaseImages = new Map<string, string | null | undefined>();
+  const databaseImages = new Map<string, DatabaseImage | null | undefined>();
   const now = Date.now();
   const builders = new Map(
     db
@@ -187,7 +211,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
           s.durationMs === null ? null : s.durationMs >= 0 ? s.durationMs : s.status === "running" ? Math.max(0, now + s.durationMs) : 0,
       })),
       durationMs: r.finishedAt && r.startedAt ? Math.max(0, r.finishedAt.getTime() - r.startedAt.getTime()) : null,
-      canRollback: r.status === "superseded" && keep.has(r.id) && (databaseImage === undefined || r.imageRef === databaseImage),
+      canRollback: r.status === "superseded" && keep.has(r.id) && (databaseImage === undefined || sameDatabaseImage(r, databaseImage)),
       rollbackOf: r.rollbackOf,
       error: r.error,
       createdAt: r.createdAt.toISOString(),

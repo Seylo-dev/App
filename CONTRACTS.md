@@ -3656,8 +3656,11 @@ members never hold them. Every op is `mcp: false`.
   `domains.add`). Database and Box specs are built from the engine
   (`databaseSpec`, `boxSpec`), never taken from the file: a database runs
   this panel's catalog image of its version, whatever image the file says
-  it ran (a `databaseImage` warning names both), and a version the panel
-  does not offer blocks (`engineVersion`). The one exception is data
+  it ran (a `databaseImage` warning names both). A version the panel does
+  not offer (0.2.11, any image) starts on the image the file ran when that
+  image is of the engine's repository and names that line
+  (`importedVersion`); otherwise the item is refused (`engineVersion`).
+  The one exception is data
   written by a newer release of the line (`importedDatabaseImage`): data
   files do not go back (`judgeVersion`'s `olderImage`), so with its data
   the database keeps the file's image when `customImage` takes it (what
@@ -4365,7 +4368,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the deployments from before a version change ran the older version.
   That stays so with any image (0.2.11): `acceptRisk` is for
   `databases.setVersion` only, and a rollback across images is not offered
-  or taken. `deployments.list` and `deployments.get` say `canRollback: false` for
+  or taken. The same image means the same reference and the same pulled
+  digest (`sameDatabaseImage`, deployments/store.ts): a rollback pins the
+  deployment's digest, so an earlier deployment of a floating tag
+  (`mongo:latest`, `postgres:17`) that pulled an older release is not
+  offered either (a digest recorded on one side only counts as different). `deployments.list` and `deployments.get` say `canRollback: false` for
   those (0.2.11; before, they were offered and then refused). The
   web app's Version card is on the database's Settings tab; the header's
   version chip links to it (`#version`).

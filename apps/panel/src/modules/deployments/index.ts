@@ -23,7 +23,16 @@ import {
 import { readLog } from "./logs";
 import { assertNoActiveDeploy, hasActiveDeploy, queueDeploy } from "./queue";
 import { registryGcJob, registryGcSweepJob, registryGcSweepJobType } from "./registry-gc";
-import { activeStatuses, databaseRollbackImage, isFinal, keptImages, loadDeployment, toDeployment, toDeployments } from "./store";
+import {
+  activeStatuses,
+  databaseRollbackImage,
+  isFinal,
+  keptImages,
+  loadDeployment,
+  sameDatabaseImage,
+  toDeployment,
+  toDeployments,
+} from "./store";
 
 export const tickJobType = "deployments.tick";
 const tickEverySeconds = 15;
@@ -149,10 +158,13 @@ const cancel = implement(deploymentOps.cancel, async (input, ctx) => {
 function assertSameDatabaseImage(ctx: Parameters<typeof deploy.run>[1], target: ReturnType<typeof mustLoad>) {
   const running = databaseRollbackImage(ctx.db, target.serviceId);
   if (running === undefined) return;
-  if (target.imageRef !== running) {
+  if (!sameDatabaseImage(target, running)) {
+    const sameTag = running !== null && target.imageRef === running.ref;
     throw new OpError(
       "CONFLICT",
-      `This deployment ran ${target.imageRef ?? "another image"}, not ${running ?? "what the database runs"}: a database cannot go back to an older version, whose files the newer one may have changed. Restore a backup into a new database instead.`,
+      sameTag
+        ? `This deployment ran an earlier release of ${target.imageRef}: the tag moved since, and a database cannot go back to an older release, whose files the newer one may have changed. Restore a backup into a new database instead.`
+        : `This deployment ran ${target.imageRef ?? "another image"}, not ${running?.ref ?? "what the database runs"}: a database cannot go back to an older version, whose files the newer one may have changed. Restore a backup into a new database instead.`,
       { reason: "databaseVersion" },
     );
   }
