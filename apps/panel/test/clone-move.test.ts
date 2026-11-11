@@ -34,6 +34,7 @@ import {
 } from "../src/db/schema";
 import { compileDesiredState } from "../src/desired";
 import { enginesCapability } from "../src/modules/databases/engines";
+import { writeSecret } from "../src/modules/databases/info";
 import { engineFor } from "../src/modules/deployments/engine";
 import { cloneDataJob, cloneName } from "../src/modules/services/clone";
 import { serviceSpecFor } from "../src/modules/services/desired";
@@ -538,13 +539,20 @@ describe("cloning databases and data", () => {
           .all()
           .map((s) => [s.name, panel.deps.secrets.open(s.valueSealed, "service.secret")]),
       );
+    // A database from before 0.2.9: a separate exposed user ("external") with its own password.
+    panel.deps.db.update(serviceDatabases).set({ exposedUser: "external" }).where(eq(serviceDatabases.serviceId, id)).run();
+    writeSecret(panel.deps.db, panel.deps.secrets, id, "exposed_password", "old-exposed-password");
+    const exposedUserOf = (serviceId: string) =>
+      panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, serviceId)).get()?.exposedUser;
     const empty = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB }, { cookie });
     expect(empty.status).toBe(200);
     expect(empty.body.copied.databaseLogins).toBe(false);
     const before = secretsOf(id);
     const fresh = secretsOf(empty.body.service.id);
-    expect(Object.keys(fresh).sort()).toEqual(Object.keys(before).sort());
+    // The old exposed password stays behind; an empty data folder has no old user to retire.
+    expect(Object.keys(fresh)).toEqual(["admin_password"]);
     expect(fresh.admin_password).not.toBe(before.admin_password);
+    expect(exposedUserOf(empty.body.service.id)).toBe("");
     const dbRow = panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, empty.body.service.id)).get();
     expect(dbRow).toMatchObject({ engine: "postgres", tlsHostname: null });
     // A database is sent to its node even before its first start, stopped.
@@ -573,7 +581,9 @@ describe("cloning databases and data", () => {
     const copied = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
     expect(copied.status).toBe(200);
     expect(copied.body.copied.databaseLogins).toBe(true);
-    expect(secretsOf(copied.body.service.id).admin_password).toBe(before.admin_password);
+    expect(secretsOf(copied.body.service.id)).toEqual({ admin_password: before.admin_password });
+    // The copied data has the old user: the clone's agent retires it there too.
+    expect(exposedUserOf(copied.body.service.id)).toBe("external");
     expect(copied.body.dataCopy).toMatchObject({ status: "queued", fromName: "db", volumes: ["data"] });
   });
 

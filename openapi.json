@@ -19364,7 +19364,7 @@
       "get": {
         "operationId": "databases.connection",
         "summary": "Get connection details",
-        "description": "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Internal URLs only work for services of the project on the same node.",
+        "description": "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Both use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
         "tags": [
           "databases"
         ],
@@ -20601,7 +20601,7 @@
       "post": {
         "operationId": "databases.resetPassword",
         "summary": "Reset a database password",
-        "description": "Sets a new password for the admin user (internal) or the exposed user. Services that reference the password get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
+        "description": "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
         "tags": [
           "databases"
         ],
@@ -20694,7 +20694,7 @@
       "post": {
         "operationId": "databases.setExposure",
         "summary": "Expose a database",
-        "description": "Turns TLS exposure on or off. On: the agent listens on a node port with the database's own TLS for a separate user, optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). The internal URL does not change. Fields left out keep their value.",
+        "description": "Turns TLS exposure on or off. On: the agent opens a node port to the database, TLS only, for the database's own user and password (nothing changes inside the database), optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). Postgres, MySQL and MariaDB need a node agent from 0.2.9 or later (CONFLICT agentTooOld otherwise). The internal URL does not change. Fields left out keep their value.",
         "tags": [
           "databases"
         ],

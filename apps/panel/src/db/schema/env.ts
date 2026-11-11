@@ -50,8 +50,9 @@ export type DatabaseEngine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis
 
 /**
  * The non-secret facts of a database service. Passwords live in
- * service_secrets ("admin_password", "exposed_password"); the exposure
- * listener is a port_exposures row of kind "database".
+ * service_secrets ("admin_password"; "exposed_password" in databases from
+ * before 0.2.9, unused since); the exposure listener is a port_exposures
+ * row of kind "database".
  */
 export const serviceDatabases = sqliteTable("service_databases", {
   serviceId: text("service_id")
@@ -65,7 +66,10 @@ export const serviceDatabases = sqliteTable("service_databases", {
   /** Default database; empty for the Redis-like engines. */
   databaseName: text("database_name").notNull().default(""),
   adminUser: text("admin_user").notNull(),
-  /** Separate TLS-only user for exposed access. */
+  /**
+   * The separate exposed user of databases from before 0.2.9 ("external"),
+   * which the agent retires; "" since (exposure uses adminUser).
+   */
   exposedUser: text("exposed_user").notNull(),
   /** Host name for the exposure's ACME certificate; null = self-signed. */
   tlsHostname: text("tls_hostname"),

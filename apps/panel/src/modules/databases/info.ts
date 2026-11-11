@@ -1,7 +1,8 @@
 // Reads a database service with its secrets opened: credentials, node,
 // exposure row and the internal and exposed connection details. Env
 // references (${{db.INTERNAL_URL}}), the connection op and the desired
-// state all use this, so they always agree.
+// state all use this, so they always agree. The exposed connection uses
+// the database's own user and password, over TLS only.
 
 import { OpError } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
@@ -15,7 +16,11 @@ import { type Credentials, connectionUrl, type Engine, engines, httpUrl } from "
 type Tx = Parameters<Parameters<PanelDb["transaction"]>[0]>[0];
 
 export const adminPasswordSecret = "admin_password";
-export const exposedPasswordSecret = "exposed_password";
+/**
+ * The password of the separate exposed user databases had before 0.2.9.
+ * Nothing reads it any more; services.clone leaves it out.
+ */
+export const retiredExposedPasswordSecret = "exposed_password";
 
 export type DatabaseRow = typeof serviceDatabases.$inferSelect;
 export type ExposureRow = typeof portExposures.$inferSelect;
@@ -26,8 +31,8 @@ export interface DatabaseInfo {
   engine: Engine;
   /** Databases run on exactly one node; null only if its placement was removed. */
   node: PlacedNode | null;
+  /** Inside and through the exposed port alike. */
   admin: Credentials;
-  exposedUser: Credentials;
   exposure: ExposureRow | null;
 }
 
@@ -58,7 +63,6 @@ export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: stri
   if (!row) throw new OpError("NOT_FOUND", `${service.name} is not a database.`, { serviceId });
   const engine = engines[row.engine];
   const adminPassword = readSecret(deps, serviceId, adminPasswordSecret) ?? "";
-  const exposedPassword = readSecret(deps, serviceId, exposedPasswordSecret) ?? "";
   const exposure =
     deps.db
       .select()
@@ -71,10 +75,6 @@ export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: stri
     engine,
     node: serviceNodes(deps.db, serviceId)[0] ?? null,
     admin: { user: row.adminUser, password: adminPassword, database: row.databaseName },
-    // The Redis-like engines have one user: exposed access uses it over TLS.
-    exposedUser: engine.redisLike
-      ? { user: row.adminUser, password: adminPassword, database: "" }
-      : { user: row.exposedUser, password: exposedPassword, database: row.databaseName },
     exposure,
   };
 }
@@ -119,12 +119,13 @@ export function exposedConnection(info: DatabaseInfo): (Connection & { tlsParams
   // certificate is self-signed, so clients must be told to accept it (Postgres and MySQL "require"
   // never verifies).
   const accept = info.row.tlsHostname ? "" : (selfSignedParam[info.row.engine] ?? "");
-  const url = connectionUrl(info.row.engine, info.exposedUser, address.host, address.port, true);
+  // The same user and password as inside: exposing only opens the port, with TLS.
+  const url = connectionUrl(info.row.engine, info.admin, address.host, address.port, true);
   return {
     url: accept ? `${url}&${accept}` : url,
     host: address.host,
     port: address.port,
-    ...info.exposedUser,
+    ...info.admin,
     tlsParams: accept ? `${info.engine.tlsParams}&${accept}` : info.engine.tlsParams,
   };
 }

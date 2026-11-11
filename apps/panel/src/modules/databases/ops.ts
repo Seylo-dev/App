@@ -2,7 +2,7 @@
 // generated credentials, read it, its connection details, password resets
 // (applied inside the running database through the agent's Exec, or by the
 // restart a new environment causes), the web UI and shell links, and TLS
-// exposure through the agent's portgate.
+// exposure through the agent's portgate, which uses the database's own user.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { parseEnv } from "@seylo/env-analyzer";
@@ -24,7 +24,7 @@ import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
 import { defaultContainer } from "../services/spec";
 import terminalsModule from "../terminals";
-import { nodeHasCapability } from "./capability";
+import { missingExposureCapability, nodeHasCapability } from "./capability";
 import { edgeToolLink } from "./edge-ticket";
 import {
   changePasswordExec,
@@ -34,6 +34,7 @@ import {
   enginesCapability,
   engineVersion,
   engineVersions,
+  exposureCapability,
   generatePassword,
   generateUserName,
   healthProbe,
@@ -43,7 +44,6 @@ import {
   type DatabaseInfo,
   exposedAddress,
   exposedConnection,
-  exposedPasswordSecret,
   internalConnection,
   loadDatabase,
   writeSecret,
@@ -100,7 +100,7 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
       enabled: info.exposure !== null,
       host: address?.host ?? null,
       port: address?.port ?? null,
-      user: info.exposedUser.user,
+      user: info.admin.user,
       allowedCidrs: info.exposure?.allowedCidrs ?? [],
       needsAllowedCidrs: info.engine.exposureNeedsAllowlist,
       tlsHostname: info.row.tlsHostname,
@@ -205,11 +205,11 @@ export const create = implement(dbOps.create, (input, ctx) => {
         variant: input.variant ?? null,
         databaseName: engine.hasDatabase ? (input.database ?? defaultDatabaseName(input.name)) : "",
         adminUser: input.user ?? engine.defaultUser ?? generateUserName(input.engine === "clickhouse" ? "ch" : "admin"),
-        exposedUser: engine.redisLike ? "default" : "external",
+        // Exposure uses the admin user; only databases from before 0.2.9 name a separate one (retired by the agent).
+        exposedUser: "",
       })
       .run();
     writeSecret(tx, ctx.secrets, row.id, adminPasswordSecret, password);
-    writeSecret(tx, ctx.secrets, row.id, exposedPasswordSecret, generatePassword());
     return row.id;
   });
   // Start it right away: a database has nothing to build.
@@ -227,10 +227,11 @@ export const connection = implement(dbOps.connection, (input, ctx) => {
   return { internal: internalConnection(info), exposed: exposedConnection(info) };
 });
 
+/** The references that carry the database's password: inside and through the exposed port alike. */
+const credentialVariables = ["PASSWORD", "INTERNAL_URL", "INTERNAL_HTTP_URL", "EXPOSED_URL"];
+
 /** Services of the project whose env uses this database's credentials. */
-function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo, user: "internal" | "exposed"): string[] {
-  const variables = user === "internal" ? ["PASSWORD", "INTERNAL_URL", "INTERNAL_HTTP_URL"] : ["EXPOSED_URL"];
-  if (info.engine.redisLike) variables.push("PASSWORD", "INTERNAL_URL", "EXPOSED_URL");
+function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo): string[] {
   const name = info.service.name.toLowerCase();
   const rows = ctx.db
     .select({ id: services.id })
@@ -240,7 +241,7 @@ function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo, user: "int
   return rows
     .filter((row) =>
       parseEnv(readServiceEnv(ctx.db, ctx.secrets, row.id).text).entries.some((e) =>
-        e.references.some((r) => r.target.toLowerCase() === name && variables.includes(r.variable)),
+        e.references.some((r) => r.target.toLowerCase() === name && credentialVariables.includes(r.variable)),
       ),
     )
     .map((row) => row.id);
@@ -249,10 +250,9 @@ function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo, user: "int
 export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
   const password = input.password ?? generatePassword();
-  // The Redis-like engines have one user: both choices change it.
-  const internalUser = input.user === "internal" || info.engine.redisLike;
+  // One user inside and through the exposed port: user "exposed" (kept for older callers) changes it too.
   // Engines that read the password from their environment take it with the restart the new env causes.
-  const exec = internalUser ? changePasswordExec(info.row.engine, info.admin.user, password) : null;
+  const exec = changePasswordExec(info.row.engine, info.admin.user, password);
   if (exec) {
     if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
     // Change it inside the running database first; only store it once that worked.
@@ -271,10 +271,10 @@ export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) =
     }
   }
   ctx.db.transaction((tx) => {
-    writeSecret(tx, ctx.secrets, info.service.id, internalUser ? adminPasswordSecret : exposedPasswordSecret, password);
+    writeSecret(tx, ctx.secrets, info.service.id, adminPasswordSecret, password);
   });
   afterChange(ctx, info);
-  return { password, affectedServiceIds: servicesUsingCredentials(ctx, info, internalUser ? "internal" : "exposed") };
+  return { password, affectedServiceIds: servicesUsingCredentials(ctx, info) };
 });
 
 export const openWebUi = implement(dbOps.openWebUi, (input, ctx) => {
@@ -297,11 +297,17 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
   if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
   const node = info.node;
-  // An older agent would relay the port without TLS; the desired state leaves it closed there anyway.
-  if (input.enabled && info.engine.needsAgentCapability && !nodeHasCapability(ctx.db, ctx.agents, node.id, enginesCapability)) {
-    throw new OpError("CONFLICT", `The agent on ${node.name} cannot expose ${info.engine.label} with TLS yet. Update the node first.`, {
-      reason: "agentTooOld",
-    });
+  // An older agent would relay the port without TLS (or without checking that clients ask for it); the
+  // desired state leaves it closed there anyway.
+  const missing = input.enabled ? missingExposureCapability(ctx.db, ctx.agents, info.engine, node.id) : null;
+  if (missing) {
+    throw new OpError(
+      "CONFLICT",
+      missing === exposureCapability
+        ? `The agent on ${node.name} cannot expose ${info.engine.label} with its own user over TLS yet. Update the node first.`
+        : `The agent on ${node.name} cannot expose ${info.engine.label} with TLS yet. Update the node first.`,
+      { reason: "agentTooOld" },
+    );
   }
   const tlsHostname = input.tlsHostname === undefined ? info.row.tlsHostname : input.tlsHostname?.toLowerCase() || null;
   if (tlsHostname && !hostnamePattern.test(tlsHostname)) {

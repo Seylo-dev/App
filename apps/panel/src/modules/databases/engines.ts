@@ -64,6 +64,13 @@ export interface Engine {
    * away from the internet.
    */
   exposureNeedsAllowlist: boolean;
+  /**
+   * Exposed only through agents that advertise database.exposure.v2: the
+   * engine negotiates TLS inside its protocol, and only such an agent's
+   * portgate refuses clients that do not ask for it (an older one relays
+   * the port plainly). Postgres, MySQL and MariaDB.
+   */
+  exposureNeedsCapability: boolean;
 }
 
 /**
@@ -76,6 +83,12 @@ export const keydbNotice =
 
 /** The agent capability for the engines added in 0.2 (go/internal/dbengine). */
 export const enginesCapability = "database.engines.v2";
+
+/**
+ * The agent capability for exposure with the database's own user, TLS only
+ * (0.2.9, go/internal/dbengine ExposureCapability).
+ */
+export const exposureCapability = "database.exposure.v2";
 
 const pg = (version: string, image: string): EngineVersion => ({
   version,
@@ -120,6 +133,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: false,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: true,
   },
   mysql: {
     engine: "mysql",
@@ -142,6 +156,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: false,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: true,
   },
   mariadb: {
     engine: "mariadb",
@@ -165,6 +180,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: false,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: true,
   },
   mongo: {
     engine: "mongo",
@@ -187,6 +203,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: false,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: false,
   },
   redis: {
     engine: "redis",
@@ -209,6 +226,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: false,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: false,
   },
   valkey: {
     engine: "valkey",
@@ -232,6 +250,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: true,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: false,
   },
   keydb: {
     engine: "keydb",
@@ -258,6 +277,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: true,
     notice: keydbNotice,
     exposureNeedsAllowlist: true,
+    exposureNeedsCapability: false,
   },
   dragonfly: {
     engine: "dragonfly",
@@ -278,6 +298,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: true,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: false,
   },
   clickhouse: {
     engine: "clickhouse",
@@ -301,6 +322,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     needsAgentCapability: true,
     notice: null,
     exposureNeedsAllowlist: false,
+    exposureNeedsCapability: false,
   },
 };
 
@@ -358,7 +380,7 @@ export function containerEnv(engine: DatabaseEngine, creds: Credentials): { name
         env("CLICKHOUSE_USER", creds.user),
         env("CLICKHOUSE_PASSWORD", creds.password, true),
         env("CLICKHOUSE_DB", creds.database),
-        // Lets the admin create the exposed user with SQL.
+        // Lets the admin manage users with SQL (the agent retires the exposed user of databases from before 0.2.9).
         env("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "1"),
       ];
   }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
 import { DatabaseEngine } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { nodes, serviceSecrets, services } from "../src/db/schema";
+import { nodes, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
 import { databaseRuntime } from "../src/modules/databases/desired";
 import { edgeSubject, verifyEdgeTicket } from "../src/modules/databases/edge-ticket";
 import {
@@ -11,6 +11,7 @@ import {
   containerCommand,
   engines,
   enginesCapability,
+  exposureCapability,
   generatePassword,
   generateUserName,
   healthCommand,
@@ -44,7 +45,7 @@ function advertise(nodeId: string, capabilities: string[]) {
 async function createDb(engine: Engine, extra: Record<string, unknown> = {}) {
   const project = seedProject(panel);
   const node = seedNode(panel, { ipv4: "203.0.113.10", wildcard: "n1.example.com" });
-  advertise(node.id, [enginesCapability]);
+  advertise(node.id, [enginesCapability, exposureCapability]);
   const res = await callOp(panel, dbOps.create, { projectId: project.id, name: "shop-db", engine, nodeId: node.id, ...extra } as never, {
     cookie,
   });
@@ -108,7 +109,8 @@ describe("databases ops", () => {
       shellClient: "psql",
       nodeId: node.id,
       internal: { host: "shop-db", port: 5432, database: "shop_db", user: "postgres" },
-      exposure: { enabled: false, host: null, port: null, user: "external", certificate: "none" },
+      // Exposure uses the database's own user.
+      exposure: { enabled: false, host: null, port: null, user: "postgres", certificate: "none" },
       webUi: { tool: "pgweb", idleMinutes: 15, running: false },
     });
     const row = panel.deps.db.select().from(services).where(eq(services.id, res.body.serviceId)).get();
@@ -117,7 +119,11 @@ describe("databases ops", () => {
     expect(JSON.stringify(row?.spec)).toContain('"mode":"recreate"');
     // Passwords are sealed, never stored as plain text.
     const secrets = panel.deps.db.select().from(serviceSecrets).where(eq(serviceSecrets.serviceId, res.body.serviceId)).all();
-    expect(secrets.map((s) => s.name).sort()).toEqual(["admin_password", "exposed_password"]);
+    // One login: no separate exposed user or password.
+    expect(secrets.map((s) => s.name)).toEqual(["admin_password"]);
+    expect(panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, res.body.serviceId)).get()?.exposedUser).toBe(
+      "",
+    );
 
     const conn = await callOp(panel, dbOps.connection, { serviceId: res.body.serviceId }, { cookie });
     expect(conn.body.internal.url).toMatch(/^postgresql:\/\/postgres:[A-Za-z0-9]{32}@shop-db:5432\/shop_db$/);
@@ -131,6 +137,7 @@ describe("databases ops", () => {
       engine: DatabaseEngine.POSTGRES,
       credentials: { adminUser: "postgres", adminPassword: conn.body.internal.password, database: "shop_db" },
       exposure: { enabled: false },
+      retiredExposedUser: "",
     });
   });
 
@@ -165,19 +172,24 @@ describe("databases ops", () => {
     const on = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, allowedCidrs: ["198.51.100.0/24"] }, { cookie });
     expect(on.body.exposure).toMatchObject({ enabled: true, host: "203.0.113.10", port: null, certificate: "selfSigned" });
 
-    const agent = fakeAgent(panel, node.id);
+    const agent = fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
     agent.snapshot({ epoch: 1n, services: [{ serviceId, openPorts: [{ hostPort: 45432, containerPort: 5432 }] }] });
     const conn = await callOp(panel, dbOps.connection, { serviceId }, { cookie });
-    expect(conn.body.exposed).toMatchObject({ host: "203.0.113.10", port: 45432, user: "external", tlsParams: "sslmode=require" });
-    expect(conn.body.exposed.url).toContain("@203.0.113.10:45432/shop_db?sslmode=require");
+    expect(conn.body.exposed).toMatchObject({
+      host: "203.0.113.10",
+      port: 45432,
+      user: "postgres",
+      password: conn.body.internal.password,
+      tlsParams: "sslmode=require",
+    });
+    expect(conn.body.exposed.url).toBe(`postgresql://postgres:${conn.body.internal.password}@203.0.113.10:45432/shop_db?sslmode=require`);
     const access = await callOp(panel, exposureOps.get, { serviceId }, { cookie });
     expect(access.body.database).toEqual({ host: "203.0.113.10", port: 45432, allowedCidrs: ["198.51.100.0/24"] });
-    expect(databaseRuntime(panel.deps, serviceId)?.database.exposure).toMatchObject({
-      enabled: true,
-      hostPort: 45432,
-      user: "external",
-      password: conn.body.exposed.password,
-    });
+    const exposure = databaseRuntime(panel.deps, serviceId)?.database.exposure;
+    expect(exposure).toMatchObject({ enabled: true, hostPort: 45432 });
+    // The agent creates no user: the port is the database's own login over TLS.
+    expect(exposure?.user).toBeUndefined();
+    expect(exposure?.password).toBeUndefined();
 
     const acme = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, tlsHostname: "db.example.com" }, { cookie });
     expect(acme.body.exposure).toMatchObject({
@@ -245,10 +257,12 @@ describe("databases ops", () => {
   test("password reset runs in the database through Exec, then stores the new one", async () => {
     const { res, node, project } = await createDb("mysql");
     const serviceId = res.body.serviceId;
-    // A service that uses the password through a reference is reported as affected.
+    // Services that use the password through a reference are reported as affected, the exposed URL's too.
     const { seedService } = await import("./seed-helpers");
     const app = seedService(panel, { projectId: project.id, name: "api", nodeIds: [node.id] });
     await callOp(panel, (await import("@seylo/ops")).env.set, { serviceId: app.id, text: "DB=${{shop-db.INTERNAL_URL}}\n" }, { cookie });
+    const outside = seedService(panel, { projectId: project.id, name: "worker", nodeIds: [node.id] });
+    await callOp(panel, (await import("@seylo/ops")).env.set, { serviceId: outside.id, text: "DB=${{shop-db.EXPOSED_URL}}\n" }, { cookie });
 
     const offline = await callOp(panel, dbOps.resetPassword, { serviceId, user: "internal" }, { cookie });
     expect(offline.status).toBe(503);
@@ -261,7 +275,8 @@ describe("databases ops", () => {
       },
     });
     const reset = await callOp(panel, dbOps.resetPassword, { serviceId, user: "internal", password: "BrandNewPassword1" }, { cookie });
-    expect(reset.body).toEqual({ password: "BrandNewPassword1", affectedServiceIds: [app.id] });
+    expect(reset.body.password).toBe("BrandNewPassword1");
+    expect(reset.body.affectedServiceIds.sort()).toEqual([app.id, outside.id].sort());
     expect(stdin).toContain("ALTER USER 'root'@'%' IDENTIFIED BY 'BrandNewPassword1'");
     expect(agent.calls[0]?.method).toBe("exec");
     const conn = await callOp(panel, dbOps.connection, { serviceId }, { cookie });
@@ -274,9 +289,28 @@ describe("databases ops", () => {
     expect((await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body.internal.password).toBe("BrandNewPassword1");
     failing.disconnect();
 
-    // The exposed user has no live database change to make here: it is stored and sent with the desired state.
-    const exposed = await callOp(panel, dbOps.resetPassword, { serviceId, user: "exposed" }, { cookie });
+    // "exposed" (older callers) is the same one user: changed in the database, stored as the admin password.
+    stdin = "";
+    const again = fakeAgent(panel, node.id, {
+      exec: (req: { command: string[]; stdin: Uint8Array }) => {
+        stdin = new TextDecoder().decode(req.stdin);
+        return { exitCode: 0 };
+      },
+    });
+    const exposed = await callOp(panel, dbOps.resetPassword, { serviceId, user: "exposed", password: "ThirdPassword333" }, { cookie });
     expect(exposed.status).toBe(200);
+    expect(exposed.body.affectedServiceIds.sort()).toEqual([app.id, outside.id].sort());
+    expect(stdin).toContain("ALTER USER 'root'@'%' IDENTIFIED BY 'ThirdPassword333'");
+    expect((await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body.internal.password).toBe("ThirdPassword333");
+    expect(
+      panel.deps.db
+        .select()
+        .from(serviceSecrets)
+        .where(eq(serviceSecrets.serviceId, serviceId))
+        .all()
+        .map((x) => x.name),
+    ).toEqual(["admin_password"]);
+    again.disconnect();
   });
 
   test("the web UI link carries a single-use edge ticket for this database only", async () => {
@@ -511,11 +545,11 @@ describe("more engines", () => {
       engine: "clickhouse",
       version: "26.8",
       internal: { host: "shop-db", port: 9000, database: "shop_db", httpPort: 8123 },
-      exposure: { user: "external" },
       webUi: { tool: "ClickHouse Play" },
       shellClient: "clickhouse-client",
     });
     expect(res.body.internal.user).toMatch(/^ch_[a-z0-9]{10}$/);
+    expect(res.body.exposure.user).toBe(res.body.internal.user);
     const conn = await callOp(panel, dbOps.connection, { serviceId }, { cookie });
     const { user, password } = conn.body.internal;
     expect(conn.body.internal).toMatchObject({
@@ -553,13 +587,14 @@ describe("more engines", () => {
     const target = refs.body.targets.find((t: { name: string }) => t.name === "shop-db");
     expect(target.variables.find((v: { name: string }) => v.name === "INTERNAL_HTTP_URL")).toMatchObject({ sensitive: true });
 
-    // Exposure: the native port through the agent's TLS, a separate user, the self-signed certificate accepted.
+    // Exposure: the native port through the agent's TLS, the same user, the self-signed certificate accepted.
     await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie });
-    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toMatchObject({ enabled: true, user: "external" });
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toMatchObject({ enabled: true });
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure?.user).toBeUndefined();
     const agent = fakeAgent(panel, node.id, {}, [], [enginesCapability]);
     agent.snapshot({ epoch: 1n, services: [{ serviceId, openPorts: [{ hostPort: 49000, containerPort: 9000, tls: true }] }] });
     const exposed = (await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body.exposed;
-    expect(exposed.url).toEndWith("@203.0.113.10:49000/shop_db?secure=true&skip_verify=true");
+    expect(exposed.url).toBe(`clickhouse://${user}:${password}@203.0.113.10:49000/shop_db?secure=true&skip_verify=true`);
     expect(exposed.tlsParams).toBe("secure=true&skip_verify=true");
     agent.disconnect();
     await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, tlsHostname: "ch.example.com" }, { cookie });
@@ -585,6 +620,109 @@ describe("more engines", () => {
       // Clean up for the next engine: one project per database name.
       await settleDeploys(panel);
     }
+  });
+
+  test("every engine's exposed connection is its own user and password, over TLS", async () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"] as const) {
+      const { res, node, project } = await createDb(engine);
+      const serviceId = res.body.serviceId;
+      const on = await callOp(
+        panel,
+        dbOps.setExposure,
+        { serviceId, enabled: true, ...(engine === "keydb" ? { allowedCidrs: ["198.51.100.24"] } : {}) },
+        { cookie },
+      );
+      expect(on.status).toBe(200);
+      expect(on.body.exposure.user).toBe(on.body.internal.user);
+      const runtime = databaseRuntime(panel.deps, serviceId, node.id)?.database;
+      expect(runtime?.exposure).toMatchObject({ enabled: true });
+      expect(runtime?.exposure?.user).toBeUndefined();
+      expect(runtime?.exposure?.password).toBeUndefined();
+      const agent = fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
+      const port = engines[engine].port;
+      agent.snapshot({ epoch: 1n, services: [{ serviceId, openPorts: [{ hostPort: 40000 + (port % 10000), containerPort: port }] }] });
+      const conn = (await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body;
+      expect(conn.exposed).toMatchObject({ user: conn.internal.user, password: conn.internal.password, database: conn.internal.database });
+      expect(conn.exposed.url).toContain(`://${conn.internal.user}:${conn.internal.password}@203.0.113.10:`);
+      // ${{shop-db.EXPOSED_URL}} is the same URL, with the same login.
+      const { seedService } = await import("./seed-helpers");
+      const app = seedService(panel, { projectId: project.id, name: `app-${engine}`, nodeIds: [node.id] });
+      await callOp(panel, (await import("@seylo/ops")).env.set, { serviceId: app.id, text: "OUT=${{shop-db.EXPOSED_URL}}\n" }, { cookie });
+      const appEnv = Object.fromEntries(resolveServiceEnv(panel.deps, app.id).map((v) => [v.name, v.value]));
+      expect(appEnv.OUT).toBe(conn.exposed.url);
+      agent.disconnect();
+      await settleDeploys(panel);
+    }
+  });
+
+  test("Postgres, MySQL and MariaDB are exposed only through agents with database.exposure.v2", async () => {
+    const project = seedProject(panel);
+    const old = seedNode(panel, { ipv4: "203.0.113.20" });
+    // An agent from before 0.2.9: it runs every engine but relays these three without the TLS check.
+    advertise(old.id, [enginesCapability]);
+    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
+      const created = await callOp(
+        panel,
+        dbOps.create,
+        { projectId: project.id, name: `old-${engine}`, engine, nodeId: old.id },
+        { cookie },
+      );
+      expect(created.status).toBe(200);
+      const refused = await callOp(panel, dbOps.setExposure, { serviceId: created.body.serviceId, enabled: true }, { cookie });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.details.reason).toBe("agentTooOld");
+      expect(refused.body.error.message).toContain("Update the node");
+      expect((await callOp(panel, dbOps.setExposure, { serviceId: created.body.serviceId, enabled: false }, { cookie })).status).toBe(200);
+    }
+    // Their TLS is the gate's already, so older agents keep exposing the others.
+    const mongo = await callOp(
+      panel,
+      dbOps.create,
+      { projectId: project.id, name: "old-mongo", engine: "mongo", nodeId: old.id },
+      { cookie },
+    );
+    expect((await callOp(panel, dbOps.setExposure, { serviceId: mongo.body.serviceId, enabled: true }, { cookie })).status).toBe(200);
+    expect(databaseRuntime(panel.deps, mongo.body.serviceId, old.id)?.database.exposure).toMatchObject({ enabled: true });
+
+    // Exposed while the node had it; the node went back to an older agent: the port stays closed there.
+    const { res, node } = await createDb("postgres");
+    const serviceId = res.body.serviceId;
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie })).status).toBe(200);
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toMatchObject({ enabled: true });
+    advertise(node.id, [enginesCapability]);
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toEqual({ enabled: false });
+    // A live agent's own capabilities count.
+    const newer = fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie })).status).toBe(200);
+    newer.disconnect();
+  });
+
+  test("a database from before 0.2.9 names its old exposed user for the agent to retire", async () => {
+    const { res, node } = await createDb("postgres");
+    const serviceId = res.body.serviceId;
+    const oldRow = (id: string, exposedUser: string) =>
+      panel.deps.db.update(serviceDatabases).set({ exposedUser }).where(eq(serviceDatabases.serviceId, id)).run();
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.retiredExposedUser).toBe("");
+    oldRow(serviceId, "external");
+    // Sent whether or not exposure is on.
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database).toMatchObject({
+      exposure: { enabled: false },
+      retiredExposedUser: "external",
+    });
+    await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie });
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database).toMatchObject({
+      exposure: { enabled: true },
+      retiredExposedUser: "external",
+    });
+    // Its exposed connection is the admin's now, not the old user's.
+    expect((await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure.user).toBe("postgres");
+    // Never the admin itself, never a Redis-like engine's one user.
+    oldRow(serviceId, "postgres");
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.retiredExposedUser).toBe("");
+    await settleDeploys(panel);
+    const valkey = await createDb("valkey");
+    oldRow(valkey.res.body.serviceId, "default");
+    expect(databaseRuntime(panel.deps, valkey.res.body.serviceId, valkey.node.id)?.database.retiredExposedUser).toBe("");
   });
 
   test("nodes without database.engines.v2 never get a new engine's exposure", async () => {

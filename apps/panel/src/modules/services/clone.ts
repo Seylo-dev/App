@@ -47,7 +47,7 @@ import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
 import { assertEngineRunsOn } from "../databases/capability";
 import { generatePassword } from "../databases/engines";
-import { findDatabase, writeSecret } from "../databases/info";
+import { findDatabase, retiredExposedPasswordSecret, writeSecret } from "../databases/info";
 import { appPort } from "../domains/lookup";
 import { insertDomain } from "../domains/ops";
 import { primaryDomain } from "../domains/rows";
@@ -391,11 +391,20 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
     }
     const database = tx.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, svc.id)).get();
     if (database) {
+      // The separate exposed user of a database from before 0.2.9 lives on in copied data, so the
+      // clone's agent retires it there too; an empty data folder never had it.
       tx.insert(serviceDatabases)
-        .values({ ...database, serviceId: id, tlsHostname: null, createdAt: new Date() })
+        .values({
+          ...database,
+          serviceId: id,
+          tlsHostname: null,
+          exposedUser: copyLogins ? database.exposedUser : "",
+          createdAt: new Date(),
+        })
         .run();
       // A copied data folder only opens with the source's logins; an empty one gets new ones.
       for (const secret of tx.select().from(serviceSecrets).where(eq(serviceSecrets.serviceId, svc.id)).all()) {
+        if (secret.name === retiredExposedPasswordSecret) continue;
         const value = copyLogins ? ctx.secrets.open(secret.valueSealed, "service.secret") : null;
         writeSecret(tx, ctx.secrets, id, secret.name, value ?? generatePassword());
       }

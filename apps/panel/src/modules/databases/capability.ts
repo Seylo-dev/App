@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { nodes, serviceDatabases } from "../../db/schema";
-import { engines, enginesCapability } from "./engines";
+import { type Engine, engines, enginesCapability, exposureCapability } from "./engines";
 
 export function nodeHasCapability(db: PanelDb, agents: Pick<AgentHub, "capabilities"> | null, nodeId: string, capability: string): boolean {
   const live = agents?.capabilities(nodeId);
@@ -16,6 +16,25 @@ export function nodeHasCapability(db: PanelDb, agents: Pick<AgentHub, "capabilit
   const facts = db.select({ facts: nodes.facts }).from(nodes).where(eq(nodes.id, nodeId)).get()?.facts;
   const stored = facts?.capabilities;
   return Array.isArray(stored) && stored.includes(capability);
+}
+
+/**
+ * The capability a node's agent lacks to expose the engine TLS only, null
+ * when it has what it needs: the engines added in 0.2 need
+ * database.engines.v2 (an older agent relays them without TLS), and
+ * Postgres, MySQL and MariaDB need database.exposure.v2 (an older agent
+ * relays them without checking that clients ask for TLS, and set TLS up
+ * only along with a separate user).
+ */
+export function missingExposureCapability(
+  db: PanelDb,
+  agents: Pick<AgentHub, "capabilities"> | null,
+  engine: Engine,
+  nodeId: string,
+): string | null {
+  if (engine.needsAgentCapability && !nodeHasCapability(db, agents, nodeId, enginesCapability)) return enginesCapability;
+  if (engine.exposureNeedsCapability && !nodeHasCapability(db, agents, nodeId, exposureCapability)) return exposureCapability;
+  return null;
 }
 
 /**

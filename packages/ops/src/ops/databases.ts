@@ -2,7 +2,8 @@
 // Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse services with
 // generated credentials, internal and exposed connection URLs, an
 // on-demand web UI and a pre-logged-in shell (both opened with short-lived
-// edge tickets), and TLS exposure through the agent's portgate.
+// edge tickets), and TLS exposure through the agent's portgate with the
+// database's own user and password.
 
 import { type Static, Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
@@ -63,7 +64,7 @@ export const DatabaseExposure = Type.Object({
   /** Node public address (or tlsHostname) and the agent-owned port. Null while closed. */
   host: Type.Union([Type.String(), Type.Null()]),
   port: Type.Union([PublicPort, Type.Null()]),
-  /** The separate user for exposed access; it must use TLS. Redis uses the default user with TLS. */
+  /** The user for exposed access: the database's own (internal.user), over TLS only. */
   user: Type.String(),
   /** Empty means anyone may connect; the UI warns about it. */
   allowedCidrs: Type.Array(Cidr),
@@ -237,7 +238,7 @@ export const connection = defineOp({
   kind: "query",
   summary: "Get connection details",
   description:
-    "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Internal URLs only work for services of the project on the same node.",
+    "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Both use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
   input: Type.Object({ serviceId: Id }),
   output: DatabaseConnection,
   sensitive: { output: ["internal.url", "internal.password", "internal.httpUrl", "exposed.url", "exposed.password"] },
@@ -251,9 +252,10 @@ export const resetPassword = defineOp({
   kind: "destructive",
   summary: "Reset a database password",
   description:
-    "Sets a new password for the admin user (internal) or the exposed user. Services that reference the password get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
+    "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
   input: Type.Object({
     serviceId: Id,
+    /** Both mean the database's one user; "exposed" is kept for older callers. */
     user: Type.Union([Type.Literal("internal"), Type.Literal("exposed")]),
     /** Generated when left out. */
     password: Type.Optional(Type.String({ minLength: 12, maxLength: 128, pattern: "^[A-Za-z0-9._~-]+$" })),
@@ -310,7 +312,7 @@ export const setExposure = defineOp({
   kind: "mutation",
   summary: "Expose a database",
   description:
-    "Turns TLS exposure on or off. On: the agent listens on a node port with the database's own TLS for a separate user, optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). The internal URL does not change. Fields left out keep their value.",
+    "Turns TLS exposure on or off. On: the agent opens a node port to the database, TLS only, for the database's own user and password (nothing changes inside the database), optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). Postgres, MySQL and MariaDB need a node agent from 0.2.9 or later (CONFLICT agentTooOld otherwise). The internal URL does not change. Fields left out keep their value.",
   input: Type.Object({
     serviceId: Id,
     enabled: Type.Boolean(),
