@@ -1,8 +1,9 @@
 // The database part of a ServiceSpec, for the desired-state compiler: the
-// DatabaseSpec (kind_spec "database") the agent uses for tools, backups and
-// TLS exposure. Image, command, ports, health check, volume and recreate
-// deploys are in the services spec written at create (databases.create via
-// insertService); the engine's environment comes from env/desired.ts.
+// DatabaseSpec (kind_spec "database") the agent uses for tools, backups, TLS
+// exposure and retiring the old exposed user. Image, command, ports, health
+// check, volume and recreate deploys are in the services spec written at
+// create (databases.create via insertService); the engine's environment
+// comes from env/desired.ts.
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { DatabaseEngine, type DatabaseSpecSchema } from "@seylo/proto";
