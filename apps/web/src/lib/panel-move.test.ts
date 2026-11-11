@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OpError, type OpOutput, type panelMove } from "@seylo/ops";
-import { followMovePoll, lostMove, lostPollMs, movedLinks } from "./panel-move";
+import { followMovePoll, lostMove, lostPollMs, lostRetryMs, movedLinks } from "./panel-move";
 
 type MoveStatus = OpOutput<typeof panelMove.status>;
 
@@ -32,31 +32,45 @@ const running = (over: Partial<MoveStatus> = {}): MoveStatus => ({
 
 const unreachable = new OpError("UNAVAILABLE", "The panel could not be reached.");
 
-test("a move at its last steps whose panel stopped answering shows as moved, with the last status's new address", () => {
-  for (const step of ["staging", "switching"] as const) {
-    const lost = lostMove({ data: running({ step, canCancel: step === "staging" }), error: unreachable });
-    expect(lost?.state).toBe("done");
-    expect(lost?.side).toBe("old");
-    expect(lost?.newUrl).toBe("http://203.0.113.20:3000");
-    expect(lost?.targetNodeName).toBe("de-fsn-2");
-    expect(lost?.canCancel).toBe(false);
-  }
+test("a move past the switch whose panel stopped answering shows as moved, with the last status's new address", () => {
+  const lost = lostMove({ data: running(), error: unreachable });
+  expect(lost?.moved).toBe(true);
+  expect(lost?.status.state).toBe("done");
+  expect(lost?.status.side).toBe("old");
+  expect(lost?.status.newUrl).toBe("http://203.0.113.20:3000");
+  expect(lost?.status.targetNodeName).toBe("de-fsn-2");
+  expect(lost?.status.canCancel).toBe(false);
   // A proxy in front of the stopped panel: its 502 or 404 page.
-  expect(lostMove({ data: running(), error: new OpError("UNAVAILABLE", "Unexpected response (HTTP 502).") })).not.toBeNull();
-  expect(lostMove({ data: running(), error: new OpError("INTERNAL", "Unexpected response (HTTP 404).") })).not.toBeNull();
-  expect(lostMove({ data: running(), error: new TypeError("Failed to fetch") })).not.toBeNull();
+  expect(lostMove({ data: running(), error: new OpError("UNAVAILABLE", "Unexpected response (HTTP 502).") })?.moved).toBe(true);
+  expect(lostMove({ data: running(), error: new OpError("INTERNAL", "Unexpected response (HTTP 404).") })?.moved).toBe(true);
+  expect(lostMove({ data: running(), error: new TypeError("Failed to fetch") })?.moved).toBe(true);
 });
 
-test("not before the nodes know the new address, not without a failure, not for the panel's own refusals", () => {
-  expect(lostMove({ data: running({ step: "shipping" }), error: unreachable })).toBeNull();
-  expect(lostMove({ data: running({ step: "starting" }), error: unreachable })).toBeNull();
+test("before the switch went ahead a panel that stopped answering is not called moved: the last status, as it was", () => {
+  // Nothing is committed before the switch: an old panel that comes back fails the move (recover.ts).
+  for (const step of ["pausing", "registry", "snapshot", "shipping", "starting", "staging"] as const) {
+    const last = running({ step, canCancel: true });
+    const lost = lostMove({ data: last, error: unreachable });
+    expect(lost?.moved).toBe(false);
+    expect(lost?.status).toBe(last);
+    expect(lost?.status.newUrl).toBe("http://203.0.113.20:3000");
+  }
+  // The target keeps the switch waiting: it may never take it.
+  const waiting = running({ waitingSince: "2026-11-11T10:00:00.000Z" });
+  expect(lostMove({ data: waiting, error: unreachable })).toEqual({ status: waiting, moved: false });
+  expect(lostMove({ data: running({ step: null }), error: unreachable })?.moved).toBe(false);
+});
+
+test("not without a failure, not for the panel's own refusals, not for a move that does not run", () => {
   expect(lostMove({ data: running(), error: null })).toBeNull();
+  expect(lostMove({ data: running({ step: "shipping" }), error: null })).toBeNull();
   expect(lostMove({ data: undefined, error: unreachable })).toBeNull();
   expect(lostMove({ data: running(), error: new OpError("UNAUTHENTICATED", "Sign in again.") })).toBeNull();
+  expect(lostMove({ data: running({ step: "shipping" }), error: new OpError("FORBIDDEN", "No.") })).toBeNull();
   expect(lostMove({ data: running({ state: "failed" }), error: unreachable })).toBeNull();
 });
 
-test("the status polls while a move runs and stops asking a panel that stopped answering at its end", () => {
+test("the status polls while a move runs and stops asking a panel that stopped answering after the switch", () => {
   const now = 10_000_000;
   const poll = followMovePoll(2000, () => now);
   expect(poll({ state: { data: running({ step: "shipping" }), error: null, dataUpdatedAt: now - 1000 } })).toBe(2000);
@@ -70,8 +84,21 @@ test("the status polls while a move runs and stops asking a panel that stopped a
   expect(
     poll({ state: { data: running({ waitingSince: "2026-11-11T10:00:00.000Z" }), error: null, dataUpdatedAt: now - lostPollMs - 1 } }),
   ).toBe(2000);
-  // Failures before the nodes know the new address keep polling as before.
-  expect(poll({ state: { data: running({ step: "shipping" }), error: unreachable, dataUpdatedAt: now - lostPollMs - 1 } })).toBe(2000);
+});
+
+test("before the switch a panel that stopped answering is asked less often, never given up on", () => {
+  const now = 10_000_000;
+  const poll = followMovePoll(2000, () => now);
+  const banner = followMovePoll(5000, () => now);
+  for (const step of ["shipping", "staging"] as const) {
+    // A short while: as often as before.
+    expect(poll({ state: { data: running({ step }), error: unreachable, dataUpdatedAt: now - 30_000 } })).toBe(2000);
+    // Minutes: every 30 seconds, so a panel that comes back (and fails the move) is noticed.
+    expect(poll({ state: { data: running({ step }), error: unreachable, dataUpdatedAt: now - lostPollMs - 1 } })).toBe(lostRetryMs);
+    expect(banner({ state: { data: running({ step }), error: unreachable, dataUpdatedAt: now - lostPollMs - 1 } })).toBe(lostRetryMs);
+  }
+  const waiting = running({ waitingSince: "2026-11-11T10:00:00.000Z" });
+  expect(poll({ state: { data: waiting, error: unreachable, dataUpdatedAt: now - lostPollMs - 1 } })).toBe(lostRetryMs);
 });
 
 test("the old copy links the new IP address first and the domain second", () => {

@@ -20,8 +20,9 @@
 // status while the move runs; a 2 second poll covers a dropped socket.
 // The check refreshes every 10 seconds while the form shows, on focus and
 // after a refused start, and names the typed address in its warnings. When
-// the old panel stops answering at the end of a move the page missed, the
-// card says where the panel went (lib/panel-move.ts).
+// the old panel stops answering after the switch, the card says where the
+// panel went; before the switch, where it is if the move finished, with
+// Retry (lib/panel-move.ts).
 
 import { slug } from "@seylo/brand";
 import { auth, OpError, type OpOutput, panelMove } from "@seylo/ops";
@@ -74,12 +75,14 @@ export function PanelMoveCard() {
 
 function OwnerCard() {
   const status = useOp(panelMove.status, {}, { refetchInterval: followMovePoll(2000) });
-  // The panel stopped answering at the end of the move: it went through, most likely.
+  // The panel stopped answering during the move: past the switch it went through, most likely.
   const lost = lostMove(status);
   return (
     <SectionCard title={t("settingsPanelMove.title")} description={t("settingsPanelMove.description")}>
-      {lost ? (
-        <MovedAway status={lost} lost />
+      {lost?.moved ? (
+        <MovedAway status={lost.status} lost />
+      ) : lost ? (
+        <MoveLost status={lost.status} retrying={status.isFetching} onRetry={() => void status.refetch()} />
       ) : (
         <QueryView query={status} skeleton={<MoveSkeleton />} className="flex flex-col gap-4">
           {(data) => (
@@ -588,6 +591,40 @@ export function MovedAway({ status, lost = false }: { status: MoveStatus; lost?:
           {t("settingsPanelMove.movedAwayDomain", { address: status.targetAddress ?? t("settingsPanelMove.newServer") })}
         </p>
       )}
+    </Alert>
+  );
+}
+
+/**
+ * This server stopped answering before the switch went ahead (a restart, a
+ * lost route, or a move that finished while this page did not look): the
+ * new address in case the move finished, and Retry. A move that fails
+ * instead shows once this server answers again.
+ */
+export function MoveLost({ status, onRetry, retrying = false }: { status: MoveStatus; onRetry: () => void; retrying?: boolean }) {
+  const { url } = movedLinks(status);
+  const node = status.targetNodeName ?? "";
+  return (
+    <Alert
+      tone="warning"
+      title={t("settingsPanelMove.lostTitle", { node })}
+      action={
+        <>
+          <Button variant="secondary" size="sm" disabled={retrying} onClick={onRetry}>
+            {t("common.retry")}
+          </Button>
+          {url && (
+            <Button variant="secondary" size="sm" asChild>
+              <a href={url}>
+                {t("settingsPanelMove.open", { url })}
+                <IconExternalLink size={14} aria-hidden="true" />
+              </a>
+            </Button>
+          )}
+        </>
+      }
+    >
+      <p className="m-0">{t("settingsPanelMove.lostHint", { node })}</p>
     </Alert>
   );
 }

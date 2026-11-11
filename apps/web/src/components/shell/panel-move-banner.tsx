@@ -3,9 +3,10 @@
 // change meanwhile. On an old copy a move left behind it says where the
 // panel is now: its new IP address first (the domain's DNS record still
 // points at the old server right after a move), the domain second. A page
-// that only saw the old panel stop answering at the end of the move says
-// the same (lib/panel-move.ts). panelMove.status gives people without
-// settings.view the state and the target's name only.
+// that only saw the old panel stop answering after the switch says the
+// same; one that saw it stop before the switch says where the panel is if
+// the move finished (lib/panel-move.ts). panelMove.status gives people
+// without settings.view the state and the target's name only.
 
 import { type OpOutput, panelMove } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -20,20 +21,25 @@ type Status = OpOutput<typeof panelMove.status>;
 export function PanelMoveBanner({ className }: { className?: string }) {
   const status = useOp(panelMove.status, {}, { refetchInterval: followMovePoll(5000) });
   if (!status.data) return null;
-  return <PanelMoveBannerView status={lostMove(status) ?? status.data} className={className} />;
+  const lost = lostMove(status);
+  return <PanelMoveBannerView status={lost?.status ?? status.data} lost={lost !== null && !lost.moved} className={className} />;
 }
 
-export function PanelMoveBannerView({ status, className }: { status: Status; className?: string }) {
+/** `lost`: this server stopped answering before the switch went ahead, so the move may or may not have finished. */
+export function PanelMoveBannerView({ status, lost = false, className }: { status: Status; lost?: boolean; className?: string }) {
   const moving = status.state === "running";
   const moved = status.state === "done" && status.side === "old";
   if (!moving && !moved) return null;
   const node = status.targetNodeName ?? "";
-  const { url, domainUrl } = moved ? movedLinks(status) : { url: null, domainUrl: null };
+  const unsure = moving && lost;
+  const { url, domainUrl } = moved || unsure ? movedLinks(status) : { url: null, domainUrl: null };
   const text = moved
     ? t("settingsPanelMove.banner.moved", { node })
-    : status.waitingSince
-      ? t("settingsPanelMove.banner.waiting", { node })
-      : t("settingsPanelMove.banner.moving", { node });
+    : unsure
+      ? t("settingsPanelMove.banner.lost", { node })
+      : status.waitingSince
+        ? t("settingsPanelMove.banner.waiting", { node })
+        : t("settingsPanelMove.banner.moving", { node });
   return (
     <div
       role="status"

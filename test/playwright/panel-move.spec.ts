@@ -2,8 +2,9 @@
 // demo data (demo/panel-move.ts): the card's states (blocked, ready with the
 // node picker and its disabled nodes, nodes that cannot follow and the tick,
 // running with its steps and the banner on every page, failed with Try
-// again, done on the moved panel with Delete the old copy, and the old copy
-// that says where the panel went). The ops are answered in the browser, so
+// again, done on the moved panel with Delete the old copy, the old copy
+// that says where the panel went, and an old panel that stopped answering
+// before or after the switch). The ops are answered in the browser, so
 // the requests the page sends are checked here; the panel's own tests
 // (apps/panel/test/panel-move.test.ts) cover the server.
 
@@ -35,6 +36,14 @@ function recordOps(page: Page) {
 const card = (page: Page) => page.locator("section", { has: page.getByRole("heading", { name: "Move the panel to another server" }) });
 const startButton = (page: Page) => card(page).getByRole("button", { name: "Move the panel", exact: true });
 const banner = (page: Page) => page.getByTestId("panel-move-banner");
+
+/** The tab goes to the back (no polling) or comes to the front again: what the query cache listens for. */
+async function setHidden(page: Page, hidden: boolean) {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (value ? "hidden" : "visible") });
+    window.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+}
 
 async function pickTarget(page: Page, name: string) {
   await card(page).getByRole("combobox", { name: "Move to" }).click();
@@ -389,6 +398,88 @@ test.describe("panel move", () => {
     await page.waitForTimeout(4000);
     expect(statusReads).toBe(settled);
     await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toBeVisible();
+  });
+
+  test("a tab hidden at an early step finds the old panel gone: where the panel is if the move finished, and Try again", async ({
+    page,
+  }) => {
+    await installDemo(page, { overrides: { "panelMove.status": () => movingStatus({ step: "shipping" }) } });
+    let statusReads = 0;
+    let gone = false;
+    await page.route(/\/api\/v1\/panelMove\.status/, (route) => {
+      statusReads++;
+      return gone ? route.abort("connectionrefused") : route.fallback();
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("Moving the panel to us-ash-1")).toBeVisible();
+    // The owner switches tabs for the minutes the copy takes: nothing asks meanwhile.
+    await setHidden(page, true);
+    const hiddenReads = statusReads;
+    gone = true;
+    await page.waitForTimeout(5000);
+    expect(statusReads).toBe(hiddenReads);
+    await setHidden(page, false);
+    await expect(card(page).getByText("This server stopped answering during the move to us-ash-1")).toBeVisible();
+    await expect(card(page).getByText("If the move finished, the panel is at its new address now.")).toBeVisible();
+    await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await expect(card(page).getByText("Could not load this")).toHaveCount(0);
+    // Nothing was committed yet: not the firm words of a move past the switch.
+    await expect(card(page).getByText("The panel moved to us-ash-1")).toHaveCount(0);
+    await expect(banner(page)).toContainText(
+      "This server stopped answering while the panel moved to us-ash-1. If the move finished, the panel is there now.",
+    );
+    await expect(banner(page).getByRole("link", { name: "Open it" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/lost-early.png`, fullPage: true });
+    // The route to it came back: Try again shows the move again.
+    gone = false;
+    await card(page).getByRole("button", { name: "Try again" }).click();
+    await expect(card(page).getByTestId("panel-move-progress")).toBeVisible();
+    await expect(banner(page)).toContainText("The panel is moving to us-ash-1: read-only for a few minutes.");
+  });
+
+  test("the old panel stops answering while it tells the nodes: not called moved, asked every 30 seconds, its failure shows once back", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    let status = movingStatus({ step: "staging", bytesDone: 0, bytesTotal: 0 });
+    await installDemo(page, { overrides: { "panelMove.status": () => status } });
+    let statusReads = 0;
+    let gone = false;
+    await page.route(/\/api\/v1\/panelMove\.status/, (route) => {
+      statusReads++;
+      return gone ? route.abort("connectionrefused") : route.fallback();
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("Moving the panel to us-ash-1")).toBeVisible();
+    // The old server reboots mid-move.
+    gone = true;
+    await expect(card(page).getByText("This server stopped answering during the move to us-ash-1")).toBeVisible();
+    await expect(card(page).getByText("The panel moved to us-ash-1")).toHaveCount(0);
+    await expect(banner(page)).toContainText("This server stopped answering while the panel moved to us-ash-1.");
+    await expect(banner(page)).not.toContainText("The panel moved to us-ash-1.");
+    // Minutes without an answer: the page keeps asking, every 30 seconds.
+    await page.clock.fastForward("03:00");
+    await page.waitForTimeout(6000);
+    const settled = statusReads;
+    await page.clock.runFor(30_000);
+    await page.waitForTimeout(4000);
+    expect(statusReads).toBeGreaterThan(settled);
+    // It is back and failed the move (nothing was committed): the card says so.
+    status = moveStatus({
+      state: "failed",
+      moveId: "move000000000001",
+      targetNodeId: ids.us,
+      targetNodeName: "us-ash-1",
+      targetAddress: "198.51.100.7",
+      step: "staging",
+      error: { step: "staging", message: "The panel restarted before the switch, so the move stopped." },
+    });
+    gone = false;
+    await page.clock.runFor(30_000);
+    await expect(card(page).getByText("The move to us-ash-1 stopped")).toBeVisible();
+    await expect(card(page).getByText("The panel restarted before the switch, so the move stopped.")).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
   });
 
   test("the switch waits for the target: how long, the banner stays, and Cancel anyway after 10 minutes", async ({ page }) => {

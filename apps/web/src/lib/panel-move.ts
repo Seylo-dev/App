@@ -2,24 +2,22 @@
 // move the old panel answers "done, side old" for about a second, then its
 // node stops it for good. A page that missed that second (a hidden tab does
 // not poll, a visible one can lose the race) only sees its status reads
-// fail. Once the move it followed got to telling the nodes the new address,
-// such a failure most likely means the move went through, so the card and
-// the banner show where the panel went (from the last status) instead of a
-// load error, and the page stops asking the dead address after a while.
+// fail. So a status read that fails while the last status said the move
+// runs never shows as a plain load error: the card and the banner show the
+// new address from the last status. Once the switch went ahead such a
+// failure most likely means the move went through ("moved"); before it,
+// nothing is committed and an old panel that comes back fails the move
+// (recover.ts), so the page only says where the panel is if the move
+// finished, and keeps asking this server, less often.
 
 import { OpError, type OpOutput, type panelMove } from "@seylo/ops";
 
 type MoveStatus = OpOutput<typeof panelMove.status>;
 
-/**
- * The steps from which a failed status read means the panel most likely
- * moved: the nodes know the new address. "committing" is the old panel's
- * journal phase between the two; listed in case a status names it.
- */
-const lateSteps: ReadonlySet<string> = new Set(["staging", "committing", "switching"]);
-
-/** How long after its last answer the page keeps asking a panel that stopped answering at the end of a move. */
+/** How long after its last answer the page asks a panel that stopped answering mid-move as often as before. */
 export const lostPollMs = 2 * 60_000;
+/** How often the page then asks it again, for a move that may still fail back here. */
+export const lostRetryMs = 30_000;
 
 /**
  * An error a stopped panel produces: no answer at all, a 5xx (a proxy in
@@ -33,15 +31,35 @@ function deadPanel(error: unknown): boolean {
 }
 
 /**
- * The last status, as the old copy's "moved" status, when the move this
- * page followed got to its last steps and the panel stopped answering since;
- * null otherwise.
+ * The switch went ahead: the old panel sent the commit to the target and
+ * the target did not keep it waiting. From here the old panel only stops
+ * once the move is done ("committing" is the old panel's journal phase,
+ * shown as switching; listed in case a status names it).
  */
-export function lostMove(query: { data?: MoveStatus | undefined; error: unknown }): MoveStatus | null {
+function switched(status: MoveStatus): boolean {
+  return (status.step === "switching" || (status.step as string) === "committing") && status.waitingSince === null;
+}
+
+/**
+ * The old panel stopped answering a page that followed a running move.
+ * moved: it got past the switch, so it most likely moved, and `status` is
+ * the old copy's "moved" status. Otherwise `status` is the last one: the
+ * move may have finished, or it fails back here once the old panel is back.
+ */
+export interface LostMove {
+  status: MoveStatus;
+  moved: boolean;
+}
+
+/** The move this page followed when the panel stopped answering since its last status; null otherwise. */
+export function lostMove(query: { data?: MoveStatus | undefined; error: unknown }): LostMove | null {
   const last = query.data;
-  if (last?.state !== "running" || last.step === null || !lateSteps.has(last.step)) return null;
-  if (!deadPanel(query.error)) return null;
-  return { ...last, state: "done", side: "old", canCancel: false, canForceCancel: false, waitingSince: null };
+  if (last?.state !== "running" || !deadPanel(query.error)) return null;
+  if (!switched(last)) return { status: last, moved: false };
+  return {
+    status: { ...last, state: "done", side: "old", canCancel: false, canForceCancel: false, waitingSince: null },
+    moved: true,
+  };
 }
 
 /**
@@ -61,14 +79,16 @@ interface StatusQuery {
 
 /**
  * refetchInterval for panelMove.status: every `intervalMs` while a move
- * runs, never otherwise, and no more once the panel stopped answering at
- * the end of the move for lostPollMs.
+ * runs, never otherwise. Once the panel stopped answering for lostPollMs:
+ * no more after the switch (it stopped for good), every lostRetryMs before
+ * it (it may come back and fail the move).
  */
 export function followMovePoll(intervalMs: number, now: () => number = Date.now) {
   return (query: StatusQuery): number | false => {
     const { data, error, dataUpdatedAt } = query.state;
     if (data?.state !== "running") return false;
-    if (lostMove({ data, error }) && now() - dataUpdatedAt > lostPollMs) return false;
-    return intervalMs;
+    const lost = lostMove({ data, error });
+    if (!lost || now() - dataUpdatedAt <= lostPollMs) return intervalMs;
+    return lost.moved ? false : Math.max(intervalMs, lostRetryMs);
   };
 }

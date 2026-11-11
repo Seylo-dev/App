@@ -6,6 +6,7 @@ import {
   MovedAway,
   MoveFailed,
   MoveFormView,
+  MoveLost,
   MoveProgress,
   MoveResult,
   type MoveStatus,
@@ -223,6 +224,28 @@ test("a page that only saw the old panel stop answering at the end says where th
   expect(out).toContain("The panel moved to de-fsn-2");
   expect(out).toContain("The old server stopped answering at the last step of the move");
   expect(out).toContain("Open http://203.0.113.20:3000");
+});
+
+test("a page that saw the old panel stop answering before the switch: the new address if the move finished, and Try again", async () => {
+  const shipping = moving({ step: "shipping" });
+  const html = await renderStatic(() => <MoveLost status={shipping} onRetry={() => {}} />);
+  const out = text(html);
+  expect(out).toContain("This server stopped answering during the move to de-fsn-2");
+  expect(out).toContain("If the move finished, the panel is at its new address now.");
+  expect(out).toContain("Try again");
+  expect(hrefs(html)).toEqual(["http://203.0.113.20:3000"]);
+  // Not the firm words of a move past the switch.
+  expect(out).not.toContain("The panel moved to");
+  const banner = await renderStatic(() => <PanelMoveBannerView status={shipping} lost />);
+  expect(text(banner)).toContain(
+    "This server stopped answering while the panel moved to de-fsn-2. If the move finished, the panel is there now.",
+  );
+  expect(text(banner)).not.toContain("The panel moved to");
+  expect(/<a [^>]*href="http:\/\/203\.0\.113\.20:3000"[^>]*>Open it/.test(banner)).toBe(true);
+  // A banner that still hears from its panel says nothing of the sort.
+  expect(text(await renderStatic(() => <PanelMoveBannerView status={shipping} />))).toContain(
+    "The panel is moving to de-fsn-2: read-only for a few minutes.",
+  );
 });
 
 test("a failed move shows until Try again, and the next move's failure shows again", () => {

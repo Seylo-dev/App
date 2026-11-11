@@ -89,12 +89,16 @@ export default {
   movedLostHint:
     "The old server stopped answering at the last step of the move, as it does once the move is done. Open the panel at its new address; if it does not answer there, reload this page.",
   movedAwayDomain: "works too once its DNS record points at {address}.",
+  lostTitle: "This server stopped answering during the move to {node}",
+  lostHint:
+    "If the move finished, the panel is at its new address now. If not, this page shows the move again once this server answers; it keeps asking.",
   newServer: "the new server",
   open: "Open {url}",
   banner: {
     moving: "The panel is moving to {node}: read-only for a few minutes.",
     waiting: "The panel is moving to {node} and waits for it to confirm the switch: read-only until then.",
     moved: "The panel moved to {node}.",
+    lost: "This server stopped answering while the panel moved to {node}. If the move finished, the panel is there now.",
     domain: "works once its DNS record points at the new server",
     open: "Open it",
   },
