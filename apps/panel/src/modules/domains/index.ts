@@ -2,8 +2,9 @@
 // with a DNS check and the Cloudflare DNS link, paths, HTTPS, custom
 // certificates, regenerating a Let's Encrypt certificate
 // (certificate-retry.ts), the origin check that tells whether a domain
-// behind Cloudflare's proxy reaches the node (origin.ts) and per-domain
-// middlewares. desired.ts turns them into
+// behind Cloudflare's proxy reaches the node (origin.ts), Let's Encrypt
+// waiting until a custom domain reaches the node (acme-hold.ts, checked
+// again by recheck.ts) and per-domain middlewares. desired.ts turns them into
 // ServiceSpec.routing (contributor.ts hands every networking part of the desired
 // state to the compiler); tracking.ts follows the agents' route reports.
 
@@ -12,14 +13,16 @@ import { retryCertificate } from "./certificate-retry";
 import { networkingContributor } from "./contributor";
 import { add, addAuto, checkDns, list, remove, setCertificate, setMiddlewares, setPrimary, update } from "./ops";
 import { originCheckJob } from "./origin";
+import { recheckJob, recheckJobType } from "./recheck";
 import { trackRoutes } from "./tracking";
 
 export default defineModule({
   name: "domains",
   ops: [list, addAuto, add, checkDns, update, setMiddlewares, setCertificate, setPrimary, retryCertificate, remove],
-  jobs: [originCheckJob],
+  jobs: [originCheckJob, recheckJob],
   start: (deps) => {
     trackRoutes(deps);
     deps.agents.desired.contribute(networkingContributor);
+    deps.schedules.ensure({ key: recheckJobType, jobType: recheckJobType, intervalSeconds: 60, missedRun: "skip" });
   },
 });

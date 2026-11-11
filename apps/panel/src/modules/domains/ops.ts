@@ -9,12 +9,13 @@ import { type DomainMiddlewares, domains } from "../../db/schema";
 import type { OpContext } from "../../ops/implement";
 import { implement } from "../../ops/implement";
 import { applyDomainLive } from "../exposures/logic";
-import { releases, settleHold } from "./acme-hold";
+import { releases } from "./acme-hold";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
 import { checkHost, dnsLookups, pointsTo } from "./dns";
 import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
-import { checkOrigin, enqueueOriginCheck, originApplies, originProvable, saveOrigin } from "./origin";
+import { enqueueOriginCheck, originApplies, originProvable } from "./origin";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
+import { checkDomain } from "./recheck";
 import { type DomainRow, getDomain, primaryDomain, serviceDomains, toDomain } from "./rows";
 
 const changedOps = [domainOps.list.id, exposureOps.get.id, envOps.references.id];
@@ -149,17 +150,8 @@ export const add = implement(domainOps.add, async (input, ctx) => {
 
 export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
   const row = requireDomain(ctx.db, input.serviceId, input.domainId);
-  const nodes = serviceNodes(ctx.db, input.serviceId);
-  const dns = await checkHost(row.host, nodes, dnsLookups());
-  // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node.
-  const check = originApplies(row, dns.status) ? await checkOrigin(ctx, row) : null;
-  const origin = check?.origin ?? null;
-  const checkedAt = new Date();
-  ctx.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
-  const originChanged = saveOrigin(ctx, row, origin, checkedAt);
-  if (dns.status !== row.dnsStatus && !originChanged) invalidateService(ctx, input.serviceId, [domainOps.list.id]);
-  // A domain whose certificate waited for this: its node asks Let's Encrypt now (acme-hold.ts).
-  settleHold(ctx, row, { dnsStatus: dns.status, origin, provable: check?.provable ?? originProvable(ctx, row.serviceId) }, checkedAt);
+  // A domain whose certificate waited for this check: its node asks Let's Encrypt now (acme-hold.ts).
+  const { dns, origin, checkedAt } = await checkDomain(ctx, row);
   return { domainId: row.id, host: row.host, checkedAt: checkedAt.toISOString(), ...dns, ...(origin ? { origin } : {}) };
 });
 

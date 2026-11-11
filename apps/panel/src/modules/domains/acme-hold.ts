@@ -33,7 +33,8 @@
 //
 // The checks run in domains.add, domains.checkDns (Check again and the
 // Domains tab's re-check of a waiting domain, once a minute while it is
-// open), the origin check a few seconds after domains.add and
+// open), the origin check a few seconds after domains.add, the re-check
+// of waiting domains with nobody looking (recheck.ts) and
 // domains.retryCertificate.
 
 import { domains as domainOps } from "@seylo/ops";

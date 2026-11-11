@@ -6,17 +6,20 @@
 // Held: plain HTTP, no redirect, waitingForDns in domains.list. Released
 // for good by the first check that proves it, which sends the desired
 // state again at once; never held: automatic domains, HTTPS custom and
-// off, a domain that had a certificate, and DNS unknown.
+// off, a domain that had a certificate, and DNS unknown. A waiting domain
+// is checked again on its own (recheck.ts), so nobody has to look.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { domains as domainOps } from "@seylo/ops";
 import { HttpsMode, RouteState } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { alerts, domains, nodes } from "../src/db/schema";
+import type { JobContext } from "../src/jobs/queue";
 import { serviceNetworking } from "../src/modules/domains/desired";
 import { type DnsLookups, setDnsLookups } from "../src/modules/domains/dns";
 import { type OriginFetch, originCapability, originPath, originSignedBytes, setOriginFetch } from "../src/modules/domains/origin";
+import { recheckEveryMs, recheckJob } from "../src/modules/domains/recheck";
 import { applyRouteStatus } from "../src/modules/domains/tracking";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 import { type FakeAgent, fakeAgent, seedNode, seedProject, seedService } from "./seed-helpers";
@@ -32,6 +35,7 @@ beforeEach(async () => {
 afterEach(() => {
   for (const agent of agents) agent.disconnect();
   agents = [];
+  setSystemTime();
   setDnsLookups(null);
   setOriginFetch(null);
   panel.close();
@@ -249,6 +253,47 @@ describe("what never waits", () => {
       .where(eq(domains.id, domainId))
       .run();
     expect(s.route(domainId)).toMatchObject(acme);
+  });
+});
+
+describe("the re-check of waiting domains", () => {
+  const run = () => recheckJob.run({}, panel.deps as JobContext);
+
+  test("a record fixed with nobody looking starts the certificate at the next check that is due", async () => {
+    const s = setup();
+    let lookups = 0;
+    const counted = (a: Record<string, string[]>): DnsLookups => ({
+      ...dns(a),
+      resolve4: async (name) => {
+        lookups++;
+        return a[name] ?? [];
+      },
+    });
+    setDnsLookups(counted({}));
+    const { domainId } = await s.add("shop.example.com");
+    setDnsLookups(counted({ "shop.example.com": [nodeIp] }));
+    lookups = 0;
+    s.dirty();
+    // Checked a moment ago by domains.add: not due yet.
+    await run();
+    expect(lookups).toBe(0);
+    expect(s.route(domainId)).toMatchObject(plainHttp);
+
+    setSystemTime(new Date(Date.now() + 3 * 60_000));
+    await run();
+    expect(lookups).toBe(1);
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject(acme);
+    // Released: never checked again by the job.
+    setSystemTime(new Date(Date.now() + 60 * 60_000));
+    await run();
+    expect(lookups).toBe(1);
+  });
+
+  test("less often the longer a domain waits", () => {
+    expect(recheckEveryMs(5 * 60_000)).toBe(2 * 60_000);
+    expect(recheckEveryMs(3 * 3_600_000)).toBe(15 * 60_000);
+    expect(recheckEveryMs(3 * 86_400_000)).toBe(6 * 3_600_000);
   });
 });
 
