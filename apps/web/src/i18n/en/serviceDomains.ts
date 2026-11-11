@@ -42,6 +42,13 @@ export default {
     "Still no certificate. Let's Encrypt checks http://{host} on port 80 at {ip}: a firewall or another proxy in front of the node can stop it. Regenerate certificate in the menu tries again.",
   certProxiedSlowHint:
     "Still no certificate, though requests through Cloudflare reach this node. In Cloudflare, set SSL/TLS to Full (strict) and turn off Always Use HTTPS, so Let's Encrypt reaches http://{host}. Regenerate certificate in the menu tries again.",
+  certWaiting: "Certificate waits for DNS",
+  certWaitsProxiedHint:
+    "{host} is behind Cloudflare's proxy, so the panel cannot see where its record points. The certificate is asked for once requests through Cloudflare reach this node: point that record in Cloudflare at {ip}. Until then {host} is served over plain HTTP.",
+  certWaitsHint: "The certificate is asked for once {host} points at {ip}. Until then {host} is served over plain HTTP.",
+  certWaitsDnsHint:
+    "The certificate is asked for once this record points at the node, so failed attempts do not use up Let's Encrypt's limits. Until then the domain is served over plain HTTP.",
+  checkAgain: "Check again",
   originNodeHint: "Requests to it reach this node.",
   originElsewhere: "DNS → {ip}, not this node",
   originElsewhereProxied: "Cloudflare proxy, not this node",

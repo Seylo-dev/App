@@ -409,7 +409,8 @@ const domains: Input[] = [
     url: "https://admin.example.com/admin",
     dnsStatus: "missing",
     liveAt: null,
-    certificate: { status: "pending", expiresAt: null, issuer: null, error: null },
+    // Nothing asks Let's Encrypt until the record is there (the certificate waits for DNS).
+    certificate: { status: "pending", expiresAt: null, issuer: null, error: null, waitingForDns: true },
     middlewares: { basicAuth: { usernames: ["ops"] }, ipAllowList: ["198.51.100.24", "10.0.0.0/8"], rateLimit: null, redirects: [] },
   }),
   // Proxied too, but its record in Cloudflare still points at the old host: the origin check reached another server.
@@ -421,7 +422,7 @@ const domains: Input[] = [
     origin: "elsewhere",
     originCheckedAt: ago(min),
     liveAt: null,
-    certificate: { status: "pending", expiresAt: null, issuer: null, error: null },
+    certificate: { status: "pending", expiresAt: null, issuer: null, error: null, waitingForDns: true },
     createdAt: ago(2 * hour),
   }),
 ];

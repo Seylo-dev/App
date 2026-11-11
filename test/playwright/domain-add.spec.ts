@@ -122,12 +122,83 @@ test("the origin check: a proxied domain that reaches the node, and one whose re
 test("a certificate on its way behind Cloudflare: the proxied-record sentence only until the check reached the node", async ({ page }) => {
   const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
   const shop = { ...base[0], certificate: { status: "pending", expiresAt: null, issuer: null, error: null }, liveAt: null, createdAt: new Date().toISOString() };
+  // Asking Let's Encrypt from before the panel waited for DNS (a domain kept on it by the 0.2.8 update).
   const unchecked = { ...shop, id: "m00000000000000a", host: "blog.example.com", url: "https://blog.example.com", primary: false, origin: undefined, originCheckedAt: undefined };
   await installDemo(page, { overrides: { "domains.list": () => ({ domains: [shop, unchecked], autoDomainSuggestion: null }) } });
   await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
   await expect(page.locator('[data-domain="shop.example.com"]').getByText("Generating SSL certificate")).toBeVisible();
   await expect(page.locator('[data-domain="shop.example.com"]').getByText(/cannot see where its record points/)).toHaveCount(0);
-  await expect(page.locator('[data-domain="blog.example.com"]').getByText(/cannot see where its record points/)).toBeVisible();
+  await expect(page.locator('[data-domain="shop.example.com"]').getByRole("button", { name: "Check again" })).toHaveCount(0);
+  const blog = page.locator('[data-domain="blog.example.com"]');
+  await expect(blog.getByText(/cannot see where its record points/)).toBeVisible();
+  // Before, this note had no way to check again.
+  await expect(blog.getByRole("button", { name: "Check again" })).toBeVisible();
+});
+
+test("behind Cloudflare the certificate waits for DNS; Check again runs the check at once and the certificate starts", async ({ page }) => {
+  const calls = watchOps(page);
+  const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
+  const pending = { status: "pending", expiresAt: null, issuer: null, error: null };
+  const waiting = {
+    ...base[0],
+    id: "m00000000000000b",
+    host: "verifly.example.com",
+    url: "https://verifly.example.com",
+    origin: undefined,
+    originCheckedAt: undefined,
+    liveAt: null,
+    certificate: { ...pending, waitingForDns: true },
+    createdAt: new Date().toISOString(),
+  };
+  // The checks on opening get no answer through Cloudflare; once the record there is fixed, they reach the node.
+  let fixed = false;
+  await installDemo(page, {
+    delay: (op) => (op === "domains.checkDns" ? 700 : 0),
+    overrides: {
+      "domains.list": () => ({
+        domains: [fixed ? { ...waiting, origin: "node", originCheckedAt: new Date().toISOString(), certificate: pending } : waiting],
+        autoDomainSuggestion: null,
+      }),
+      "domains.checkDns": (input) => {
+        return {
+          domainId: input.domainId,
+          host: waiting.host,
+          status: "proxied",
+          message: `${waiting.host} is proxied by Cloudflare, so the panel cannot see where it points.`,
+          expected: [{ type: "A", name: "verifly", value: "203.0.113.10" }],
+          found: [{ type: "A", name: "verifly", value: "104.16.1.1" }],
+          zone: "example.com",
+          cloudflareManaged: true,
+          cloudflareDnsUrl: "https://dash.cloudflare.com/?to=/:account/example.com/dns",
+          origin: fixed ? "node" : "unknown",
+          checkedAt: new Date().toISOString(),
+        };
+      },
+    },
+  });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
+  const row = page.locator('[data-domain="verifly.example.com"]');
+  // Not Generating: nothing asks Let's Encrypt until the domain reaches the node.
+  await expect(row.getByTestId("certificate-waiting")).toHaveText("Certificate waits for DNS");
+  await expect(row.getByText("Generating SSL certificate")).toHaveCount(0);
+  await expect(row.getByText(/point that record in Cloudflare at 203\.0\.113\.10\. Until then verifly\.example\.com is served over plain HTTP\./)).toBeVisible();
+  // The note checks on opening; the button waits for that check, then runs one at once.
+  const again = row.getByRole("button", { name: "Check again" });
+  await expect(again).toBeEnabled();
+  const opened = calls("domains.checkDns").length;
+  expect(opened).toBeGreaterThanOrEqual(1);
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/certificate-waits-for-dns.png` });
+  // The owner points the record in Cloudflare at the node.
+  fixed = true;
+  await again.click();
+  await expect(again).toBeDisabled();
+  await expect(again.locator("svg.animate-spin")).toBeVisible();
+  // The record reaches the node now: the row refreshes and the certificate is on its way.
+  await expect(row.getByText("Generating SSL certificate")).toBeVisible();
+  await expect(row.getByTestId("certificate-waiting")).toHaveCount(0);
+  expect(calls("domains.checkDns")).toHaveLength(opened + 1);
+  expect(calls("domains.checkDns").at(-1)).toEqual({ serviceId: svc.api, domainId: "m00000000000000b" });
 });
 
 test("the Overview's domains card flags a domain that does not reach the node", async ({ page }) => {

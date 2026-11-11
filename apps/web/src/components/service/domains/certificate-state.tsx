@@ -3,7 +3,9 @@
 // when it failed, and "Regenerate certificate" (domains.retryCertificate),
 // which the row, its menu and the certificate dialog share. After a click
 // the domain shows Generating until its node reports a certificate or a new
-// failure.
+// failure. While the panel has not seen a custom domain reach the node, its
+// certificate waits for DNS instead (the node asks Let's Encrypt nothing),
+// and the row's Check again starts it once the record is right.
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { opQueryKey, useOpMutation } from "@seylo/ops/react";
@@ -11,7 +13,7 @@ import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { toast } from "@seylo/ui/components/toast";
-import { IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { IconClock, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
@@ -20,9 +22,14 @@ import { isNotBuilt } from "../op-state";
 
 type Domain = OpOutput<typeof domains.list>["domains"][number];
 
-/** A Let's Encrypt certificate that is not there yet: issuing or failed. */
+/** The certificate waits until a check sees the domain reach the node (certificate.waitingForDns). */
+export function waitsForDns(d: Domain): boolean {
+  return d.https === "acme" && d.certificate.waitingForDns === true;
+}
+
+/** A Let's Encrypt certificate that is not there yet: issuing or failed. Not while it waits for DNS: nothing would be retried. */
 export function canRegenerate(d: Domain): boolean {
-  return d.https === "acme" && (d.certificate.status === "pending" || d.certificate.status === "failed");
+  return d.https === "acme" && !waitsForDns(d) && (d.certificate.status === "pending" || d.certificate.status === "failed");
 }
 
 /**
@@ -56,6 +63,38 @@ export function GeneratingChip() {
       <IconLoader2 size={12} stroke={2.4} className="animate-spin" aria-hidden="true" />
       {t("serviceDomains.generating")}
     </Chip>
+  );
+}
+
+/** A clock and "Certificate waits for DNS". */
+export function WaitingForDnsChip() {
+  return (
+    <Chip tone="amber" data-testid="certificate-waiting">
+      <IconClock size={12} stroke={2.2} aria-hidden="true" />
+      {t("serviceDomains.certWaiting")}
+    </Chip>
+  );
+}
+
+/** Runs the row's DNS and origin check now, then refreshes the row; a spinner while it runs. */
+export function CheckAgainButton({ check }: { check: { isFetching: boolean; refetch: () => Promise<unknown> } }) {
+  const invalidate = useInvalidate();
+  return (
+    <Button
+      size="sm"
+      className="bg-muted shadow-none"
+      disabled={check.isFetching}
+      onClick={() => {
+        void check.refetch().then(() => invalidate(domains.list));
+      }}
+    >
+      {check.isFetching ? (
+        <IconLoader2 size={13} stroke={2.2} className="animate-spin" aria-hidden="true" />
+      ) : (
+        <IconRefresh size={13} stroke={2.2} aria-hidden="true" />
+      )}
+      {t("serviceDomains.checkAgain")}
+    </Button>
   );
 }
 

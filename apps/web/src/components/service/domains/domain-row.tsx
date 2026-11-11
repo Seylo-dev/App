@@ -6,6 +6,11 @@
 // the origin behind Cloudflare's proxy), like the panel domain card, and
 // what the panel's origin check found: that requests reach this node, or
 // that something else answers (a red chip and the record to fix, below).
+// Until the panel has seen a custom domain reach the node its certificate
+// waits for DNS (Certificate waits for DNS, plain HTTP meanwhile); every
+// note about a pending certificate has Check again, which runs the DNS and
+// origin check at once, and a waiting domain is checked once a minute
+// while the tab is open, so a fixed record starts the certificate.
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -42,6 +47,7 @@ import { formatDate, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import {
+  CheckAgainButton,
   canRegenerate,
   FailedChip,
   GeneratingChip,
@@ -49,6 +55,8 @@ import {
   RateLimitNote,
   RegenerateButton,
   useRegenerate,
+  WaitingForDnsChip,
+  waitsForDns,
 } from "./certificate-state";
 
 export type Domain = OpOutput<typeof domains.list>["domains"][number];
@@ -56,9 +64,13 @@ export type DomainDialog = "routing" | "access" | "certificate";
 
 type Tone = "ok" | "busy" | "error" | "off";
 
+/** How often a domain whose certificate waits for DNS is checked again while its row shows. */
+export const waitingRecheckMs = 60_000;
+
 function domainTone(d: Domain): Tone {
   if (d.forward) return "ok";
-  if (d.dnsStatus === "wrongTarget" || d.certificate.status === "failed" || elsewhere(d)) return "error";
+  // A failure from before the certificate waited for DNS is not what holds it up now.
+  if (d.dnsStatus === "wrongTarget" || (d.certificate.status === "failed" && !waitsForDns(d)) || elsewhere(d)) return "error";
   if (!d.auto && d.dnsStatus !== "ok" && d.dnsStatus !== "proxied") return "busy";
   if (d.https !== "off" && d.certificate.status !== "valid") return "busy";
   return "ok";
@@ -96,9 +108,10 @@ export function DomainRow({
   const primary = useOpMutation(domains.setPrimary, { onSuccess: () => invalidate(domains.list), onError: fail });
   const remove = useOpMutation(domains.remove, { onSuccess: () => invalidate(domains.list) });
   const regenerate = useRegenerate(serviceId);
-  const generating = d.https === "acme" && (d.certificate.status === "pending" || regenerate.isPending);
+  const held = waitsForDns(d);
+  const generating = d.https === "acme" && !held && (d.certificate.status === "pending" || regenerate.isPending);
   const runRegenerate = () => regenerate.mutate({ serviceId, domainId: d.id });
-  const rateLimited = !waiting && !generating && d.certificate.status === "failed" && isRateLimited(d.certificate.error);
+  const rateLimited = !waiting && !generating && !held && d.certificate.status === "failed" && isRateLimited(d.certificate.error);
   const mw = d.middlewares;
   const Icon = d.forward
     ? IconCornerDownRight
@@ -153,7 +166,14 @@ export function DomainRow({
           {mw.redirects.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.redirects", { count: mw.redirects.length })}</Chip>}
           {/* On a phone the status takes its own line from the left edge, with the menu at the right. */}
           <span className="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full">
-            <RowStatus d={d} waiting={waiting} generating={generating} onRegenerate={runRegenerate} busy={regenerate.isPending} />
+            <RowStatus
+              d={d}
+              waiting={waiting}
+              held={held}
+              generating={generating}
+              onRegenerate={runRegenerate}
+              busy={regenerate.isPending}
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="icon" variant="ghost" className="ml-auto" aria-label={t("serviceDomains.actions", { host: d.host })}>
@@ -185,10 +205,10 @@ export function DomainRow({
           </span>
         </div>
       </div>
-      {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} />}
-      {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} />}
+      {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} held={held} />}
+      {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} held={held} />}
       {rateLimited && <RateLimitNote />}
-      {generating && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} />}
+      {(generating || held) && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -251,30 +271,45 @@ function DnsChip({ d }: { d: Domain }) {
 const slowCertMs = 10 * 60_000;
 
 /**
- * Why a certificate can stay on "Generating": Let's Encrypt reaches the
- * host over its DNS. Behind Cloudflare's proxy, until the panel's origin
- * check reached the node, it says the record there must point at the node
- * (at once, with the node's address); once it has, and with the record on
- * the node, what else can stop it (once it takes longer than usual):
- * Cloudflare's settings, or something in front of port 80. The node reports
- * a failure it sees in Traefik's log on its own; this covers the checks
- * that never arrive. While it shows, the DNS and origin checks run again
- * (at most once a minute), so a record fixed in Cloudflare shows up here.
+ * Why a certificate can stay on "Generating" or wait for DNS: Let's Encrypt
+ * reaches the host over its DNS. While the certificate waits for DNS (the
+ * panel has not seen the domain reach the node), it says so and what to
+ * point where. Behind Cloudflare's proxy, until the panel's origin check
+ * reached the node, it says the record there must point at the node (at
+ * once, with the node's address); once it has, and with the record on the
+ * node, what else can stop it (once it takes longer than usual):
+ * Cloudflare's settings, or something in front of port 80. The node
+ * reports a failure it sees in Traefik's log on its own; this covers the
+ * checks that never arrive. While it shows, the DNS and origin checks run
+ * again (at most once a minute, every minute while the certificate waits),
+ * and Check again runs them at once, so a record fixed in Cloudflare shows
+ * up here and starts the certificate.
  */
-function PendingCertNote({ serviceId, d }: { serviceId: string; d: Domain }) {
+function PendingCertNote({ serviceId, d, held }: { serviceId: string; d: Domain; held: boolean }) {
   const reaches = d.origin === "node";
-  useOp(domains.checkDns, { serviceId, domainId: d.id }, { retry: retryOp, staleTime: 60_000, enabled: !d.auto && !d.forward && !reaches });
+  const check = useOp(
+    domains.checkDns,
+    { serviceId, domainId: d.id },
+    {
+      retry: retryOp,
+      staleTime: 60_000,
+      enabled: !d.auto && (held || (!d.forward && !reaches)),
+      refetchInterval: held ? waitingRecheckMs : false,
+    },
+  );
   const ip = d.pointsTo?.[0];
   if (!ip) return null;
   const proxied = d.dnsStatus === "proxied";
-  if (proxied && !reaches)
-    return <p className="m-0 text-xs text-muted-foreground">{t("serviceDomains.certProxiedHint", { host: d.host, ip })}</p>;
-  if (Date.now() - Date.parse(d.createdAt) < slowCertMs) return null;
-  return (
-    <p className="m-0 text-xs text-muted-foreground">
-      {t(proxied ? "serviceDomains.certProxiedSlowHint" : "serviceDomains.certSlowHint", { host: d.host, ip })}
-    </p>
+  const note = (text: string) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="pending-cert-note">
+      <p className="m-0 min-w-0 flex-1 basis-64 text-xs text-muted-foreground">{text}</p>
+      <CheckAgainButton check={check} />
+    </div>
   );
+  if (held) return note(t(proxied ? "serviceDomains.certWaitsProxiedHint" : "serviceDomains.certWaitsHint", { host: d.host, ip }));
+  if (proxied && !reaches) return note(t("serviceDomains.certProxiedHint", { host: d.host, ip }));
+  if (Date.now() - Date.parse(d.createdAt) < slowCertMs) return null;
+  return note(t(proxied ? "serviceDomains.certProxiedSlowHint" : "serviceDomains.certSlowHint", { host: d.host, ip }));
 }
 
 /**
@@ -282,10 +317,15 @@ function PendingCertNote({ serviceId, d }: { serviceId: string; d: Domain }) {
  * Cloudflare's proxy, the record to set there (with the zone's Cloudflare
  * DNS link, like DnsHelp); with the record on the node's address, that
  * something in front of the node answers instead. Opening it runs the
- * check again (at most once a minute), and Check now runs it at once.
+ * check again (at most once a minute, every minute while the certificate
+ * waits for DNS), and Check now runs it at once.
  */
-function OriginHelp({ serviceId, d }: { serviceId: string; d: Domain }) {
-  const check = useOp(domains.checkDns, { serviceId, domainId: d.id }, { retry: retryOp, staleTime: 60_000 });
+function OriginHelp({ serviceId, d, held }: { serviceId: string; d: Domain; held: boolean }) {
+  const check = useOp(
+    domains.checkDns,
+    { serviceId, domainId: d.id },
+    { retry: retryOp, staleTime: 60_000, refetchInterval: held ? waitingRecheckMs : false },
+  );
   const invalidate = useInvalidate();
   const [copied, copy] = useCopy();
   const ip = d.pointsTo?.[0];
@@ -348,12 +388,14 @@ const expiringSoonMs = 14 * 86_400_000;
 function RowStatus({
   d,
   waiting,
+  held,
   generating,
   onRegenerate,
   busy,
 }: {
   d: Domain;
   waiting: boolean;
+  held: boolean;
   generating: boolean;
   onRegenerate: () => void;
   busy: boolean;
@@ -371,6 +413,7 @@ function RowStatus({
       </span>
     );
   }
+  if (held) return <WaitingForDnsChip />;
   if (generating) return <GeneratingChip />;
   if (d.https === "acme" && d.certificate.status === "failed")
     return (
@@ -412,9 +455,16 @@ function RowStatus({
   );
 }
 
-/** The record to create, Open Cloudflare DNS, and Check now. */
-function DnsHelp({ serviceId, domainId }: { serviceId: string; domainId: string }) {
-  const check = useOp(domains.checkDns, { serviceId, domainId }, { retry: retryOp, staleTime: 60_000 });
+/**
+ * The record to create, Open Cloudflare DNS, and Check now. While the
+ * certificate waits for DNS it says so, and the check runs every minute.
+ */
+function DnsHelp({ serviceId, domainId, held }: { serviceId: string; domainId: string; held: boolean }) {
+  const check = useOp(
+    domains.checkDns,
+    { serviceId, domainId },
+    { retry: retryOp, staleTime: 60_000, refetchInterval: held ? waitingRecheckMs : false },
+  );
   const invalidate = useInvalidate();
   const [copied, copy] = useCopy();
   if (check.isError) return <OpErrorNote error={check.error} compact />;
@@ -443,6 +493,7 @@ function DnsHelp({ serviceId, domainId }: { serviceId: string; domainId: string 
         </>
       )}
       {data && data.status !== "missing" && <span className="w-full text-xs text-muted-foreground">{data.message}</span>}
+      {held && <span className="w-full text-xs text-muted-foreground">{t("serviceDomains.certWaitsDnsHint")}</span>}
       <span className="ml-auto flex flex-wrap gap-2">
         {data?.cloudflareDnsUrl && (
           <a
