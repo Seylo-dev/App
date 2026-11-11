@@ -40,7 +40,7 @@ import {
 import type { Deps } from "../../deps";
 import type { OpContext } from "../../ops/implement";
 import { getSetting } from "../../settings";
-import { urlHost } from "../domains/lookup";
+import { privateIpv4Of, urlHost } from "../domains/lookup";
 import { panelServiceId } from "../nodes/panel-service";
 import { readIpAccessApplied, updateRunning } from "../settings/ip-access";
 import { readServeWanted } from "../tailscale/keys";
@@ -76,9 +76,14 @@ export function panelNodeRow(deps: Pick<Deps, "db">): NodeRow | null {
   return deps.db.select().from(nodes).where(eq(nodes.isPanelNode, true)).get() ?? null;
 }
 
-/** Where other nodes reach a node: its public address, else public IPv4, else IPv6 (as nodes/join-target.ts panelUrl). */
-export function defaultAddressOf(node: Pick<NodeRow, "publicAddress" | "publicIpv4" | "publicIpv6">): string | null {
-  return node.publicAddress || node.publicIpv4 || node.publicIpv6 || null;
+/**
+ * Where other nodes reach a node: its public address, else public IPv4, else
+ * IPv6, else the private IPv4 its agent reports (nodes on one private
+ * network, as nodes/join-target.ts panelUrl). Every node probes it before the
+ * switch, so a wrong guess stops the move instead of stranding nodes.
+ */
+export function defaultAddressOf(node: Pick<NodeRow, "publicAddress" | "publicIpv4" | "publicIpv6" | "facts">): string | null {
+  return node.publicAddress || node.publicIpv4 || node.publicIpv6 || privateIpv4Of(node.facts) || null;
 }
 
 /**

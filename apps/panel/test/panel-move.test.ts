@@ -266,6 +266,12 @@ describe("who may move the panel and what refuses it", () => {
     }
     panel.deps.db.update(nodes).set({ publicIpv4: null }).where(eq(nodes.id, targetId)).run();
     expect((await start()).body.error.message).toContain("The panel knows no address of new");
+    // Nodes on one private network: the private IPv4 the target's agent reports is the default.
+    panel.deps.db.update(nodes).set({ facts: { privateIpv4: "10.0.0.20" } }).where(eq(nodes.id, targetId)).run();
+    const lan = await check();
+    expect(lan.body.defaultAddress).toBe("10.0.0.20");
+    expect(lan.body.targets.find((t: { id: string }) => t.id === targetId)?.address).toBe("10.0.0.20");
+    panel.deps.db.update(nodes).set({ facts: {} }).where(eq(nodes.id, targetId)).run();
 
     const v6 = await start({ address: "[2001:DB8::20]" });
     expect(v6.status).toBe(200);
