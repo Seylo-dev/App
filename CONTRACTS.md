@@ -74,7 +74,7 @@ packages use. "Built" means implemented and tested.
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
-| `proxy` | Traefik route files (`Build`, `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
+| `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM) |
 | `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
@@ -3739,12 +3739,20 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   for DNS, and Check again (on every pending-certificate note) runs it at
   once and refreshes the row.
 - Let's Encrypt waits for DNS (0.2.8, `modules/domains/acme-hold.ts`): an
-  `https: acme` custom domain's route goes out as `HttpsMode.OFF` without
-  the HTTPS redirect (no certificate resolver), and `Domain.certificate`
-  has `waitingForDns: true`, while the last check said `missing` or
+  `https: acme` custom domain's route goes out with `Route.acme_hold`
+  (ACME without the certificate resolver: plain HTTP without the HTTPS
+  redirect, and HTTPS with Traefik's default certificate plus the origin
+  routers on both entry points, so the origin check reaches the node when
+  Cloudflare's proxy connects on 443; an agent from before 0.2.8 ignores
+  the field and asks the CA at once), and `Domain.certificate` has
+  `waitingForDns: true`, while the last check said `missing` or
   `wrongTarget`, `proxied` with the origin not `node`, or `ok` with the
   origin `elsewhere`. `unknown` DNS (a failed lookup, no node address)
-  never holds. The first check that proves the domain (DNS `ok` with the
+  never starts a hold, and never ends one either: a held domain keeps its
+  last DNS and origin answer (`keepsLastAnswer`; only `dns_checked_at`
+  moves on, `domains.retryCertificate` refuses with `waitingForDns`), so
+  it stays on the re-check and a resolver timeout starts no certificate
+  against a record still missing. The first check that proves the domain (DNS `ok` with the
   origin not `elsewhere`, or `proxied` with `node`), or a `proxied` one
   nothing can prove (redirect-only, or no placed node with
   `routing.origin-proof.v1`), sets `domains.acme_released_at` (migration
@@ -3763,7 +3771,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   check releases one, returns it pending without calling the agents (the
   new desired state starts the certificate). Route reports of a held
   domain count only with a certificate in them (ACTIVE without
-  `certificate_expires_at` is plain HTTP serving; CERTIFICATE_FAILED is
+  `certificate_expires_at` is a held route serving; CERTIFICATE_FAILED is
   ignored); one with a certificate, or a DNS_MISMATCH that holds a domain
   nothing proved, marks the service dirty too.
 
