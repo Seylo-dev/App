@@ -1,18 +1,20 @@
 // panelMove.status, from whichever record says the most about now: the
-// move running in memory, the old copy's panelMoveOut after a restart, the
-// moved panel's panelMoveArrival (waiting for its first agent) or
-// panelMoveDone, or the last failure. A failure newer than panelMoveDone
-// wins only once that move's old copy is deleted (or its node removed):
-// until then the done state stays, with the failure in `error`, so the card
-// keeps Delete the old copy. People without settings.view get the state
-// and the target's name only, for the banner.
+// move running in memory (while the target leaves the switch unconfirmed,
+// `error` says what the panel saw at the moved panel's address), the old
+// copy's panelMoveOut after a restart, the moved panel's panelMoveArrival
+// (waiting for its first agent) or panelMoveDone, or the last failure. A
+// failure newer than panelMoveDone wins only once that move's old copy is
+// deleted (or its node removed): until then the done state stays, with the
+// failure in `error`, so the card keeps Delete the old copy. People
+// without settings.view get the state and the target's name only, for the
+// banner.
 
 import type { panelMove } from "@seylo/ops";
 import { eq, inArray } from "drizzle-orm";
 import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting } from "../../settings";
-import { newIpUrl, phaseStep } from "./orchestrator";
+import { newIpUrl, phaseStep, waitingMessage } from "./orchestrator";
 import "./keys";
 import { activeMove, canForceCancel } from "./state";
 
@@ -81,6 +83,11 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
       canCancel: !done && !move.committing && !move.switching && !move.abort.signal.aborted,
       waitingSince: done ? null : iso(move.waitingSince),
       canForceCancel: !done && canForceCancel(move),
+      // While the target leaves the switch unconfirmed: what the panel saw at the moved panel's address.
+      error:
+        !done && move.waitingSince !== null && !move.switching && !move.abort.signal.aborted
+          ? { step: "switching", message: waitingMessage(move) }
+          : null,
       oldPanelRunning: done && move.oldPanelRunning,
     };
   }

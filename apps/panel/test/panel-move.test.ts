@@ -4,11 +4,13 @@
 // offline edit, the archive and its manifest), the switch, and undoing a
 // move that failed or was cancelled at each step. The switch is
 // CommitMovedPanel on the target: a definite refusal undoes the move, an
-// answer that never comes is asked again until the owner cancels with
-// force. The moved panel's side (standby until the commit marker, then the
-// arrival), the offline alerts' grace, deleting the old copy, a restart of
-// the old panel in the middle and the agents' protocol during a move
-// (joins, reports, 503 at the switch) are at the end.
+// answer that never comes is asked again (and the moved panel's address
+// looked at, probe.ts) until it comes, the moved panel shows the switch or
+// the owner cancels with force. The moved panel's side (standby until the
+// commit marker, then the arrival), the offline alerts' grace, deleting
+// the old copy, a restart of the old panel in the middle and the agents'
+// protocol during a move (joins, reports, 503 at the switch) are at the
+// end.
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -46,12 +48,13 @@ import { runCleanups } from "../src/modules/panelMove/cleanup";
 import type { PanelMoveArrival, PanelMoveDone, PanelMoveOut } from "../src/modules/panelMove/keys";
 import { moveTiming } from "../src/modules/panelMove/orchestrator";
 import { setWritePause, writePause, writesInFlight } from "../src/modules/panelMove/pause";
+import { type MovedPanelSeen, movedPanelProbe, probeMovedPanel } from "../src/modules/panelMove/probe";
 import { recoverMoveOut } from "../src/modules/panelMove/recover";
 import { dataFiles, editSnapshot, tarHeader, writeArchive } from "../src/modules/panelMove/snapshot";
 import { activeMove, forceCancelAfterMs } from "../src/modules/panelMove/state";
 import { moveStatus } from "../src/modules/panelMove/status";
 import { implement } from "../src/ops/implement";
-import { agentTlsPinOf, newAgentTlsKey } from "../src/security/agent-tls";
+import { agentTlsPinOf, ensureAgentTls, newAgentTlsKey } from "../src/security/agent-tls";
 import { getSetting, setSetting } from "../src/settings";
 import { agentKey, FakeAgent } from "./fake-agent";
 import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
@@ -138,7 +141,25 @@ async function build(options: Parameters<typeof testPanel>[0] = {}) {
   for (const id of [fromId, targetId, otherId]) fleet.online.add(id);
   // The moved panel answers /api/health with this panel's version.
   fleet.answers.set("startMovedPanel", () => ({ version: panel.deps.config.version }));
+  // No moved panel to reach at 203.0.113.20: looking at it finds nothing, unless a test says otherwise.
+  probes.length = 0;
+  movedPanelProbe.see = async (url, pin, moveId) => {
+    probes.push({ url, pin, moveId });
+    return "noAnswer";
+  };
   owner = await createUser(panel, "owner");
+}
+
+/** The looks at the moved panel's address the old panel took (probe.ts), in order. */
+const probes: { url: string; pin: string; moveId: string }[] = [];
+const realProbe = movedPanelProbe.see;
+
+/** What looking at the moved panel finds from now on. */
+function probeSees(answer: (count: number) => MovedPanelSeen) {
+  movedPanelProbe.see = async (url, pin, moveId) => {
+    probes.push({ url, pin, moveId });
+    return answer(probes.length);
+  };
 }
 
 /** Closes what build made. */
@@ -158,6 +179,7 @@ beforeEach(() => build());
 afterEach(async () => {
   await tearDown();
   Object.assign(moveTiming, timing);
+  movedPanelProbe.see = realProbe;
 });
 
 describe("who may move the panel and what refuses it", () => {
@@ -944,7 +966,7 @@ describe("the switch: CommitMovedPanel on the target", () => {
       });
     });
     await start();
-    for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.waitingSince; i++) await Bun.sleep(5);
+    for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.seen; i++) await Bun.sleep(5);
     const move = activeMove(panel.deps.db);
     if (move) move.waitingSince = Date.now() - forceCancelAfterMs - 1000;
     expect((await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie })).status).toBe(200);
@@ -967,6 +989,95 @@ describe("the switch: CommitMovedPanel on the target", () => {
     expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.switched")).get()).toMatchObject({
       input: expect.objectContaining({ undoSkipped: expect.stringContaining("Cancelled with force") }),
     });
+  });
+
+  test("an unanswered commit the moved panel shows it took (arrived, or the marker) goes on with the switch", async () => {
+    moveTiming.commitRetryMs = 20;
+    // The target took the switch and is on the moved panel for good: here it is away, and stays away.
+    fleet.answers.set("commitMovedPanel", (nodeId) => {
+      throw nodeOffline(nodeId);
+    });
+    let seen: any;
+    probeSees((count) => {
+      if (count === 1) return "noAnswer";
+      if (count === 2) {
+        seen = moveStatus(panel.deps, true);
+        return "standby";
+      }
+      return "arrived";
+    });
+    await start();
+    const done = await waitForState("done");
+    expect(done).toMatchObject({ side: "old", oldPanelRunning: false });
+    expect(probes.length).toBe(3);
+    // Over the agents' TLS port at the address nodes stage, with the pin, for this move.
+    expect(probes[0]).toEqual({ url: "https://203.0.113.20:3443", pin: pinValue(), moveId: done.moveId });
+    // What it saw is in the status while it waited.
+    expect(seen).toMatchObject({
+      state: "running",
+      waitingSince: expect.any(String),
+      canForceCancel: false,
+      error: {
+        step: "switching",
+        message: "new has not confirmed the switch, and the panel gets no answer from the moved panel at 203.0.113.20 either.",
+      },
+    });
+    expect(fleet.of("abortMovedPanel")).toEqual([]);
+    expect(fleet.of("clearPanelAddress")).toEqual([]);
+    expect(fleet.of("retirePanel")).toHaveLength(1);
+    expect(writePause(panel.deps.db)).toMatchObject({ reason: "moved", agentsClosed: true });
+  });
+
+  test("the moved panel's commit marker is enough: switched", async () => {
+    moveTiming.commitRetryMs = 20;
+    fleet.answers.set("commitMovedPanel", () => {
+      throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+    });
+    probeSees(() => "switched");
+    await start();
+    await waitForState("done");
+    expect(fleet.of("commitMovedPanel")).toHaveLength(1);
+    expect(fleet.of("abortMovedPanel")).toEqual([]);
+  });
+
+  test("a cancel with force waits for a look at the moved panel; one that finds the switch goes on with it", async () => {
+    moveTiming.commitRetryMs = 20;
+    fleet.answers.set("commitMovedPanel", () => {
+      throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+    });
+    const look = held<MovedPanelSeen>("standby");
+    movedPanelProbe.see = async (url, pin, moveId) => {
+      probes.push({ url, pin, moveId });
+      if (probes.length === 1) return look.answer("", {}, {}) as Promise<MovedPanelSeen>;
+      // The moved panel takes its first agent meanwhile: only the look of the forced cancel finds it.
+      return activeMove(panel.deps.db)?.abort.signal.aborted ? "arrived" : "standby";
+    };
+    await start();
+    await look.started;
+    const move = activeMove(panel.deps.db);
+    if (move) move.waitingSince = Date.now() - forceCancelAfterMs - 1000;
+    // Ten minutes, but the panel has not seen the moved panel yet: no force.
+    expect(moveStatus(panel.deps, true)).toMatchObject({
+      canForceCancel: false,
+      error: { message: expect.stringContaining("is looking at") },
+    });
+    const early = await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie });
+    expect(early.body.error.details.reason).toBe("switching");
+    look.release();
+    for (let i = 0; i < 500 && !activeMove(panel.deps.db)?.seen; i++) await Bun.sleep(5);
+    expect(moveStatus(panel.deps, true)).toMatchObject({
+      canForceCancel: true,
+      error: {
+        message: "new has not confirmed the switch. The moved panel at 203.0.113.20 answers and still waits for it, so no node is on it.",
+      },
+    });
+    // The target is gone from here when the owner forces; the moved panel took its first agent meanwhile.
+    fleet.online.delete(targetId);
+    expect((await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie })).status).toBe(200);
+    await waitForState("done");
+    expect(fleet.of("clearPanelAddress")).toEqual([]);
+    expect(getSetting(panel.deps.db, "panelMoveCleanups")).toBeUndefined();
+    expect(panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.failed")).get()).toBeUndefined();
   });
 
   test("a local database failure while it records the wait is no answer: the commit is asked again", async () => {
@@ -1259,7 +1370,11 @@ describe("the moved panel", () => {
   }
 
   const health = async (app: { handle(request: Request): Promise<Response> | Response }) =>
-    (await (await app.handle(new Request("http://panel.test/api/health"))).json()) as { status: string; moveId?: string };
+    (await (await app.handle(new Request("http://panel.test/api/health"))).json()) as {
+      status: string;
+      moveId?: string;
+      switched?: boolean;
+    };
 
   test("is a standby until the old panel commits the switch here: agents get 503, health names the move", async () => {
     const dir = mkdtempSync(join(tmpdir(), "panel-move-arrive-"));
@@ -1278,6 +1393,7 @@ describe("the moved panel", () => {
       // The probe of every node requires the move id, on the panel port and the agents' TLS port alike.
       expect(await health(moved.app)).toMatchObject({ status: "ok", moveId: "m".repeat(16) });
       expect(await health(moved.agentApp)).toMatchObject({ status: "ok", moveId: "m".repeat(16) });
+      expect((await health(moved.app)).switched).toBeUndefined();
 
       // A node that lost the old panel and dials here early gets 503 and goes back.
       const early = new FakeAgent({ url, panelId: moved.deps.panelId, nodeId: targetId, key });
@@ -1290,6 +1406,7 @@ describe("the moved panel", () => {
       // A marker of another move opens nothing.
       writeFileSync(join(dir, "move-commit"), "z".repeat(16));
       expect(checkMoveCommit(moved.deps)).toBe(false);
+      expect((await health(moved.app)).switched).toBeUndefined();
       expect(writePause(moved.deps.db)?.agentsClosed).toBe(true);
 
       // CommitMovedPanel writes the marker with this move's id: within about a second agents are taken.
@@ -1300,7 +1417,7 @@ describe("the moved panel", () => {
       expect((await callOp(moved, settings.updateGeneral, { name: "x" }, { cookie: me.cookie })).body.error.details.reason).toBe(
         "panelMoving",
       );
-      expect((await health(moved.app)).moveId).toBe("m".repeat(16));
+      expect(await health(moved.app)).toMatchObject({ moveId: "m".repeat(16), switched: true });
 
       const agent = new FakeAgent({ url, panelId: moved.deps.panelId, nodeId: targetId, key });
       await agent.connect();
@@ -1314,6 +1431,58 @@ describe("the moved panel", () => {
       await moved.app.stop(true);
       moved.close();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the old panel's look at it, over the agents' key: standby, switched once the marker is there, then arrived", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "panel-move-arrive-"));
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const { panelPath } = shippedCopy(dir, masterKey);
+    const moved = testPanel({ panelPath, masterKey, dataDir: dir });
+    const tls = ensureAgentTls(dir, 0);
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      tls: { cert: tls.certPem, key: tls.keyPem },
+      fetch: (request) => moved.agentApp.handle(request),
+    });
+    const base = `https://127.0.0.1:${server.port}`;
+    const moveId = "m".repeat(16);
+    try {
+      expect(await probeMovedPanel(base, tls.pin, moveId)).toBe("standby");
+      // Another key at that address, or the copy of another move, counts for nothing.
+      expect(await probeMovedPanel(base, newAgentTlsKey().pin, moveId)).toBe("noAnswer");
+      expect(await probeMovedPanel(base, tls.pin, "z".repeat(16))).toBe("noAnswer");
+      // CommitMovedPanel wrote the marker: the answer says so at once, before the standby's own poll.
+      writeFileSync(join(dir, "move-commit"), moveId);
+      expect(await probeMovedPanel(base, tls.pin, moveId)).toBe("switched");
+      // Its first agent committed the arrival: no move id any more.
+      commitArrival(moved.deps, targetId);
+      expect(await probeMovedPanel(base, tls.pin, moveId)).toBe("arrived");
+    } finally {
+      server.stop(true);
+      moved.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    // Nothing listens, or something that never answers: no answer.
+    expect(await probeMovedPanel(base, tls.pin, moveId)).toBe("noAnswer");
+    const silent = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+    try {
+      expect(await probeMovedPanel(`https://127.0.0.1:${silent.port}`, tls.pin, moveId, 200)).toBe("noAnswer");
+    } finally {
+      silent.stop(true);
+    }
+    // A panel there that is not healthy (503) is no answer either.
+    const unwell = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      tls: { cert: tls.certPem, key: tls.keyPem },
+      fetch: () => Response.json({ status: "unavailable" }, { status: 503 }),
+    });
+    try {
+      expect(await probeMovedPanel(`https://127.0.0.1:${unwell.port}`, tls.pin, moveId)).toBe("noAnswer");
+    } finally {
+      unwell.stop(true);
     }
   });
 

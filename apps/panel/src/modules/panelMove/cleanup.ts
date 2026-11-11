@@ -6,12 +6,12 @@
 // dropped once done or after a week.
 //
 // A target that refuses AbortMovedPanel with "committed" took the switch
-// after all: a forced cancel undid a move while the target was away, but
-// its CommitMovedPanel had landed. Its moved panel takes agents and nothing
-// here can stop it. That is logged as an error with an audit row naming
-// the node, and dropped. (A target that answers "committed" to the forced
-// cancel's own AbortMovedPanel sends the move on with the switch instead,
-// orchestrator.ts.)
+// after all: a forced cancel undid a move while the target was away and
+// its moved panel showed nothing, but its CommitMovedPanel had landed. Its
+// moved panel takes agents and nothing here can stop it. That is logged as
+// an error with an audit row naming the node, and dropped. (A target that
+// answers "committed" to the forced cancel's own AbortMovedPanel sends the
+// move on with the switch instead, orchestrator.ts.)
 
 import { OpError } from "@seylo/ops";
 import { agentRefusalOf } from "../../agent-hub/calls";

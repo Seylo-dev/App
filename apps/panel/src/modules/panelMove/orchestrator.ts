@@ -24,10 +24,14 @@
 //              takes agents and nothing undoes the move. An answer that
 //              never comes (a timeout, the target away) is no answer: it is
 //              sent again every few seconds while this panel stays
-//              read-only and keeps every node, and only a definite refusal
-//              ("notStarted") or, after 10 minutes, a cancel with force
-//              undoes the move. A forced cancel the target answers with
-//              "committed" goes on with the switch instead.
+//              read-only and keeps every node, and after each miss the
+//              panel looks at the moved panel's address itself (probe.ts):
+//              when that shows the switch landed (the commit marker, or the
+//              moved panel took its first agent), the move goes on. Only a
+//              definite refusal ("notStarted") or, after 10 minutes, a
+//              cancel with force undoes the move, and a forced cancel the
+//              target answers with "committed" (or whose moved panel shows
+//              the switch) goes on with the switch instead.
 //   switching  agents' connects answer 503, every session but the panel
 //              node's own closes, RetirePanel stops this panel
 //
@@ -59,6 +63,7 @@ import { writeMoveAudit } from "./audit";
 import { addCleanup, refusedAsCommitted } from "./cleanup";
 import type { PanelMoveFailure, PanelMoveOut, PanelMoveOutPhase } from "./keys";
 import { setWritePause, writesSettled } from "./pause";
+import { type MovedPanelSeen, movedPanelProbe, tookTheSwitch } from "./probe";
 import { bytesNeeded, dataFiles, editSnapshot, freeBytes, type ManifestEntry, panelSpecFromCopy, writeArchive } from "./snapshot";
 import { activeMove, canForceCancel, type RunningMove, setActiveMove } from "./state";
 
@@ -140,6 +145,7 @@ export function beginMove(deps: Deps, plan: MovePlan): RunningMove {
     abort: new AbortController(),
     committing: false,
     waitingSince: null,
+    seen: null,
     switching: false,
     staged: new Set(),
     doneAt: null,
@@ -180,6 +186,7 @@ export function resumeCommit(deps: Deps, out: PanelMoveOut): RunningMove {
     abort: new AbortController(),
     committing: true,
     waitingSince: out.waitingSince ?? null,
+    seen: null,
     switching: false,
     staged: new Set(out.staged),
     doneAt: null,
@@ -449,7 +456,8 @@ async function commitAndSwitch(deps: Deps, move: RunningMove, held: boolean): Pr
     await abortMove(deps, move, error, held, log);
     return;
   }
-  await switchOver(deps, move, log);
+  // A cancel that came while the moved panel showed the switch is too late for it.
+  await switchOver(deps, move, log, move.abort.signal.aborted ? failureMessage(move.abort.signal.reason) : undefined);
 }
 
 /**
@@ -496,7 +504,37 @@ function refusedForSure(error: unknown): boolean {
   return refusal.status === "INVALID_ARGUMENT" || refusal.status === "UNIMPLEMENTED";
 }
 
-/** CommitMovedPanel until the target answers it; a definite refusal or a forced cancel throws. */
+/** Where nodes other than the target reach the moved panel, on the agents' TLS port. */
+function movedPanelUrl(move: Pick<RunningMove, "address">, agentPort: number): string {
+  return `https://${urlHost(move.address)}:${agentPort}`;
+}
+
+/**
+ * Looks at the moved panel's address over the agents' pinned key (probe.ts).
+ * What it found is kept on the move for the status, unless it found the
+ * switch there, which ends the wait anyway.
+ */
+async function lookAtMovedPanel(deps: Deps, move: RunningMove, log: Deps["logger"]): Promise<MovedPanelSeen> {
+  const pin = deps.agentTls?.pin;
+  const agentPort = deps.agentTls?.port;
+  let seen: MovedPanelSeen = "noAnswer";
+  if (pin && agentPort) {
+    try {
+      seen = await movedPanelProbe.see(movedPanelUrl(move, agentPort), pin, move.moveId);
+    } catch (error) {
+      log.warn({ err: error }, "looking at the moved panel failed");
+    }
+  }
+  if (seen === "standby" || seen === "noAnswer") move.seen = seen;
+  return seen;
+}
+
+/**
+ * CommitMovedPanel until the target answers it, or until the moved panel
+ * shows it took the switch (an answer lost while the target was away for
+ * 10 s can move the target onto it for good); a definite refusal or a
+ * forced cancel throws.
+ */
 async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promise<void> {
   const signal = move.abort.signal;
   let forceable = false;
@@ -531,13 +569,31 @@ async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promi
           log.error({ err: failed }, "recording the wait for the switch failed");
         }
       }
-      if (first || forceable !== canForceCancel(move)) {
+      if (first) tell();
+      const before = move.seen;
+      const seen = await lookAtMovedPanel(deps, move, log);
+      if (tookTheSwitch(seen)) {
+        log.warn({ nodeId: move.targetNodeId, seen }, "the target did not answer the switch, but the moved panel shows it took it");
+        return;
+      }
+      cancelled(move);
+      if (move.seen !== before || forceable !== canForceCancel(move)) {
         forceable = canForceCancel(move);
         tell();
       }
     }
     await sleepUnlessCancelled(moveTiming.commitRetryMs, signal);
   }
+}
+
+/** What the status says while the target leaves the switch unconfirmed: what the panel saw at the moved panel. */
+export function waitingMessage(move: Pick<RunningMove, "targetNodeName" | "address" | "seen">): string {
+  const unconfirmed = `${move.targetNodeName} has not confirmed the switch`;
+  if (move.seen === "standby") {
+    return `${unconfirmed}. The moved panel at ${move.address} answers and still waits for it, so no node is on it.`;
+  }
+  if (move.seen === "noAnswer") return `${unconfirmed}, and the panel gets no answer from the moved panel at ${move.address} either.`;
+  return `${unconfirmed}. The panel is looking at the moved panel at ${move.address}.`;
 }
 
 function finishSwitch(deps: Deps, move: RunningMove, undoSkipped?: string): void {
@@ -733,6 +789,8 @@ async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: bo
     // The commit may have landed: the target is asked first, with the journal still at committing, so a
     // restart meanwhile sends the commit again rather than undo a move the target may have switched to.
     onTargetAnswer = await abortOnTarget(deps, move, log);
+    // No answer: the moved panel itself may show the switch (the target on it for good, its agent gone from here).
+    if (onTargetAnswer === "unknown" && tookTheSwitch(await lookAtMovedPanel(deps, move, log))) onTargetAnswer = "committed";
   }
   if (onTarget && onTargetAnswer !== "committed") {
     // A restart from here finishes the undo (recover.ts), never resumes or retires.

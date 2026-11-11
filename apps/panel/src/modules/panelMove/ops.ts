@@ -6,7 +6,7 @@ import { requireFreshSignIn } from "../../auth/fresh";
 import { implement, type OpContext } from "../../ops/implement";
 import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
-import { beginMove, cancelMove, publishStatus } from "./orchestrator";
+import { beginMove, cancelMove, publishStatus, waitingMessage } from "./orchestrator";
 import { callerBlocks, checkAddress, moveCheck, panelNodeRow, refusal } from "./preflight";
 import { activeMove, canForceCancel } from "./state";
 import { moveStatus } from "./status";
@@ -75,7 +75,7 @@ export const cancel = implement(panelMove.cancel, (input, ctx) => {
       "CONFLICT",
       move.waitingSince === null
         ? "The switch to the new server has started; it cannot be cancelled any more."
-        : `The switch waits for ${move.targetNodeName} to confirm it. It can be cancelled with force once it has not answered for 10 minutes.`,
+        : `${waitingMessage(move)} A cancel with force is possible once ${move.targetNodeName} has not answered for 10 minutes and the panel looked at the moved panel.`,
       { reason: "switching" },
     );
   }

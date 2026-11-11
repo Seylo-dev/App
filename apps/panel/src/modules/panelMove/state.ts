@@ -6,6 +6,7 @@
 
 import type { panelMove } from "@seylo/ops";
 import type { PanelDb } from "../../db/client";
+import type { MovedPanelSeen } from "./probe";
 
 export interface RunningMove {
   moveId: string;
@@ -33,6 +34,12 @@ export interface RunningMove {
   committing: boolean;
   /** Epoch ms the first CommitMovedPanel failed without a definite answer; null while none did. */
   waitingSince: number | null;
+  /**
+   * What the last look at the moved panel's address found while the commit
+   * waits (probe.ts); null before the first. One that found the switch
+   * there ends the wait, so only "standby" or "noAnswer" stay here.
+   */
+  seen: Exclude<MovedPanelSeen, "arrived" | "switched"> | null;
   /** From the switch on the move can no longer be undone. */
   switching: boolean;
   /** Nodes that hold the staged address of this move. */
@@ -50,13 +57,18 @@ export interface RunningMove {
 /** How long the target may leave the switch unconfirmed before panelMove.cancel takes force: true. */
 export const forceCancelAfterMs = 10 * 60_000;
 
-/** panelMove.cancel with force: true may undo this move now. */
+/**
+ * panelMove.cancel with force: true may undo this move now: the target left
+ * the commit unconfirmed for 10 minutes and the panel looked at the moved
+ * panel's address since, without finding that it took the switch.
+ */
 export function canForceCancel(move: RunningMove, now = Date.now()): boolean {
   return (
     move.committing &&
     !move.switching &&
     !move.abort.signal.aborted &&
     move.waitingSince !== null &&
+    move.seen !== null &&
     now - move.waitingSince >= forceCancelAfterMs
   );
 }
