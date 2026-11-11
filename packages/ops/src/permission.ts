@@ -41,6 +41,11 @@ export interface ScopedPermission<Input> {
   readonly kind: ScopeKind;
   readonly action: Action;
   readonly resource: ResourceOf<Input>;
+  /**
+   * Only owners and admins hold it, on the resource only (so a key limited
+   * to some projects can still use it there); never granted to members.
+   */
+  readonly adminOnly?: true;
 }
 
 export type ScopeKind = "project" | "service";
@@ -60,15 +65,17 @@ export const permission = {
   /** signedIn for account-wide data: narrowed keys and tokens are refused. */
   account: (): SignedInPermission => ({ kind: "signedIn", account: true }),
   global: (action: Action): GlobalPermission => ({ kind: "global", action }),
-  project: <Input>(action: Action, resource: ResourceOf<Input>): ScopedPermission<Input> => ({
+  project: <Input>(action: Action, resource: ResourceOf<Input>, options: { adminOnly?: true } = {}): ScopedPermission<Input> => ({
     kind: "project",
     action,
     resource,
+    ...(options.adminOnly ? { adminOnly: true as const } : {}),
   }),
-  service: <Input>(action: Action, resource: ResourceOf<Input>): ScopedPermission<Input> => ({
+  service: <Input>(action: Action, resource: ResourceOf<Input>, options: { adminOnly?: true } = {}): ScopedPermission<Input> => ({
     kind: "service",
     action,
     resource,
+    ...(options.adminOnly ? { adminOnly: true as const } : {}),
   }),
 };
 
@@ -82,6 +89,6 @@ export function describePermission(p: AnyPermission): string {
     case "global":
       return p.action;
     default:
-      return `${p.kind}:${p.action}`;
+      return `${p.kind}:${p.action}${p.adminOnly ? " (owners and admins)" : ""}`;
   }
 }

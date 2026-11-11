@@ -13,6 +13,8 @@ export interface ActionInfo {
   ops: string[];
   /** True when every op behind it is a query; a read-only key can still use it. */
   readOnly: boolean;
+  /** Scoped, but only owners and admins hold it (permission adminOnly): never granted. */
+  adminOnly?: true;
 }
 
 /** Every action named by an op permission, sorted. */
@@ -28,6 +30,7 @@ export function actionCatalog(ops: readonly AnyOpContract[]): ActionInfo[] {
     if (info.scope !== scope) info.scope = info.scope === "global" || scope === "global" ? "global" : "service";
     info.ops.push(op.id);
     if (op.kind !== "query") info.readOnly = false;
+    if ((p.kind === "project" || p.kind === "service") && p.adminOnly) info.adminOnly = true;
     byAction.set(p.action, info);
   }
   return [...byAction.values()].map((info) => ({ ...info, ops: info.ops.sort() })).sort((a, b) => a.action.localeCompare(b.action));
@@ -41,8 +44,17 @@ export function actionCatalog(ops: readonly AnyOpContract[]): ActionInfo[] {
  */
 export function grantableActions(ops: readonly AnyOpContract[], scope: ScopeKind): Action[] {
   return actionCatalog(ops)
-    .filter((info) => (scope === "project" ? info.scope !== "global" : info.scope === "service"))
+    .filter((info) => !info.adminOnly && (scope === "project" ? info.scope !== "global" : info.scope === "service"))
     .map((info) => info.action);
+}
+
+/** Scoped actions only owners and admins hold, whatever a grant lists. */
+export function adminOnlyActions(ops: readonly AnyOpContract[]): Set<string> {
+  return new Set(
+    actionCatalog(ops)
+      .filter((info) => info.adminOnly)
+      .map((info) => info.action),
+  );
 }
 
 /**

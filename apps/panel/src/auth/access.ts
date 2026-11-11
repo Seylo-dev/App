@@ -4,9 +4,11 @@
 // read-only keys to queries; keys limited to projects only reach those
 // projects and their services, and narrowed keys never reach account-wide
 // ops (permission.account()). Action lists match with actionAllowed
-// ("*", "<area>.*" or the exact action).
+// ("*", "<area>.*" or the exact action). Scoped actions marked adminOnly
+// (adminOnlyActions) are held by owners and admins only, whatever a grant
+// lists.
 
-import { type Action, type AnyPermission, actionAllowed, OpError, type OpKind } from "@seylo/ops";
+import { type Action, type AnyPermission, actionAllowed, adminOnlyActions, allOps, OpError, type OpKind } from "@seylo/ops";
 import { and, eq, or } from "drizzle-orm";
 import type { PanelDb } from "../db/client";
 import { grants, services } from "../db/schema";
@@ -36,6 +38,13 @@ export interface Access {
 }
 
 type KeyPrincipal = Extract<Principal, { type: "apiKey" }>;
+
+let adminOnly: Set<string> | undefined;
+/** Whether only owners and admins hold `action` (a scoped permission with adminOnly). */
+export function isAdminOnly(action: string): boolean {
+  adminOnly ??= adminOnlyActions(allOps);
+  return adminOnly.has(action);
+}
 
 /**
  * An API key or MCP token limited to some projects or to a list of actions.
@@ -87,6 +96,7 @@ export function createAccess(db: PanelDb, principal: Principal): Access {
   const can = (action: Action, target?: Target): boolean => {
     if (!user || !keyAllows(action, target)) return false;
     if (isAdmin) return true;
+    if (isAdminOnly(action)) return false;
     return target !== undefined && grantAllows(action, target);
   };
 
@@ -96,13 +106,15 @@ export function createAccess(db: PanelDb, principal: Principal): Access {
     if (wanted.length === 0) return false;
     const keyProjects = principal.type === "apiKey" ? principal.projectIds : null;
     if (isAdmin) return keyProjects === null || keyProjects.length > 0;
+    const granted = wanted.filter((action) => !isAdminOnly(action));
+    if (granted.length === 0) return false;
     const rows = db
       .select({ scopeType: grants.scopeType, scopeId: grants.scopeId, actions: grants.actions })
       .from(grants)
       .where(eq(grants.userId, user.id))
       .all();
     return rows.some((row) => {
-      if (!wanted.some((action) => actionAllowed(row.actions, action))) return false;
+      if (!granted.some((action) => actionAllowed(row.actions, action))) return false;
       if (keyProjects === null) return true;
       const projectId = projectOf({ type: row.scopeType, id: row.scopeId });
       return projectId !== undefined && keyProjects.includes(projectId);

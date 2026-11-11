@@ -2,7 +2,17 @@ import { expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import type { AnyPermission } from "../src";
-import { ActionName, actionAllowed, actionCatalog, allOps, defineOp, expandActionEntry, grantableActions, permission } from "../src";
+import {
+  ActionName,
+  actionAllowed,
+  actionCatalog,
+  adminOnlyActions,
+  allOps,
+  defineOp,
+  expandActionEntry,
+  grantableActions,
+  permission,
+} from "../src";
 
 const op = (id: string, kind: "query" | "mutation", p: AnyPermission) =>
   defineOp({
@@ -71,4 +81,13 @@ test("entries expand against the known actions", () => {
 test("ActionName accepts *, area.* and area.verb only", () => {
   for (const ok of ["*", "services.*", "services.deploy", "apiKeys.create"]) expect(Value.Check(ActionName, ok)).toBe(true);
   for (const bad of ["services", "*.view", "Services.view", "a.b.c", "services.*x"]) expect(Value.Check(ActionName, bad)).toBe(false);
+});
+
+test("admin-only scoped actions are in the catalog but never grantable", () => {
+  const withExport = [...sample, op("services.export", "mutation", permission.service("services.export", byService, { adminOnly: true }))];
+  const info = actionCatalog(withExport).find((a) => a.action === "services.export");
+  expect(info).toEqual({ action: "services.export", scope: "service", ops: ["services.export"], readOnly: false, adminOnly: true });
+  expect(grantableActions(withExport, "project")).not.toContain("services.export");
+  expect(grantableActions(withExport, "service")).not.toContain("services.export");
+  expect(adminOnlyActions(withExport)).toEqual(new Set(["services.export"]));
 });
