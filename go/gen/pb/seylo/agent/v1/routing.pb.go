@@ -164,8 +164,19 @@ type Route struct {
 	// Empty means every source address is allowed.
 	AllowedSourceCidrs []string   `protobuf:"bytes,11,rep,name=allowed_source_cidrs,json=allowedSourceCidrs,proto3" json:"allowed_source_cidrs,omitempty"`
 	RateLimit          *RateLimit `protobuf:"bytes,12,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// With HTTPS_MODE_ACME: do not ask the CA yet. The panel holds the
+	// certificate back until it has seen the host reach a node of the
+	// service (apps/panel/src/modules/domains/acme-hold.ts), since every
+	// failed attempt counts against Let's Encrypt's 5 failed validations per
+	// host name per hour. Meanwhile the route serves plain HTTP without the
+	// redirect, and HTTPS with Traefik's default certificate and no
+	// certificate resolver, so the panel's origin check also reaches the
+	// node when Cloudflare's proxy connects to it on 443 (Always Use HTTPS,
+	// SSL/TLS Full). redirect_to_https is ignored. false asks the CA at once;
+	// an agent from before 0.2.8 ignores it and does the same.
+	AcmeHold      bool `protobuf:"varint,13,opt,name=acme_hold,json=acmeHold,proto3" json:"acme_hold,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Route) Reset() {
@@ -280,6 +291,13 @@ func (x *Route) GetRateLimit() *RateLimit {
 		return x.RateLimit
 	}
 	return nil
+}
+
+func (x *Route) GetAcmeHold() bool {
+	if x != nil {
+		return x.AcmeHold
+	}
+	return false
 }
 
 type Certificate struct {
@@ -672,7 +690,7 @@ const file_seylo_agent_v1_routing_proto_rawDesc = "" +
 	"\x06routes\x18\x01 \x03(\v2\x15.seylo.agent.v1.RouteR\x06routes\x12=\n" +
 	"\vmaintenance\x18\x02 \x01(\v2\x1b.seylo.agent.v1.MaintenanceR\vmaintenance\x12;\n" +
 	"\vstatus_page\x18\x03 \x01(\v2\x1a.seylo.agent.v1.StatusPageR\n" +
-	"statusPage\"\x8c\x04\n" +
+	"statusPage\"\xa9\x04\n" +
 	"\x05Route\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05hosts\x18\x02 \x03(\tR\x05hosts\x12\x1f\n" +
@@ -690,7 +708,8 @@ const file_seylo_agent_v1_routing_proto_rawDesc = "" +
 	" \x01(\v2\x19.seylo.agent.v1.BasicAuthR\tbasicAuth\x120\n" +
 	"\x14allowed_source_cidrs\x18\v \x03(\tR\x12allowedSourceCidrs\x128\n" +
 	"\n" +
-	"rate_limit\x18\f \x01(\v2\x19.seylo.agent.v1.RateLimitR\trateLimit\"A\n" +
+	"rate_limit\x18\f \x01(\v2\x19.seylo.agent.v1.RateLimitR\trateLimit\x12\x1b\n" +
+	"\tacme_hold\x18\r \x01(\bR\bacmeHold\"A\n" +
 	"\vCertificate\x12\x19\n" +
 	"\bcert_pem\x18\x01 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x02 \x01(\tR\x06keyPem\"L\n" +

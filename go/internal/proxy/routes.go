@@ -563,9 +563,17 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		https = agentv1.HttpsMode_HTTPS_MODE_ACME
 	}
 	var tls *routerTLS
+	// The panel holds the certificate back until the host reaches this
+	// node (Route.acme_hold): HTTPS with Traefik's default certificate and
+	// no resolver, so the origin routers answer on 443 too, and plain HTTP
+	// without the redirect.
+	held := https == agentv1.HttpsMode_HTTPS_MODE_ACME && r.GetAcmeHold()
 	switch https {
 	case agentv1.HttpsMode_HTTPS_MODE_ACME:
 		tls = &routerTLS{CertResolver: CertResolver}
+		if held {
+			tls = &routerTLS{}
+		}
 	case agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE:
 		cert := r.GetCertificate()
 		if cert.GetCertPem() == "" || cert.GetKeyPem() == "" {
@@ -596,7 +604,7 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	} else {
 		b.putRouter(name, &router{EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Middlewares: chain, Service: target, TLS: tls}, retry)
 		httpRouter := &router{EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Middlewares: chain, Service: target}
-		if r.GetRedirectToHttps() {
+		if r.GetRedirectToHttps() && !held {
 			// Plain HTTP only redirects (after the route's own redirects);
 			// the service is never reached.
 			redirect := b.mw(b.n.svc("https"), &middleware{RedirectScheme: &redirectScheme{Scheme: "https", Permanent: true}})

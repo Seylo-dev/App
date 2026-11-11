@@ -528,3 +528,63 @@ func TestBuildOriginRouters(t *testing.T) {
 		t.Fatalf("no edge: %v\n%s", err, built.Data)
 	}
 }
+
+// A route whose certificate the panel holds back (Route.acme_hold) asks
+// the CA nothing: its routers carry no certificate resolver, plain HTTP
+// serves the app without the redirect, and HTTPS serves Traefik's default
+// certificate with the origin router on it, so the panel's origin check
+// also reaches the node when Cloudflare's proxy connects on 443. Before,
+// the panel sent such a route as HTTPS off: nothing on 443 answered for
+// the host (Traefik's 404), so behind Always Use HTTPS the check read
+// "elsewhere" and the hold never ended.
+func TestBuildHeldAcmeRoute(t *testing.T) {
+	held := route("r1", "shop.example.com")
+	held.AcmeHold = true
+	built, err := Build(BuildInput{Service: app("svc1", held), Upstreams: ups("http://seylo-svc1-7:3000"), Edge: testEdge, ProbeSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(built.Data), "certResolver") {
+		t.Fatalf("a held route asks the CA:\n%s", built.Data)
+	}
+	var cfg dynamicConfig
+	if err := yaml.Unmarshal(built.Data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		entry string
+		tls   bool
+	}{
+		"seylo-svc1-r-r1":             {EntryPointSecure, true},
+		"seylo-svc1-r-r1-http":        {EntryPointWeb, false},
+		"seylo-svc1-r-r1-origin":      {EntryPointSecure, true},
+		"seylo-svc1-r-r1-origin-http": {EntryPointWeb, false},
+	}
+	for name, w := range want {
+		r := cfg.HTTP.Routers[name]
+		if r == nil {
+			t.Fatalf("no %s in %v", name, slices.Sorted(maps.Keys(cfg.HTTP.Routers)))
+		}
+		if !slices.Equal(r.EntryPoints, []string{w.entry}) || (r.TLS != nil) != w.tls || (r.TLS != nil && *r.TLS != routerTLS{}) {
+			t.Errorf("%s: %+v tls %+v", name, r, r.TLS)
+		}
+	}
+	// Plain HTTP reaches the app: without a certificate a redirect to HTTPS would only show a warning.
+	if r := cfg.HTTP.Routers["seylo-svc1-r-r1-http"]; r.Service != cfg.HTTP.Routers["seylo-svc1-r-r1"].Service {
+		t.Errorf("plain HTTP goes to %q, not the app", r.Service)
+	}
+	for name, m := range cfg.HTTP.Middlewares {
+		if m.RedirectScheme != nil {
+			t.Errorf("%s redirects to HTTPS", name)
+		}
+	}
+	// Released: the same route asks Let's Encrypt and redirects again.
+	held.AcmeHold = false
+	built, err = Build(BuildInput{Service: app("svc1", held), Upstreams: ups("http://seylo-svc1-7:3000"), Edge: testEdge, ProbeSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(built.Data), "certResolver: "+CertResolver) || !strings.Contains(string(built.Data), "redirectScheme") {
+		t.Fatalf("released route:\n%s", built.Data)
+	}
+}

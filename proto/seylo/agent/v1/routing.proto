@@ -38,6 +38,17 @@ message Route {
   // Empty means every source address is allowed.
   repeated string allowed_source_cidrs = 11;
   RateLimit rate_limit = 12;
+  // With HTTPS_MODE_ACME: do not ask the CA yet. The panel holds the
+  // certificate back until it has seen the host reach a node of the
+  // service (apps/panel/src/modules/domains/acme-hold.ts), since every
+  // failed attempt counts against Let's Encrypt's 5 failed validations per
+  // host name per hour. Meanwhile the route serves plain HTTP without the
+  // redirect, and HTTPS with Traefik's default certificate and no
+  // certificate resolver, so the panel's origin check also reaches the
+  // node when Cloudflare's proxy connects to it on 443 (Always Use HTTPS,
+  // SSL/TLS Full). redirect_to_https is ignored. false asks the CA at once;
+  // an agent from before 0.2.8 ignores it and does the same.
+  bool acme_hold = 13;
 }
 
 enum HttpsMode {
