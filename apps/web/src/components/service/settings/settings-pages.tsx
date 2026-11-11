@@ -15,11 +15,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { Markdown } from "../../markdown";
+import { VersionCard } from "../database/version-card";
 import { CodeEditor } from "../editor/code-editor";
 import { Field } from "../field";
 import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
+import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
 
 const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -148,6 +150,7 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
         </form>
         {member && <Callout tone="neutral">{t("serviceSettings.member")}</Callout>}
       </SectionCard>
+      {isDatabaseKind(service.kind) && <VersionCard service={service} />}
       <SectionCard title={t("serviceSettings.delete.title")} description={t("serviceSettings.delete.description")} danger>
         {service.protected ? (
           <Callout tone="neutral">{t("serviceSettings.delete.protected")}</Callout>

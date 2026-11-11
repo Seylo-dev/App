@@ -8,13 +8,14 @@ import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { toast } from "@seylo/ui/components/toast";
 import { IconArrowUpRight, IconServer2 } from "@tabler/icons-react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { isPanelService } from "../../lib/service-display";
 import { useActiveDeploy } from "./active-deploy";
 import { ServiceMenu } from "./copy/service-menu";
+import { versionCardId } from "./database/version-card";
 import { useInvalidate } from "./invalidate";
 import { KindBadge } from "./kind-badge";
 import { isNotBuilt, retryOp } from "./op-state";
@@ -47,7 +48,7 @@ export function ServiceHeader({ service }: { service: ServiceDetail }) {
 }
 
 function HeaderAddress({ service, href }: { service: ServiceDetail; href: string | null }) {
-  if (isDatabaseKind(service.kind)) return <DatabaseSubtitle serviceId={service.id} />;
+  if (isDatabaseKind(service.kind)) return <DatabaseSubtitle service={service} />;
   if (href)
     return (
       <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 font-mono text-[12.5px]">
@@ -65,14 +66,20 @@ function HeaderAddress({ service, href }: { service: ServiceDetail; href: string
   return null;
 }
 
-function DatabaseSubtitle({ serviceId }: { serviceId: string }) {
-  const db = useOp(databases.get, { serviceId }, { retry: retryOp });
+/** "MongoDB 8.0": links to the Version card on Settings, where it changes. */
+function DatabaseSubtitle({ service }: { service: ServiceDetail }) {
+  const db = useOp(databases.get, { serviceId: service.id }, { retry: retryOp });
   if (!db.data) return null;
   return (
-    <span className="text-[12.5px] text-muted-foreground">
+    <Link
+      to="/p/$projectId/s/$serviceId/settings"
+      params={{ projectId: service.projectId, serviceId: service.id }}
+      hash={versionCardId}
+      className="text-[12.5px] text-muted-foreground no-underline hover:text-foreground"
+    >
       {t("service.header.databaseVersion", { engine: t(`service.kind.${db.data.engine}`), version: db.data.version })}
       {db.data.variant && t("service.header.databaseVariant", { variant: db.data.variant })}
-    </span>
+    </Link>
   );
 }
 

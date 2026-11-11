@@ -613,6 +613,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "backups.listDestinations": () => ({ destinations: [], choices: [{ id: "x000000000000001", name: "acme-backups", provider: "r2", bucket: "acme-backups" }] }),
   "databases.get": (input: Input) => databaseOf(String(input.serviceId)),
   "databases.connection": (input: Input) => connectionOf(String(input.serviceId)),
+  "databases.versionChoices": (input: Input) => versionChoicesOf(String(input.serviceId)),
   "previews.getSettings": () => ({ settings: { enabled: true, domainPattern: "", maxPreviews: 5 }, available: true, unavailableReason: null }),
   "previews.list": () => ({
     previews: [
@@ -673,6 +674,45 @@ export const handlers: Record<string, (input: Input) => unknown> = {
     expiresAt: ago(-min),
   }),
 };
+
+const refused = (kind: string, reason: string, message: string) => ({ kind, allowed: false, reason, message });
+
+/**
+ * databases.versionChoices for the demo databases, as the panel's rules
+ * answer them: Postgres refuses its next major and older ones, Redis
+ * takes the newer line. database-version.spec.ts adds a MongoDB.
+ */
+export function versionChoicesOf(serviceId: string) {
+  const base = { variant: null, pendingImage: null, blocked: null, recentBackupAt: ago(15 * hour), backupFresh: true };
+  if (serviceId === ids.redis)
+    return {
+      ...base,
+      engine: "redis",
+      version: "7.4",
+      image: "redis:7.4.5-alpine",
+      choices: [
+        { version: "8.2", image: "redis:8.2.1-alpine", kind: "major", allowed: true },
+        { version: "7.4", image: "redis:7.4.5-alpine", ...refused("current", "current", "The database runs redis:7.4.5-alpine.") },
+      ],
+    };
+  const older = (version: string) => refused("downgrade", "downgrade", `PostgreSQL 17 data files cannot go back to ${version}. Restore a backup into a new database instead.`);
+  return {
+    ...base,
+    engine: "postgres",
+    version: "17",
+    image: "postgres:17.6-alpine",
+    choices: [
+      {
+        version: "18",
+        image: "postgres:18.6-alpine",
+        ...refused("major", "postgresMajor", "A Postgres major upgrade needs a dump and restore into a new database: pg_upgrade is not run in place."),
+      },
+      { version: "17", image: "postgres:17.6-alpine", ...refused("current", "current", "The database runs postgres:17.6-alpine.") },
+      { version: "16", image: "postgres:16.10-alpine", ...older("16") },
+      { version: "15", image: "postgres:15.14-alpine", ...older("15") },
+    ],
+  };
+}
 
 /** databases.get for the demo's Postgres, Redis and ClickHouse (events) databases; databases.spec.ts makes db a pgvector one. */
 export function databaseOf(serviceId: string) {
