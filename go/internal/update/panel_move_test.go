@@ -1024,9 +1024,13 @@ func TestRetirePanel(t *testing.T) {
 	if err := fx.m.Retire(context.Background(), &agentv1.RetirePanelRequest{MoveId: testMove, ServiceId: defaultPanelServiceID}); err != nil {
 		t.Fatal(err)
 	}
+	// The retire holds the update lock until it is done.
+	if h := fx.lock.Holder(); h != holdPanelRetire && h != "" {
+		t.Fatalf("lock holder = %q", h)
+	}
 	waitFor(t, "the old panel stopped", func() bool {
 		var r panelRetire
-		return readJSON(fx.path("update", retireJournal), &r) == nil && r.Phase == retired
+		return readJSON(fx.path("update", retireJournal), &r) == nil && r.Phase == retired && fx.lock.Holder() == ""
 	})
 	if got := fx.f.panelSpec(); got == nil || !got.GetStopped() {
 		t.Fatalf("spec = %v, want kept and stopped", got)
