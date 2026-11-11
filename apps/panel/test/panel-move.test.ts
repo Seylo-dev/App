@@ -1339,7 +1339,8 @@ describe("the copy", () => {
     }
     // The writer really ran during the copies.
     expect(counts.at(-1)).toBeGreaterThan(counts[0] as number);
-  });
+    // Six copies next to a busy writer take seconds on a slow CI runner (7 s there): not the 5 s default.
+  }, 60_000);
 
   test("the offline edit refuses a copy without both nodes or a panel service", () => {
     const dir = mkdtempSync(join(tmpdir(), "panel-move-edit-"));
