@@ -432,18 +432,31 @@ function PromptDialog({
   );
 }
 
+/**
+ * Whether the editor holds edits the file does not have: against the last
+ * save when there was one (the read stays as first loaded), else the read.
+ * Text typed during a save stays unsaved: the save wrote what was there
+ * when it started.
+ */
+export function isUnsaved(text: string | null, saved: string | null, loaded: string | undefined): boolean {
+  return text !== null && text !== (saved ?? loaded);
+}
+
 function FileEditor({ root, entry, onBack }: { root: Root; entry: Entry; onBack: () => void }) {
   const file = useOp(files.readFile, { ...root, path: entry.path }, { retry: retryOp, staleTime: 0, gcTime: 0 });
   const [text, setText] = useState<string | null>(null);
+  // What the last save wrote: the file as it is now, so the edits compare with that (the read stays as first loaded).
+  const [savedText, setSavedText] = useState<string | null>(null);
   const invalidate = useInvalidate();
   const write = useOpMutation(files.write, {
-    onSuccess: () => {
+    onSuccess: (_result, sent) => {
+      setSavedText(sent.content);
       invalidate(files.list);
       toast.success(t("service.saved"));
     },
   });
   const content = text ?? (file.data?.encoding === "utf8" ? file.data.content : "");
-  const dirty = text !== null && text !== file.data?.content;
+  const dirty = isUnsaved(text, savedText, file.data?.content);
   const save = () => write.mutate({ ...root, path: entry.path, content, encoding: "utf8" });
 
   return (
