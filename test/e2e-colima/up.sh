@@ -97,6 +97,9 @@ RemainAfterExit=yes
 WantedBy=multi-user.target"
   printf '%s\n' "$script" | on "$vm" "cat >/usr/local/sbin/e2e-routes && chmod 0755 /usr/local/sbin/e2e-routes"
   printf '%s\n' "$unit" | on "$vm" "cat >/etc/systemd/system/e2e-routes.service && systemctl daemon-reload && systemctl enable -q e2e-routes.service && /usr/local/sbin/e2e-routes"
+  # A systemd-networkd restart (unattended-upgrades updating systemd) drops
+  # routes it did not add; keep these. lib.sh re-adds them before checks too.
+  on "$vm" "mkdir -p /etc/systemd/networkd.conf.d && printf '[Network]\nManageForeignRoutes=no\n' >/etc/systemd/networkd.conf.d/e2e-keep-routes.conf"
 done
 
 for from in "$E2E_A" "$E2E_B" "$E2E_C"; do

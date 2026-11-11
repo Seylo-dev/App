@@ -2789,7 +2789,8 @@ manifest sizes) + 64 MiB`); ABORTED `busy` (update lock); UNAVAILABLE
 `pull`, `start`, `health`, `pin`, `undo`, `config`; CANCELLED
 `cancelled`. ImportPanelData, ImportRegistry and StartMovedPanel are
 refused while a panel container runs on the node. e2e check 41 moves the
-panel from A to C and back.
+panel from A to B, fails a move to C on a held port (rolled back), then
+moves it back to A, deleting each old copy.
 
 Test builds of the panel (the e2e only): `bun build` with
 `--define __TEST_RELEASE_API_URL__='"<mirror>/repos/<org>/<repo>/releases/latest"'`

@@ -14,6 +14,7 @@
 source "$(dirname "$0")/lib.sh"
 dir=$(dirname "$0")
 
+vm_routes
 [ -n "$(state_get api-key)" ] || fail "no API key in $E2E_STATE (run the checks once first)"
 curl -fsS -m 5 -o /dev/null "$(panel_url)/api/health" || fail "the e2e panel at $(panel_url) does not answer"
 

@@ -139,6 +139,15 @@ host_ip() {
   printf '%s\n' "$ip"
 }
 
+# vm_routes: re-adds the routes between the VMs (up.sh's e2e-routes) on each
+# VM, in case a systemd-networkd restart dropped them on a VM up.sh set up
+# before it kept them (networkd.conf.d/e2e-keep-routes.conf).
+vm_routes() {
+  local vm
+  for vm in "$E2E_A" "$E2E_B" "$E2E_C"; do
+    on "$vm" "[ ! -x /usr/local/sbin/e2e-routes ] || /usr/local/sbin/e2e-routes" >/dev/null 2>&1 || true
+  done
+}
 release_base() { echo "http://$(host_ip):$E2E_REL_PORT"; }
 
 # docker_a/docker_b: the Docker CLI against VM A/B (never the default context).

@@ -4131,7 +4131,7 @@ p41_move() {
   nto=$(node_id "$to")
   owner_session || { bad "the owner could not sign in on $(panel_url)"; return 1; }
   out=$(sess_get "$E2E_STATE/cookies" "$(panel_url)" panelMove.check) || out='{}'
-  ev "panelMove.check on $(panel_url): $(printf '%s' "$out" | jq -c '{blocks: [.blocks[]? | {code, nodeId}], nodes: [.nodes[]? | {name, canMove}], defaultAddress}' 2>/dev/null)"
+  ev "panelMove.check on $(panel_url): $(printf '%s' "$out" | jq -c '{blocks: [.blocks[]? | {code, nodeIds}], targets: [.targets[]? | {name, ready}], defaultAddress, nodesLeftBehind}' 2>/dev/null)"
   reauth "$E2E_STATE/cookies"
   out=$(session_op panelMove.start "$(jq -nc --arg n "$nto" '{targetNodeId: $n}')")
   ev "panelMove.start to $to: $(printf '%s' "$out" | head -c 400)"
@@ -4183,6 +4183,7 @@ p41_cleanup() {
   local on
   on=$(state_get p41-panel-on)
   relay_stop "$E2E_C" e2e-p41-hold
+  relay_stop "$E2E_C" e2e-p41-regc
   if [ -n "$on" ] && [ "$on" != a ]; then
     ev "cleanup: the panel is still on $on; moving it back to A"
     export E2E_PANEL_URL
@@ -4242,6 +4243,7 @@ p41_run() {
   expect "the old copy on A is gone (no master.key, no panel container)" on "$E2E_A" "test ! -e $BRAND_DATA_DIR/panel/master.key && [ -z \"\$(docker ps -aq --filter label=$SLUG.service=panel00000000000)\" ]"
 
   # A failed move rolls back: something else holds C's agents' port.
+  relay_start "$E2E_C" 127.0.0.1 "$E2E_REG_PORT" "$(node_ip a)" 15012 e2e-p41-regc || { bad "registry relay on C failed"; return 1; }
   relay_start "$E2E_C" 0.0.0.0 "$P41_TLS_PORT" 127.0.0.1 9 e2e-p41-hold || true
   owner_session
   reauth "$E2E_STATE/cookies"
@@ -4254,6 +4256,7 @@ p41_run() {
   done
   ev "status after the refused move: $(p41_status | jq -c '{state, step, error}')"
   expect "the move to C failed and rolled back" jq_ok "$(p41_status)" '.state == "failed" and .error != null'
+  expect "it failed starting the panel on C (the held port), not pulling its image" jq_ok "$(p41_status)" '.error.step == "starting" and (.error.message | test("pull"; "i") | not)'
   expect "the panel still answers on B" p41_answers b
   expect "C holds no copy of the panel (no master.key)" fails on "$E2E_C" "test -e $BRAND_DATA_DIR/panel/master.key"
   expect "every node still dials B with the same pin" p41_followed b "$P41_PIN"
@@ -4279,6 +4282,7 @@ main() {
     return 0
   fi
   local list n
+  vm_routes
   list=${*:-$(seq 1 "$LAST" | grep -vx "$DOMAIN_CHECK") $DOMAIN_CHECK}
   for n in $list; do
     run_check "$n"
