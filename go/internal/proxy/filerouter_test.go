@@ -170,7 +170,14 @@ func TestFileRouterStatus(t *testing.T) {
 	acme := filepath.Join(dir, "acme.json")
 	cert := base64.StdEncoding.EncodeToString([]byte("CERT"))
 	key := base64.StdEncoding.EncodeToString([]byte("KEY"))
-	_ = os.WriteFile(acme, []byte(`{"le":{"Account":{},"Certificates":[{"domain":{"main":"ok.example.com"},"certificate":"`+cert+`","key":"`+key+`","Store":"default"}]}}`), 0o600)
+	certs := ""
+	for _, host := range []string{"ok.example.com", "proxied.example.com"} {
+		if certs != "" {
+			certs += ","
+		}
+		certs += `{"domain":{"main":"` + host + `"},"certificate":"` + cert + `","key":"` + key + `","Store":"default"}`
+	}
+	_ = os.WriteFile(acme, []byte(`{"le":{"Account":{},"Certificates":[`+certs+`]}}`), 0o600)
 	r := NewFileRouter(FileConfig{
 		Dir:           filepath.Join(dir, "dynamic"),
 		AcmeFile:      acme,
@@ -181,12 +188,18 @@ func TestFileRouterStatus(t *testing.T) {
 				return []string{"198.51.100.1"}, nil
 			case "pending.example.com", "ok.example.com":
 				return []string{"203.0.113.10"}, nil
+			case "proxied.example.com", "proxied-pending.example.com":
+				// Behind Cloudflare's proxy: its addresses, whatever the record there points at.
+				return []string{"104.21.48.7", "172.67.150.2", "2606:4700:3030::6815:3007"}, nil
+			case "half.example.com":
+				return []string{"104.21.48.7", "198.51.100.1"}, nil
 			}
 			return nil, errors.New("no such host")
 		},
 	})
 	ctx := context.Background()
 	spec := app("svc1", route("ok", "ok.example.com"), route("pending", "pending.example.com"), route("dns", "elsewhere.example.com"),
+		route("proxied", "proxied.example.com"), route("proxied-pending", "proxied-pending.example.com"), route("half", "half.example.com"),
 		&agentv1.Route{Id: "plain", Hosts: []string{"plain.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_OFF})
 	if err := r.Apply(ctx, spec, ups("http://x:1")); err != nil {
 		t.Fatal(err)
@@ -199,7 +212,15 @@ func TestFileRouterStatus(t *testing.T) {
 		"ok":      agentv1.RouteState_ROUTE_STATE_ACTIVE,
 		"pending": agentv1.RouteState_ROUTE_STATE_CERTIFICATE_PENDING,
 		"dns":     agentv1.RouteState_ROUTE_STATE_DNS_MISMATCH,
-		"plain":   agentv1.RouteState_ROUTE_STATE_ACTIVE,
+		// Before: DNS_MISMATCH for good, so the panel showed Generating SSL certificate after Let's Encrypt issued it.
+		"proxied":         agentv1.RouteState_ROUTE_STATE_ACTIVE,
+		"proxied-pending": agentv1.RouteState_ROUTE_STATE_CERTIFICATE_PENDING,
+		// Only some addresses are Cloudflare's: the others point elsewhere.
+		"half":  agentv1.RouteState_ROUTE_STATE_DNS_MISMATCH,
+		"plain": agentv1.RouteState_ROUTE_STATE_ACTIVE,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d statuses, want %d", len(got), len(want))
 	}
 	for _, st := range got {
 		if want[st.GetRouteId()] != st.GetState() {

@@ -562,7 +562,11 @@ func setCertInfo(st *agentv1.RouteStatus, info certInfo) {
 
 // dnsMismatch returns the first host that resolves, but not to any of the
 // node's addresses. Hosts that do not resolve at all are left to the
-// certificate state (the panel's DNS check explains those).
+// certificate state (the panel's DNS check explains those), and so are
+// hosts behind Cloudflare's proxy: they resolve to Cloudflare's addresses
+// whatever their record there points at, so only the certificate tells
+// (Let's Encrypt reached this node through the proxy), and a mismatch
+// would hide it: the route would never report ACTIVE.
 func (r *FileRouter) dnsMismatch(ctx context.Context, hosts, nodeAddrs []string) (string, []string) {
 	if len(nodeAddrs) == 0 {
 		return "", nil
@@ -579,7 +583,7 @@ func (r *FileRouter) dnsMismatch(ctx context.Context, hosts, nodeAddrs []string)
 				break
 			}
 		}
-		if !match {
+		if !match && !cloudflareProxied(addrs) {
 			return host, addrs
 		}
 	}
