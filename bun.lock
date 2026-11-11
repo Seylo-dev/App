@@ -145,6 +145,10 @@
         "react-dom": "^19.3.1",
       },
     },
+    "packages/zip": {
+      "name": "@seylo/zip",
+      "version": "0.0.0",
+    },
   },
   "overrides": {
     "dompurify": "3.4.17",
@@ -579,6 +583,8 @@
     "@seylo/ui": ["@seylo/ui@workspace:packages/ui"],
 
     "@seylo/web": ["@seylo/web@workspace:apps/web"],
+
+    "@seylo/zip": ["@seylo/zip@workspace:packages/zip"],
 
     "@simplewebauthn/browser": ["@simplewebauthn/browser@14.0.0", "", {}, "sha512-1odWVqeEBTl7lJ9zMKLEsmTlnyrDO5iRcTvfMKKk1WThUnp/i8JJdffdj2icP+tty159s4PgwE3BiMoEW9NFow=="],
 

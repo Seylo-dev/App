@@ -1,0 +1,17 @@
+{
+  "name": "@seylo/zip",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "A streaming zip writer for the panel (store and deflate, data descriptors, zip64) and a strict zip reader that runs in browsers and Bun: random access over a File or a buffer, refuses links, overlaps, encryption and unknown methods. No dependencies.",
+  "type": "module",
+  "exports": {
+    "./read": "./src/read.ts",
+    "./write": "./src/write.ts",
+    "./crc32": "./src/crc32.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  }
+}
