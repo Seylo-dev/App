@@ -86,7 +86,9 @@ func NewMux(service protoreflect.ServiceDescriptor) *Mux {
 
 // Advertise adds a capability that no method carries: one that says this
 // side handles something new in messages it already takes (for example
-// "database.engines.v2", new DatabaseEngine values in ServiceSpec). The
+// "database.engines.v2", new DatabaseEngine values in ServiceSpec, or
+// "database.exposure.v2", exposed Postgres, MySQL and MariaDB ports that
+// refuse clients without TLS and DatabaseSpec.retired_exposed_user). The
 // area that implements it calls Advertise while wiring. Naming a method
 // capability here is a registration mistake: those come from handlers.
 func (m *Mux) Advertise(capability string) {

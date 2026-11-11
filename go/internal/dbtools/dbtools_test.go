@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -232,46 +234,78 @@ func TestUIsOnlyServeEnabledDatabases(t *testing.T) {
 	}
 }
 
-func TestExposedUserJobKeepsSecretsInEnv(t *testing.T) {
+func TestExposedJobsKeepSecretsInEnv(t *testing.T) {
+	certs := &tlsMaterial{certPEM: []byte("CERT"), keyPEM: []byte("private-key")}
+	for _, e := range []agentv1.DatabaseEngine{agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL} {
+		db := dbSpec("d", e, false).GetDatabase()
+		j, err := tlsJob(db, certs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(j.env, "KEY_PEM=private-key") || !slices.Contains(j.env, "ADMIN_PASSWORD=p@ss:w/rd") {
+			t.Errorf("%v: env = %v", e, j.env)
+		}
+		if all := strings.Join(j.argv, " ") + j.stdin; strings.Contains(all, "p@ss") || strings.Contains(all, "private-key") {
+			t.Errorf("%v: values outside env: %q", e, all)
+		}
+		// No user of its own: TLS only.
+		if all := strings.Join(j.argv, " "); strings.Contains(all, "CREATE ROLE") || strings.Contains(all, "CREATE USER") {
+			t.Errorf("%v: the TLS job creates a user", e)
+		}
+		if _, err := tlsJob(db, nil); err == nil {
+			t.Errorf("%v: TLS job without a certificate", e)
+		}
+	}
+	for _, e := range []agentv1.DatabaseEngine{
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
+	} {
+		if _, err := tlsJob(dbSpec("d", e, false).GetDatabase(), certs); err == nil {
+			t.Errorf("%v got a TLS job", e)
+		}
+	}
+
 	for _, e := range []agentv1.DatabaseEngine{
 		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL,
 		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO,
 		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE,
 	} {
 		db := dbSpec("d", e, false).GetDatabase()
-		db.Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "remote", Password: "expo-secret"}
-		j, err := exposedUserJob(db, &tlsMaterial{certPEM: []byte("CERT"), keyPEM: []byte("KEY")})
+		db.RetiredExposedUser = "external"
+		j, err := retireJob(db)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Contains(j.env, "KEY_PEM=KEY") {
-			t.Errorf("%v: key not in env", e)
-		}
-		all := strings.Join(j.argv, " ") + j.stdin
-		if strings.Contains(all, "expo-secret") || strings.Contains(all, "p@ss") || strings.Contains(all, "remote") {
-			t.Errorf("%v: values outside env: %q", e, all)
-		}
-		if !slices.Contains(j.env, "EXPOSED_PASSWORD=expo-secret") || !slices.Contains(j.env, "EXPOSED_USER=remote") {
+		if !slices.Contains(j.env, "RETIRED_USER=external") {
 			t.Errorf("%v: env = %v", e, j.env)
 		}
-	}
-	for _, e := range []agentv1.DatabaseEngine{
-		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
-		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY,
-	} {
-		db := dbSpec("d", e, false).GetDatabase()
-		db.Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "u", Password: "p"}
-		if _, err := exposedUserJob(db, nil); err == nil {
-			t.Errorf("%v got an exposed user job", e)
+		all := strings.Join(j.argv, " ") + j.stdin
+		if strings.Contains(all, "external") || strings.Contains(all, "p@ss") {
+			t.Errorf("%v: values outside env: %q", e, all)
+		}
+		// Disabled, never deleted with what it owns.
+		if strings.Contains(all, "DROP ROLE") || strings.Contains(all, "DROP OWNED") || strings.Contains(all, "DROP DATABASE") {
+			t.Errorf("%v: the retirement deletes data: %q", e, all)
 		}
 	}
-	if _, err := exposedUserJob(dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false).GetDatabase(), nil); err == nil {
-		t.Error("job without a user")
-	}
-	bad := dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false).GetDatabase()
-	bad.Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "x all all trust\nhost", Password: "p"}
-	if _, err := exposedUserJob(bad, nil); err == nil {
-		t.Error("user name that could inject pg_hba lines accepted")
+	for name, db := range map[string]*agentv1.DatabaseSpec{
+		"redis-like":   dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, false).GetDatabase(),
+		"no user":      dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false).GetDatabase(),
+		"the admin":    dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false).GetDatabase(),
+		"bad name":     dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false).GetDatabase(),
+		"unknown kind": dbSpec("d", agentv1.DatabaseEngine(99), false).GetDatabase(),
+	} {
+		switch name {
+		case "redis-like", "unknown kind":
+			db.RetiredExposedUser = "external"
+		case "the admin":
+			db.RetiredExposedUser = db.GetCredentials().GetAdminUser()
+		case "bad name":
+			db.RetiredExposedUser = "x all all trust\nhost"
+		}
+		if _, err := retireJob(db); err == nil {
+			t.Errorf("%s: got a retirement job", name)
+		}
 	}
 }
 
@@ -299,24 +333,81 @@ func TestCertForPrefersACMEAndKeepsSelfSigned(t *testing.T) {
 	}
 }
 
-// Only engines with a separate login get one; Redis-like engines are left
-// to the portgate's TLS.
-func TestExposedUsersSyncPicksEnginesWithAUser(t *testing.T) {
-	x := NewExposedUsers(nil, nil, t.TempDir(), nil)
+// TLS is installed in exposed Postgres and MySQL only (MariaDB has its
+// own; the rest get it from the portgate). Old exposed users are retired
+// whether or not the database is exposed, never the admin or a Redis-like
+// engine's one user.
+func TestExposedTLSSyncPicksTLSAndRetirements(t *testing.T) {
+	x := NewExposedTLS(nil, nil, t.TempDir(), t.TempDir(), nil)
 	var specs []*agentv1.ServiceSpec
 	for _, e := range []agentv1.DatabaseEngine{
-		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE,
-		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
-		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
 	} {
 		s := dbSpec(e.String(), e, false)
-		s.GetDatabase().Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "external", Password: "p"}
+		s.GetDatabase().Exposure = &agentv1.DatabaseExposure{Enabled: true}
+		s.GetDatabase().RetiredExposedUser = "external"
 		specs = append(specs, s)
 	}
-	x.Sync(specs)
+	closed := dbSpec("closed", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false)
+	closed.GetDatabase().RetiredExposedUser = "external"
+	stopped := dbSpec("stopped", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false)
+	stopped.Stopped = true
+	stopped.GetDatabase().Exposure = &agentv1.DatabaseExposure{Enabled: true}
+	stopped.GetDatabase().RetiredExposedUser = "external"
+	admin := dbSpec("admin", agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, false)
+	admin.GetDatabase().RetiredExposedUser = "admin"
+	x.Sync(append(specs, closed, stopped, admin))
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if len(x.specs) != 2 || x.specs["DATABASE_ENGINE_POSTGRES"] == nil || x.specs["DATABASE_ENGINE_CLICKHOUSE"] == nil {
-		t.Fatalf("specs = %v", x.specs)
+	keys := func(m map[string]*agentv1.ServiceSpec) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := keys(x.tls); !slices.Equal(got, []string{"DATABASE_ENGINE_MYSQL", "DATABASE_ENGINE_POSTGRES"}) {
+		t.Errorf("TLS for %v", got)
+	}
+	want := []string{"DATABASE_ENGINE_CLICKHOUSE", "DATABASE_ENGINE_MARIADB", "DATABASE_ENGINE_MONGO", "DATABASE_ENGINE_MYSQL", "DATABASE_ENGINE_POSTGRES", "closed"}
+	if got := keys(x.retire); !slices.Equal(got, want) {
+		t.Errorf("retire in %v, want %v", got, want)
+	}
+}
+
+// A retirement runs once per node: with its marker in place nothing runs
+// (there is no Docker here to run it on), and a marker never leaves its
+// folder.
+func TestRetireRunsOncePerNode(t *testing.T) {
+	dir := t.TempDir()
+	x := NewExposedTLS(nil, nil, t.TempDir(), dir, nil)
+	s := dbSpec("db1", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false)
+	s.GetDatabase().RetiredExposedUser = "external"
+	if done, err := x.retired(s); done || err != nil {
+		t.Fatalf("retired before it ran: %v %v", done, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "db1.external"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.Retire(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if done, _ := x.retired(s); !done {
+		t.Fatal("marker not seen")
+	}
+	// The same user name on another database is still to do.
+	other := dbSpec("db2", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false)
+	other.GetDatabase().RetiredExposedUser = "external"
+	if done, _ := x.retired(other); done {
+		t.Fatal("db2 counted as retired")
+	}
+	bad := dbSpec("../db1", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false)
+	bad.GetDatabase().RetiredExposedUser = "external"
+	if err := x.Retire(context.Background(), bad); err == nil {
+		t.Fatal("bad service id accepted")
 	}
 }

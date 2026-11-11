@@ -36,7 +36,7 @@ type jobsParts struct {
 	cf       *tunnel.CloudflareDocker
 	uiDemand *jobrun.OnDemand
 	uis      *dbtools.UIs
-	exposed  *dbtools.ExposedUsers
+	exposed  *dbtools.ExposedTLS
 	boxes    *box.Boxes
 	// suspendDir holds markers of services a backup put to sleep (see
 	// backup.SleepSuspend).
@@ -68,7 +68,7 @@ func provideJobs(d *Deps) error {
 	if c, ok := d.Router.(proxy.Certificates); ok {
 		certs = c.Certificate
 	}
-	p.exposed = dbtools.NewExposedUsers(dk, certs, filepath.Join(d.Layout.StateDir(), "db-tls"), log)
+	p.exposed = dbtools.NewExposedTLS(dk, certs, filepath.Join(d.Layout.StateDir(), "db-tls"), filepath.Join(d.Layout.StateDir(), "db-retired"), log)
 	// Suspend is set in wireJobs, once d.Reconcile exists.
 	services := func() []*agentv1.ServiceSpec { return d.Feed.Current().GetServices() }
 	// Panels from 0.2 keep the destination's keys and presign each request.
@@ -135,9 +135,9 @@ type sleeper interface {
 }
 
 // wireJobs: register RunBackup, RestoreBackup (backup.run.v1), RunCronNow
-// (cron.run.v1) and Prune (node.prune.v1); advertise database.engines.v2;
-// add the cron, backup, tunnel, tool and scheduled cleanup loops; follow
-// the desired state through d.Feed.
+// (cron.run.v1) and Prune (node.prune.v1); advertise database.engines.v2
+// and database.exposure.v2; add the cron, backup, tunnel, tool and
+// scheduled cleanup loops; follow the desired state through d.Feed.
 func wireJobs(reg *Registry, d *Deps) error {
 	p, ok := d.Cron.(*jobsParts)
 	if !ok {
@@ -178,6 +178,10 @@ func wireJobs(reg *Registry, d *Deps) error {
 	// Valkey, KeyDB, Dragonfly and ClickHouse: backups and dbtools (here)
 	// and the portgate's TLS (network area) all handle them in this build.
 	reg.Advertise(dbengine.Capability)
+	// Exposed databases with their own user over TLS only: the portgate
+	// checks Postgres, MySQL and MariaDB clients ask for TLS (network area),
+	// ExposedTLS turns it on inside them and retires the old exposed users.
+	reg.Advertise(dbengine.ExposureCapability)
 	// Destinations without keys: the panel presigns every storage request.
 	if d.Panel != nil {
 		reg.Advertise(backup.SignedCapability)
@@ -221,7 +225,7 @@ func wireJobs(reg *Registry, d *Deps) error {
 	})
 	d.Components.Add("backups", p.backups.Run)
 	wireCleanupSchedule(d)
-	d.Components.Add("db-exposed-users", p.exposed.Run)
+	d.Components.Add("db-exposed-tls", p.exposed.Run)
 	d.Components.Add("cloudflared", func(ctx context.Context) error { return p.cf.Supervise(ctx, 15*time.Second) })
 	d.Components.Add("db-ui-idle", func(ctx context.Context) error {
 		if err := p.uiDemand.Adopt(ctx, jobrun.RoleDBUI, dbtools.DefaultIdle); err != nil {

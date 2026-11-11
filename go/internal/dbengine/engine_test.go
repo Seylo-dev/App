@@ -12,23 +12,22 @@ func TestEngineFacts(t *testing.T) {
 		redis      bool
 		cli        string
 		gate       bool
-		separate   bool
 	}
 	cases := map[agentv1.DatabaseEngine]want{
 		agentv1.DatabaseEngine_DATABASE_ENGINE_UNSPECIFIED: {},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:    {port: 5432, separate: true},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:       {port: 3306, separate: true},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:     {port: 3306, separate: true},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:       {port: 27017, gate: true, separate: true},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:    {port: 5432},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:       {port: 3306},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:     {port: 3306},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:       {port: 27017, gate: true},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:       {port: 6379, redis: true, cli: "redis-cli", gate: true},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY:      {port: 6379, redis: true, cli: "valkey-cli", gate: true},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB:       {port: 6379, redis: true, cli: "keydb-cli", gate: true},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY:   {port: 6379, redis: true, cli: "redis-cli", gate: true},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:  {port: 9000, http: 8123, gate: true, separate: true},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:  {port: 9000, http: 8123, gate: true},
 		agentv1.DatabaseEngine(99):                         {},
 	}
 	for e, w := range cases {
-		got := want{port: Port(e), http: HTTPPort(e), redis: RedisLike(e), cli: RedisCLI(e), gate: TLSAtGate(e), separate: SeparateExposedUser(e)}
+		got := want{port: Port(e), http: HTTPPort(e), redis: RedisLike(e), cli: RedisCLI(e), gate: TLSAtGate(e)}
 		if got != w {
 			t.Errorf("%v: got %+v, want %+v", e, got, w)
 		}

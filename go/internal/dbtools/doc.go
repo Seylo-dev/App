@@ -12,12 +12,14 @@
 //     mongosh, clickhouse-client or redis-cli/valkey-cli/keydb-cli command
 //     (and the env carrying the password) to exec inside the database
 //     container for the database shell on the Connection tab.
-//   - The exposed user (DatabaseExposure.user/password): ExposedUsers
-//     creates it inside the running database, or rotates its password,
-//     with the engine's client (Postgres, MySQL, MariaDB, Mongo,
-//     ClickHouse; the Redis-like engines have one user), and makes it
-//     TLS-only on Postgres, MySQL and MariaDB with the edge's ACME
-//     certificate for tls_hostname or a self-signed one.
+//   - TLS for the exposed port: connections through it use the
+//     database's own user. ExposedTLS installs the edge's ACME certificate
+//     for tls_hostname (or a self-signed one) and turns TLS on inside
+//     exposed Postgres and MySQL; MariaDB has its own certificate, and the
+//     portgate terminates TLS for the other engines and refuses plain
+//     clients of these three. It also retires the separate exposed user of
+//     databases created before 0.2.9 (DatabaseSpec.retired_exposed_user),
+//     once per node, disabling it without deleting anything.
 //
 // Interfaces used by other packages:
 //

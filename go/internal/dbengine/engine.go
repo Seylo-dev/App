@@ -10,6 +10,16 @@ import (
 // places such a database on a node (database.proto).
 const Capability = "database.engines.v2"
 
+// ExposureCapability is advertised by agents whose exposed database port
+// is TLS only for every engine with the database's own user: the portgate
+// refuses Postgres, MySQL and MariaDB clients that do not ask for TLS
+// (TLSInProtocol), the agent turns TLS on inside Postgres and MySQL
+// without creating a user, and it retires the separate exposed user of
+// older databases (DatabaseSpec.retired_exposed_user). An older agent
+// relays those three engines without the check, so the panel sends their
+// exposure only to agents that advertise it.
+const ExposureCapability = "database.exposure.v2"
+
 // Port is the engine's main port inside the container (ClickHouse: the
 // native protocol), 0 for an engine this agent does not know.
 func Port(e agentv1.DatabaseEngine) uint32 {
@@ -71,14 +81,8 @@ func RedisCLI(e agentv1.DatabaseEngine) string {
 // TLS itself: their protocols carry no TLS upgrade (or the image has no
 // certificate set up), so clients speak TLS from the first byte and the
 // relay can terminate it. Postgres, MySQL and MariaDB negotiate TLS inside
-// their protocol and use their own certificate.
+// their protocol and use their own certificate; the portgate checks that
+// their clients ask for it (portgate.TLSCheck).
 func TLSAtGate(e agentv1.DatabaseEngine) bool {
 	return e == agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO || e == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE || RedisLike(e)
-}
-
-// SeparateExposedUser reports the engines that get their own login for the
-// exposed port (DatabaseExposure.user); Redis-like engines have one user
-// and use it over TLS.
-func SeparateExposedUser(e agentv1.DatabaseEngine) bool {
-	return Port(e) != 0 && !RedisLike(e)
 }

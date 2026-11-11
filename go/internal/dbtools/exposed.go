@@ -2,72 +2,79 @@ package dbtools
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/datadir"
 	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/jobrun"
 )
 
-// The exposed user (DatabaseExposure.user/password) is a separate login
-// for connections through the exposed port, so the admin credentials never
-// leave the node. The agent creates it, or updates its password, inside
-// the running database with the engine's client, and makes that user
-// TLS-only where the engine can switch TLS on at runtime:
+// Connections through an exposed port use the database's own user and
+// password (DatabaseCredentials), over TLS only:
 //
 //   - Postgres: the certificate (ACME for tls_hostname, else self-signed)
-//     is written to the data directory, ssl is turned on with ALTER SYSTEM,
-//     and a pg_hba block admits the exposed user only over hostssl.
+//     is written to the data directory and ssl is turned on with ALTER
+//     SYSTEM. The portgate refuses clients that do not ask for TLS.
 //   - MySQL: the certificate is installed with SET PERSIST and ALTER
-//     INSTANCE RELOAD TLS; the user gets REQUIRE SSL.
-//   - MariaDB (11.4+ makes its own certificate at start): REQUIRE SSL.
-//   - Mongo and ClickHouse: the user only. TLS is the portgate's: it
-//     terminates TLS on the exposed port with Certificate and relays plain
-//     TCP inside.
-//   - Redis, Valkey, KeyDB and Dragonfly: no separate user; TLS as for
-//     Mongo.
+//     INSTANCE RELOAD TLS; the portgate refuses clients without CLIENT_SSL.
+//   - MariaDB (11.4+ makes its own certificate at start): the portgate's
+//     check only.
+//   - Mongo, ClickHouse and the Redis-like engines: TLS is the portgate's,
+//     which terminates it on the exposed port with Certificate and relays
+//     plain TCP inside; nothing to do in the database.
+//
+// Databases created before 0.2.9 had a separate exposed user ("external").
+// The panel names it in DatabaseSpec.retired_exposed_user and the agent
+// disables it once per node, without deleting anything it owns: Postgres
+// NOLOGIN (and the pg_hba block the agent once wrote for it goes), MySQL
+// and MariaDB ACCOUNT LOCK, Mongo dropUser, ClickHouse DROP USER.
 
-// userRe bounds exposed user names to what every engine accepts unquoted,
-// so they can go into pg_hba.conf and SQL safely.
+// userRe bounds user names to what every engine accepts unquoted, so they
+// can go into SQL and file names safely.
 var userRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,62}$`)
 
-// exposedJob is how the user (and TLS) is set up for one engine: a command
-// run in the database container with the values in env (EXPOSED_*,
-// CERT_PEM, KEY_PEM), never in argv, and an optional stdin script.
+// exposedJob is a command run in the database container with the values
+// in env (ADMIN_*, CERT_PEM, KEY_PEM, RETIRED_USER), never in argv, and an
+// optional stdin script.
 type exposedJob struct {
 	argv  []string
 	env   []string
 	stdin string
 }
 
-// pgScript creates or updates the role, then (with a certificate) turns on
-// TLS and restricts the role to hostssl. psql reads the role SQL from a
-// quoted heredoc, so the shell never expands the values.
-const pgScript = `set -e
+// pgPrelude signs psql_ in as the admin over the container's loopback.
+const pgPrelude = `set -e
 export PGPASSWORD="$ADMIN_PASSWORD"
-psql_() { psql --host=127.0.0.1 --username="$ADMIN_USER" --dbname="$EXPOSED_DB" --no-password -v ON_ERROR_STOP=1 --quiet "$@"; }
-psql_ <<'SQL'
-\getenv u EXPOSED_USER
-\getenv p EXPOSED_PASSWORD
-\getenv d EXPOSED_DB
-SELECT format('CREATE ROLE %I LOGIN', :'u') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'u') \gexec
-SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'u', :'p') \gexec
-SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'d', :'u') \gexec
-SELECT format('GRANT ALL ON SCHEMA public TO %I', :'u') \gexec
-SQL
-[ -n "$CERT_PEM" ] || exit 0
-DIR=$(psql_ -tA -c 'SHOW data_directory')
-HBA=$(psql_ -tA -c 'SHOW hba_file')
+psql_() { psql --host=127.0.0.1 --username="$ADMIN_USER" --dbname="$ADMIN_DB" --no-password -v ON_ERROR_STOP=1 --quiet "$@"; }
+`
+
+// pgDropHBABlock removes the pg_hba block agents before 0.2.9 wrote for the
+// exposed user (hostssl for it, reject otherwise) and reloads the
+// configuration.
+const pgDropHBABlock = `HBA=$(psql_ -tA -c 'SHOW hba_file')
+if grep -q '^# seylo-exposed-begin' "$HBA"; then
+  OWNER=$(stat -c %u:%g "$HBA")
+  awk '/^# seylo-exposed-begin/{skip=1} !skip{print} /^# seylo-exposed-end/{skip=0}' "$HBA" > "$HBA.new"
+  chown "$OWNER" "$HBA.new"
+  chmod 600 "$HBA.new"
+  mv "$HBA.new" "$HBA"
+fi
+psql_ -tA -c 'SELECT pg_reload_conf()' > /dev/null
+`
+
+// pgTLSScript installs the certificate and turns TLS on.
+const pgTLSScript = pgPrelude + `DIR=$(psql_ -tA -c 'SHOW data_directory')
 OWNER=$(stat -c %u:%g "$DIR")
 umask 077
 printf '%s\n' "$CERT_PEM" > "$DIR/seylo-server.crt"
@@ -75,101 +82,81 @@ printf '%s\n' "$KEY_PEM" > "$DIR/seylo-server.key"
 chown "$OWNER" "$DIR/seylo-server.crt" "$DIR/seylo-server.key"
 chmod 644 "$DIR/seylo-server.crt"
 psql_ -c "ALTER SYSTEM SET ssl_cert_file = 'seylo-server.crt'" -c "ALTER SYSTEM SET ssl_key_file = 'seylo-server.key'" -c "ALTER SYSTEM SET ssl = on"
-awk '/^# seylo-exposed-begin/{skip=1} !skip{print} /^# seylo-exposed-end/{skip=0}' "$HBA" > "$HBA.seylo"
-{
-  echo '# seylo-exposed-begin (managed by the agent: the exposed user only over TLS)'
-  echo "hostssl all $EXPOSED_USER all scram-sha-256"
-  echo "host all $EXPOSED_USER all reject"
-  echo '# seylo-exposed-end'
-  cat "$HBA.seylo"
-} > "$HBA.new"
-chown "$OWNER" "$HBA.new"
-chmod 600 "$HBA.new"
-mv "$HBA.new" "$HBA"
-rm -f "$HBA.seylo"
-psql_ -tA -c 'SELECT pg_reload_conf()' > /dev/null
+` + pgDropHBABlock
+
+// mysqlTLSScript installs MySQL's certificate (SET PERSIST survives
+// restarts).
+const mysqlTLSScript = `set -e
+q() { printf '%s\n' "$1" | mysql --host=127.0.0.1 --user="$ADMIN_USER" -N -B; }
+DIR=$(q 'SELECT @@datadir')
+OWNER=$(stat -c %u:%g "$DIR")
+umask 077
+printf '%s\n' "$CERT_PEM" > "${DIR}seylo-server.crt"
+printf '%s\n' "$KEY_PEM" > "${DIR}seylo-server.key"
+chown "$OWNER" "${DIR}seylo-server.crt" "${DIR}seylo-server.key"
+chmod 644 "${DIR}seylo-server.crt"
+q "SET PERSIST ssl_cert = '${DIR}seylo-server.crt'; SET PERSIST ssl_key = '${DIR}seylo-server.key'; ALTER INSTANCE RELOAD TLS;"
 `
 
-// mysqlScript creates or updates the user with REQUIRE SSL. MySQL also
-// gets the certificate (SET PERSIST survives restarts); MariaDB 11.4+
-// serves its own generated one.
-const mysqlScript = `set -e
-BT=$(printf '\140')
+// pgRetireScript takes LOGIN from the role, ends its sessions and drops
+// the old pg_hba block. psql reads the name from a quoted heredoc, so the
+// shell never expands it. DROP ROLE would need DROP OWNED first, which
+// deletes the role's tables: never.
+const pgRetireScript = pgPrelude + `psql_ <<'SQL'
+\getenv u RETIRED_USER
+SELECT format('ALTER ROLE %I NOLOGIN', :'u') WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'u') \gexec
+SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = :'u' \g /dev/null
+SQL
+` + pgDropHBABlock
+
+// mysqlRetireScript locks the account and ends its sessions (MySQL and
+// MariaDB).
+const mysqlRetireScript = `set -e
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/''/g"; }
-U=$(esc "$EXPOSED_USER"); P=$(esc "$EXPOSED_PASSWORD"); D=$(printf '%s' "$EXPOSED_DB" | sed "s/$BT/$BT$BT/g")
-if command -v mariadb >/dev/null 2>&1; then CLIENT=mariadb; MARIA=1; else CLIENT=mysql; MARIA=; fi
+U=$(esc "$RETIRED_USER")
+if command -v mariadb >/dev/null 2>&1; then CLIENT=mariadb; else CLIENT=mysql; fi
 q() { printf '%s\n' "$1" | $CLIENT --host=127.0.0.1 --user="$ADMIN_USER" -N -B; }
-if [ -n "$CERT_PEM" ] && [ -z "$MARIA" ]; then
-  DIR=$(q 'SELECT @@datadir')
-  OWNER=$(stat -c %u:%g "$DIR")
-  umask 077
-  printf '%s\n' "$CERT_PEM" > "${DIR}seylo-server.crt"
-  printf '%s\n' "$KEY_PEM" > "${DIR}seylo-server.key"
-  chown "$OWNER" "${DIR}seylo-server.crt" "${DIR}seylo-server.key"
-  chmod 644 "${DIR}seylo-server.crt"
-  q "SET PERSIST ssl_cert = '${DIR}seylo-server.crt'; SET PERSIST ssl_key = '${DIR}seylo-server.key'; ALTER INSTANCE RELOAD TLS;"
-fi
-q "CREATE USER IF NOT EXISTS '$U'@'%' IDENTIFIED BY '$P'; ALTER USER '$U'@'%' IDENTIFIED BY '$P' REQUIRE SSL; GRANT ALL PRIVILEGES ON $BT$D$BT.* TO '$U'@'%'; FLUSH PRIVILEGES;"
+q "ALTER USER IF EXISTS '$U'@'%' ACCOUNT LOCK;"
+for id in $(q "SELECT ID FROM information_schema.PROCESSLIST WHERE USER = '$U'"); do q "KILL $id" || true; done
 `
 
-const mongoJS = `const u = process.env.EXPOSED_USER, p = process.env.EXPOSED_PASSWORD, d = process.env.EXPOSED_DB || "admin";
+const mongoRetireJS = `const u = process.env.RETIRED_USER;
 const admin = db.getSiblingDB("admin");
-const roles = [{ role: "readWrite", db: d }, { role: "dbAdmin", db: d }];
-if (admin.getUser(u)) { admin.updateUser(u, { pwd: p, roles: roles }); } else { admin.createUser({ user: u, pwd: p, roles: roles }); }
+if (admin.getUser(u)) { admin.dropUser(u); }
 `
 
-// clickhouseScript creates or updates the user with a SHA-256 password and
-// grants it the database. The statements reach clickhouse-client on stdin
-// from the printf builtin, so the password is never in an argv; the
-// admin's password comes from CLICKHOUSE_PASSWORD. The values are escaped
-// as a string literal and as backquoted identifiers (B is a backquote).
-const clickhouseScript = `set -e
+// clickhouseRetireScript drops the user (its grants go with it; tables
+// belong to databases, not users). B is a backquote.
+const clickhouseRetireScript = `set -e
 B=$(printf '\140')
-esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"; }
-idq() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/$B/\\\\$B/g"; }
-P=$(esc "$EXPOSED_PASSWORD"); U=$(idq "$EXPOSED_USER"); D=$(idq "$EXPOSED_DB")
+U=$(printf '%s' "$RETIRED_USER" | sed -e 's/\\/\\\\/g' -e "s/$B/\\\\$B/g")
 export CLICKHOUSE_PASSWORD="$ADMIN_PASSWORD"
-printf '%s\n' \
-  "CREATE USER IF NOT EXISTS $B$U$B IDENTIFIED WITH sha256_password BY '$P';" \
-  "ALTER USER $B$U$B IDENTIFIED WITH sha256_password BY '$P';" \
-  "GRANT ALL ON $B$D$B.* TO $B$U$B;" |
-  clickhouse-client --host=127.0.0.1 --user="$ADMIN_USER" --multiquery
+printf '%s\n' "DROP USER IF EXISTS $B$U$B;" | clickhouse-client --host=127.0.0.1 --user="$ADMIN_USER" --multiquery
 `
 
-func exposedUserJob(db *agentv1.DatabaseSpec, tls *tlsMaterial) (exposedJob, error) {
-	exp := db.GetExposure()
+// adminEnv signs the scripts in as the database's admin.
+func adminEnv(db *agentv1.DatabaseSpec) []string {
 	c := db.GetCredentials()
-	if exp.GetUser() == "" || exp.GetPassword() == "" {
-		return exposedJob{}, errors.New("no exposed user to create")
+	name := c.GetDatabase()
+	if name == "" && db.GetEngine() == agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES {
+		name = "postgres"
 	}
-	if !userRe.MatchString(exp.GetUser()) {
-		return exposedJob{}, fmt.Errorf("exposed user name %q is not allowed", exp.GetUser())
+	return []string{"ADMIN_USER=" + c.GetAdminUser(), "ADMIN_PASSWORD=" + c.GetAdminPassword(), "ADMIN_DB=" + name}
+}
+
+// tlsJob turns TLS on inside Postgres or MySQL with the certificate.
+func tlsJob(db *agentv1.DatabaseSpec, tls *tlsMaterial) (exposedJob, error) {
+	if tls == nil {
+		return exposedJob{}, errors.New("no certificate to install")
 	}
-	if c.GetDatabase() == "" && db.GetEngine() != agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO {
-		return exposedJob{}, errors.New("no database to grant the exposed user")
-	}
-	env := []string{
-		"EXPOSED_USER=" + exp.GetUser(), "EXPOSED_PASSWORD=" + exp.GetPassword(), "EXPOSED_DB=" + c.GetDatabase(),
-		"ADMIN_USER=" + c.GetAdminUser(), "ADMIN_PASSWORD=" + c.GetAdminPassword(),
-	}
-	if tls != nil {
-		env = append(env, "CERT_PEM="+strings.TrimSpace(string(tls.certPEM)), "KEY_PEM="+strings.TrimSpace(string(tls.keyPEM)))
-	}
+	env := append(adminEnv(db), "CERT_PEM="+strings.TrimSpace(string(tls.certPEM)), "KEY_PEM="+strings.TrimSpace(string(tls.keyPEM)))
 	switch db.GetEngine() {
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
-		return exposedJob{argv: []string{"sh", "-c", pgScript}, env: env}, nil
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
-		return exposedJob{argv: []string{"sh", "-c", mysqlScript}, env: append(env, "MYSQL_PWD="+c.GetAdminPassword())}, nil
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
-		script := `exec mongosh --quiet "mongodb://127.0.0.1:27017/admin" --username "$ADMIN_USER" --password "$ADMIN_PASSWORD" --authenticationDatabase admin --file /dev/stdin`
-		return exposedJob{argv: []string{"sh", "-c", script}, env: env, stdin: mongoJS}, nil
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
-		return exposedJob{argv: []string{"sh", "-c", clickhouseScript}, env: env}, nil
+		return exposedJob{argv: []string{"sh", "-c", pgTLSScript}, env: env}, nil
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:
+		return exposedJob{argv: []string{"sh", "-c", mysqlTLSScript}, env: append(env, "MYSQL_PWD="+db.GetCredentials().GetAdminPassword())}, nil
 	}
-	if dbengine.RedisLike(db.GetEngine()) {
-		return exposedJob{}, errors.New("redis-like engines have no separate exposed user")
-	}
-	return exposedJob{}, fmt.Errorf("unknown engine %v", db.GetEngine())
+	return exposedJob{}, fmt.Errorf("the agent does not install TLS in %v", db.GetEngine())
 }
 
 // usesTLS reports whether the agent installs TLS for the engine.
@@ -177,47 +164,92 @@ func usesTLS(e agentv1.DatabaseEngine) bool {
 	return e == agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES || e == agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL
 }
 
-// ExposedUsers keeps the exposed user (and TLS) of every exposed database
-// in place. It retries until the database runs and accepts the change,
-// and applies each user, password and certificate once per agent run
-// (the panel rotates the password by sending a new one; a renewed ACME
-// certificate is picked up on the next pass).
-type ExposedUsers struct {
+// retiredUser is the old exposed user to disable, "" when there is none
+// (or it would be the admin itself).
+func retiredUser(db *agentv1.DatabaseSpec) string {
+	u := db.GetRetiredExposedUser()
+	if u == "" || u == db.GetCredentials().GetAdminUser() || dbengine.RedisLike(db.GetEngine()) {
+		return ""
+	}
+	return u
+}
+
+// retireJob disables the old exposed user inside the database.
+func retireJob(db *agentv1.DatabaseSpec) (exposedJob, error) {
+	u := retiredUser(db)
+	if u == "" {
+		return exposedJob{}, errors.New("no user to retire")
+	}
+	if !userRe.MatchString(u) {
+		return exposedJob{}, fmt.Errorf("user name %q is not allowed", u)
+	}
+	env := append(adminEnv(db), "RETIRED_USER="+u)
+	switch db.GetEngine() {
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
+		return exposedJob{argv: []string{"sh", "-c", pgRetireScript}, env: env}, nil
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
+		return exposedJob{argv: []string{"sh", "-c", mysqlRetireScript}, env: append(env, "MYSQL_PWD="+db.GetCredentials().GetAdminPassword())}, nil
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
+		script := `exec mongosh --quiet "mongodb://127.0.0.1:27017/admin" --username "$ADMIN_USER" --password "$ADMIN_PASSWORD" --authenticationDatabase admin --file /dev/stdin`
+		return exposedJob{argv: []string{"sh", "-c", script}, env: env, stdin: mongoRetireJS}, nil
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
+		return exposedJob{argv: []string{"sh", "-c", clickhouseRetireScript}, env: env}, nil
+	}
+	return exposedJob{}, fmt.Errorf("unknown engine %v", db.GetEngine())
+}
+
+// ExposedTLS keeps TLS on inside every exposed Postgres and MySQL
+// database, and retires the old exposed user of every database that names
+// one. It retries until the database runs and accepts the change. TLS is
+// applied once per agent run and certificate (a renewed ACME certificate
+// is picked up on the next pass); a retirement once per node, recorded by
+// a marker file per service and user.
+type ExposedTLS struct {
 	docker *jobrun.Docker
 	log    *slog.Logger
 	certs  CertSource
 	// certDir holds self-signed certificates per service.
 	certDir string
+	// retiredDir holds "<service id>.<user>" markers of retired users.
+	retiredDir string
 
 	mu      sync.Mutex
-	specs   map[string]*agentv1.ServiceSpec
-	applied map[string]string // service id -> hash of what was applied
+	tls     map[string]*agentv1.ServiceSpec // exposed Postgres and MySQL
+	retire  map[string]*agentv1.ServiceSpec // with a user to retire
+	applied map[string]string               // service id -> certificate fingerprint installed
 	wake    chan struct{}
 }
 
-// NewExposedUsers returns a manager running commands through d. certs may
-// be nil (self-signed certificates only).
-func NewExposedUsers(d *jobrun.Docker, certs CertSource, certDir string, logger *slog.Logger) *ExposedUsers {
+// NewExposedTLS returns a manager running commands through d. certs may be
+// nil (self-signed certificates only).
+func NewExposedTLS(d *jobrun.Docker, certs CertSource, certDir, retiredDir string, logger *slog.Logger) *ExposedTLS {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return &ExposedUsers{docker: d, certs: certs, certDir: certDir, log: logger,
-		specs: map[string]*agentv1.ServiceSpec{}, applied: map[string]string{}, wake: make(chan struct{}, 1)}
+	return &ExposedTLS{docker: d, certs: certs, certDir: certDir, retiredDir: retiredDir, log: logger,
+		tls: map[string]*agentv1.ServiceSpec{}, retire: map[string]*agentv1.ServiceSpec{}, applied: map[string]string{},
+		wake: make(chan struct{}, 1)}
 }
 
-// Sync takes the desired services; only exposed databases with a user
-// matter.
-func (x *ExposedUsers) Sync(specs []*agentv1.ServiceSpec) {
-	next := map[string]*agentv1.ServiceSpec{}
+// Sync takes the desired services: running databases that are exposed
+// with an engine whose TLS the agent installs, and those with a user to
+// retire.
+func (x *ExposedTLS) Sync(specs []*agentv1.ServiceSpec) {
+	tls, retire := map[string]*agentv1.ServiceSpec{}, map[string]*agentv1.ServiceSpec{}
 	for _, s := range specs {
-		exp := s.GetDatabase().GetExposure()
-		if s.GetKind() == agentv1.ServiceKind_SERVICE_KIND_DATABASE && exp.GetEnabled() && exp.GetUser() != "" && !s.GetStopped() &&
-			dbengine.SeparateExposedUser(s.GetDatabase().GetEngine()) {
-			next[s.GetId()] = s
+		db := s.GetDatabase()
+		if s.GetKind() != agentv1.ServiceKind_SERVICE_KIND_DATABASE || db == nil || s.GetStopped() {
+			continue
+		}
+		if db.GetExposure().GetEnabled() && usesTLS(db.GetEngine()) {
+			tls[s.GetId()] = s
+		}
+		if retiredUser(db) != "" {
+			retire[s.GetId()] = s
 		}
 	}
 	x.mu.Lock()
-	x.specs = next
+	x.tls, x.retire = tls, retire
 	x.mu.Unlock()
 	select {
 	case x.wake <- struct{}{}:
@@ -227,7 +259,7 @@ func (x *ExposedUsers) Sync(specs []*agentv1.ServiceSpec) {
 
 // Run applies pending changes on every desired-state change and retries
 // (and looks for renewed certificates) every 30 s.
-func (x *ExposedUsers) Run(ctx context.Context) error {
+func (x *ExposedTLS) Run(ctx context.Context) error {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
@@ -241,74 +273,122 @@ func (x *ExposedUsers) Run(ctx context.Context) error {
 	}
 }
 
-func (x *ExposedUsers) applyAll(ctx context.Context) {
+func (x *ExposedTLS) applyAll(ctx context.Context) {
 	x.mu.Lock()
-	specs := make([]*agentv1.ServiceSpec, 0, len(x.specs))
-	for _, s := range x.specs {
-		specs = append(specs, s)
+	tls := make([]*agentv1.ServiceSpec, 0, len(x.tls))
+	for _, s := range x.tls {
+		tls = append(tls, s)
+	}
+	retire := make([]*agentv1.ServiceSpec, 0, len(x.retire))
+	for _, s := range x.retire {
+		retire = append(retire, s)
 	}
 	x.mu.Unlock()
-	for _, s := range specs {
-		tls, err := x.material(s)
+	for _, s := range retire {
+		if done, _ := x.retired(s); done {
+			continue
+		}
+		if err := x.Retire(ctx, s); err != nil {
+			x.log.Warn("old exposed database user not retired yet", "service_id", s.GetId(), "err", err)
+			continue
+		}
+		x.log.Info("old exposed database user retired", "service_id", s.GetId(), "user", retiredUser(s.GetDatabase()))
+	}
+	for _, s := range tls {
+		m, err := x.material(s)
 		if err != nil {
 			x.log.Warn("database certificate", "service_id", s.GetId(), "err", err)
 			continue
 		}
-		h := applyHash(s.GetDatabase(), tls)
 		x.mu.Lock()
-		done := x.applied[s.GetId()] == h
+		done := x.applied[s.GetId()] == m.fingerprint()
 		x.mu.Unlock()
 		if done {
 			continue
 		}
-		if err := x.apply(ctx, s, tls); err != nil {
-			x.log.Warn("exposed database user not set yet", "service_id", s.GetId(), "err", err)
+		if err := x.apply(ctx, s, m); err != nil {
+			x.log.Warn("exposed database TLS not set yet", "service_id", s.GetId(), "err", err)
 			continue
 		}
 		x.mu.Lock()
-		x.applied[s.GetId()] = h
+		x.applied[s.GetId()] = m.fingerprint()
 		x.mu.Unlock()
-		x.log.Info("exposed database user set", "service_id", s.GetId(), "tls", tls != nil)
+		x.log.Info("exposed database TLS set", "service_id", s.GetId(), "self_signed", m.selfSigned)
 	}
 }
 
-func applyHash(db *agentv1.DatabaseSpec, tls *tlsMaterial) string {
-	fp := ""
-	if tls != nil {
-		fp = tls.fingerprint()
-	}
-	h := sha256.Sum256([]byte(db.GetExposure().GetUser() + "\x00" + db.GetExposure().GetPassword() + "\x00" + db.GetCredentials().GetDatabase() + "\x00" + fp))
-	return hex.EncodeToString(h[:8])
-}
-
-// material is the certificate to install, nil for engines without
-// runtime TLS.
-func (x *ExposedUsers) material(spec *agentv1.ServiceSpec) (*tlsMaterial, error) {
-	db := spec.GetDatabase()
-	if !usesTLS(db.GetEngine()) {
-		return nil, nil
-	}
-	m, err := certFor(x.certs, x.certDir, spec.GetId(), db.GetExposure().GetTlsHostname())
+// material is the certificate to install.
+func (x *ExposedTLS) material(spec *agentv1.ServiceSpec) (*tlsMaterial, error) {
+	m, err := certFor(x.certs, x.certDir, spec.GetId(), spec.GetDatabase().GetExposure().GetTlsHostname())
 	if err != nil {
 		return nil, err
 	}
 	return &m, nil
 }
 
-// Apply creates or updates the exposed user (and TLS) of one database now.
-func (x *ExposedUsers) Apply(ctx context.Context, spec *agentv1.ServiceSpec) error {
-	tls, err := x.material(spec)
+// Apply installs the certificate and turns TLS on in one database now.
+func (x *ExposedTLS) Apply(ctx context.Context, spec *agentv1.ServiceSpec) error {
+	m, err := x.material(spec)
 	if err != nil {
 		return err
 	}
-	return x.apply(ctx, spec, tls)
+	return x.apply(ctx, spec, m)
 }
 
-func (x *ExposedUsers) apply(ctx context.Context, spec *agentv1.ServiceSpec, tls *tlsMaterial) error {
-	job, err := exposedUserJob(spec.GetDatabase(), tls)
+func (x *ExposedTLS) apply(ctx context.Context, spec *agentv1.ServiceSpec, tls *tlsMaterial) error {
+	job, err := tlsJob(spec.GetDatabase(), tls)
 	if err != nil {
 		return err
 	}
+	return x.run(ctx, spec, job)
+}
+
+// marker is the file that records a retired user on this node.
+func (x *ExposedTLS) marker(spec *agentv1.ServiceSpec) (string, error) {
+	u := retiredUser(spec.GetDatabase())
+	if !userRe.MatchString(u) {
+		return "", fmt.Errorf("user name %q is not allowed", u)
+	}
+	if _, err := datadir.New("/").ServiceDir(spec.GetId()); err != nil {
+		return "", err
+	}
+	return filepath.Join(x.retiredDir, spec.GetId()+"."+u), nil
+}
+
+func (x *ExposedTLS) retired(spec *agentv1.ServiceSpec) (bool, error) {
+	path, err := x.marker(spec)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(path)
+	return err == nil, nil
+}
+
+// Retire disables the old exposed user of one database now, unless this
+// node did already, and records it.
+func (x *ExposedTLS) Retire(ctx context.Context, spec *agentv1.ServiceSpec) error {
+	path, err := x.marker(spec)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	job, err := retireJob(spec.GetDatabase())
+	if err != nil {
+		return err
+	}
+	if err := x.run(ctx, spec, job); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(x.retiredDir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
+}
+
+// run executes a job in the service's running container.
+func (x *ExposedTLS) run(ctx context.Context, spec *agentv1.ServiceSpec, job exposedJob) error {
 	cs, err := x.docker.ListContainers(ctx, map[string]string{docker.LabelService: spec.GetId()})
 	if err != nil {
 		return err
@@ -332,8 +412,7 @@ func (x *ExposedUsers) apply(ctx context.Context, spec *agentv1.ServiceSpec, tls
 		return err
 	}
 	if code != 0 {
-		secrets := []string{spec.GetDatabase().GetExposure().GetPassword(), spec.GetDatabase().GetCredentials().GetAdminPassword()}
-		tail := jobrun.NewTail(5, secrets)
+		tail := jobrun.NewTail(5, []string{spec.GetDatabase().GetCredentials().GetAdminPassword()})
 		_, _ = tail.Write([]byte(out))
 		return fmt.Errorf("exit code %d: %s", code, tail.String())
 	}
