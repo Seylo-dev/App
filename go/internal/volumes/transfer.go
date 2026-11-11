@@ -1,7 +1,6 @@
 package volumes
 
 import (
-	"archive/tar"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/seylo-dev/app/go/internal/datadir"
 )
@@ -98,102 +96,7 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 	if err := clearOrCheck(root, replace); err != nil {
 		return 0, err
 	}
-
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrBadArchive, err)
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	asRoot := os.Geteuid() == 0
-	var total uint64
-	type dirMeta struct {
-		name  string
-		mode  fs.FileMode
-		mtime time.Time
-	}
-	var dirs []dirMeta
-	for {
-		if err := ctx.Err(); err != nil {
-			return total, err
-		}
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return total, fmt.Errorf("%w: %v", ErrBadArchive, err)
-		}
-		name, ok := cleanName(hdr.Name)
-		if !ok {
-			return total, fmt.Errorf("%w: bad path %q", ErrBadArchive, hdr.Name)
-		}
-		if name == "." {
-			continue
-		}
-		mode := ArchiveMode(hdr)
-		if parent := path.Dir(name); parent != "." {
-			if err := root.MkdirAll(parent, 0o755); err != nil {
-				return total, fmt.Errorf("creating %s: %w", parent, err)
-			}
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := root.MkdirAll(name, 0o755); err != nil {
-				return total, fmt.Errorf("creating %s: %w", name, err)
-			}
-			dirs = append(dirs, dirMeta{name, mode, hdr.ModTime})
-		case tar.TypeReg:
-			_ = root.Remove(name) // replace a link or an older file, never write through one
-			f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-			if err != nil {
-				return total, fmt.Errorf("creating %s: %w", name, err)
-			}
-			n, err := io.Copy(f, tr)
-			total += uint64(n)
-			if cerr := f.Close(); err == nil {
-				err = cerr
-			}
-			if err != nil {
-				return total, fmt.Errorf("writing %s: %w", name, err)
-			}
-			if err := root.Chmod(name, mode); err != nil {
-				return total, err
-			}
-			_ = root.Chtimes(name, hdr.ModTime, hdr.ModTime)
-		case tar.TypeSymlink:
-			_ = root.Remove(name)
-			if err := root.Symlink(hdr.Linkname, name); err != nil {
-				return total, fmt.Errorf("creating link %s: %w", name, err)
-			}
-		case tar.TypeLink:
-			target, ok := cleanName(hdr.Linkname)
-			if !ok || target == "." {
-				return total, fmt.Errorf("%w: bad link target %q", ErrBadArchive, hdr.Linkname)
-			}
-			_ = root.Remove(name)
-			if err := root.Link(target, name); err != nil {
-				return total, fmt.Errorf("creating hard link %s: %w", name, err)
-			}
-		default:
-			continue
-		}
-		if asRoot {
-			if err := root.Lchown(name, hdr.Uid, hdr.Gid); err != nil {
-				return total, fmt.Errorf("setting owner of %s: %w", name, err)
-			}
-		}
-	}
-	// Directory modes and times last, so writing into them worked and
-	// their mtimes are not bumped by the files.
-	for i := len(dirs) - 1; i >= 0; i-- {
-		d := dirs[i]
-		if err := root.Chmod(d.name, d.mode); err != nil {
-			return total, err
-		}
-		_ = root.Chtimes(d.name, d.mtime, d.mtime)
-	}
-	return total, nil
+	return Unpack(ctx, root, r, UnpackOptions{Owners: os.Geteuid() == 0})
 }
 
 // cleanName turns an archive path into a clean relative path, refusing
