@@ -24,7 +24,13 @@ let cookie: string;
 beforeEach(async () => {
   panel = testPanel();
   cookie = (await createUser(panel, "owner")).cookie;
-  setDnsLookups({ resolve4: async () => [], resolve6: async () => [], resolveCname: async () => [], resolveNs: async () => [] });
+  // shop.example.com points at the node (seedNode's address), so its route asks Let's Encrypt (acme-hold.test.ts has the ones that wait).
+  setDnsLookups({
+    resolve4: async (name) => (name === "shop.example.com" ? ["203.0.113.10"] : []),
+    resolve6: async () => [],
+    resolveCname: async () => [],
+    resolveNs: async () => [],
+  });
 });
 afterEach(async () => {
   setDnsLookups(null);
