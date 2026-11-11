@@ -41,6 +41,11 @@ export interface JoinTarget {
 export function panelUrl(ctx: JoinContext): string {
   const domain = getSetting(ctx.db, "panelDomain") ?? null;
   if (domain) return `https://${domain}`;
+  return panelIpUrl(ctx);
+}
+
+/** panelUrl without the domain: where the panel answers on IP:port. */
+export function panelIpUrl(ctx: JoinContext): string {
   const port = ctx.config.hostPort ?? ctx.config.port;
   const panelNode = ctx.db
     .select({ ipv4: nodes.publicIpv4, ipv6: nodes.publicIpv6, publicAddress: nodes.publicAddress, facts: nodes.facts })
@@ -86,6 +91,23 @@ function domainActive(db: PanelDb): boolean {
  * the panel's pinned key; else plain HTTP, which the join card warns about
  * (anyone on the path could read and inject the agent protocol).
  */
+/**
+ * The same join over the panel's IP address and agents' TLS port with its
+ * pinned key, when agentJoinTarget picked the domain (no pin): for a server
+ * whose network decrypts HTTPS on the way (TLS inspection re-signs the
+ * domain's certificate, which the agent then refuses) or that cannot reach
+ * the domain. Null without an agents' TLS port, with that port closed, or
+ * when the panel knows no address other servers reach.
+ */
+export function agentPinnedTarget(ctx: JoinContext & Pick<Deps, "agentTls">, main: JoinTarget): JoinTarget | null {
+  if (main.pin || !main.url.startsWith("https://") || !ctx.agentTls) return null;
+  const applied: PanelIpAccessApplied | undefined = getSetting(ctx.db, "panelIpAccessApplied");
+  if (applied?.agentPortClosed) return null;
+  const host = new URL(panelIpUrl(ctx)).hostname;
+  if (host === "localhost" || host === "[::1]" || /^127\./.test(host)) return null;
+  return { url: `https://${host}:${ctx.agentTls.port}`, pin: ctx.agentTls.pin, insecureTransport: false };
+}
+
 export function agentJoinTarget(ctx: JoinContext & Pick<Deps, "agentTls">): JoinTarget {
   const url = panelUrl(ctx);
   const applied: PanelIpAccessApplied | undefined = getSetting(ctx.db, "panelIpAccessApplied");

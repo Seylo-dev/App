@@ -11,6 +11,7 @@ import { nodes as nodeOps } from "@seylo/ops";
 import { agentConnectPath, agentSubprotocol } from "../src/agent-hub/endpoint";
 import { nodes } from "../src/db/schema";
 import { ensureAgentTls } from "../src/security/agent-tls";
+import { setSetting } from "../src/settings";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -61,6 +62,24 @@ test("join commands use the TLS port with --pin; plain HTTP is flagged", async (
   expect(pinned.body.command).toContain("--panel 'https://203.0.113.9:3443'");
   expect(pinned.body.command).toContain(`--pin '${tls.pin}'`);
   expect(pinned.body.command).not.toContain("--insecure");
+  // Over the IP with the pin already: no second command.
+  expect(pinned.body.pinnedCommand).toBeNull();
+
+  // An active panel domain: the command joins over it with public roots, and the same token over the
+  // IP and the pinned key comes along, for a network that decrypts HTTPS (TLS inspection).
+  setSetting(secured.deps.db, "panelDomain", "panel.example.com");
+  setSetting(secured.deps.db, "panelDomainStatus", { domain: "panel.example.com", state: "active", message: "", checkedAt: Date.now() });
+  const both = await callOp(secured, nodeOps.createJoinToken, {}, { cookie: admin.cookie });
+  expect(both.body.command).toContain("--panel 'https://panel.example.com'");
+  expect(both.body.command).not.toContain("--pin");
+  expect(both.body.pinnedCommand).toContain("--panel 'https://203.0.113.9:3443'");
+  expect(both.body.pinnedCommand).toContain(`--pin '${tls.pin}'`);
+  expect(both.body.pinnedCommand).toContain(`--token '${both.body.token}'`);
+  // With the agents' port closed the IP command could not connect: none.
+  setSetting(secured.deps.db, "panelIpAccessApplied", { closed: true, agentPortClosed: true, at: 1, reason: "test" });
+  expect((await callOp(secured, nodeOps.createJoinToken, {}, { cookie: admin.cookie })).body.pinnedCommand).toBeNull();
+  // No agents' TLS port at all: none either.
+  expect((await callOp(plain, nodeOps.createJoinToken, {}, { cookie: owner.cookie })).body.pinnedCommand).toBeNull();
 });
 
 test("join commands install the running panel's own release through the verified install host", async () => {

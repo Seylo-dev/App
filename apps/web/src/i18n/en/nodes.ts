@@ -105,6 +105,10 @@ export default {
     used: "That command was already used, so it can't be changed. Set Can build for the node that ran it in the list above.",
     insecure:
       "This command connects over plain HTTP (--insecure): anyone on the network path could read the node's traffic. Set a panel domain first, or restart the panel with its agents' TLS port (the installer sets one).",
+    pinnedToggle: "Network decrypts HTTPS? Join over the panel's IP instead",
+    pinnedHint:
+      "For a server whose network replaces the domain's certificate (a firewall doing TLS inspection; the agent refuses it) or that cannot reach the domain: this joins over the panel's IP address and agents' port with the panel's pinned key. Run one command or the other: the token works once.",
+    pinnedCommand: "Join command over the panel's IP",
     otherOpen: { one: "{count} other unused join command is still valid.", other: "{count} other unused join commands are still valid." },
     step2: "2. Optional: automatic domains for this node",
     dnsBefore: "Add",

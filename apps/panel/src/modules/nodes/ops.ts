@@ -18,7 +18,7 @@ import { metricsFor } from "../metrics/ingest";
 import { blockedReason } from "../uptime/targets";
 import { checksDocker, recordUpdateDockerAnswer } from "./docker-check";
 import { joinCommand } from "./join-command";
-import { agentJoinTarget } from "./join-target";
+import { agentJoinTarget, agentPinnedTarget } from "./join-target";
 import { forgetNodeCertificate, refreshLbPeers } from "./lb-tls";
 import { nodeLive } from "./live";
 import { detectNodeLocation } from "./location";
@@ -97,6 +97,7 @@ const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
   // Where the node joins, first: a closed agents' port refuses (join-target.ts), and a
   // refused call must not leave a valid token behind.
   const target = agentJoinTarget(ctx);
+  const pinned = agentPinnedTarget(ctx, target);
   const token = prefixedToken("join");
   const expiresAt = new Date(Date.now() + joinTokenTtlMs);
   const row = ctx.db
@@ -109,6 +110,7 @@ const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
     token,
     // The install host's verified installer, pinned to this panel's release with --version (join-command.ts).
     command: joinCommand(ctx.config.version, target.url, token, target.pin, target.insecureTransport),
+    pinnedCommand: pinned ? joinCommand(ctx.config.version, pinned.url, token, pinned.pin) : null,
     expiresAt: expiresAt.toISOString(),
     insecureTransport: target.insecureTransport,
     canBuild,

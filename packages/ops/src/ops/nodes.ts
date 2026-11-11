@@ -284,6 +284,14 @@ export const createJoinToken = defineOp({
     token: Type.String(),
     /** The full one-line install command with the token in it. */
     command: Type.String(),
+    /**
+     * When command joins over the panel domain: the same token over the
+     * panel's IP address and agents' TLS port with its pinned key, for a
+     * server whose network decrypts HTTPS (a firewall doing TLS inspection
+     * re-signs the domain's certificate) or cannot reach the domain. Null
+     * otherwise. Only one of the two can be used: the token is single use.
+     */
+    pinnedCommand: Type.Union([Type.String(), Type.Null()]),
     expiresAt: Timestamp,
     /**
      * True when the command makes the agent dial the panel over plain HTTP
@@ -296,7 +304,7 @@ export const createJoinToken = defineOp({
     canBuild: Type.Boolean(),
   }),
   permission: permission.global("nodes.manage"),
-  sensitive: { output: ["token", "command"] },
+  sensitive: { output: ["token", "command", "pinnedCommand"] },
   mcp: false,
   audit: true,
 });

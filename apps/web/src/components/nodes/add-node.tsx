@@ -27,6 +27,32 @@ export interface AddNodeHandle {
   start(): void;
 }
 
+/**
+ * The same token over the panel's IP and its pinned key, behind a toggle:
+ * for a server whose network decrypts HTTPS (TLS inspection re-signs the
+ * domain's certificate, so the domain command cannot connect).
+ */
+export function PinnedJoin({ command, initiallyOpen = false }: { command: string; initiallyOpen?: boolean }) {
+  const [open, setOpen] = useState(initiallyOpen);
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="cursor-pointer self-start border-0 bg-transparent p-0 text-xs font-medium text-link"
+      >
+        {t("nodes.addCard.pinnedToggle")}
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-[7px]">
+      <span className="text-xs text-muted-foreground">{t("nodes.addCard.pinnedHint")}</span>
+      <CopyField value={command} tone="terminal" aria-label={t("nodes.addCard.pinnedCommand")} />
+    </div>
+  );
+}
+
 export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props, ref) {
   const section = useRef<HTMLElement>(null);
   const create = useOpMutation(nodes.createJoinToken);
@@ -112,6 +138,7 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
                 {t("nodes.addCard.insecure")}
               </span>
             )}
+            {token.pinnedCommand && <PinnedJoin key={token.tokenId} command={token.pinnedCommand} />}
           </>
         ) : (
           <>

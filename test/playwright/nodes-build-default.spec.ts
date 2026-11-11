@@ -52,6 +52,49 @@ test.describe("Add node: build images by default", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a domain command comes with the IP and pin command behind a toggle, for a network that decrypts HTTPS", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const token = "seylo_join_DomainAndPin01";
+    const pin = `sha256:${"ab".repeat(32)}`;
+    const pinnedCommand = `curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token '${token}' --version '0.2.0' --pin '${pin}'`;
+    await installDemo(page, {
+      overrides: {
+        "nodes.createJoinToken": () => ({
+          tokenId: "token00000000002",
+          token,
+          command: `curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://panel.acme.dev' --token '${token}' --version '0.2.0'`,
+          pinnedCommand,
+          insecureTransport: false,
+          expiresAt: new Date(Date.now() + 58 * 60_000).toISOString(),
+          canBuild: true,
+        }),
+      },
+    });
+    await page.goto("/nodes");
+    const card = page.getByRole("region", { name: "Add a node" });
+    await card.getByRole("button", { name: "Create join command" }).click();
+    const toggle = card.getByRole("button", { name: "Network decrypts HTTPS? Join over the panel's IP instead" });
+    await expect(toggle).toBeVisible();
+    await expect(card.getByText(pin, { exact: false })).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveCount(0);
+    await expect(card.getByText(/a firewall doing TLS inspection; the agent refuses it/)).toBeVisible();
+    await expect(card.getByText(/Run one command or the other: the token works once\./)).toBeVisible();
+    await expect(card.getByLabel("Join command over the panel's IP")).toContainText("--pin");
+    await page.screenshot({ path: `${shots}/pinned-command.png` });
+    expect(errors).toEqual([]);
+  });
+
+  test("an IP command with the pin already shows no second command", async ({ page }) => {
+    await installDemo(page);
+    await page.goto("/nodes");
+    const card = page.getByRole("region", { name: "Add a node" });
+    await card.getByRole("button", { name: "Create join command" }).click();
+    await expect(card.getByText(/Single use · expires in/)).toBeVisible();
+    await expect(card.getByRole("button", { name: /Network decrypts HTTPS/ })).toHaveCount(0);
+  });
+
   test("unticking sends canBuild false; Change revokes the command and asks again", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));

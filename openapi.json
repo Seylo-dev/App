@@ -45630,6 +45630,7 @@
                     "tokenId",
                     "token",
                     "command",
+                    "pinnedCommand",
                     "expiresAt",
                     "insecureTransport",
                     "canBuild"
@@ -45645,6 +45646,16 @@
                     },
                     "command": {
                       "type": "string"
+                    },
+                    "pinnedCommand": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "expiresAt": {
                       "format": "date-time",
