@@ -636,7 +636,15 @@ check_03() {
     [ -n "$n" ] || { bad "node $l not found in nodes.list"; continue; }
     ev "node $l: $(printf '%s' "$nodes" | jq -c --arg id "$n" '.nodes[] | select(.id==$id) | {id,name,status,publicIpv4,agentVersion,canBuild,facts:(.facts|{hostname,os,arch,cpuCores,dockerVersion,cgroupVersion})}')"
     expect "node $l has facts" test "$(printf '%s' "$nodes" | jq -r --arg id "$n" '.nodes[] | select(.id==$id) | .facts.dockerVersion // empty')" != ""
-    report=$(api nodes.runHealthCheck "{\"nodeId\":\"$n\"}") || { bad "nodes.runHealthCheck $l failed"; continue; }
+    # A node joined seconds ago may still be starting its Traefik (C installed Docker just now): up to a minute.
+    report=
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      report=$(api nodes.runHealthCheck "{\"nodeId\":\"$n\"}") || { report=; break; }
+      [ "$(printf '%s' "$report" | jq .summary.fail)" = 0 ] && break
+      printf 'not yet: %s\n' "$(printf '%s' "$report" | jq -c '[.results[] | select(.status=="fail") | .id]')" >>"$RES/$CUR.log"
+      sleep 5
+    done
+    [ -n "$report" ] || { bad "nodes.runHealthCheck $l failed"; continue; }
     printf '%s\n' "$report" >>"$RES/$CUR.log"
     ev "health $l: $(printf '%s' "$report" | jq -c .summary) not passing: $(printf '%s' "$report" | jq -c '[.results[] | select(.status!="pass") | "\(.id)=\(.status): \(.detail|.[0:90])"]')"
     expect "health check on $l has no fail" test "$(printf '%s' "$report" | jq .summary.fail)" = 0
