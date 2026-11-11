@@ -1067,6 +1067,8 @@ container_on() { on_node "$1" "docker ps -q --filter label=$SLUG.service=$2 | he
 # pg_on_b <sql>: psql inside the Postgres container on B (harness side, for setup and checks).
 # (By name: the service's web UI sidecar <slug>-<id>-db-ui carries its label too.)
 pg_exec() { on_node "$1" "docker exec \$(docker ps -q --filter label=$SLUG.service=$2 --filter name=^$SLUG-$2-[0-9] | head -1) psql -U app -d app -tAc \"$3\""; }
+# pg_retired <service>: the separate exposed user of a database from before 0.2.9 ("external") can no longer log in.
+pg_retired() { [ "$(pg_exec b "$1" "select rolcanlogin from pg_roles where rolname = 'external'" | tr -d '[:space:]')" = f ]; }
 
 pg_probe_cmd='["sh","-c","for i in $(seq 1 30); do if psql \"$DATABASE_URL\" -tAc \"select 1\" >/dev/null 2>&1; then echo PG-CONNECTED; sleep 86400; fi; echo PG-FAILED-$i; sleep 2; done; sleep 86400"]'
 
@@ -1110,7 +1112,7 @@ check_10() {
     sh -c "printf '%s' '$logs' | grep -q PG-FAILED && ! printf '%s' '$logs' | grep -q PG-CONNECTED"
   api services.stop "{\"serviceId\":\"$app2\"}" >/dev/null || true
 
-  # TLS exposure on a port, from the Mac.
+  # TLS exposure on a port, from the Mac, with the database's own user and password.
   port=25432
   api databases.setExposure "{\"serviceId\":\"$db\",\"enabled\":true,\"port\":$port,\"allowedCidrs\":[\"$(host_ip)/32\",\"192.168.64.0/24\"]}" >/dev/null ||
     bad "databases.setExposure failed"
@@ -1118,14 +1120,12 @@ check_10() {
   exp=$(api databases.connection "{\"serviceId\":\"$db\"}" | jq -c .exposed)
   if [ "$exp" = null ] || [ "$(printf '%s' "$exp" | jq -r .port)" = null ]; then
     bad "databases.connection has no exposed URL after setExposure (exposure: $(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '.exposure | {enabled, host, port, user, certificate}'))"
-    # Go on with what the agent does: set a known password for the exposed user.
-    local xpass=e2e-exposed-pass-1 xuser
-    xuser=$(api databases.get "{\"serviceId\":\"$db\"}" | jq -r .exposure.user)
-    api databases.resetPassword "{\"serviceId\":\"$db\",\"user\":\"exposed\",\"password\":\"$xpass\"}" >/dev/null || bad "databases.resetPassword (exposed) failed"
-    sleep 35
-    url="postgresql://$xuser:$xpass@$(node_ip b):$port/app"
+    # Go on with the port the check asked for: the login is the database's own.
+    url="postgresql://app:e2e-pg-password-1@$(node_ip b):$port/app"
   else
     ev "exposed: $(printf '%s' "$exp" | jq -c '{host, port, user, tlsParams}')"
+    expect "the exposed connection uses the database's own user and password" test \
+      "$(printf '%s' "$exp" | jq -r '.user + " " + .password')" = "$(printf '%s' "$conn" | jq -r '.internal.user + " " + .internal.password')"
     url=$(printf '%s' "$exp" | jq -r '"postgresql://\(.user):\(.password)@\(.host):\(.port)/\(.database)"')
     url=${url/@e2e-b:/@$(node_ip b):}
   fi
@@ -1136,7 +1136,17 @@ check_10() {
   else
     bad "psql sslmode=require to $(node_ip b):$port failed: $(psql "$url?sslmode=require" -tAc 'select 1' 2>&1 | head -2 | tr '\n' ' ')"
   fi
-  expect "the exposed user cannot log in without TLS" sh -c "! psql '$url?sslmode=disable' -tAc 'select 1' >/dev/null 2>&1"
+  out=$(psql "$url?sslmode=disable" -tAc 'select 1' 2>&1) && bad "psql sslmode=disable logged in through the exposed port: $out"
+  ev "psql sslmode=disable: $(printf '%s' "$out" | head -1)"
+  expect "the exposed port refuses a login without TLS, with the gate's message" grep -q 'this port only accepts TLS connections' <<<"$out"
+  # A database from before 0.2.9 kept a separate exposed user ("external"): the agent retires it.
+  if [ -n "$(pg_exec b "$db" "select 1 from pg_roles where rolname = 'external'" 2>/dev/null | tr -d '[:space:]')" ]; then
+    if wait_for 90 "the old exposed user retired" pg_retired "$db"; then
+      good "the old exposed user (external) can no longer log in; it still exists with what it owns"
+    else
+      bad "the old exposed user (external) can still log in"
+    fi
+  fi
 
   # Web UI ticket through the edge.
   out=$(api databases.openWebUi "{\"serviceId\":\"$db\"}") || bad "databases.openWebUi failed"
@@ -3015,7 +3025,10 @@ check_37() {
   else
     bad "psql sslmode=require to $ip_b:25433 failed: $(psql "$url?sslmode=require" -tAc 'select 1' 2>&1 | head -2 | tr '\n' ' ')"
   fi
-  expect "Postgres' exposed user cannot log in without TLS" sh -c "! psql '$url?sslmode=disable' -tAc 'select 1' >/dev/null 2>&1"
+  expect "Postgres' exposed port uses the database's own user ($(printf '%s' "$exp" | jq -r .user))" test \
+    "$(printf '%s' "$exp" | jq -r .user)" = "$(api databases.connection "{\"serviceId\":\"$pg\"}" | jq -r .internal.user)"
+  out=$(psql "$url?sslmode=disable" -tAc 'select 1' 2>&1) && bad "psql sslmode=disable logged in through Postgres' exposed port: $out"
+  expect "Postgres' exposed port refuses a login without TLS, with the gate's message" grep -q 'this port only accepts TLS connections' <<<"$out"
 
   # Backups to MinIO and restores.
   pass=$(db_secret "$vk" .internal.password)
