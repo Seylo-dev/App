@@ -1463,9 +1463,19 @@ wait_connected() {
 			# The name reaches a server with no certificate for it yet (seylo's conn.certificateHint).
 			JOIN_HINT="${addr%:*} has no certificate yet: open the panel's Settings > General and check the panel domain's status (Let's Encrypt reaches it on port 80)."
 			;;
-		*"TLS inspection"* | *"x509:"* | *"pinned key"*)
-			# The certificate that came is not the panel's: most often a firewall or proxy that decrypts HTTPS.
-			JOIN_HINT="This server did not get the panel's certificate for ${addr%:*} (the error above names who issued the one it got). A firewall or proxy on this server's network that decrypts HTTPS (TLS inspection) does this: exempt ${addr%:*} from it, or join with the panel's IP address and its pinned key, the second command in the panel's Add node dialog."
+		*"TLS inspection"* | *"pinned key"* | *"x509: certificate signed by unknown authority"*)
+			# The certificate that came is not the panel's: most often a firewall or proxy that decrypts
+			# HTTPS. The agent's hint says who the certificate claims issued it; a 0.2.7 agent's x509 error
+			# alone (certificate signed by unknown authority) does not.
+			named=
+			case $reason in *"issued by"*) named=" (the error above says who issued the one it got)" ;; esac
+			JOIN_HINT="This server did not get the panel's certificate for ${addr%:*}$named. A firewall or proxy on this server's network that decrypts HTTPS (TLS inspection) does this: exempt ${addr%:*} from it, or join with the panel's IP address and its pinned key, the second command in the panel's Add node dialog."
+			;;
+		*"x509: certificate has expired or is not yet valid"*)
+			JOIN_HINT="The certificate ${addr%:*} presented has expired or is not valid yet: check this server's clock (date), then the panel domain's status in the panel's Settings > General."
+			;;
+		*"x509: certificate is valid for "* | *"x509: certificate is not valid for any names"*)
+			JOIN_HINT="The certificate ${addr%:*} presented is for another name: check that ${addr%:*} leads to the panel's server (its DNS record)."
 			;;
 		*)
 			JOIN_HINT="Check that this server can reach $addr: the panel's server must accept connections on port ${addr##*:} (3443 is the agents' port of a panel without a domain), and no firewall or cloud security group on the way may block it."
