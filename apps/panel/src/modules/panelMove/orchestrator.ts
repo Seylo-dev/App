@@ -491,6 +491,15 @@ function refusedForSure(error: unknown): boolean {
 async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promise<void> {
   const signal = move.abort.signal;
   let forceable = false;
+  let recorded = move.waitingSince !== null;
+  // Failures of this panel's own (a busy or full database, say) are no answer from the target: the wait goes on.
+  const tell = () => {
+    try {
+      publishStatus(deps);
+    } catch (failed) {
+      log.error({ err: failed }, "telling screens about the wait for the switch failed");
+    }
+  };
   for (;;) {
     cancelled(move);
     try {
@@ -502,16 +511,21 @@ async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promi
       if (refusedForSure(error)) {
         throw new MoveFailure(`${move.targetNodeName} did not take the switch: ${failureMessage(error).replace(/\.$/, "")}.`);
       }
-      if (move.waitingSince === null) {
-        move.waitingSince = Date.now();
-        writeOut(deps, move, "committing");
-        publishStatus(deps);
-      }
-      if (!forceable && canForceCancel(move)) {
-        forceable = true;
-        publishStatus(deps);
-      }
       log.warn({ err: error, nodeId: move.targetNodeId }, "the target did not confirm the switch; asking again");
+      const first = move.waitingSince === null;
+      if (first) move.waitingSince = Date.now();
+      if (!recorded) {
+        try {
+          writeOut(deps, move, "committing");
+          recorded = true;
+        } catch (failed) {
+          log.error({ err: failed }, "recording the wait for the switch failed");
+        }
+      }
+      if (first || forceable !== canForceCancel(move)) {
+        forceable = canForceCancel(move);
+        tell();
+      }
     }
     await sleepUnlessCancelled(moveTiming.commitRetryMs, signal);
   }

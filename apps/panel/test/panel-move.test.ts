@@ -20,7 +20,7 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { defineOp, panelMove, permission, settings } from "@seylo/ops";
 import { EventSchema, PanelService, ReportEventRequestSchema, ReportEventResponseSchema, StatusCode } from "@seylo/proto";
 import { Type } from "@sinclair/typebox";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { agentStatusError, nodeOffline } from "../src/agent-hub/calls";
 import { recordDialedUrl } from "../src/agent-hub/dialed";
@@ -949,6 +949,30 @@ describe("the switch: CommitMovedPanel on the target", () => {
         .map((c) => c.nodeId)
         .sort(),
     ).toEqual([fromId, otherId].sort());
+  });
+
+  test("a local database failure while it records the wait is no answer: the commit is asked again", async () => {
+    moveTiming.commitRetryMs = 20;
+    let tries = 0;
+    fleet.answers.set("commitMovedPanel", () => {
+      tries++;
+      if (tries === 1) {
+        // The journal write of waitingSince fails, as with a busy or full disk.
+        panel.deps.db.run(
+          sql.raw(
+            `CREATE TEMP TRIGGER fail_wait BEFORE UPDATE ON settings WHEN NEW.key = 'panelMoveOut' AND json_extract(NEW.value, '$.waitingSince') IS NOT NULL BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`,
+          ),
+        );
+        throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+      }
+      panel.deps.db.run(sql.raw("DROP TRIGGER IF EXISTS fail_wait"));
+      return {};
+    });
+    await start();
+    await waitForState("done");
+    expect(tries).toBe(2);
+    expect(fleet.of("abortMovedPanel")).toEqual([]);
+    expect(fleet.of("clearPanelAddress")).toEqual([]);
   });
 });
 
