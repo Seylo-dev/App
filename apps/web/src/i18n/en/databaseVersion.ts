@@ -70,7 +70,8 @@ export default {
       olderImage: "{image} is older than what runs. Data files a newer release wrote may not open on it.",
       postgresMajor:
         "A major jump: Postgres does not open another major's data files without pg_upgrade or a dump and restore, which do not run here. It will most likely not start.",
-      dataPath: "This version keeps its data in another folder: it may start without the data, which stays on the volume.",
+      dataPath:
+        "This version keeps its data in another folder. Seylo runs it on the folder of the data that runs, so it will most likely not start.",
       patchOnly: "{engine} takes patch updates only: another version may not read the data files.",
       oneStep: "It skips a version: {engine} upgrades one version at a time, so it may refuse the data files.",
       otherLine: "Not tested by Seylo: this version is not in Seylo's catalog.",

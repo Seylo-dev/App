@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OpError } from "@seylo/ops";
-import { isFloatingImage, riskRefusalOf } from "./database-image";
+import { imageLine, isFloatingImage, riskRefusalOf } from "./database-image";
 
 test("a tag floats unless it names an exact release or a digest pins it", () => {
   for (const [engine, image, variant, floating] of [
@@ -47,4 +47,31 @@ test("a riskNotAccepted refusal gives its risks, the line and whether a backup i
   });
   expect(riskRefusalOf(new OpError("CONFLICT", "x", { reason: "backupRequired" }))).toBeNull();
   expect(riskRefusalOf(new Error("x"))).toBeNull();
+});
+
+test("the line an image is recorded as: the catalog's, the one its tag names, else custom", () => {
+  const mysql = [
+    { version: "8.4", image: "mysql:8.4.6" },
+    { version: "8.0", image: "mysql:8.0.43" },
+  ];
+  const pgvector = [{ version: "17", image: "pgvector/pgvector:0.8.1-pg17" }];
+  for (const [engine, image, catalog, variant, line] of [
+    ["mysql", "mysql:8.4.5", mysql, null, "8.4"],
+    ["mysql", "docker.io/library/mysql:8.4.6", mysql, null, "8.4"],
+    ["mysql", "mysql:9.1.0", mysql, null, "9.1"],
+    ["mysql", "mysql:8.4", mysql, null, "8.4"],
+    ["mysql", "mysql:8", mysql, null, "custom"],
+    ["mysql", "mysql:latest", mysql, null, "custom"],
+    ["mysql", "mysql", mysql, null, "custom"],
+    ["mysql", `mysql@sha256:${"a".repeat(64)}`, mysql, null, "custom"],
+    ["mongo", `mongo:8.0.40@sha256:${"a".repeat(64)}`, [], null, "8.0"],
+    ["postgres", "postgres:17.9-bookworm", [], null, "17"],
+    ["postgres", "postgres:9.6.24", [], null, "9.6"],
+    ["postgres", "pgvector/pgvector:0.8.8-pg16-trixie", pgvector, "pgvector", "16"],
+    ["postgres", "pgvector/pgvector:latest", pgvector, "pgvector", "custom"],
+    ["keydb", "eqalpha/keydb:x86_64_v6.3.4", [], null, "6.3"],
+    ["dragonfly", "ghcr.io/dragonflydb/dragonfly:v1.34.1", [], null, "1.34"],
+  ] as const) {
+    expect({ image, line: imageLine(engine, image, catalog, variant) }).toEqual({ image, line });
+  }
 });

@@ -1,16 +1,18 @@
 // The Version card on a database's Settings tab: the catalog versions with
 // the risks they take, a patch update, a MongoDB upgrade that waits for a
 // backup (Back up now) or "Change without a backup", Postgres's next major
-// and older lines as risks to accept ("I understand"), any other image of
+// (every risk it takes listed) and older lines as risks to accept ("I
+// understand"), any other image of
 // the engine (Use another image: an older patch, a line outside the
 // catalog such as mongo:8.2.12, mongo:latest, another repository refused),
 // staying on a custom tag after a change to another one failed, the
 // header chip of a database on latest, and MySQL 8.0 to 8.4 refused for the
 // accounts on mysql_native_password (or when they cannot be listed) until
 // their logins are kept working, which the card then shows and a patch
-// update keeps, and a MySQL 8.4 turning those logins on and off on the image
-// it runs. Demo data (demo/service.ts versionChoicesOf) stands in for the
-// panel; databases.setVersion is answered here so nothing deploys.
+// update keeps, for another image of 8.4 too (never sent for 9.1), and a
+// MySQL 8.4 turning those logins on and off on the image it runs. Demo data
+// (demo/service.ts versionChoicesOf) stands in for the panel;
+// databases.setVersion is answered here so nothing deploys.
 //
 // Screenshots: $SHOTS_DIR/databases/version-*.png.
 
@@ -245,10 +247,19 @@ test.describe("database version", () => {
     // The one that runs is no choice at all.
     await expect(page.getByRole("option", { name: /^17/ })).toHaveCount(0);
     await page.screenshot({ path: `${shots}/version-postgres.png` });
+    // Every risk of a catalog choice is listed, not only the most serious one.
+    await page.getByRole("option", { name: /^18/ }).click();
+    await card.getByRole("button", { name: "Change version" }).click();
+    const dialog = page.getByRole("dialog");
+    const majorRisks = dialog.getByRole("list", { name: "What can go wrong" });
+    await expect(majorRisks.getByText("A major jump: Postgres does not open another major's data files")).toBeVisible();
+    await expect(majorRisks.getByText("This version keeps its data in another folder. Seylo runs it on the folder of the data that runs")).toBeVisible();
+    await expect(majorRisks.getByRole("listitem")).toHaveCount(2);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await card.getByRole("combobox", { name: "Change to" }).click();
     await page.getByRole("option", { name: /^16/ }).click();
     await card.getByRole("button", { name: "Change version" }).click();
 
-    const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Change PostgreSQL to 16?" })).toBeVisible();
     const risks = dialog.getByRole("list", { name: "What can go wrong" });
     await expect(risks.getByText("postgres:16.10-alpine is older than what runs.")).toBeVisible();
@@ -395,19 +406,22 @@ test.describe("database version", () => {
     await expect(field).toHaveValue("mongo:8.0.38");
 
     await field.fill("mongo:8.2.12");
-    await dialog.getByRole("button", { name: "Update" }).click();
+    // Another line, as the panel reads the tag: a version change, with the backup step before the panel answers.
+    const backup = dialog.getByRole("region", { name: "Backup" });
+    await expect(backup.getByText("No successful backup from the last 24 hours.")).toBeVisible();
+    // MongoDB's compatibility step is only for the catalog's one-step upgrades: not said for 8.2.
+    await expect(dialog.getByText("feature compatibility version is set to")).toHaveCount(0);
+    const submit = dialog.getByRole("button", { name: "Change version" });
+    await expect(submit).toBeDisabled();
+    await backup.getByLabel("Change without a backup").check();
+    await submit.click();
     const risks = dialog.getByRole("list", { name: "What can go wrong" });
     await expect(risks.getByText("Not tested by Seylo: this version is not in Seylo's catalog.")).toBeVisible();
     // No compatibility step outside the catalog's one-step upgrades: MongoDB may refuse the data.
     await expect(risks.getByText("MongoDB may refuse data whose feature compatibility version it does not support")).toBeVisible();
     await expect(dialog.getByText("the old container comes back on the same data")).toBeVisible();
-    const backup = dialog.getByRole("region", { name: "Backup" });
-    await expect(backup.getByText("No successful backup from the last 24 hours.")).toBeVisible();
-    const submit = dialog.getByRole("button", { name: "Change version" });
     await expect(submit).toBeDisabled();
     await dialog.getByLabel("I understand").check();
-    await expect(submit).toBeDisabled();
-    await backup.getByLabel("Change without a backup").check();
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${shots}/version-other-line.png` });
     await submit.click();
@@ -415,10 +429,10 @@ test.describe("database version", () => {
 
     await card.getByRole("button", { name: "Use another image" }).click();
     await field.fill("mongo:latest");
-    await dialog.getByRole("button", { name: "Update" }).click();
+    await dialog.getByRole("region", { name: "Backup" }).getByLabel("Change without a backup").check();
+    await dialog.getByRole("button", { name: "Change version" }).click();
     await expect(risks.getByText("A floating tag: the release behind it can change on the next deploy")).toBeVisible();
     await dialog.getByLabel("I understand").check();
-    await dialog.getByRole("region", { name: "Backup" }).getByLabel("Change without a backup").check();
     await dialog.getByRole("button", { name: "Change version" }).click();
     await expect(dialog).toHaveCount(0);
 
@@ -428,9 +442,9 @@ test.describe("database version", () => {
     await expect(dialog.getByText("Use an image of mongo, MongoDB's official image.")).toBeVisible();
     await expect(dialog.getByLabel("I understand")).toHaveCount(0);
     expect(sent).toEqual([
-      { serviceId: svc.db, image: "mongo:8.2.12" },
+      { serviceId: svc.db, image: "mongo:8.2.12", confirmNoBackup: true },
       { serviceId: svc.db, image: "mongo:8.2.12", acceptRisk: true, confirmNoBackup: true },
-      { serviceId: svc.db, image: "mongo:latest" },
+      { serviceId: svc.db, image: "mongo:latest", confirmNoBackup: true },
       { serviceId: svc.db, image: "mongo:latest", acceptRisk: true, confirmNoBackup: true },
       { serviceId: svc.db, image: "bitnami/mongodb:8.0.4" },
     ]);
@@ -593,6 +607,79 @@ test.describe("database version", () => {
     await dialog.getByRole("button", { name: "Update" }).click();
     await expect(dialog).toHaveCount(0);
     expect(sent).toEqual({ serviceId: svc.db, image: "mysql:8.4.7", keepNativePassword: true });
+  });
+
+  test("another image of MySQL 8.4 on an 8.0 database offers to keep the old logins once the panel names them; 9.1 never sends it", async ({
+    page,
+  }) => {
+    const sent: Record<string, unknown>[] = [];
+    let version: "8.0" | "8.4" = "8.0";
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? mysqlDb(version) : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => mysqlChoices(version, version === "8.4"),
+        "databases.setVersion": (input) => {
+          sent.push(input);
+          if (input.image === "mysql:8.4.5" && input.keepNativePassword !== true) {
+            throw new DemoRefusal(409, "CONFLICT", "MySQL 8.4 has the mysql_native_password plugin off. Nothing changed.", {
+              reason: "nativePasswordUsers",
+              accounts: "legacy@%",
+              count: "1",
+            });
+          }
+          if (input.image === "mysql:9.1.0") {
+            // As the panel answers keepNativePassword for a line without the plugin.
+            if (input.keepNativePassword !== undefined)
+              throw new DemoRefusal(400, "BAD_REQUEST", "MySQL 9.1 has no mysql_native_password plugin to keep on.", { field: "keepNativePassword" });
+            if (input.acceptRisk !== true)
+              throw new DemoRefusal(409, "CONFLICT", "MySQL 9.1 is not in Seylo's catalog. Nothing changed.", {
+                reason: "riskNotAccepted",
+                risk: "otherLine",
+                risks: "otherLine",
+                message: "MySQL 9.1 is not in Seylo's catalog, so this change is not tested by Seylo.",
+                version: "9.1",
+                image: "mysql:9.1.0",
+                backupRequired: "false",
+              });
+          }
+          return { database: mysqlDb("8.4"), deploymentId: "d0000000000000va" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await card.getByRole("button", { name: "Use another image" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Image").fill("mysql:8.4.5");
+    // Read from the tag: 8.4, a line change, whose accounts are checked first.
+    await expect(dialog.getByText("MySQL 8.4 has mysql_native_password logins off.")).toBeVisible();
+    const keep = dialog.getByLabel("Keep mysql_native_password logins working in 8.4");
+    await expect(keep).toHaveCount(0);
+    const submit = dialog.getByRole("button", { name: "Change version" });
+    await submit.click();
+    await expect(dialog.getByText("This account signs in with mysql_native_password, which MySQL 8.4 has off")).toBeVisible();
+    await keep.check();
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+
+    // On 8.4 with the logins on, 9.1 has no plugin to keep: the checkbox goes, and nothing about it is sent.
+    version = "8.4";
+    await page.reload();
+    await card.getByRole("button", { name: "Use another image" }).click();
+    await expect(dialog.getByLabel("Keep mysql_native_password logins working in 8.4")).toBeChecked();
+    await dialog.getByLabel("Image").fill("mysql:9.1.0");
+    await expect(dialog.getByLabel(/^Keep mysql_native_password logins working/)).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Change version" }).click();
+    await expect(dialog.getByRole("list", { name: "What can go wrong" }).getByText("Not tested by Seylo")).toBeVisible();
+    await dialog.getByLabel("I understand").check();
+    await dialog.getByRole("button", { name: "Change version" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual([
+      { serviceId: svc.db, image: "mysql:8.4.5" },
+      { serviceId: svc.db, image: "mysql:8.4.5", keepNativePassword: true },
+      { serviceId: svc.db, image: "mysql:9.1.0" },
+      { serviceId: svc.db, image: "mysql:9.1.0", acceptRisk: true },
+    ]);
   });
 
   test("a MySQL whose accounts cannot be listed upgrades by keeping the old logins working", async ({ page }) => {

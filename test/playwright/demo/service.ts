@@ -724,6 +724,7 @@ export function versionChoicesOf(serviceId: string) {
         version: "18",
         image: "postgres:18.6-alpine",
         ...risky("major", "postgresMajor", "PostgreSQL 18 does not open PostgreSQL 17 data files without pg_upgrade or a dump and restore, which do not run here, so it will most likely not start."),
+        risks: ["postgresMajor", "dataPath"],
       },
       { version: "17", image: "postgres:17.6-alpine", ...refused("current", "current", "The database already runs postgres:17.6-alpine: nothing to change.") },
       { version: "16", image: "postgres:16.10-alpine", ...older("16") },

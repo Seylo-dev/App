@@ -27,7 +27,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
-import { type RiskRefusal, riskRefusalOf } from "../../../lib/database-image";
+import { imageLine, type RiskRefusal, riskRefusalOf } from "../../../lib/database-image";
 import { shortImage } from "../../new-service/short-image";
 import { useActiveDeploy } from "../active-deploy";
 import { DeployLogModal } from "../deploy-log-modal";
@@ -237,7 +237,6 @@ function VersionDialog({
   onClose: () => void;
 }) {
   const invalidate = useInvalidate();
-  const lineChange = choice !== null && choice.version !== data.version;
   const [image, setImage] = useState(data.image);
   const [withoutBackup, setWithoutBackup] = useState(false);
   // What the panel answered for another image: the risks (riskNotAccepted), or that it needs a backup.
@@ -249,15 +248,21 @@ function VersionDialog({
     (choice?.risk
       ? {
           risk: choice.risk,
-          risks: [choice.risk],
+          // Every risk the panel found, not only the most serious one.
+          risks: choice.risks?.length ? choice.risks : [choice.risk],
           message: choice.message ?? "",
           version: choice.version,
           image: choice.image,
           backupRequired: !data.backupFresh,
         }
       : null);
-  // The line it would run: the catalog's, or the one the panel read from another image's tag.
-  const toVersion = choice?.version ?? (refused?.version || data.version);
+  // The line it would run: the catalog's, else the one the panel read from another image's tag, else
+  // the one that tag names as the panel reads it (imageLine), before the panel answered.
+  const toVersion = choice?.version ?? (refused?.version || imageLine(data.engine, image, data.choices, data.variant ?? null));
+  const lineChange = toVersion !== data.version;
+  // A catalog version, or another image of a catalog line whose choice takes no risk (an upgrade the
+  // rules make: MongoDB's gets the compatibility step); the panel's answer says the rest.
+  const plainLine = choice !== null || data.choices.some((c) => c.version === toVersion && c.allowed && !c.risk);
   // MySQL 8.4: mysql_native_password logins. The checkbox shows while they are on, or once the
   // panel named accounts that would lose them or could not list them (an admin other than root
   // cannot read MySQL's accounts).
@@ -350,8 +355,8 @@ function VersionDialog({
                 : t("databaseVersion.confirm.restart", { image: target })}
             </DialogDescription>
           </div>
-          {lineChange && !risk && <Callout tone="warning">{t("databaseVersion.confirm.undo")}</Callout>}
-          {lineChange && !risk && data.engine === "mongo" && (
+          {lineChange && !risk && plainLine && <Callout tone="warning">{t("databaseVersion.confirm.undo")}</Callout>}
+          {lineChange && !risk && plainLine && data.engine === "mongo" && (
             <p className="m-0 text-[13px] leading-normal text-ink-strong">
               {t("databaseVersion.confirm.mongoFcv", { version: data.version })}
             </p>

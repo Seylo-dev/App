@@ -33,6 +33,43 @@ export function isFloatingImage(engine: string, image: string, variant: string |
   return parts < exact;
 }
 
+/** The version recorded for an image whose tag names no release (latest, a digest). */
+const customLine = "custom";
+
+/**
+ * The line databases.setVersion would record for an image (the panel's
+ * images.ts engineImage): the catalog line of that very image, pgvector's
+ * "-pg17", else the release in its tag as a line (Postgres its major from
+ * 10 on, the others major.minor), else "custom". The Version card's notes
+ * (the backup, MySQL 8.4's mysql_native_password logins) follow it until
+ * the panel answers with its own.
+ */
+export function imageLine(
+  engine: string,
+  image: string,
+  catalog: readonly { version: string; image: string }[],
+  variant: string | null = null,
+): string {
+  const name = image
+    .trim()
+    .replace(/^docker\.io\//, "")
+    .replace(/^library\//, "");
+  const ref = name.includes("@") || /:[^/]*$/.test(name) ? name : `${name}:latest`;
+  const exact = catalog.find((v) => v.image === ref);
+  if (exact) return exact.version;
+  // The tag in front of a digest still names the release ("mongo:8.0.40@sha256:...").
+  const named = ref.replace(/@.*$/, "");
+  const colon = named.lastIndexOf(":");
+  if (colon < 0 || named.indexOf("/", colon) >= 0) return customLine;
+  const tag = named.slice(colon + 1);
+  if (variant === "pgvector") return /(?:^|-)pg(\d+)(?:-|$)/.exec(tag)?.[1] ?? customLine;
+  const release = /^v?(\d+(?:\.\d+)*)/.exec(tag)?.[1] ?? /_v?(\d+(?:\.\d+)+)/.exec(tag)?.[1];
+  if (!release) return customLine;
+  const [major, minor] = release.split(".");
+  if (engine === "postgres" && Number(major) >= 10) return major ?? customLine;
+  return minor === undefined ? customLine : `${major}.${minor}`;
+}
+
 /** What databases.setVersion's riskNotAccepted refusal says (details), null for any other error. */
 export interface RiskRefusal {
   /** The most serious risk. */
