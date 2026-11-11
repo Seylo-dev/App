@@ -10,6 +10,11 @@ export interface RegistryLogin {
 
 const timeoutMs = 15_000;
 
+/** A login as registries.create stores it: the server in lower case, the user name trimmed. */
+export function registryLogin(input: RegistryLogin): RegistryLogin {
+  return { server: input.server.toLowerCase(), username: input.username.trim(), password: input.password };
+}
+
 /** Docker Hub's API host for "docker.io" and its aliases. */
 export function registryHost(server: string): string {
   const host = server.toLowerCase();

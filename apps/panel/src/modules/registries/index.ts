@@ -11,7 +11,7 @@ import { registryCredentials, services } from "../../db/schema";
 import { implement } from "../../ops/implement";
 import type { SecretBox } from "../../security/secret-box";
 import { defineModule } from "../module";
-import { checkRegistryLogin, type RegistryLogin } from "./login";
+import { checkRegistryLogin, type RegistryLogin, registryLogin } from "./login";
 
 type Row = typeof registryCredentials.$inferSelect;
 type Registry = Static<typeof registryOps.Registry>;
@@ -67,7 +67,7 @@ const list = implement(registryOps.list, (_input, ctx) => {
 });
 
 const create = implement(registryOps.create, async (input, ctx) => {
-  const login = { server: input.server.toLowerCase(), username: input.username.trim(), password: input.password };
+  const login = registryLogin(input);
   const failure = await checkRegistryLogin(login);
   if (failure) throw new OpError("BAD_REQUEST", failure, { field: "password" });
   const row = ctx.db

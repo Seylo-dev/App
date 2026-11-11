@@ -11,7 +11,7 @@ import { implement } from "../../ops/implement";
 import { defineModule } from "../module";
 import { assertSourceAllowed } from "../services/source-guard";
 import { blockedMessage, blockedTarget } from "../uptime/targets";
-import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
+import { credentialUsage, loadCredential, newCredential, openCredential, toCredential } from "./credentials";
 import { checkKnownHostsFor, generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, urlHost } from "./remote";
 import {
   allowInternalGitHost,
@@ -40,38 +40,10 @@ const listCredentials = implement(gitOps.listCredentials, (_input, ctx) => {
 });
 
 const createCredential = implement(gitOps.createCredential, (input, ctx) => {
-  checkKnownHostsFor(input.host, input.knownHosts);
-  let secret: string;
-  let publicKey: string | null = null;
-  let fingerprint: string | null = null;
-  if (input.kind === "token") {
-    if (!input.token) throw new OpError("BAD_REQUEST", "Enter the access token.", { field: "token" });
-    secret = input.token.trim();
-  } else {
-    if (!input.privateKey) throw new OpError("BAD_REQUEST", "Paste the private key.", { field: "privateKey" });
-    const pub = publicKeyOf(input.privateKey, input.name);
-    if (!pub)
-      throw new OpError("BAD_REQUEST", "This private key cannot be read. Use an OpenSSH or PEM key without a passphrase.", {
-        field: "privateKey",
-      });
-    secret = `${input.privateKey.trim()}\n`;
-    publicKey = pub.publicKey;
-    fingerprint = pub.fingerprint;
-  }
+  const { values, secret } = newCredential(input);
   const row = ctx.db
     .insert(gitCredentials)
-    .values({
-      name: input.name.trim(),
-      kind: input.kind,
-      host: input.host.toLowerCase(),
-      username: input.kind === "token" ? input.username?.trim() || null : null,
-      secretSealed: ctx.secrets.seal(secret, "git.credential"),
-      knownHosts: input.knownHosts?.trim() || null,
-      publicKey,
-      fingerprint,
-      origin: "manual",
-      createdBy: userOf(ctx.principal)?.id ?? null,
-    })
+    .values({ ...values, secretSealed: ctx.secrets.seal(secret, "git.credential"), createdBy: userOf(ctx.principal)?.id ?? null })
     .returning()
     .get();
   return toCredential(row, 0);

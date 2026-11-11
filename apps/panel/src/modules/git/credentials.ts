@@ -7,10 +7,55 @@ import { eq, or, sql } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { gitCredentials, services } from "../../db/schema";
 import type { SecretBox } from "../../security/secret-box";
-import type { RemoteAuth } from "./remote";
+import { checkKnownHostsFor, publicKeyOf, type RemoteAuth } from "./remote";
 
 export type GitCredentialRow = typeof gitCredentials.$inferSelect;
 export type GitCredential = Static<typeof gitOps.GitCredential>;
+export type NewCredential = Static<typeof gitOps.createCredential.input>;
+
+/**
+ * What git.createCredential stores for its input, after its checks: the
+ * known_hosts lines name the host, a token is given, or a private key the
+ * panel can read, whose public key and fingerprint come from the key
+ * itself. Imports build a credential from a file with it too. BAD_REQUEST
+ * when a check fails; the caller seals `secret`.
+ */
+export function newCredential(input: NewCredential): {
+  values: Omit<typeof gitCredentials.$inferInsert, "secretSealed" | "createdBy">;
+  secret: string;
+} {
+  checkKnownHostsFor(input.host, input.knownHosts);
+  let secret: string;
+  let publicKey: string | null = null;
+  let fingerprint: string | null = null;
+  if (input.kind === "token") {
+    if (!input.token) throw new OpError("BAD_REQUEST", "Enter the access token.", { field: "token" });
+    secret = input.token.trim();
+  } else {
+    if (!input.privateKey) throw new OpError("BAD_REQUEST", "Paste the private key.", { field: "privateKey" });
+    const pub = publicKeyOf(input.privateKey, input.name);
+    if (!pub)
+      throw new OpError("BAD_REQUEST", "This private key cannot be read. Use an OpenSSH or PEM key without a passphrase.", {
+        field: "privateKey",
+      });
+    secret = `${input.privateKey.trim()}\n`;
+    publicKey = pub.publicKey;
+    fingerprint = pub.fingerprint;
+  }
+  return {
+    values: {
+      name: input.name.trim(),
+      kind: input.kind,
+      host: input.host.toLowerCase(),
+      username: input.kind === "token" ? input.username?.trim() || null : null,
+      knownHosts: input.knownHosts?.trim() || null,
+      publicKey,
+      fingerprint,
+      origin: "manual",
+    },
+    secret,
+  };
+}
 
 /** Services whose source (or compose source) uses each credential, the connected GitHub account (accountId) included. */
 export function credentialUsage(db: PanelDb, credentialId?: string): Map<string, number> {
