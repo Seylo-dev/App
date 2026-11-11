@@ -232,6 +232,8 @@ export function MoveFormView({
   // The nodes the tick was given for: a node that drops off since needs a new tick.
   const [tickedFor, setTickedFor] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // An address panelMove.start refused, in the panel's words: under the field too, until it changes.
+  const [startRefused, setStartRefused] = useState<{ address: string; message: string } | null>(null);
   const tickId = useId();
   const addressId = useId();
   const start = useSettingsMutation(panelMove.start, {
@@ -245,7 +247,7 @@ export function MoveFormView({
   const address = typed ?? check.defaultAddress ?? "";
   const trimmed = address.trim();
   const malformed = trimmed !== "" && (trimmed.length > 253 || !addressShape.test(trimmed));
-  const refusedHere = refused?.address === trimmed ? refused.message : null;
+  const refusedHere = [refused, startRefused].find((refusal) => refusal?.address === trimmed)?.message ?? null;
   const addressError = malformed ? t("settingsPanelMove.addressInvalid") : refusedHere;
   const leftKey = check.nodesLeftBehind.map((node) => node.id).join(",");
   const leftBehind = tickedFor === leftKey;
@@ -375,6 +377,8 @@ export function MoveFormView({
           } catch (error) {
             // The person closed the re-auth dialog: nothing failed, this one closes too.
             if (isReauthCancelled(error)) return;
+            const message = addressRefusal(error);
+            if (message) setStartRefused({ address: trimmed, message });
             throw error;
           }
         }}

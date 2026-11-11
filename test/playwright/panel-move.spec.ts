@@ -531,6 +531,57 @@ test.describe("panel move", () => {
     await expect.poll(() => sent["panelMove.start"]).toEqual([{ targetNodeId: ids.us, address: "panel-2.acme.dev", leftBehind: true }]);
   });
 
+  test("an address the panel refuses, from the check or from Start: its words under the field, and Start stays off", async ({ page }) => {
+    const ownAddress = (address: string) =>
+      new DemoRefusal(
+        400,
+        "BAD_REQUEST",
+        `${address} is an address of de-fsn-1, the server the panel moves away from. Enter the address other servers reach the target at.`,
+        { field: "address" },
+      );
+    await installDemo(page, {
+      overrides: {
+        "panelMove.check": (input) => {
+          if (input.address === "203.0.113.10") throw ownAddress(input.address);
+          return moveCheck(input);
+        },
+        "panelMove.start": (input) => {
+          if (input.address === "10.0.0.5") throw ownAddress(input.address);
+          return movingStatus();
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await pickTarget(page, "us-ash-1");
+    const address = card(page).getByRole("textbox", { name: "Address" });
+    // The check refuses it: the form keeps its last answer, the field says why.
+    await address.fill("203.0.113.10");
+    await expect(card(page).getByText("203.0.113.10 is an address of de-fsn-1")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    await expect(card(page).getByText("3 nodes follow on their own")).toBeVisible();
+    await expect(card(page).getByText("Could not load this")).toHaveCount(0);
+    await expect(card(page).getByText("Could not check again")).toHaveCount(0);
+    await address.fill("panel-2.acme.dev");
+    await expect(card(page).getByText("203.0.113.10 is an address of de-fsn-1")).toHaveCount(0);
+    await expect(startButton(page)).toBeEnabled();
+    // Only Start refuses this one: after the dialog the field says why too, until it changes.
+    await address.fill("10.0.0.5");
+    await expect(card(page).getByText("Point the DNS record of panel.acme.dev at 10.0.0.5")).toBeVisible();
+    await startButton(page).click();
+    const dialog = page.getByRole("alertdialog");
+    await dialog.getByRole("button", { name: "Move the panel" }).click();
+    await expect(dialog.getByText("10.0.0.5 is an address of de-fsn-1")).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(card(page).getByText("10.0.0.5 is an address of de-fsn-1")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/address-refused.png`, fullPage: true });
+    await address.fill("panel-2.acme.dev");
+    await expect(startButton(page)).toBeEnabled();
+    expect(sent["panelMove.start"]).toEqual([{ targetNodeId: ids.us, address: "10.0.0.5" }]);
+  });
+
   test("the switch waits for the target: how long, the banner stays, and Cancel anyway after 10 minutes", async ({ page }) => {
     let status = movingStatus({
       step: "switching",
