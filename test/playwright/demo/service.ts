@@ -678,6 +678,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
 export function databaseOf(serviceId: string) {
   const exposure = {
     enabled: true,
+    state: "open",
     host: "203.0.113.10",
     port: 15432,
     // The database's own user: exposing only opens the port, with TLS.
@@ -717,7 +718,7 @@ export function databaseOf(serviceId: string) {
       engine: "clickhouse",
       version: "26.8",
       internal: { host: "events", port: 9000, database: "events", user: "ch_k3v9q2m8x1", httpPort: 8123 },
-      exposure: { ...exposure, enabled: false, host: null, port: null, user: "ch_k3v9q2m8x1", certificate: "none" },
+      exposure: { ...exposure, enabled: false, state: "off", host: null, port: null, user: "ch_k3v9q2m8x1", certificate: "none" },
       shellClient: "clickhouse-client",
       webUi: { ...base.webUi, tool: "ClickHouse Play", running: false, lastActiveAt: null },
     };
@@ -731,7 +732,8 @@ export function databaseOf(serviceId: string) {
   };
 }
 
-function connectionOf(serviceId: string) {
+/** databases.connection for the same databases. */
+export function connectionOf(serviceId: string) {
   if (serviceId === ids.redis)
     return {
       internal: { url: "redis://default:Rk2mV7wTq9Lx4Pb8@redis:6379", host: "redis", port: 6379, database: "", user: "default", password: "Rk2mV7wTq9Lx4Pb8" },

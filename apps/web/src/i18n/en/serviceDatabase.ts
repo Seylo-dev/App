@@ -21,6 +21,8 @@ export default {
   notExposed:
     "Off. Only services of this project on the same node can connect. Turn it on to reach the database from other nodes or your laptop, with TLS.",
   opening: "Opening the port…",
+  waitingForNode:
+    "Closed until {node} updates to 0.2.9: its agent cannot keep this port TLS-only yet. Exposure stays on, and the port opens by itself after the update.",
   sameUserBefore: "The same user",
   sameUserAfter: "and password as inside, here only over TLS. The internal URL is unchanged.",
   allowedFrom: "Allowed from:",

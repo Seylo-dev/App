@@ -17,6 +17,7 @@ const db = {
   internal: { host: "db", port: 5432, database: "shop", user: "postgres", httpPort: null },
   exposure: {
     enabled: true,
+    state: "open",
     host: "203.0.113.10",
     port: 15432,
     user: "postgres",
@@ -74,4 +75,31 @@ test("the exposed card shows the database's own user and password, with one rese
   expect(out).not.toContain("exposed password");
   expect(exposed).not.toContain(t("serviceDatabase.reset.button"));
   expect(section(out, t("serviceDatabase.internal"))).toContain(t("serviceDatabase.reset.button"));
+});
+
+test("an exposure waiting for its node's update stays on, closed: no SSL chip and no address", async () => {
+  const render = (database: object, exposed: object | null) =>
+    renderStatic(
+      () => <ConnectionPage service={service} />,
+      [
+        [databases.get, { serviceId: "svc-db" }, database],
+        [databases.connection, { serviceId: "svc-db" }, { ...connection, exposed }],
+      ],
+    );
+  const waitingNote = t("serviceDatabase.waitingForNode", { node: "de-fsn-1" });
+  const out = await render({ ...db, exposure: { ...db.exposure, state: "waitingForNodeUpdate", host: null, port: null } }, null);
+  const exposed = section(out, t("serviceDatabase.exposed"));
+  // The switch stays on: the setting is kept, and the port opens by itself after the update.
+  expect(exposed.match(/<button[^>]*id="db-exposed"[^>]*>/)?.[0]).toContain('aria-checked="true"');
+  expect(exposed).toContain(waitingNote);
+  expect(exposed).not.toContain(t("serviceDatabase.sslRequired"));
+  expect(exposed).not.toContain("203.0.113.10");
+  expect(exposed).not.toContain(t("serviceDatabase.opening"));
+  expect(exposed).not.toContain(t("serviceDatabase.exposedUrl"));
+
+  // Open, it has the chip and the address, and no note.
+  const open = section(await render(db, connection.exposed), t("serviceDatabase.exposed"));
+  expect(open).toContain(t("serviceDatabase.sslRequired"));
+  expect(open).toContain("203.0.113.10");
+  expect(open).not.toContain(waitingNote);
 });

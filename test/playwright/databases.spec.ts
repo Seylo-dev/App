@@ -1,8 +1,9 @@
 // The database engines on screen: the New database form (the offered engines,
 // versions from databases.engines on the real panel, pgvector for Postgres;
 // KeyDB, Dragonfly and ClickHouse are hidden from it for now), KeyDB's exposure asking
-// for allowed IPs first, and the Connection tab of a ClickHouse database
-// (native and HTTP URLs) and of a pgvector one. Demo data (demo/*.ts) stands in for the fleet;
+// for allowed IPs first, an exposure closed until its node is updated, and
+// the Connection tab of a ClickHouse database (native and HTTP URLs) and of
+// a pgvector one. Demo data (demo/*.ts) stands in for the fleet;
 // databases.create is answered here so nothing is deployed.
 //
 // Screenshots: $SHOTS_DIR/databases/*.png.
@@ -11,7 +12,7 @@ import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { databaseOf, ids as svc } from "./demo/service";
+import { connectionOf, databaseOf, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/databases`;
@@ -124,7 +125,15 @@ test.describe("database engines", () => {
       engine: "keydb",
       version: "6.3",
       shellClient: "keydb-cli",
-      exposure: { ...databaseOf(svc.redis).exposure, enabled: false, host: null, port: null, certificate: "none", needsAllowedCidrs: true },
+      exposure: {
+        ...databaseOf(svc.redis).exposure,
+        enabled: false,
+        state: "off",
+        host: null,
+        port: null,
+        certificate: "none",
+        needsAllowedCidrs: true,
+      },
     });
     await installDemo(page, {
       overrides: {
@@ -156,7 +165,7 @@ test.describe("database engines", () => {
     let exposure: Record<string, unknown> | null = null;
     const closed = () => ({
       ...databaseOf(svc.db),
-      exposure: { ...databaseOf(svc.db).exposure, enabled: false, host: null, port: null, certificate: "none" },
+      exposure: { ...databaseOf(svc.db).exposure, enabled: false, state: "off", host: null, port: null, certificate: "none" },
     });
     await installDemo(page, {
       overrides: {
@@ -187,6 +196,41 @@ test.describe("database engines", () => {
     await dialog.getByRole("button", { name: "Expose" }).click();
     await expect.poll(() => exposure).not.toBeNull();
     expect(exposure).toMatchObject({ serviceId: svc.db, enabled: true, port: 25432 });
+  });
+
+  test("an exposed database on a node that was not updated stays on, closed until the update", async ({ page }) => {
+    let exposure: Record<string, unknown> | null = null;
+    const waiting = () => ({
+      ...databaseOf(svc.db),
+      exposure: { ...databaseOf(svc.db).exposure, state: "waitingForNodeUpdate", host: null, port: null },
+    });
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? waiting() : databaseOf(String(input.serviceId))),
+        "databases.connection": (input) => ({ ...connectionOf(String(input.serviceId)), ...(input.serviceId === svc.db ? { exposed: null } : {}) }),
+        "databases.setExposure": (input) => {
+          exposure = input;
+          return waiting();
+        },
+      },
+    });
+    await page.goto(connection(svc.db));
+    const exposed = page.getByRole("region", { name: "Exposed connection" });
+    await expect(exposed.getByRole("note")).toHaveText(
+      "Closed until de-fsn-1 updates to 0.2.9: its agent cannot keep this port TLS-only yet. Exposure stays on, and the port opens by itself after the update.",
+    );
+    // The setting is kept: the switch stays on, with no SSL chip, URL or address to a closed port.
+    await expect(exposed.getByLabel("Exposed")).toBeChecked();
+    await expect(exposed.getByText("SSL required")).toHaveCount(0);
+    await expect(exposed.getByLabel("Exposed connection URL")).toHaveCount(0);
+    await expect(exposed).not.toContainText("203.0.113.10");
+    await expect(exposed).not.toContainText("Opening the port");
+    await expect(page.locator('main [data-slot="skeleton"]')).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/exposed-waiting-for-node.png`, fullPage: true });
+    // It can still be turned off.
+    await exposed.getByLabel("Exposed").click();
+    await expect.poll(() => exposure).not.toBeNull();
+    expect(exposure).toMatchObject({ serviceId: svc.db, enabled: false });
   });
 
   test("the exposed card has the same user and password; one reset for the database", async ({ page }) => {

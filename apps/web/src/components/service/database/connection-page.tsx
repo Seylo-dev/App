@@ -230,12 +230,15 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
     onError: fail,
   });
   const e = db.exposure;
+  // On, but closed until the node's agent can keep the port TLS only: the setting stays and reopens by itself.
+  const waiting = e.state === "waitingForNodeUpdate";
   return (
     <Section
       label={t("serviceDatabase.exposed")}
       title={t("serviceDatabase.exposed")}
       badge={
-        e.enabled && (
+        e.enabled &&
+        !waiting && (
           <Chip tone="green">
             <IconLock size={11} stroke={2.6} />
             {t("serviceDatabase.sslRequired")}
@@ -261,6 +264,10 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
     >
       {!e.enabled ? (
         <p className="m-0 text-[13px] leading-normal text-ink-strong">{t("serviceDatabase.notExposed")}</p>
+      ) : waiting ? (
+        <p role="note" className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-[12.5px] leading-normal text-chip-amber-fg">
+          {t("serviceDatabase.waitingForNode", { node: db.nodeName })}
+        </p>
       ) : (
         <>
           {conn?.exposed ? (
