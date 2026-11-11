@@ -4304,11 +4304,13 @@ p41_run() {
 }
 
 # Check 43 (0.2.9): databases.setVersion on the real panel and B. A MongoDB
-# 7.0 with a document takes a patch update (the same release pinned by
-# digest: no backup, no compatibility step), is refused 8.0 without a
+# 7.0 with a document takes a patch update (the same release by another
+# tag, 7.0.45-jammy: no backup, no compatibility step; a digest is
+# refused, it does not show its version), is refused 8.0 without a
 # backup, then moves to 8.0 with confirmNoBackup (the panel sets
 # featureCompatibilityVersion 7.0 on the running 7.0 first) and keeps the
-# document; going back to 7.0 is refused.
+# document; going back to 7.0 is refused, a rollback to a 7.0 deployment too.
+P43_TAG=mongo:7.0.45-jammy
 P43_DIGEST=mongo:7.0.45@sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4
 check_43() {
   need_key || return 3
@@ -4335,8 +4337,9 @@ check_43() {
   expect "8.0 is offered as the next major; 9.0 waits for it (oneStep)" jq_ok "$out" \
     '([.choices[] | select(.version == "8.0" and .allowed)] | length == 1) and ([.choices[] | select(.version == "9.0" and .reason == "oneStep")] | length == 1)'
 
-  # Patch update: the same release by digest. No backup needed.
-  out=$(api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_DIGEST" '{serviceId: $s, version: "7.0", image: $i}')") ||
+  # A digest could be any version: refused. Patch update: the same release by another tag, no backup needed.
+  expect "a custom image by digest is refused (customImage)" refused_with customImage api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_DIGEST" '{serviceId: $s, version: "7.0", image: $i}')"
+  out=$(api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_TAG" '{serviceId: $s, version: "7.0", image: $i}')") ||
     { bad "the patch update was refused"; return 1; }
   dep=$(printf '%s' "$out" | jq -r .deploymentId)
   st=$(wait_deploy "$db" 600 "$dep")
@@ -4344,7 +4347,7 @@ check_43() {
   wait_for 120 "mongosh after the patch update" sh -c "printf 'db.t.findOne().v\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q e2e-43" ||
     bad "the document is gone after the patch update"
   out=$(on "$E2E_B" "docker inspect --format '{{.Config.Image}}' \$(docker ps -q --filter label=$SLUG.service=$db | head -1)")
-  expect "the container runs the pinned digest ($out)" sh -c "printf '%s' '$out' | grep -q 8bb4442761a6"
+  expect "the container runs $P43_TAG ($out)" sh -c "printf '%s' '$out' | grep -q 7.0.45-jammy"
 
   # A new major: refused without a backup, then with confirmNoBackup.
   expect "8.0 without a backup is refused (backupRequired)" refused_with backupRequired api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"8.0\"}"
@@ -4362,6 +4365,12 @@ check_43() {
   ev "database: $(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '{engine, version}'), choices now: $(api databases.versionChoices "{\"serviceId\":\"$db\"}" | jq -c '{image, choices: [.choices[] | {version, allowed, reason}]}')"
 
   expect "going back to 7.0 is refused (downgrade)" refused_with downgrade api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"7.0\",\"confirmNoBackup\":true}"
+  dep=$(api deployments.list "{\"serviceId\":\"$db\"}" | jq -r '[.deployments[] | select(.canRollback)][0].id // empty')
+  if [ -n "$dep" ]; then
+    expect "a rollback to a 7.0 deployment is refused (databaseVersion)" refused_with databaseVersion api deployments.rollback "{\"serviceId\":\"$db\",\"deploymentId\":\"$dep\"}"
+  else
+    bad "no 7.0 deployment is kept for a rollback"
+  fi
   api services.delete "{\"serviceId\":\"$db\",\"confirmName\":\"mongo-ver\"}" >/dev/null || true
 }
 
