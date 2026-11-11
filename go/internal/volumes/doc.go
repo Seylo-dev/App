@@ -8,6 +8,12 @@
 // volume folder: absolute paths, "..", and symlinks that point out of the
 // volume are all refused by the kernel-checked root, not by string tests.
 //
+// Data from outside the fleet (a volume archive in an uploaded service
+// export file) comes with limits (ImportOptions, capability
+// volume.import-limits.v1): most file bytes, most entries, the stream's
+// SHA-256 and the free space it needs. An import with limits that fails
+// after it started writing leaves the volume empty.
+//
 // A volume lives in its owner's folder (VolumeMount.owner_service_id for
 // compose stacks sharing one volume); callers pass that owner.
 //

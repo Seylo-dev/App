@@ -22,7 +22,7 @@ func TestRemoveServiceDirWaitsForImports(t *testing.T) {
 	done := make(chan error, 1)
 	tr := &Transfer{Layout: layout}
 	go func() {
-		_, err := tr.Import(context.Background(), "svc1", "svc1", "data", false, pr)
+		_, err := tr.Import(context.Background(), "svc1", "svc1", "data", ImportOptions{}, pr)
 		done <- err
 	}()
 	gz := gzip.NewWriter(pw)

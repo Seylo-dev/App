@@ -131,22 +131,36 @@ func wireRuntime(reg *Registry, d *Deps) error {
 	}
 	rpc.HandleRaw(reg, "ExportVolume", func(ctx context.Context, req *agentv1.ExportVolumeRequest, s rpc.RawStream) (*agentv1.ExportVolumeResponse, error) {
 		owner := volumeOwner(rt.Current(), req.GetServiceId(), req.GetVolume())
-		n, err := tr.Export(ctx, owner, req.GetVolume(), s)
+		got, err := tr.Export(ctx, owner, req.GetVolume(), s)
 		if err != nil {
 			return nil, runtimeStatus(err)
 		}
-		return &agentv1.ExportVolumeResponse{SizeBytes: n}, nil
+		return &agentv1.ExportVolumeResponse{SizeBytes: got.Bytes, Entries: got.Entries}, nil
 	})
 	rpc.HandleRaw(reg, "ImportVolume", func(ctx context.Context, req *agentv1.ImportVolumeRequest, s rpc.RawStream) (*agentv1.ImportVolumeResponse, error) {
 		owner := volumeOwner(rt.Current(), req.GetServiceId(), req.GetVolume())
-		n, err := tr.Import(ctx, req.GetServiceId(), owner, req.GetVolume(), req.GetReplace(), s)
+		opts := volumes.ImportOptions{
+			Replace:    req.GetReplace(),
+			MaxBytes:   req.GetMaxBytes(),
+			MaxEntries: req.GetMaxEntries(),
+			SHA256:     req.GetSha256(),
+		}
+		n, err := tr.Import(ctx, req.GetServiceId(), owner, req.GetVolume(), opts, s)
 		if err != nil {
-			// Drain what the panel still sends so the stream ends cleanly.
-			_, _ = io.Copy(io.Discard, s)
+			// A move's relay sends everything before it reads the answer:
+			// drain so its stream ends cleanly. Data from a file ends at
+			// once, so an upload learns of a refusal (no space, too large)
+			// without sending the rest.
+			if !opts.Limited() {
+				_, _ = io.Copy(io.Discard, s)
+			}
 			return nil, runtimeStatus(err)
 		}
 		return &agentv1.ImportVolumeResponse{SizeBytes: n}, nil
 	})
+	// ImportVolume honours max_bytes, max_entries and sha256: the panel
+	// sends data from an uploaded export file only to agents with this.
+	reg.Advertise(volumes.ImportLimitsCapability)
 	return nil
 }
 
@@ -169,6 +183,22 @@ func volumeOwner(desired *agentv1.DesiredState, serviceID, volume string) string
 // runtimeStatus maps runtime errors to user-facing statuses; anything not
 // listed stays an internal error.
 func runtimeStatus(err error) error {
+	// An import from a file the panel checks against: the reason tells the
+	// owner what to fix.
+	for _, limit := range []struct {
+		err    error
+		code   agentv1.StatusCode
+		reason string
+	}{
+		{volumes.ErrNoSpace, agentv1.StatusCode_STATUS_CODE_RESOURCE_EXHAUSTED, "noSpace"},
+		{volumes.ErrTooLarge, agentv1.StatusCode_STATUS_CODE_RESOURCE_EXHAUSTED, "tooLarge"},
+		{volumes.ErrTooMany, agentv1.StatusCode_STATUS_CODE_RESOURCE_EXHAUSTED, "tooMany"},
+		{volumes.ErrChecksum, agentv1.StatusCode_STATUS_CODE_INVALID_ARGUMENT, "checksum"},
+	} {
+		if errors.Is(err, limit.err) {
+			return &rpc.Error{Code: limit.code, Message: err.Error(), Details: map[string]string{"reason": limit.reason}}
+		}
+	}
 	code := agentv1.StatusCode_STATUS_CODE_UNSPECIFIED
 	switch {
 	case errors.Is(err, reconcile.ErrInvalidSpec), errors.Is(err, state.ErrInvalidDesired),

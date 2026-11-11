@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/seylo-dev/app/go/internal/datadir"
@@ -50,13 +53,14 @@ func TestRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 100_005 {
-		t.Fatalf("exported %d bytes", n)
+	// a.txt, sub/, sub/deep/, sub/deep/b.bin, sub/link, abs-link, hard.txt, empty/.
+	if n.Bytes != 100_005 || n.Entries != 8 {
+		t.Fatalf("exported %+v", n)
 	}
 
 	running := false
 	dst := &Transfer{Layout: datadir.New(t.TempDir()), Running: func(context.Context, string) (bool, error) { return running, nil }}
-	got, err := dst.Import(ctx, "svc", "svc", "data", false, bytes.NewReader(buf.Bytes()))
+	got, err := dst.Import(ctx, "svc", "svc", "data", ImportOptions{}, bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,18 +99,18 @@ func TestRoundtrip(t *testing.T) {
 	}
 
 	// Not empty now: refused without replace, works with it.
-	if _, err := dst.Import(ctx, "svc", "svc", "data", false, bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrNotEmpty) {
+	if _, err := dst.Import(ctx, "svc", "svc", "data", ImportOptions{}, bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrNotEmpty) {
 		t.Fatalf("non-empty import: %v", err)
 	}
 	mustWrite(t, filepath.Join(out, "stale.txt"), "old", 0o644)
-	if _, err := dst.Import(ctx, "svc", "svc", "data", true, bytes.NewReader(buf.Bytes())); err != nil {
+	if _, err := dst.Import(ctx, "svc", "svc", "data", ImportOptions{Replace: true}, bytes.NewReader(buf.Bytes())); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(out, "stale.txt")); !os.IsNotExist(err) {
 		t.Fatal("replace kept old files")
 	}
 	running = true
-	if _, err := dst.Import(ctx, "svc", "svc", "data", true, bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrRunning) {
+	if _, err := dst.Import(ctx, "svc", "svc", "data", ImportOptions{Replace: true}, bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrRunning) {
 		t.Fatalf("import while running: %v", err)
 	}
 	if _, err := src.Export(ctx, "svc", "nope", &bytes.Buffer{}); !errors.Is(err, ErrNoVolume) {
@@ -164,7 +168,7 @@ func TestImportRefusesEscapes(t *testing.T) {
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
 			tr := &Transfer{Layout: datadir.New(filepath.Join(base, name))}
-			_, err := tr.Import(ctx, "svc", "svc", "data", true, bytes.NewReader(data))
+			_, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{Replace: true}, bytes.NewReader(data))
 			if err == nil {
 				t.Fatal("escape accepted")
 			}
@@ -174,7 +178,147 @@ func TestImportRefusesEscapes(t *testing.T) {
 		})
 	}
 	tr := &Transfer{Layout: datadir.New(filepath.Join(base, "garbage"))}
-	if _, err := tr.Import(ctx, "svc", "svc", "data", true, bytes.NewReader([]byte("not gzip"))); !errors.Is(err, ErrBadArchive) {
+	if _, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{Replace: true}, bytes.NewReader([]byte("not gzip"))); !errors.Is(err, ErrBadArchive) {
 		t.Fatalf("garbage: %v", err)
+	}
+}
+
+// volumeFiles lists the names in the volume (empty: nothing there).
+func volumeFiles(t *testing.T, tr *Transfer) []string {
+	t.Helper()
+	dir, _ := tr.Layout.ServiceVolume("svc", "data")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+func hexSum(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// Data from an uploaded export file: the limits hold, and a failure leaves
+// the volume empty instead of half imported.
+func TestImportLimits(t *testing.T) {
+	ctx := context.Background()
+	data := archive(t,
+		entry{hdr: tar.Header{Name: "a.txt", Typeflag: tar.TypeReg}, body: "hello"},
+		entry{hdr: tar.Header{Name: "dir/", Typeflag: tar.TypeDir, Mode: 0o755}},
+		entry{hdr: tar.Header{Name: "dir/b.txt", Typeflag: tar.TypeReg}, body: "world!"},
+	)
+	sum := hexSum(data)
+	plenty := func(string) (uint64, uint64, bool) { return 1 << 40, 1 << 41, true }
+	fresh := func(t *testing.T) *Transfer {
+		return &Transfer{Layout: datadir.New(t.TempDir()), Space: plenty}
+	}
+
+	t.Run("within the limits", func(t *testing.T) {
+		tr := fresh(t)
+		n, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{MaxBytes: 11, MaxEntries: 3, SHA256: sum}, bytes.NewReader(data))
+		if err != nil || n != 11 {
+			t.Fatalf("import = %d, %v", n, err)
+		}
+		if got := volumeFiles(t, tr); len(got) != 2 {
+			t.Fatalf("volume = %v", got)
+		}
+	})
+	t.Run("more file bytes than max_bytes", func(t *testing.T) {
+		tr := fresh(t)
+		_, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{MaxBytes: 10}, bytes.NewReader(data))
+		if !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("err = %v", err)
+		}
+		if got := volumeFiles(t, tr); len(got) != 0 {
+			t.Fatalf("a failed import left %v", got)
+		}
+	})
+	t.Run("more entries than max_entries, folders counted", func(t *testing.T) {
+		tr := fresh(t)
+		_, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{MaxEntries: 2}, bytes.NewReader(data))
+		if !errors.Is(err, ErrTooMany) {
+			t.Fatalf("err = %v", err)
+		}
+		if got := volumeFiles(t, tr); len(got) != 0 {
+			t.Fatalf("a failed import left %v", got)
+		}
+	})
+	t.Run("another sha256", func(t *testing.T) {
+		tr := fresh(t)
+		_, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{SHA256: hexSum([]byte("other"))}, bytes.NewReader(data))
+		if !errors.Is(err, ErrChecksum) {
+			t.Fatalf("err = %v", err)
+		}
+		if got := volumeFiles(t, tr); len(got) != 0 {
+			t.Fatalf("a stream with another hash left %v", got)
+		}
+	})
+	t.Run("bytes after the archive count in the hash", func(t *testing.T) {
+		tr := fresh(t)
+		tail := append(bytes.Clone(data), archive(t, entry{hdr: tar.Header{Name: "c.txt", Typeflag: tar.TypeReg}, body: "x"})...)
+		_, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{SHA256: sum}, bytes.NewReader(tail))
+		if err == nil {
+			t.Fatal("a stream longer than the one hashed was accepted")
+		}
+		if got := volumeFiles(t, tr); len(got) != 0 {
+			t.Fatalf("volume = %v", got)
+		}
+	})
+	t.Run("a checksum that is not hex", func(t *testing.T) {
+		tr := fresh(t)
+		if _, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{SHA256: strings.ToUpper(sum)}, bytes.NewReader(data)); !errors.Is(err, ErrBadArchive) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("not enough free space", func(t *testing.T) {
+		tr := fresh(t)
+		// 20 GiB disk: 2 GiB must stay free, 2 GiB + 10 bytes are.
+		tr.Space = func(string) (uint64, uint64, bool) { return 2<<30 + 10, 20 << 30, true }
+		if _, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{MaxBytes: 11}, bytes.NewReader(data)); !errors.Is(err, ErrNoSpace) {
+			t.Fatalf("err = %v", err)
+		}
+		if _, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{MaxBytes: 10}, bytes.NewReader(data)); !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("with room for 10 bytes: %v", err)
+		}
+	})
+	t.Run("a broken stream", func(t *testing.T) {
+		tr := fresh(t)
+		_, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{SHA256: sum}, bytes.NewReader(data[:len(data)-12]))
+		if err == nil {
+			t.Fatal("a cut stream was accepted")
+		}
+		if got := volumeFiles(t, tr); len(got) != 0 {
+			t.Fatalf("volume = %v", got)
+		}
+	})
+	t.Run("without limits (moves, clones) a failure keeps what arrived", func(t *testing.T) {
+		tr := fresh(t)
+		bad := archive(t,
+			entry{hdr: tar.Header{Name: "a.txt", Typeflag: tar.TypeReg}, body: "hello"},
+			entry{hdr: tar.Header{Name: "../x", Typeflag: tar.TypeReg}, body: "pwn"},
+		)
+		if _, err := tr.Import(ctx, "svc", "svc", "data", ImportOptions{}, bytes.NewReader(bad)); !errors.Is(err, ErrBadArchive) {
+			t.Fatalf("err = %v", err)
+		}
+		if got := volumeFiles(t, tr); len(got) != 1 {
+			t.Fatalf("volume = %v", got)
+		}
+	})
+}
+
+func TestFreeFloor(t *testing.T) {
+	for _, c := range []struct{ total, want uint64 }{
+		{4 << 30, 1 << 30},
+		{20 << 30, 2 << 30},
+		{1 << 40, 5 << 30},
+	} {
+		if got := FreeFloor(c.total); got != c.want {
+			t.Fatalf("FreeFloor(%d) = %d, want %d", c.total, got, c.want)
+		}
 	}
 }

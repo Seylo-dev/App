@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,9 @@ func TestWireRuntime(t *testing.T) {
 	caps := d.Facts.Get().GetCapabilities()
 	// panel.publish-bind.v1: the panel closes IP access only on a panel
 	// node that advertises it (apps/panel/src/modules/settings).
-	for _, c := range []string{"state.sync.v1", "volume.transfer.v1", "panel.publish-bind.v1"} {
+	// volume.import-limits.v1: the panel sends an uploaded export file's
+	// volume data only to agents that advertise it (modules/serviceTransfer).
+	for _, c := range []string{"state.sync.v1", "volume.transfer.v1", "panel.publish-bind.v1", "volume.import-limits.v1"} {
 		if !slices.Contains(caps, c) {
 			t.Fatalf("capability %s not advertised: %v", c, caps)
 		}
@@ -106,7 +109,7 @@ func TestWireRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	var exp agentv1.ExportVolumeResponse
-	if err := st.Finish(&exp); err != nil || exp.GetSizeBytes() != 2 {
+	if err := st.Finish(&exp); err != nil || exp.GetSizeBytes() != 2 || exp.GetEntries() != 1 {
 		t.Fatalf("export = %v, %v", &exp, err)
 	}
 
@@ -136,6 +139,36 @@ func TestWireRuntime(t *testing.T) {
 	moved, _ := d.Layout.ServiceVolume("moved", "data")
 	if b, _ := os.ReadFile(filepath.Join(moved, "hello.txt")); string(b) != "hi" {
 		t.Fatalf("imported file = %q", b)
+	}
+
+	// With the limits of an uploaded file: another hash is refused with its
+	// reason and leaves the volume empty; too many entries too.
+	for _, c := range []struct {
+		req    *agentv1.ImportVolumeRequest
+		code   agentv1.StatusCode
+		reason string
+	}{
+		{&agentv1.ImportVolumeRequest{ServiceId: "moved", Volume: "data", Replace: true, Sha256: strings.Repeat("0", 64)},
+			agentv1.StatusCode_STATUS_CODE_INVALID_ARGUMENT, "checksum"},
+		{&agentv1.ImportVolumeRequest{ServiceId: "moved", Volume: "data", Replace: true, MaxEntries: 0, MaxBytes: 1},
+			agentv1.StatusCode_STATUS_CODE_RESOURCE_EXHAUSTED, ""},
+	} {
+		up, err = panel.Open(ctx, "ImportVolume", c.req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.Copy(up, bytes.NewReader(archive)); err != nil {
+			t.Fatal(err)
+		}
+		_ = up.CloseSend()
+		err = up.Finish(&agentv1.ImportVolumeResponse{})
+		st := rpc.StatusOf(err)
+		if st.GetCode() != c.code || (c.reason != "" && st.GetDetails()["reason"] != c.reason) {
+			t.Fatalf("import with %v = %v", c.req, st)
+		}
+		if left, _ := os.ReadDir(moved); len(left) != 0 {
+			t.Fatalf("a refused import left %v", left)
+		}
 	}
 
 	var rm agentv1.RemoveServiceResponse

@@ -492,7 +492,7 @@ func TestITVolumeMove(t *testing.T) {
 	// Import on the "target" (another data dir) and run the service there.
 	target := datadir.New(t.TempDir())
 	dst := &volumes.Transfer{Layout: target}
-	if _, err := dst.Import(ctx, e.id("dst"), e.id("dst"), "data", false, bytes.NewReader(buf.Bytes())); err != nil {
+	if _, err := dst.Import(ctx, e.id("dst"), e.id("dst"), "data", volumes.ImportOptions{}, bytes.NewReader(buf.Bytes())); err != nil {
 		t.Fatal(err)
 	}
 	dstDir, _ := target.ServiceVolume(e.id("dst"), "data")

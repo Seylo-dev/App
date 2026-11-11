@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/transfer.proto.
  */
 export const file_seylo_agent_v1_transfer: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zZXlsby9hZ2VudC92MS90cmFuc2Zlci5wcm90bxIOc2V5bG8uYWdlbnQudjEiOQoTRXhwb3J0Vm9sdW1lUmVxdWVzdBISCgpzZXJ2aWNlX2lkGAEgASgJEg4KBnZvbHVtZRgCIAEoCSIqChRFeHBvcnRWb2x1bWVSZXNwb25zZRISCgpzaXplX2J5dGVzGAEgASgEIl4KE0ltcG9ydFZvbHVtZVJlcXVlc3QSEgoKc2VydmljZV9pZBgBIAEoCRIOCgZ2b2x1bWUYAiABKAkSDwoHcmVwbGFjZRgDIAEoCBISCgpzaXplX2J5dGVzGAQgASgEIioKFEltcG9ydFZvbHVtZVJlc3BvbnNlEhIKCnNpemVfYnl0ZXMYASABKARCuAEKEmNvbS5zZXlsby5hZ2VudC52MUINVHJhbnNmZXJQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM");
+  fileDesc("Ch1zZXlsby9hZ2VudC92MS90cmFuc2Zlci5wcm90bxIOc2V5bG8uYWdlbnQudjEiOQoTRXhwb3J0Vm9sdW1lUmVxdWVzdBISCgpzZXJ2aWNlX2lkGAEgASgJEg4KBnZvbHVtZRgCIAEoCSI7ChRFeHBvcnRWb2x1bWVSZXNwb25zZRISCgpzaXplX2J5dGVzGAEgASgEEg8KB2VudHJpZXMYAiABKAQilgEKE0ltcG9ydFZvbHVtZVJlcXVlc3QSEgoKc2VydmljZV9pZBgBIAEoCRIOCgZ2b2x1bWUYAiABKAkSDwoHcmVwbGFjZRgDIAEoCBISCgpzaXplX2J5dGVzGAQgASgEEhEKCW1heF9ieXRlcxgFIAEoBBITCgttYXhfZW50cmllcxgGIAEoBBIOCgZzaGEyNTYYByABKAkiKgoUSW1wb3J0Vm9sdW1lUmVzcG9uc2USEgoKc2l6ZV9ieXRlcxgBIAEoBEK4AQoSY29tLnNleWxvLmFnZW50LnYxQg1UcmFuc2ZlclByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw");
 
 /**
  * ExportVolumeRequest opens a raw download of one volume as a .tar.gz
@@ -49,6 +49,14 @@ export type ExportVolumeResponse = Message<"seylo.agent.v1.ExportVolumeResponse"
    * @generated from field: uint64 size_bytes = 1;
    */
   sizeBytes: bigint;
+
+  /**
+   * Archive entries written (files, folders, links); 0 from agents before
+   * 0.2.9. added in 0.2.9 (volume.import-limits.v1)
+   *
+   * @generated from field: uint64 entries = 2;
+   */
+  entries: bigint;
 };
 
 /**
@@ -90,6 +98,36 @@ export type ImportVolumeRequest = Message<"seylo.agent.v1.ImportVolumeRequest"> 
    * @generated from field: uint64 size_bytes = 4;
    */
   sizeBytes: bigint;
+
+  /**
+   * The limits below are for data from outside (an uploaded export file).
+   * An agent without the capability volume.import-limits.v1 ignores them,
+   * so the panel sends such data only to agents that advertise it.
+   * added in 0.2.9
+   *
+   * Most file bytes the unpack may write; 0 = no cap. Before anything is
+   * written the agent also refuses (RESOURCE_EXHAUSTED, reason "noSpace")
+   * when the data folder's free space is below max_bytes plus a floor.
+   *
+   * @generated from field: uint64 max_bytes = 5;
+   */
+  maxBytes: bigint;
+
+  /**
+   * Most archive entries (every header: files, folders, links); 0 = no cap.
+   *
+   * @generated from field: uint64 max_entries = 6;
+   */
+  maxEntries: bigint;
+
+  /**
+   * SHA-256 of the whole compressed stream, lower-case hex; empty = not
+   * checked. A stream that ends with another hash fails (INVALID_ARGUMENT,
+   * reason "checksum").
+   *
+   * @generated from field: string sha256 = 7;
+   */
+  sha256: string;
 };
 
 /**

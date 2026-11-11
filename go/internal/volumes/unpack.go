@@ -19,6 +19,10 @@ import (
 // given (UnpackOptions.Budget).
 var ErrTooLarge = errors.New("the archive is larger than the space for it")
 
+// ErrTooMany means an archive holds more entries than it was allowed
+// (UnpackOptions.MaxEntries).
+var ErrTooMany = errors.New("the archive holds more entries than allowed")
+
 // UnpackOptions shape what Unpack accepts and how it writes.
 type UnpackOptions struct {
 	// Owners gives entries their archived uid and gid. Only root can, so
@@ -34,6 +38,11 @@ type UnpackOptions struct {
 	// Budget caps the file bytes written; 0 is no cap. A file that would
 	// pass it fails the unpack with ErrTooLarge before it is written.
 	Budget uint64
+	// MaxEntries caps the archive's entries, every header counted (files,
+	// folders, links, devices and pipes that are skipped); 0 is no cap.
+	// The one past it fails the unpack with ErrTooMany. Budget counts file
+	// bytes only, so this is what bounds empty files, folders and links.
+	MaxEntries uint64
 	// CheckEnd reads the gzip stream to its end after the tar archive, so
 	// gzip's checksum is checked, and refuses data after the archive
 	// (other than the zeros tar pads with).
@@ -60,7 +69,7 @@ func Unpack(ctx context.Context, root *os.Root, r io.Reader, opts UnpackOptions)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
-	var total uint64
+	var total, entries uint64
 	type dirMeta struct {
 		name  string
 		mode  fs.FileMode
@@ -81,6 +90,9 @@ func Unpack(ctx context.Context, root *os.Root, r io.Reader, opts UnpackOptions)
 		}
 		if err != nil {
 			return total, fmt.Errorf("%w: %v", ErrBadArchive, err)
+		}
+		if entries++; opts.MaxEntries > 0 && entries > opts.MaxEntries {
+			return total, fmt.Errorf("%w: more than %d", ErrTooMany, opts.MaxEntries)
 		}
 		name, ok := cleanName(hdr.Name)
 		if !ok {

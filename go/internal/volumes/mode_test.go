@@ -64,7 +64,7 @@ func TestImportKeepsStickyAndFolderSetgid(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := &Transfer{Layout: datadir.New(t.TempDir())}
-	if _, err := dst.Import(ctx, "svc", "svc", "data", false, bytes.NewReader(buf.Bytes())); err != nil {
+	if _, err := dst.Import(ctx, "svc", "svc", "data", ImportOptions{}, bytes.NewReader(buf.Bytes())); err != nil {
 		t.Fatal(err)
 	}
 	out, _ := dst.Layout.ServiceVolume("svc", "data")

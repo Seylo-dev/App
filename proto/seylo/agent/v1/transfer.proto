@@ -6,7 +6,9 @@ package seylo.agent.v1;
 // cross-node network, so the panel relays the bytes: it opens ExportVolume
 // on the source node and pipes the stream into ImportVolume on the target.
 // The panel stops the service on the source first so the copy is
-// consistent.
+// consistent. Service exports (the panel's .zip files) use the same two
+// calls: ExportVolume's stream goes into the file as it is, and the data of
+// a file someone uploads goes into ImportVolume with the limits below.
 
 // ExportVolumeRequest opens a raw download of one volume as a .tar.gz
 // stream (paths relative to the volume root, owners and modes kept).
@@ -19,6 +21,9 @@ message ExportVolumeRequest {
 message ExportVolumeResponse {
   // Uncompressed bytes archived.
   uint64 size_bytes = 1;
+  // Archive entries written (files, folders, links); 0 from agents before
+  // 0.2.9. added in 0.2.9 (volume.import-limits.v1)
+  uint64 entries = 2;
 }
 
 // ImportVolumeRequest opens a raw upload of a .tar.gz stream produced by
@@ -32,8 +37,27 @@ message ImportVolumeRequest {
   bool replace = 3;
   // Expected compressed size for progress; 0 if unknown.
   uint64 size_bytes = 4;
+  // The limits below are for data from outside (an uploaded export file).
+  // An agent without the capability volume.import-limits.v1 ignores them,
+  // so the panel sends such data only to agents that advertise it.
+  // added in 0.2.9
+  //
+  // Most file bytes the unpack may write; 0 = no cap. Before anything is
+  // written the agent also refuses (RESOURCE_EXHAUSTED, reason "noSpace")
+  // when the data folder's free space is below max_bytes plus a floor.
+  uint64 max_bytes = 5;
+  // Most archive entries (every header: files, folders, links); 0 = no cap.
+  uint64 max_entries = 6;
+  // SHA-256 of the whole compressed stream, lower-case hex; empty = not
+  // checked. A stream that ends with another hash fails (INVALID_ARGUMENT,
+  // reason "checksum").
+  string sha256 = 7;
 }
 
 message ImportVolumeResponse {
   uint64 size_bytes = 1;
 }
+
+// When an import with any of the limits fails after it started writing
+// (a limit, the checksum, a broken stream or a cancel), the volume is
+// emptied, so no half import stays behind.

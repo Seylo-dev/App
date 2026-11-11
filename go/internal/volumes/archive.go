@@ -43,44 +43,64 @@ func WriteArchive(ctx context.Context, dir string, w io.Writer, opts ArchiveOpti
 		return 0, fmt.Errorf("opening %s: %w", dir, err)
 	}
 	defer root.Close()
-	return writeArchive(ctx, root, w, opts)
+	n, err := writeArchive(ctx, root, w, opts)
+	return n.Bytes, err
 }
 
-func writeArchive(ctx context.Context, root *os.Root, w io.Writer, opts ArchiveOptions) (uint64, error) {
+// Archived is what an archive holds: the file bytes and the entries
+// (files, folders, links).
+type Archived struct {
+	Bytes   uint64
+	Entries uint64
+}
+
+func writeArchive(ctx context.Context, root *os.Root, w io.Writer, opts ArchiveOptions) (Archived, error) {
 	level := opts.Level
 	if level == 0 {
 		level = gzip.DefaultCompression
 	}
 	gz, err := gzip.NewWriterLevel(w, level)
 	if err != nil {
-		return 0, err
+		return Archived{}, err
 	}
 	a := &archiver{ctx: ctx, tw: tar.NewWriter(gz), opts: opts, seen: map[inodeKey]string{}}
 	top, err := root.Stat(".")
 	if err != nil {
-		return 0, err
+		return Archived{}, err
 	}
 	if opts.DotPrefix {
 		if err := a.header(top, "", "."); err != nil {
-			return 0, err
+			return a.archived(), err
 		}
 	}
 	if err := a.dir(root, ""); err != nil {
-		return a.total, err
+		return a.archived(), err
 	}
 	if err := a.tw.Close(); err != nil {
-		return a.total, err
+		return a.archived(), err
 	}
-	return a.total, gz.Close()
+	return a.archived(), gz.Close()
 }
 
 type archiver struct {
-	ctx   context.Context
-	tw    *tar.Writer
-	opts  ArchiveOptions
-	seen  map[inodeKey]string
-	total uint64
-	buf   []byte
+	ctx     context.Context
+	tw      *tar.Writer
+	opts    ArchiveOptions
+	seen    map[inodeKey]string
+	total   uint64
+	entries uint64
+	buf     []byte
+}
+
+func (a *archiver) archived() Archived { return Archived{Bytes: a.total, Entries: a.entries} }
+
+// write writes one header and counts it.
+func (a *archiver) write(hdr *tar.Header) error {
+	if err := a.tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	a.entries++
+	return nil
 }
 
 // name is the archive name of rel ("" is the folder itself).
@@ -106,7 +126,7 @@ func (a *archiver) header(info fs.FileInfo, link, rel string) error {
 	hdr.Name = a.name(rel, info.IsDir())
 	hdr.Uname, hdr.Gname = "", ""
 	hdr.Format = tar.FormatPAX
-	return a.tw.WriteHeader(hdr)
+	return a.write(hdr)
 }
 
 // dir archives the entries of the folder r, whose archive path is rel.
@@ -212,7 +232,7 @@ func (a *archiver) file(r *os.Root, base, rel string, listed fs.FileInfo) error 
 				hdr.Name, hdr.Typeflag, hdr.Linkname, hdr.Size = a.name(rel, false), tar.TypeLink, a.name(first, false), 0
 				hdr.Uname, hdr.Gname = "", ""
 				hdr.Format = tar.FormatPAX
-				return a.tw.WriteHeader(hdr)
+				return a.write(hdr)
 			}
 			a.seen[key] = rel
 		}

@@ -79,7 +79,10 @@ func (x *ExportVolumeRequest) GetVolume() string {
 type ExportVolumeResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Uncompressed bytes archived.
-	SizeBytes     uint64 `protobuf:"varint,1,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	SizeBytes uint64 `protobuf:"varint,1,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	// Archive entries written (files, folders, links); 0 from agents before
+	// 0.2.9. added in 0.2.9 (volume.import-limits.v1)
+	Entries       uint64 `protobuf:"varint,2,opt,name=entries,proto3" json:"entries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -121,6 +124,13 @@ func (x *ExportVolumeResponse) GetSizeBytes() uint64 {
 	return 0
 }
 
+func (x *ExportVolumeResponse) GetEntries() uint64 {
+	if x != nil {
+		return x.Entries
+	}
+	return 0
+}
+
 // ImportVolumeRequest opens a raw upload of a .tar.gz stream produced by
 // ExportVolume into a volume of a service on this node. The service must
 // not be running on this node yet.
@@ -132,7 +142,22 @@ type ImportVolumeRequest struct {
 	// non-empty volume fails.
 	Replace bool `protobuf:"varint,3,opt,name=replace,proto3" json:"replace,omitempty"`
 	// Expected compressed size for progress; 0 if unknown.
-	SizeBytes     uint64 `protobuf:"varint,4,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	SizeBytes uint64 `protobuf:"varint,4,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	// The limits below are for data from outside (an uploaded export file).
+	// An agent without the capability volume.import-limits.v1 ignores them,
+	// so the panel sends such data only to agents that advertise it.
+	// added in 0.2.9
+	//
+	// Most file bytes the unpack may write; 0 = no cap. Before anything is
+	// written the agent also refuses (RESOURCE_EXHAUSTED, reason "noSpace")
+	// when the data folder's free space is below max_bytes plus a floor.
+	MaxBytes uint64 `protobuf:"varint,5,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	// Most archive entries (every header: files, folders, links); 0 = no cap.
+	MaxEntries uint64 `protobuf:"varint,6,opt,name=max_entries,json=maxEntries,proto3" json:"max_entries,omitempty"`
+	// SHA-256 of the whole compressed stream, lower-case hex; empty = not
+	// checked. A stream that ends with another hash fails (INVALID_ARGUMENT,
+	// reason "checksum").
+	Sha256        string `protobuf:"bytes,7,opt,name=sha256,proto3" json:"sha256,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -195,6 +220,27 @@ func (x *ImportVolumeRequest) GetSizeBytes() uint64 {
 	return 0
 }
 
+func (x *ImportVolumeRequest) GetMaxBytes() uint64 {
+	if x != nil {
+		return x.MaxBytes
+	}
+	return 0
+}
+
+func (x *ImportVolumeRequest) GetMaxEntries() uint64 {
+	if x != nil {
+		return x.MaxEntries
+	}
+	return 0
+}
+
+func (x *ImportVolumeRequest) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
 type ImportVolumeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SizeBytes     uint64                 `protobuf:"varint,1,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
@@ -247,17 +293,22 @@ const file_seylo_agent_v1_transfer_proto_rawDesc = "" +
 	"\x13ExportVolumeRequest\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x16\n" +
-	"\x06volume\x18\x02 \x01(\tR\x06volume\"5\n" +
+	"\x06volume\x18\x02 \x01(\tR\x06volume\"O\n" +
 	"\x14ExportVolumeResponse\x12\x1d\n" +
 	"\n" +
-	"size_bytes\x18\x01 \x01(\x04R\tsizeBytes\"\x85\x01\n" +
+	"size_bytes\x18\x01 \x01(\x04R\tsizeBytes\x12\x18\n" +
+	"\aentries\x18\x02 \x01(\x04R\aentries\"\xdb\x01\n" +
 	"\x13ImportVolumeRequest\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x16\n" +
 	"\x06volume\x18\x02 \x01(\tR\x06volume\x12\x18\n" +
 	"\areplace\x18\x03 \x01(\bR\areplace\x12\x1d\n" +
 	"\n" +
-	"size_bytes\x18\x04 \x01(\x04R\tsizeBytes\"5\n" +
+	"size_bytes\x18\x04 \x01(\x04R\tsizeBytes\x12\x1b\n" +
+	"\tmax_bytes\x18\x05 \x01(\x04R\bmaxBytes\x12\x1f\n" +
+	"\vmax_entries\x18\x06 \x01(\x04R\n" +
+	"maxEntries\x12\x16\n" +
+	"\x06sha256\x18\a \x01(\tR\x06sha256\"5\n" +
 	"\x14ImportVolumeResponse\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x01 \x01(\x04R\tsizeBytesB\xb8\x01\n" +
