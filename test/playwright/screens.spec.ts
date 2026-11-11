@@ -32,6 +32,7 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["node-cleanup", `/nodes?node=${ids.de}&view=cleanup`, "dialog"],
   ["node-shell", `/nodes?node=${ids.de}&view=shell`, "dialog"],
   ["project", `/p/${ids.acme}`],
+  ["project-settings", `/p/${ids.acme}?tab=settings`],
   ["templates", "/templates"],
   ["templates-docker-hub", "/templates?tab=docker-hub&q=gitea"],
   ["activity", "/activity"],

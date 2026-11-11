@@ -199,6 +199,8 @@ export function InternalGitHosts({ projectId, projectName }: { projectId: string
             {
               id: "host",
               header: t("gitHosts.list.host"),
+              // Its own share of the table, so the longer Allowed by text cannot squeeze a short host onto two lines.
+              width: "36%",
               skeletonWidth: "30%",
               // A host breaks only where it must (a very long name), never mid-word in a squeezed column.
               cell: (h) => (
