@@ -14,7 +14,7 @@ const (
 
 // The MongoDB lines the panel offers.
 const (
-	imageMongo90 = "mongo:9.0.4"
-	imageMongo80 = "mongo:8.0.34"
+	imageMongo90 = "mongo:9.0.8"
+	imageMongo80 = "mongo:8.0.38"
 	imageMongo70 = "mongo:7.0.45"
 )

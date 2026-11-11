@@ -21,8 +21,8 @@ import (
 // The MongoDB lines of the panel's catalog (apps/panel/src/modules/databases/engines.ts).
 const (
 	mongo70 = "mongo:7.0.45"
-	mongo80 = "mongo:8.0.34"
-	mongo90 = "mongo:9.0.4"
+	mongo80 = "mongo:8.0.38"
+	mongo90 = "mongo:9.0.8"
 )
 
 // mongoFcvStdin is the script databases.setVersion sends on stdin before a

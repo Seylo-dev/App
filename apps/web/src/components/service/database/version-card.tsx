@@ -38,7 +38,7 @@ type Choice = Choices["choices"][number];
 /** The card's id: the version chip in the service header links here. */
 export const versionCardId = "version";
 
-/** The repository of an image, for the custom tag hint: "mongo" of "mongo:8.0.34". */
+/** The repository of an image, for the custom tag hint: "mongo" of "mongo:8.0.38". */
 function repositoryOf(image: string): string {
   return image.replace(/@.*$/, "").replace(/:[^/:]*$/, "");
 }

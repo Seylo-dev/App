@@ -41,7 +41,7 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** The release in an image's tag ("mongo:8.0.34" is 8.0.34, "postgres:17.6-alpine" 17.6); null for a digest or a tag without one. */
+/** The release in an image's tag ("mongo:8.0.38" is 8.0.38, "postgres:17.6-alpine" 17.6); null for a digest or a tag without one. */
 export function imageRelease(image: string): string | null {
   if (image.includes("@")) return null;
   const colon = image.lastIndexOf(":");
@@ -192,9 +192,7 @@ export function customImage(engine: DatabaseEngine, variant: string | null, vers
     variant === "pgvector"
       ? new RegExp(`^\\d+(\\.\\d+)*-pg${escapeRegExp(version)}(-|$)`).test(tag)
       : new RegExp(`^v?${escapeRegExp(version)}\\.\\d`).test(tag);
-  if (!claims) {
-    throw new OpError("BAD_REQUEST", `${repo}:${tag} is not an exact ${label} ${version} release. Use a tag such as ${example}.`, field);
-  }
+  if (!claims) throw new OpError("BAD_REQUEST", notOfLine(engine, variant, version, repo, tag, example), field);
   if (engine === "postgres" && baseOf(tag) !== baseOf(catalogTag)) {
     throw new OpError(
       "BAD_REQUEST",
@@ -203,6 +201,39 @@ export function customImage(engine: DatabaseEngine, variant: string | null, vers
     );
   }
   return `${repo}:${tag}`;
+}
+
+/**
+ * Why customImage refuses a tag that is not a release of `version`. An
+ * exact release of another line of the engine ("mongo:8.2.12" on 8.0) is
+ * named as that line, with whether the catalog has it: a move to another
+ * version goes through the catalog's list, not a tag. A tag with a shorter
+ * release ("mongo:8.2", a line's moving tag) moves to each new release of
+ * it, and one without a release (latest) to each new release.
+ */
+function notOfLine(engine: DatabaseEngine, variant: string | null, version: string, repo: string, tag: string, example: string): string {
+  const label = engines[engine].label;
+  const release = /^v?(\d+(?:\.\d+)*)/.exec(tag)?.[1] ?? null;
+  const depth = version.split(".").length;
+  // pgvector's tags name their Postgres line after the release ("0.8.8-pg18-trixie" is 18).
+  const line =
+    variant === "pgvector"
+      ? (/^\d+(?:\.\d+)*-pg(\d+)(?:-|$)/.exec(tag)?.[1] ?? null)
+      : release && release.split(".").length > depth
+        ? release.split(".").slice(0, depth).join(".")
+        : null;
+  if (line !== null && line !== version) {
+    const offered = (engineVersions(engine, variant) ?? []).some((v) => v.version === line);
+    return [
+      `${repo}:${tag} is ${label} ${line}, not ${version}.`,
+      ...(offered ? [] : [`Seylo does not offer ${label} ${line}${variant ? ` with ${variant}` : ""}.`]),
+      `Another tag takes ${example} releases; to move to another version, pick it in the list above.`,
+    ].join(" ");
+  }
+  if (release !== null && variant !== "pgvector") {
+    return `${repo}:${tag} is not an exact release: it moves to each new ${label} ${release} release. Use a tag such as ${repo}:${example}.`;
+  }
+  return `${repo}:${tag} is not an exact release: a tag without a full release number moves to each new release. Use a tag such as ${repo}:${example}.`;
 }
 
 /** What follows the release in a tag: "-alpine" of "17.6-alpine", "-trixie" of pgvector's "0.8.7-pg17-trixie". */

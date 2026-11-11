@@ -4189,7 +4189,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   catalog choice of the line is allowed: a newer release is a patch (no
   backup), an older one is refused (`olderImage`), and the very image that
   runs is refused as `current` ("nothing to change"; after a failed change
-  it may be set again to stay). `versionChoices.customOnCurrent` says
+  it may be set again to stay). The refusal of a tag that is not a release
+  of the claimed line says what it is (0.2.11): an exact release of
+  another line of the engine is named as that line ("mongo:8.2.12 is
+  MongoDB 8.2, not 8.0", with "Seylo does not offer MongoDB 8.2" when the
+  catalog has no such line) and a move to another version is sent to the
+  list of versions; a moving tag (`mongo:8.2`, `latest`) is "not an exact
+  release" that moves to each new release. `versionChoices.customOnCurrent` says
   whether setVersion takes such a tag for the line it runs: false for
   KeyDB and Dragonfly (no official repository), a variant without one, a
   line the catalog no longer has, and while `blocked`. The Version card

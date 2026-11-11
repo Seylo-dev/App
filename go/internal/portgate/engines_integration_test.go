@@ -10,5 +10,5 @@ const (
 	imageDragonfly  = "ghcr.io/dragonflydb/dragonfly:v2.0.2"
 	imageClickHouse = "clickhouse/clickhouse-server:26.8.36.3"
 	// The newest MongoDB line of the catalog.
-	imageMongo90 = "mongo:9.0.4"
+	imageMongo90 = "mongo:9.0.8"
 )

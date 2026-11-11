@@ -208,8 +208,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     port: 27017,
     httpPort: null,
     versions: [
-      { version: "9.0", image: "mongo:9.0.4", dataPath: "/data/db" },
-      { version: "8.0", image: "mongo:8.0.34", dataPath: "/data/db" },
+      { version: "9.0", image: "mongo:9.0.8", dataPath: "/data/db" },
+      { version: "8.0", image: "mongo:8.0.38", dataPath: "/data/db" },
       { version: "7.0", image: "mongo:7.0.45", dataPath: "/data/db" },
     ],
     variants: [],

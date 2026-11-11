@@ -38,8 +38,8 @@ function mongoChoices(over: Record<string, unknown> = {}) {
     backupFresh: false,
     nativePassword: null,
     choices: [
-      { version: "9.0", image: "mongo:9.0.4", kind: "major", allowed: false, reason: "oneStep", message: "MongoDB upgrades one version at a time: go to 8.0 first." },
-      { version: "8.0", image: "mongo:8.0.34", kind: "major", allowed: true },
+      { version: "9.0", image: "mongo:9.0.8", kind: "major", allowed: false, reason: "oneStep", message: "MongoDB upgrades one version at a time: go to 8.0 first." },
+      { version: "8.0", image: "mongo:8.0.38", kind: "major", allowed: true },
       { version: "7.0", image: "mongo:7.0.45", kind: "patch", allowed: true },
     ],
     ...over,

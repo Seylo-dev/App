@@ -140,23 +140,23 @@ describe("version rules", () => {
 
     // The same release on another base, where the engine allows that (Postgres does not: customImage).
     const mongo = point("mongo", "8.0");
-    expect(tagOf("mongo", null, mongo, "mongo:8.0.34-noble")).toMatchObject({ kind: "patch", allowed: true });
-    expect(tagOf("mongo", null, mongo, "mongo:8.0.35")).toMatchObject({ kind: "patch", allowed: true });
-    expect(tagOf("mongo", null, mongo, "mongo:8.0.33")).toMatchObject({ kind: "downgrade", allowed: false, reason: "olderImage" });
-    expect(tagOf("mongo", null, mongo, "mongo:8.0.34")).toMatchObject({ kind: "current", allowed: false, reason: "current" });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.38-noble")).toMatchObject({ kind: "patch", allowed: true });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.39")).toMatchObject({ kind: "patch", allowed: true });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.37")).toMatchObject({ kind: "downgrade", allowed: false, reason: "olderImage" });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.38")).toMatchObject({ kind: "current", allowed: false, reason: "current" });
   });
 
   test("versions compare number by number; images give their release and line", () => {
     expect(compareVersions("10.11", "11.4")).toBe(-1);
     expect(compareVersions("11.10", "11.8")).toBe(1);
     expect(compareVersions("8.0", "8")).toBe(0);
-    expect(imageRelease("mongo:8.0.34")).toBe("8.0.34");
+    expect(imageRelease("mongo:8.0.38")).toBe("8.0.38");
     expect(imageRelease("postgres:17.6-alpine")).toBe("17.6");
     expect(imageRelease("ghcr.io/dragonflydb/dragonfly:v2.0.2")).toBe("2.0.2");
     expect(imageRelease("eqalpha/keydb@sha256:6537505c42355ca1f571276bddf83f5b750f760f07b2a185a676481791e388ac")).toBeNull();
     expect(imageRelease("localhost:5000/mongo")).toBeNull();
     expect(lineOfImage("mongo:7.0.21", engines.mongo.versions)).toBe("7.0");
-    expect(lineOfImage("mongo:8.0.34", engines.mongo.versions)).toBe("8.0");
+    expect(lineOfImage("mongo:8.0.38", engines.mongo.versions)).toBe("8.0");
     expect(lineOfImage("mariadb:10.11.9", engines.mariadb.versions)).toBe("10.11");
     expect(lineOfImage("pgvector/pgvector:0.8.0-pg16", engineVersions("postgres", "pgvector") ?? [])).toBe("16");
     expect(lineOfImage("mongo:6.0.1", engines.mongo.versions)).toBeNull();
@@ -183,7 +183,7 @@ describe("version rules", () => {
       ["mongo", null, "8.0", "mongo:latest"],
       ["mongo", null, "8.0", "mongo"],
       ["mongo", null, "8.0", "mongo:8.0"],
-      ["mongo", null, "8.0", "mongo:9.0.4"],
+      ["mongo", null, "8.0", "mongo:9.0.8"],
       ["mongo", null, "8.0", "bitnami/mongodb:8.0.4"],
       ["mongo", null, "8.0", "ghcr.io/acme/mongo:8.0.40"],
       ["postgres", null, "17", "pgvector/pgvector:0.8.8-pg17"],
@@ -204,6 +204,58 @@ describe("version rules", () => {
     ] as const) {
       expect({ image, reason: refused(engine, variant, version, image) }).toEqual({ image, reason: "customImage" });
     }
+  });
+
+  test("a refused tag says why: a release of another line names that line, a moving tag says it moves", () => {
+    const message = (engine: DatabaseEngine, variant: string | null, version: string, image: string) => {
+      try {
+        customImage(engine, variant, version, image);
+        return null;
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    const pickInList = "to move to another version, pick it in the list above.";
+    // 8.2 was MongoDB's short-lived rapid release: an exact release, but of a line the catalog does not have.
+    expect(message("mongo", null, "8.0", "mongo:8.2.12")).toBe(
+      `mongo:8.2.12 is MongoDB 8.2, not 8.0. Seylo does not offer MongoDB 8.2. Another tag takes 8.0.<patch> releases; ${pickInList}`,
+    );
+    // Another line the catalog has: the list is the way to it.
+    expect(message("mongo", null, "8.0", "mongo:9.0.8")).toBe(
+      `mongo:9.0.8 is MongoDB 9.0, not 8.0. Another tag takes 8.0.<patch> releases; ${pickInList}`,
+    );
+    expect(message("mongo", null, "8.0", "mongo:7.0.45-jammy")).toBe(
+      `mongo:7.0.45-jammy is MongoDB 7.0, not 8.0. Another tag takes 8.0.<patch> releases; ${pickInList}`,
+    );
+    // Moving tags: a line's tag and latest.
+    expect(message("mongo", null, "8.0", "mongo:8.2")).toBe(
+      "mongo:8.2 is not an exact release: it moves to each new MongoDB 8.2 release. Use a tag such as mongo:8.0.<patch>.",
+    );
+    expect(message("mongo", null, "8.0", "mongo:8.0")).toBe(
+      "mongo:8.0 is not an exact release: it moves to each new MongoDB 8.0 release. Use a tag such as mongo:8.0.<patch>.",
+    );
+    expect(message("mongo", null, "8.0", "mongo:latest")).toBe(
+      "mongo:latest is not an exact release: a tag without a full release number moves to each new release. Use a tag such as mongo:8.0.<patch>.",
+    );
+    expect(message("mongo", null, "8.0", "mongo:8.0.38")).toBeNull();
+    // Postgres lines are majors; pgvector's tags name theirs after the release.
+    expect(message("postgres", null, "17", "postgres:16.10-alpine")).toBe(
+      `postgres:16.10-alpine is PostgreSQL 16, not 17. Another tag takes 17.<patch>-alpine releases; ${pickInList}`,
+    );
+    expect(message("postgres", null, "17", "postgres:17-alpine")).toBe(
+      "postgres:17-alpine is not an exact release: it moves to each new PostgreSQL 17 release. Use a tag such as postgres:17.<patch>-alpine.",
+    );
+    expect(message("postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg19-trixie")).toBe(
+      `pgvector/pgvector:0.8.8-pg19-trixie is PostgreSQL 19, not 17. Seylo does not offer PostgreSQL 19 with pgvector. Another tag takes <release>-pg17-trixie releases; ${pickInList}`,
+    );
+    expect(message("postgres", "pgvector", "17", "pgvector/pgvector:pg17")).toBe(
+      "pgvector/pgvector:pg17 is not an exact release: a tag without a full release number moves to each new release. Use a tag such as pgvector/pgvector:<release>-pg17-trixie.",
+    );
+    // The other refusals keep their own wording.
+    expect(message("mongo", null, "8.0", "bitnami/mongodb:8.0.4")).toBe("Use MongoDB's official image, mongo, with an exact release tag.");
+    expect(message("mongo", null, "8.0", `mongo:8.0.40@sha256:${"a".repeat(64)}`)).toStartWith(
+      "Give mongo an exact release tag without a digest",
+    );
   });
 
   test("MongoDB's compatibility step keeps the password off the command line and fails loudly", () => {
@@ -488,7 +540,7 @@ describe("databases.versionChoices and setVersion", () => {
     expect(choices.body.choices.find((c: { version: string }) => c.version === "8.0")).toMatchObject({
       kind: "patch",
       allowed: true,
-      image: "mongo:8.0.34",
+      image: "mongo:8.0.38",
     });
     const before = deployCount(serviceId);
     // No agent is connected: a patch update runs no exec.
@@ -496,7 +548,7 @@ describe("databases.versionChoices and setVersion", () => {
     expect(res.status).toBe(200);
     expect(res.body.database).toMatchObject({ engine: "mongo", version: "8.0" });
     expect(res.body.deploymentId).toBeString();
-    expect(specImage(serviceId)).toBe("mongo:8.0.34");
+    expect(specImage(serviceId)).toBe("mongo:8.0.38");
     expect(deployCount(serviceId)).toBe(before + 1);
   });
 
@@ -538,7 +590,7 @@ describe("databases.versionChoices and setVersion", () => {
     const res = await callOp(panel, dbOps.setVersion, { serviceId, version: "8.0" }, { cookie });
     expect(res.status).toBe(200);
     expect(res.body.database.version).toBe("8.0");
-    expect(specImage(serviceId)).toBe("mongo:8.0.34");
+    expect(specImage(serviceId)).toBe("mongo:8.0.38");
     expect(deployCount(serviceId)).toBe(before + 1);
     const sent = request as unknown as { command: string[]; stdin: Uint8Array };
     const stdin = new TextDecoder().decode(sent.stdin);
@@ -754,7 +806,7 @@ describe("databases.versionChoices and setVersion", () => {
     );
     expect(digest.status).toBe(400);
     expect(digest.body.error.details.reason).toBe("customImage");
-    expect(specImage(mongo.serviceId)).toBe("mongo:8.0.34");
+    expect(specImage(mongo.serviceId)).toBe("mongo:8.0.38");
     // A custom image of the same line is a patch update.
     const custom = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "8.0", image: "mongo:8.0.40" }, { cookie });
     expect(custom.status).toBe(200);
@@ -955,9 +1007,9 @@ describe("databases.versionChoices and setVersion", () => {
     const { serviceId } = await createDb("mongo", "7.0");
     // The 7.0 deploy went live; then a change to 8.0 failed, so 7.0 still runs.
     panel.deps.db.update(serviceDatabases).set({ version: "8.0" }).where(eq(serviceDatabases.serviceId, serviceId)).run();
-    setImage(serviceId, "mongo:8.0.34");
+    setImage(serviceId, "mongo:8.0.38");
     const res = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
-    expect(res.body).toMatchObject({ version: "7.0", image: "mongo:7.0.45", pendingImage: "mongo:8.0.34" });
+    expect(res.body).toMatchObject({ version: "7.0", image: "mongo:7.0.45", pendingImage: "mongo:8.0.38" });
     expect(res.body.choices.map((c: { version: string; allowed: boolean }) => [c.version, c.allowed])).toEqual([
       ["9.0", false],
       ["8.0", true],

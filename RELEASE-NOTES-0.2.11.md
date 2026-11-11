@@ -7,6 +7,8 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-11
 ## Improved
 
 - **Every version change the Version card allows ran on the real images.** MySQL 8.0 to 8.4, MariaDB 11.4 to 11.8, Redis 7.4 to 8.2, Valkey 8.1 to 9.0 to 9.1 (and 8.1 straight to 9.1), ClickHouse 26.3 to 26.8 and a PostgreSQL 17 patch update (the pinned 17.6 to 17.11) now run in Seylo's test setup the way a node runs them, on the same data with the same settings, and every one kept the data, like MongoDB 7.0 to 8.0 to 9.0 and MariaDB 10.11 to 11.4 since 0.2.9. Nothing changes in what you can pick. Exposing a MongoDB 9.0 database over TLS ran there too.
+- **MongoDB 9.0.8 and 8.0.38.** New MongoDB 9.0 and 8.0 databases start on these newest patch releases, and existing ones can take them as a patch update on the Version card (no backup needed). The upgrade from 7.0 to 8.0 to 9.0, backups, the web UI and TLS ran on them in Seylo's test setup. MongoDB 7.0 stays on 7.0.45: Docker Hub's `mongo:7.0.48` had no Linux image when this release was made.
+- **A clearer message for a tag of another version.** Another tag of a database's version takes releases of that version only. A release of another version, such as `mongo:8.2.12` on a MongoDB 8.0 database, used to be refused as "not an exact MongoDB 8.0 release". The message now says which version the tag is, says when Seylo does not offer that version (8.2 was MongoDB's short-lived rapid release, which no longer gets fixes), and points to the list of versions for a move to another one. A moving tag such as `mongo:8.2` or `latest` says that it moves to each new release.
 
 ## Fixed
 
