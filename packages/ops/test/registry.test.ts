@@ -41,6 +41,28 @@ describe("lintOp", () => {
     ]);
   });
 
+  test("a flag or an object of named fields is not a secret by its name; strings, arrays and records still are", () => {
+    const op = defineOp({
+      ...base,
+      id: "test.flags",
+      kind: "mutation",
+      input: Type.Object({
+        keepNativePassword: Type.Optional(Type.Boolean()),
+        nativePassword: Type.Union([Type.Object({ on: Type.Boolean(), lines: Type.Array(Type.String()) }), Type.Null()]),
+        resetPassword: Type.Literal(true),
+        backupPassword: Type.Array(Type.String()),
+        serviceToken: Type.Record(Type.String(), Type.String()),
+        password: Type.Union([Type.String(), Type.Null()]),
+      }),
+      permission: permission.global("test.flags"),
+    });
+    expect(lintOp(op)).toEqual([
+      'test.flags: input field "backupPassword" looks secret; list it in sensitive.input so audit and model output redact it',
+      'test.flags: input field "serviceToken" looks secret; list it in sensitive.input so audit and model output redact it',
+      'test.flags: input field "password" looks secret; list it in sensitive.input so audit and model output redact it',
+    ]);
+  });
+
   test("accepts secrets covered by a parent or wildcard path", () => {
     const op = defineOp({
       ...base,

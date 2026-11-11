@@ -51,10 +51,26 @@ export function pathsWhere(schema: TSchema, match: (key: string) => boolean, pre
   const found: string[] = [];
   for (const [key, child] of childrenOf(schema)) {
     const path = [...prefix, key];
-    if (key !== "*" && match(key)) found.push(path.join("."));
+    if (key !== "*" && match(key) && canHoldSecret(child)) found.push(path.join("."));
     found.push(...pathsWhere(child, match, path));
   }
   return [...new Set(found)];
+}
+
+/**
+ * False for a field that cannot carry a secret value itself: a boolean, null,
+ * or an object with named fields (those fields are checked on their own). A
+ * flag such as "keepNativePassword" or an object such as "nativePassword:
+ * { on, lines }" is not a secret; a string, a number, an array or a record of
+ * those, or a schema with no type at all might be.
+ */
+function canHoldSecret(schema: TSchema): boolean {
+  const branches = [...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])] as TSchema[];
+  if (branches.length > 0) return branches.some(canHoldSecret);
+  if (schema.type === "boolean" || schema.type === "null" || typeof schema.const === "boolean") return false;
+  if (schema.type === "object" && schema.properties && !schema.additionalProperties && !schema.patternProperties) return false;
+  if (schema.type === "array") return schema.items && !Array.isArray(schema.items) ? canHoldSecret(schema.items as TSchema) : true;
+  return true;
 }
 
 /**
