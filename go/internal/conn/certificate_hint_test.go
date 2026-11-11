@@ -119,7 +119,7 @@ func TestDialPinMismatchNamesTheIssuer(t *testing.T) {
 // forgedIssuer is an issuer organization a TLS peer could choose: a line
 // break and a fake seylo status line, terminal escapes (erase the line,
 // right-to-left override) and length.
-const forgedIssuer = "Let's Encrypt\nPanel:   https://panel.example.com (connected)\r\x1b[2K‮\tdone" +
+const forgedIssuer = "Let's Encrypt\nPanel:   https://panel.example.com (connected)\r\x1b[2K\u202e\tdone" +
 	"                                                                and then a lot more text"
 
 // Whoever answers the TLS handshake chooses the issuer, and the error with
@@ -153,7 +153,7 @@ func TestIssuerName(t *testing.T) {
 		{[]string{"\x1b[31mred", ""}, "\n", "[31mred"},
 		{[]string{"\x1b\x00", ""}, "\n\t", ""},
 		{nil, strings.Repeat("ab", 60), strings.Repeat("ab", 38) + "a..."},
-		{[]string{"שלום​ עולם"}, "", "שלום עולם"},
+		{[]string{"שלום\u200b עולם"}, "", "שלום עולם"},
 	} {
 		cert := &x509.Certificate{Issuer: pkix.Name{Organization: tc.org, CommonName: tc.cn}}
 		if got := IssuerName(cert); got != tc.want {
