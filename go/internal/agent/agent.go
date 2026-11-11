@@ -65,7 +65,7 @@ var ErrAlreadyJoined = errors.New("agent: this node already joined a panel")
 // config.yml: no_host_shell, no_tailnet, tailscale_socket, node_name,
 // can_build, the acme_ca settings and every key this agent does not know. Join replaces only how the node
 // reaches the panel (panel_url, panel_pin, trust_on_first_use,
-// insecure_transport, fallback), the identity the token gives it (node_id,
+// insecure_transport, fallback, staged), the identity the token gives it (node_id,
 // join_token) and the identity of the panel it belonged to (panel_id,
 // panel_key, panel_proves); node_name and can_build change only when
 // --name or --can-build say so.
@@ -83,7 +83,7 @@ func Join(layout datadir.Layout, opts JoinOptions) error {
 	cfg.PanelURL, cfg.PanelPin, cfg.TrustOnFirstUse = opts.PanelURL, "", opts.TrustOnFirstUse
 	// Only recorded when it matters, so a later move to https:// drops it.
 	cfg.InsecureTransport = opts.Insecure && PlainRemote(opts.PanelURL)
-	cfg.Fallback = nil
+	cfg.Fallback, cfg.Staged, cfg.StagedMove = nil, nil, ""
 	cfg.NodeID, cfg.JoinToken = "", opts.Token
 	cfg.PanelID, cfg.PanelKey, cfg.PanelProves = "", "", false
 	if opts.Name != "" {
@@ -249,6 +249,7 @@ func newDaemon(ctx context.Context, layout datadir.Layout, logger *slog.Logger) 
 		cfg := c.config()
 		return cfg.PanelURL, cfg.PanelPin
 	}
+	d.PanelStage = c
 	return &daemon{
 		layout: layout, logger: logger, deps: d, reg: reg, conn: c,
 		backend: &localBackend{deps: d, conn: c, desired: desired, outbox: outbox, started: time.Now()},

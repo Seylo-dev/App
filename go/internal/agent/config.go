@@ -78,6 +78,17 @@ type FileConfig struct {
 	// stays as a standing one (dialed after panel_url failed for 5 minutes)
 	// and any other is dropped. Written by the agent.
 	Fallback *PanelAddress `yaml:"fallback,omitempty"`
+	// Staged is the panel's next address while the panel moves to another
+	// node (StagePanelAddress, panel_stage.go): https:// with the pin of
+	// the agents' TLS key, which moves with the panel. Once panel_url
+	// stops answering (the connections fail; a refusal does not count)
+	// the agent dials it, and once a session there is accepted it becomes
+	// panel_url and the old address and the fallback are forgotten (the
+	// old panel was retired). StagedMove is the move that staged it;
+	// ClearPanelAddress of that move removes both. Written by the agent;
+	// `join` drops them.
+	Staged     *PanelAddress `yaml:"staged,omitempty"`
+	StagedMove string        `yaml:"staged_move,omitempty"`
 	// NoHostShell refuses root shells on this host from the panel
 	// (HostShell), whatever the panel's node setting says. Only someone
 	// with root on the node can set it.
@@ -272,6 +283,17 @@ func (c *FileConfig) Validate() error {
 	if c.PanelKey != "" {
 		if _, err := decodePanelKey(c.PanelKey); err != nil {
 			return fmt.Errorf("panel_key: %w", err)
+		}
+	}
+	if st := c.Staged; st != nil {
+		if !tlsURL(st.PanelURL) {
+			return fmt.Errorf("staged: panel_url %q must start with https://", st.PanelURL)
+		}
+		if _, err := AgentURL(st.PanelURL); err != nil {
+			return fmt.Errorf("staged: %w", err)
+		}
+		if _, err := conn.ParsePin(st.PanelPin); err != nil {
+			return fmt.Errorf("staged panel_pin: %w", err)
 		}
 	}
 	if f := c.Fallback; f != nil {

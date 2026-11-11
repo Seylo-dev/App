@@ -20,6 +20,7 @@ import (
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/nodecheck"
 	"github.com/seylo-dev/app/go/internal/reconcile"
@@ -86,6 +87,12 @@ func provideNode(d *Deps) error {
 			}
 			return d.Reconcile.Apply(ctx, revision, spec)
 		},
+		Remove: func(ctx context.Context, revision uint64, serviceID string) (uint64, error) {
+			if d.Reconcile == nil {
+				return 0, update.ErrRuntimeNotReady
+			}
+			return d.Reconcile.Remove(ctx, revision, serviceID, false)
+		},
 		Status: func(serviceID string) *agentv1.ServiceStatus {
 			if d.State == nil {
 				return nil
@@ -129,6 +136,17 @@ func provideNode(d *Deps) error {
 				found := proto.Clone(info).(*agentv1.DockerUpdateInfo)
 				d.Facts.Update(func(f *agentv1.NodeFacts) { f.DockerUpdate = found })
 			}}, lock),
+		Mover: update.NewPanelMover(update.MoveOptions{
+			DataDir:        d.Layout.Root(),
+			Runtime:        rt,
+			Host:           moveHost(d),
+			PanelServiceID: docker.PanelServiceID,
+			PanelURL: func() string {
+				u, _ := panelAddress(d)
+				return u
+			},
+			Logger: d.Logger.With("component", "panel-move"),
+		}, lock),
 		System: update.NewSystemdSystem(),
 		Lock:   lock,
 		Logger: d.Logger,
@@ -137,10 +155,11 @@ func provideNode(d *Deps) error {
 }
 
 // wireNode: register UpdateAgent, UpdatePanel, UpdateDocker, Reboot,
-// RunHealthCheck and Troubleshoot; finish or undo updates interrupted by a
-// restart; after each connect confirm a pending agent update and check for
-// a newer release; run the health checks hourly for alerts; look for a
-// newer Docker Engine daily (node.docker-check.v1).
+// RunHealthCheck, Troubleshoot and the panel move (panel_move.go); finish
+// or undo updates and panel moves interrupted by a restart; after each
+// connect confirm a pending agent update and check for a newer release;
+// run the health checks hourly for alerts; look for a newer Docker Engine
+// daily (node.docker-check.v1).
 func wireNode(reg *Registry, d *Deps) error {
 	svc, ok := d.Updater.(*update.Service)
 	if !ok {
@@ -148,6 +167,7 @@ func wireNode(reg *Registry, d *Deps) error {
 	}
 	checks := &healthMemory{last: map[string]agentv1.NodeCheckStatus{}}
 	registerHostShell(reg, d)
+	registerPanelMove(reg, d, svc.Mover)
 	reg.Advertise(update.DockerCheckCapability)
 	d.Components.Add("docker-check", svc.Docker.RunChecks)
 
@@ -210,11 +230,15 @@ func wireNode(reg *Registry, d *Deps) error {
 	d.Components.Add("update", func(ctx context.Context) error {
 		svc.Panel.SetBackground(ctx)
 		svc.Docker.SetBackground(ctx)
+		svc.Mover.SetBackground(ctx)
 		if err := svc.Agent.Resume(ctx); err != nil {
 			d.Logger.Error("reporting the last agent update", "err", err)
 		}
 		if err := svc.Panel.Resume(ctx); err != nil {
 			d.Logger.Error("recovering an interrupted panel update", "err", err)
+		}
+		if err := svc.Mover.Resume(ctx); err != nil {
+			d.Logger.Error("recovering an interrupted panel move", "err", err)
 		}
 		<-ctx.Done()
 		return nil
@@ -359,6 +383,13 @@ func (p *panelControl) spec(ctx context.Context) (uint64, *agentv1.ServiceSpec, 
 }
 
 func (p *panelControl) Start(ctx context.Context) error {
+	// The copy a move left here stays stopped until it is deleted: two
+	// panels on one identity would split the nodes between them.
+	if svc, ok := p.d.Updater.(*update.Service); ok && svc.Mover != nil {
+		if move, retired := svc.Mover.Retired(); retired {
+			return fmt.Errorf("the panel moved to another node (move %s); this node keeps a stopped copy until you delete it from the panel's settings", move)
+		}
+	}
 	rev, spec, err := p.spec(ctx)
 	if err != nil {
 		return err

@@ -15,7 +15,7 @@ import (
 var (
 	joinReplaces = []string{
 		"panel_url", "node_id", "panel_pin", "panel_id", "panel_key", "panel_proves",
-		"trust_on_first_use", "insecure_transport", "join_token", "fallback",
+		"trust_on_first_use", "insecure_transport", "join_token", "fallback", "staged", "staged_move",
 	}
 	// Kept unless --name or --can-build is given.
 	joinKeepsUnlessFlagged = []string{"node_name", "can_build"}
@@ -44,6 +44,10 @@ fallback:
   panel_url: https://198.51.100.4:3443
   panel_pin: sha256:` + "1111111111111111111111111111111111111111111111111111111111111111" + `
   standing: true
+staged:
+  panel_url: https://203.0.113.9:3443
+  panel_pin: sha256:2222222222222222222222222222222222222222222222222222222222222222
+staged_move: move0000000000ab
 node_name: edge-owner
 can_build: true
 acme_ca: staging

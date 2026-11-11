@@ -73,6 +73,8 @@ type panelTarget struct {
 	tofu     bool
 	// fallback marks config.yml's fallback address.
 	fallback bool
+	// staged marks config.yml's staged address (panel_stage.go).
+	staged bool
 }
 
 func primaryTarget(cfg FileConfig) panelTarget {

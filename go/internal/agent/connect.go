@@ -72,9 +72,16 @@ type connector struct {
 	// (node id, pin) but config.yml could not be written yet.
 	cfgUnsaved bool
 
+	// sessionURL is the address of the session being served ("" between
+	// sessions), under cfgMu: StagePanelAddress refuses a plain-HTTP one.
+	sessionURL string
+
 	// The rest belongs to the run goroutine (move.go).
 	// useFallback makes the next attempt dial config.yml's fallback.
 	useFallback bool
+	// useStaged makes the next attempt dial config.yml's staged address
+	// (panel_stage.go).
+	useStaged bool
 	// primaryDown is when connects to panel_url started failing (zero
 	// while they work); standingTried is the last standing fallback dial.
 	primaryDown, standingTried time.Time
@@ -129,6 +136,10 @@ func (c *connector) run(ctx context.Context) error {
 			c.logger.Error("cannot connect to the panel", "err", err)
 			c.status.failed("rejected", err, delay)
 		default:
+			if c.useStaged {
+				// The panel went away during its move: its new address next.
+				delay = reconnectMin
+			}
 			c.logger.Warn("panel connection ended", "err", err, "retry_in", delay.Round(time.Millisecond))
 			c.status.failed("waiting", err, delay)
 		}
@@ -179,20 +190,33 @@ var errNotJoined = errors.New("this node has neither a node id nor a join token:
 func (c *connector) connectOnce(ctx context.Context) error {
 	cfg := c.config()
 	target := primaryTarget(cfg)
-	if c.useFallback && cfg.Fallback != nil {
+	switch {
+	case c.useStaged && cfg.Staged != nil:
+		target = stagedTarget(cfg)
+		c.logger.Warn("the panel's address does not answer; trying the address the panel staged for its move to another node",
+			"panel_url", cfg.PanelURL, "staged", target.url, "move_id", cfg.StagedMove)
+	case c.useFallback && cfg.Fallback != nil:
 		target = fallbackTarget(cfg)
 		c.logger.Warn("the panel's address does not answer; trying the previous one", "panel_url", cfg.PanelURL, "fallback", target.url)
 	}
-	c.useFallback = false
+	c.useFallback, c.useStaged = false, false
 	t, res, err := c.dial(ctx, target)
 	if err != nil {
 		var rejected *rpc.RejectedError
-		if !target.fallback && !errors.As(err, &rejected) && ctx.Err() == nil {
+		if !target.fallback && !target.staged && !errors.As(err, &rejected) && ctx.Err() == nil {
 			c.primaryFailed(cfg)
 		}
 		return err
 	}
-	if !target.fallback {
+	promoted := false
+	switch {
+	case target.staged:
+		// The panel moved: the staged address is the address from now on.
+		c.promoteStaged(target)
+		promoted = true
+		c.primaryDown = time.Time{}
+		target = primaryTarget(c.config())
+	case !target.fallback:
 		c.primaryDown = time.Time{}
 		c.afterHandshake(cfg, res, t.ServerSPKI)
 		target = primaryTarget(c.config()) // with the pin trust on first use just recorded
@@ -203,25 +227,32 @@ func (c *connector) connectOnce(ctx context.Context) error {
 		if t, res, err = c.move(ctx, target, next, res.Server.GetPanelId()); err != nil {
 			return err
 		}
+		target = next
 	} else if target.fallback {
 		// Reached only through the fallback, and the panel names no other
 		// address: the fallback is the address again.
 		if restorable(cfg.Fallback) {
 			c.restoreFallback()
 		}
-	} else if cfg.Fallback != nil && !cfg.Fallback.Standing {
+	} else if !promoted && cfg.Fallback != nil && !cfg.Fallback.Standing {
 		c.endCycle()
 	}
-	return c.serve(ctx, t, res)
+	return c.serve(ctx, t, res, target.url)
 }
 
 // primaryFailed decides whether the next attempt dials the fallback: at
 // once during a move's first cycle, after standingFallbackAfter of failed
 // connects for a standing fallback (then again every standingFallbackAfter).
+// A staged address (the panel moving to another node) goes first once
+// connects failed for stagedAfter: from then on every other attempt dials it.
 func (c *connector) primaryFailed(cfg FileConfig) {
 	now := time.Now()
 	if c.primaryDown.IsZero() {
 		c.primaryDown = now
+	}
+	if cfg.Staged != nil && now.Sub(c.primaryDown) >= stagedAfter {
+		c.useStaged = true
+		return
 	}
 	f := cfg.Fallback
 	switch {
@@ -287,8 +318,16 @@ func (c *connector) dial(ctx context.Context, target panelTarget) (*conn.WebSock
 	return t, res, nil
 }
 
-// serve runs an accepted session until it ends.
-func (c *connector) serve(ctx context.Context, t *conn.WebSocket, res *rpc.HandshakeResult) error {
+// serve runs an accepted session at address url until it ends.
+func (c *connector) serve(ctx context.Context, t *conn.WebSocket, res *rpc.HandshakeResult, url string) error {
+	c.cfgMu.Lock()
+	c.sessionURL = url
+	c.cfgMu.Unlock()
+	defer func() {
+		c.cfgMu.Lock()
+		c.sessionURL = ""
+		c.cfgMu.Unlock()
+	}()
 	session := rpc.NewSession(rpc.SessionConfig{
 		Transport:        t,
 		Role:             conn.RoleDialer,

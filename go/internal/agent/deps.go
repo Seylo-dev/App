@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"crypto/ed25519"
 	"log/slog"
 
+	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/backup"
 	"github.com/seylo-dev/app/go/internal/build"
 	"github.com/seylo-dev/app/go/internal/cleanup"
@@ -81,6 +83,11 @@ type Deps struct {
 	// keeps the values config.yml had at start. Nil in some tests: use
 	// panelAddress(d).
 	PanelAddress func() (url, pin string)
+	// PanelStage stages and clears the panel's next address while it
+	// moves to another node (panel_stage.go). The connector implements it;
+	// set by the agent after wiring, so read it at call time. Nil in tests
+	// that do not set it.
+	PanelStage PanelStager
 	// Desired persists the last accepted desired state on disk.
 	Desired state.DesiredStore
 	// DesiredSync accepts SyncDesired/ApplyService/RemoveService with the
@@ -151,6 +158,12 @@ type Deps struct {
 	// Node (wire_node.go).
 
 	Updater update.Updater
+}
+
+// PanelStager is StagePanelAddress and ClearPanelAddress (panel_stage.go).
+type PanelStager interface {
+	StagePanelAddress(ctx context.Context, req *agentv1.StagePanelAddressRequest) (*agentv1.StagePanelAddressResponse, error)
+	ClearPanelAddress(ctx context.Context, req *agentv1.ClearPanelAddressRequest) error
 }
 
 // panelAddress is d.PanelAddress, or Config's values without it.

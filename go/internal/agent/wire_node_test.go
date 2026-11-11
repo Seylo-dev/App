@@ -26,7 +26,7 @@ func TestNodeWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	caps := reg.Capabilities()
-	for _, c := range []string{"node.update.v1", "node.healthcheck.v1", "node.troubleshoot.v1", "node.reboot.v1", "node.docker-update.v1", "node.panel-update.v1", "node.docker-check.v1"} {
+	for _, c := range []string{"node.update.v1", "node.healthcheck.v1", "node.troubleshoot.v1", "node.reboot.v1", "node.docker-update.v1", "node.panel-update.v1", "node.docker-check.v1", "panel.relocate.v1"} {
 		if !slices.Contains(caps, c) {
 			t.Errorf("capability %s not advertised: %v", c, caps)
 		}
