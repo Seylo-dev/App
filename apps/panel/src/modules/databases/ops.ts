@@ -19,7 +19,7 @@ import { normalizeCidrs } from "../domains/checks";
 import { invalidateService } from "../domains/lookup";
 import { assertHostUnclaimed } from "../domains/ownership";
 import { issuerName } from "../domains/rows";
-import { readServiceEnv } from "../env/store";
+import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { assertCreateRights } from "../services/create-rights";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
@@ -52,6 +52,7 @@ import {
   loadDatabase,
   writeSecret,
 } from "./info";
+import { createdPgdata } from "./pgdata";
 
 type Database = Static<typeof dbOps.Database>;
 
@@ -207,6 +208,8 @@ export const create = implement(dbOps.create, (input, ctx) => {
       })
       .run();
     writeSecret(tx, ctx.secrets, row.id, adminPasswordSecret, password);
+    const env = createdPgdata(input.engine, version);
+    if (env) writeServiceEnv(tx, ctx.secrets, row.id, env, user?.id ?? null);
     return row.id;
   });
   // Start it right away: a database has nothing to build.

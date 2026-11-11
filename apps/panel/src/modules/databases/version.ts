@@ -9,7 +9,7 @@
 // recreate mode on the same data volume, and a new version that never gets
 // healthy brings the old container back.
 
-import { databases as dbOps, OpError } from "@seylo/ops";
+import { databases as dbOps, env as envOps, OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
@@ -17,6 +17,7 @@ import { backupRuns, type DatabaseEngine, deployments, serviceDatabases, service
 import { implement, type OpContext } from "../../ops/implement";
 import { activeDeploy, assertNoActiveDeploy, queueDeploy } from "../deployments/queue";
 import { invalidateService } from "../domains/lookup";
+import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { writeSpec } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
 import { loadService } from "../services/rows";
@@ -25,6 +26,7 @@ import { engines, engineVersion, engineVersions, hasNativePassword, rootPassword
 import { baseOfTag, customLine, engineImage, engineRepository, hasOfficialRepository, imageTag, tagRelease } from "./images";
 import { type DatabaseInfo, loadDatabase } from "./info";
 import { toDatabase } from "./ops";
+import { definesPgdata, lineDataFolder, needsPgdataPin, pgdataExec, versionPinNote, withPgdata } from "./pgdata";
 
 type Choice = Static<typeof dbOps.VersionChoice>;
 export type VersionKind = Choice["kind"];
@@ -180,7 +182,7 @@ export type Judged = Judgement & { risks: Risk[] };
  * (riskOrder) and message says all of them.
  */
 export function judgeImage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, lines: readonly string[]): Judged {
-  if (to.image === from.image) return { ...judgeVersion(engine, from, to, lines), risks: [] };
+  if (to.image === from.image) return nothingToChange(to.image);
   const unknown = from.version === customLine || to.version === customLine;
   const sameLine = !unknown && compareVersions(to.version, from.version) === 0;
   // A floating tag's release is unknown: the rules compare releases on the same line.
@@ -210,6 +212,21 @@ export function judgeImage(engine: DatabaseEngine, from: ImagePoint, to: ImagePo
   return { kind: base.kind, allowed: true, risk, message: riskMessage(engine, from, to, ordered, lines), risks: ordered };
 }
 
+/**
+ * The very image that runs: nothing to change, whatever line it is
+ * recorded as. judgeVersion compares lines first, and a line that names
+ * no release (customLine: latest, a digest) does not compare.
+ */
+function nothingToChange(image: string): Judged {
+  return {
+    kind: "current",
+    allowed: false,
+    reason: "current",
+    message: `The database already runs ${image}: nothing to change.`,
+    risks: [],
+  };
+}
+
 /** The risks of a change in sentences, the most serious first, and what protects the data. */
 function riskMessage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, risks: readonly Risk[], lines: readonly string[]): string {
   const label = engines[engine].label;
@@ -221,7 +238,7 @@ function riskMessage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, r
     postgresMajor: () =>
       `${label} ${to.version} does not open ${label} ${from.version} data files without pg_upgrade or a dump and restore, which do not run here, so it will most likely not start.`,
     dataPath: () =>
-      `${label} ${to.version} keeps its data in another folder than ${from.version}: it may start without the data (which stays on the volume), or not start.`,
+      `${label} ${to.version} keeps its data in another folder than ${from.version}: Seylo runs it on the folder of the data that runs (PGDATA), so it will most likely not start.`,
     patchOnly: () => `${label} takes patch updates only: ${to.version} may not read the data files of ${from.version}.`,
     oneStep: () => `${label} upgrades one version at a time: ${to.version} skips ${next ?? "a version"}, and may refuse the data files.`,
     otherLine: () =>
@@ -477,7 +494,8 @@ export function nativePasswordPlan(
  * nativePasswordPlan's check, and every change to a line from 8.4 on that
  * the catalog does not have (9.0 removed the plugin; a tag that names no
  * release counts as one), from a line that has the plugin on by itself
- * (before 8.4) or a command that turns it on.
+ * (before 8.4), a command that turns it on, or an image whose tag names no
+ * release (mysql:8 pulled while it was 8.0, mysql:5): it may be such a line.
  */
 export function nativePasswordCheckNeeded(
   engine: DatabaseEngine,
@@ -489,7 +507,7 @@ export function nativePasswordCheckNeeded(
   if (plan.check) return true;
   if (engine !== "mysql" || plan.on) return false;
   const off = (version: string) => version === customLine || compareVersions(version, "8.4") >= 0;
-  return off(to) && (hasNativePassword(command) || !off(from));
+  return off(to) && (hasNativePassword(command) || from === customLine || !off(from));
 }
 
 /**
@@ -692,8 +710,8 @@ export const versionChoices = implement(dbOps.versionChoices, (input, ctx) => {
     anyImage: repository !== null,
     pendingImage: state.pending?.image ?? null,
     choices: catalog.map((v) => {
-      const { risks: _, ...j } = judge(state, v);
-      return { version: v.version, image: v.image, ...j };
+      const { risks, ...j } = judge(state, v);
+      return { version: v.version, image: v.image, ...j, ...(risks.length > 0 ? { risks } : {}) };
     }),
     blocked: state.blocked,
     customOnCurrent: state.blocked === null && repository !== null,
@@ -740,7 +758,8 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
     await raiseFeatureCompatibility(ctx, info, node.id, state.from.version);
   if (nativePasswordCheckNeeded(info.row.engine, state.command, state.from.version, to.version, native) && node)
     await assertNoNativePasswordUsers(ctx, info, node.id, to.version);
-  // Another change may have queued its deploy while the MongoDB or MySQL step ran.
+  const pgdata = node ? await pgdataPin(ctx, state, node.id, to) : null;
+  // Another change may have queued its deploy while the MongoDB, MySQL or PostgreSQL step ran.
   assertNoActiveDeploy(ctx, info.service.id);
 
   ctx.db.transaction((tx) => {
@@ -753,6 +772,7 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
       source: { type: "image", image, registryId: spec.source.type === "image" ? spec.source.registryId : null },
       ...(command ? { container: { ...spec.container, command } } : {}),
     });
+    if (pgdata) writePgdataPin(tx, ctx, info.service.id, pgdata);
   });
   const user = userOf(ctx.principal);
   const deployment = queueDeploy(ctx, {
@@ -768,12 +788,43 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
             `mysql_native_password logins ${native.on ? "on (--mysql-native-password=ON)" : "off"}${flagOnly ? `, on the image it runs (${image})` : ""}.`,
           ]
         : []),
+      ...(pgdata ? [`PGDATA set to ${pgdata}, the folder of the data that ran.`] : []),
     ],
   });
   publishService(ctx, info.service);
-  invalidateService(ctx, info.service.id, [dbOps.get.id, dbOps.versionChoices.id]);
+  invalidateService(ctx, info.service.id, [dbOps.get.id, dbOps.versionChoices.id, ...(pgdata ? [envOps.get.id] : [])]);
   return { database: toDatabase(loadDatabase(ctx, info.service.id), ctx.agents), deploymentId: deployment.id };
 });
+
+/**
+ * The folder a PostgreSQL change pins PGDATA to (pgdata.ts), null when it
+ * needs none: the cluster that runs, from the line it runs (18 on), else
+ * as the running container says. Refused when that cannot be read:
+ * nothing changed.
+ */
+async function pgdataPin(ctx: OpContext, state: VersionState, nodeId: string, to: ImagePoint): Promise<string | null> {
+  const { info } = state;
+  const env = readServiceEnv(ctx.db, ctx.secrets, info.service.id).text;
+  if (!needsPgdataPin(info.row.engine, state.from.dataPath, env, state.from.version, to.version)) return null;
+  const known = lineDataFolder(state.from.version);
+  if (known) return known;
+  const refuse = (detail: string) =>
+    new OpError(
+      "CONFLICT",
+      `Could not read where PostgreSQL keeps the data that runs (PGDATA), so nothing changed. Check that the database is running and healthy, then try again. ${detail}`.trim(),
+      { reason: "pgdataFailed" },
+    );
+  const folder = (await execStep(ctx, info, nodeId, pgdataExec, refuse, "postgres PGDATA read failed")).trim();
+  if (!folder.startsWith("/")) throw refuse(folder ? `PostgreSQL said: ${folder.slice(0, 300)}` : "");
+  return folder;
+}
+
+/** Writes the PGDATA pin into the database's .env, unless it was set there in the meantime. */
+function writePgdataPin(tx: Parameters<typeof writeServiceEnv>[0], ctx: OpContext, serviceId: string, folder: string): void {
+  const env = readServiceEnv(tx, ctx.secrets, serviceId).text;
+  if (definesPgdata(env)) return;
+  writeServiceEnv(tx, ctx.secrets, serviceId, withPgdata(env, folder, versionPinNote), userOf(ctx.principal)?.id ?? null);
+}
 
 async function raiseFeatureCompatibility(ctx: OpContext, info: DatabaseInfo, nodeId: string, version: string): Promise<void> {
   const exec = mongoFcvExec(info.admin.user, info.admin.password, version);

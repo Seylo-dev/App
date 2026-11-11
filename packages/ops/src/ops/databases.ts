@@ -227,7 +227,9 @@ export const create = defineOp({
      * valkey/valkey, eqalpha/keydb, ghcr.io/dragonflydb/dragonfly or
      * clickhouse/clickhouse-server. Not tested by Seylo. The version
      * recorded is the line its tag names ("8.2"), or "custom"; version is
-     * not used then.
+     * not used then. A Postgres image whose tag names no release also gets
+     * PGDATA=/var/lib/postgresql/docker in the database's own variables,
+     * so an image older than 18 keeps its data on the volume.
      */
     image: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     nodeId: Id,
@@ -285,6 +287,8 @@ export const VersionChoice = Type.Object({
    * digest (the release that runs or would run is unknown).
    */
   risk: Type.Optional(Type.String()),
+  /** Every risk the change takes, the most serious (risk) first: what setVersion's riskNotAccepted names as details.risks (0.2.11). */
+  risks: Type.Optional(Type.Array(Type.String())),
   /** The reason or the risks in sentences. */
   message: Type.Optional(Type.String()),
 });
@@ -352,7 +356,7 @@ export const setVersion = defineOp({
   kind: "destructive",
   summary: "Change a database's version",
   description:
-    "Moves a database to another version line of its engine, to the newest pinned image of its own line (a patch update), or to any image of its engine's own repository (image: any tag or digest, not tested by Seylo), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Refused outright: another repository, a database not placed, stopped or deploying, and the image that runs (nothing to change) unless keepNativePassword changes alone. Every other change the rules would not make by themselves is a risk the caller takes with acceptRisk: true, else it is refused with reason riskNotAccepted (details.risk, details.risks, details.message): downgrades and older releases, Postgres majors (pg_upgrade is not run), skipped MongoDB, MariaDB or MySQL lines, KeyDB and Dragonfly beyond patches, lines outside the catalog, another Postgres base system (text indexes may need REINDEX), floating tags (latest, 8.2) and digests. A new version that never gets healthy brings the old container back on the same data. MongoDB's featureCompatibilityVersion is raised to the running version first for a one-step upgrade between catalog lines, never for other moves. Every change but a newer patch of the line it runs needs a successful backup from the last 24 hours, or confirmNoBackup: true. MySQL 8.4 ships mysql_native_password off (9.0 removed it): before a change from 8.0 to 8.4 or later the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command.",
+    "Moves a database to another version line of its engine, to the newest pinned image of its own line (a patch update), or to any image of its engine's own repository (image: any tag or digest, not tested by Seylo), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Refused outright: another repository, a database not placed, stopped or deploying, and the image that runs (nothing to change) unless keepNativePassword changes alone. Every other change the rules would not make by themselves is a risk the caller takes with acceptRisk: true, else it is refused with reason riskNotAccepted (details.risk, details.risks, details.message): downgrades and older releases, Postgres majors (pg_upgrade is not run), skipped MongoDB, MariaDB or MySQL lines, KeyDB and Dragonfly beyond patches, lines outside the catalog, another Postgres base system (text indexes may need REINDEX), floating tags (latest, 8.2) and digests. A new version that never gets healthy brings the old container back on the same data. MongoDB's featureCompatibilityVersion is raised to the running version first for a one-step upgrade between catalog lines, never for other moves. Every change but a newer patch of the line it runs needs a successful backup from the last 24 hours, or confirmNoBackup: true. MySQL 8.4 ships mysql_native_password off (9.0 removed it): before a change from 8.0 to 8.4 or later the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command. Before a Postgres move to another line (or from or to a tag that names no release) on a volume at /var/lib/postgresql, PGDATA is set in the database's own variables to the folder of the data that runs (from 18 on each major keeps its own folder there, and an older image looks in an anonymous volume), so a version that cannot read the data fails and the old container comes back, instead of starting an empty database; reason pgdataFailed when that folder cannot be read from the running container.",
   input: Type.Object({
     serviceId: Id,
     /** A catalog version of the database's engine, for example "8.0". Not needed with image (0.2.11). */

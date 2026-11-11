@@ -41,7 +41,7 @@ import {
   generatePassword,
   hasNativePassword,
 } from "../databases/engines";
-import { importedVersion } from "../databases/images";
+import { baseOfTag, engineImage, imageTag, importedVersion, tagRelease } from "../databases/images";
 import { adminPasswordSecret } from "../databases/info";
 import { compareVersions, customImage, imageRelease } from "../databases/version";
 import { hasBuildx } from "../deployments/source";
@@ -181,6 +181,15 @@ export function importedDatabaseImage(
   const catalog = version.image;
   if (!ran || ran === catalog) return { image: catalog, warning: null, blocker: null };
   const label = engines[engine].label;
+  const ranKept = withData ? keptRanImage(engine, variant, version, ran) : null;
+  if (ranKept) {
+    const why = {
+      newer: `newer than ${catalog}, this panel's image of ${label} ${version.version}. It keeps ${ranKept.image}: its data cannot go back to an older release.`,
+      unknown: `which does not show its release, so Seylo cannot tell it from ${catalog}, this panel's image of ${label} ${version.version}. It keeps ${ranKept.image}: its data may not open on an older release.`,
+      base: `built on another base system than ${catalog}, this panel's image of ${label} ${version.version}. It keeps ${ranKept.image}: text indexes follow the sort order of the base system's C library.`,
+    }[ranKept.why];
+    return { image: ranKept.image, warning: `It ran ${ran}, ${why}`, blocker: null };
+  }
   const theirs = imageRelease(ran);
   const ours = imageRelease(catalog);
   const newer = theirs !== null && ours !== null && compareVersions(theirs, ours) > 0;
@@ -209,6 +218,37 @@ export function importedDatabaseImage(
     warning: `It ran ${ran}; it starts here on ${here}.${kept ? ` Once it runs, change it to ${kept} on the Version card of its Settings tab.` : ""}`,
     blocker: null,
   };
+}
+
+/**
+ * The image an import with data keeps instead of the catalog's (0.2.11,
+ * any image of the engine): the one the file ran, when it is an image of
+ * the engine's repository (engineImage) recorded as the same line, and the
+ * catalog's could be older than it or read the data differently: a newer
+ * release, a tag that floats or names no release next to a digest (Seylo
+ * cannot tell which release), another Postgres base system. Null to start
+ * on the catalog's image (the same release or an older one on the same
+ * base: the catalog's is a newer patch) or when it is another line.
+ */
+function keptRanImage(
+  engine: DatabaseEngine,
+  variant: string | null,
+  version: EngineVersion,
+  ran: string,
+): { image: string; why: "newer" | "unknown" | "base" } | null {
+  let parsed: ReturnType<typeof engineImage>;
+  try {
+    parsed = engineImage(engine, variant, ran);
+  } catch {
+    return null;
+  }
+  if (parsed.version !== version.version || parsed.image === version.image) return null;
+  const ours = imageTag(version.image);
+  if (engine === "postgres" && parsed.tag !== null && ours !== null && baseOfTag(parsed.tag) !== baseOfTag(ours))
+    return { image: parsed.image, why: "base" };
+  const release = ours ? tagRelease(ours) : null;
+  if (parsed.floating || parsed.release === null || release === null) return { image: parsed.image, why: "unknown" };
+  return compareVersions(parsed.release, release) > 0 ? { image: parsed.image, why: "newer" } : null;
 }
 
 export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choicesIn: Choices): Plan {

@@ -635,7 +635,7 @@ describe("databases", () => {
     expect(fresh.body.warnings.map((w: { reason: string }) => w.reason)).not.toContain("databaseImage");
   });
 
-  test("importedDatabaseImage: newer data keeps its release only as databases.setVersion would take it", () => {
+  test("importedDatabaseImage: data keeps the image it ran when this panel's could read it differently", () => {
     const pick = (engine: DatabaseEngine, variant: string | null, line: string, ran: string | null, withData = true) =>
       importedDatabaseImage(engine, variant, engineVersion(engine, line, variant) as EngineVersion, ran, withData);
     // Same image, or none named: the catalog's, nothing to say.
@@ -649,12 +649,28 @@ describe("databases", () => {
     expect(pick("postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg17-trixie").image).toBe("pgvector/pgvector:0.8.8-pg17-trixie");
     expect(pick("mongo", null, "8.0", "mongo:8.0.40").image).toBe("mongo:8.0.40");
     expect(pick("clickhouse", null, "26.3", "clickhouse/clickhouse-server:26.3.70.1").image).toBe("clickhouse/clickhouse-server:26.3.70.1");
-    // Newer on another base system, or an engine that takes the catalog's image only: the data is refused.
-    for (const [engine, line, ran] of [
-      ["postgres", "17", "postgres:17.7-trixie"],
-      ["dragonfly", "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.9"],
-      ["mariadb", "11.4", "mariadb:11.8.2"],
+    // Any image of the engine's repository on the same line (0.2.11): kept with the data whenever the
+    // catalog's could read it differently. Another base system, older or newer; KeyDB's and Dragonfly's
+    // own repositories; a tag that floats, or a digest next to its tag.
+    for (const [engine, line, ran, why] of [
+      ["postgres", "17", "postgres:17.7-trixie", "built on another base system"],
+      ["postgres", "17", "postgres:17.4", "built on another base system"],
+      ["dragonfly", "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.9", "newer than"],
+      ["mongo", "8.0", "mongo:8.0", "which does not show its release"],
+      ["mongo", "8.0", `docker.io/library/mongo:8.0.40@sha256:${"c".repeat(64)}`, "newer than"],
     ] as const) {
+      const got = pick(engine, null, line, ran);
+      const stored = ran.replace("docker.io/library/", "");
+      expect({ ran, ...got }).toEqual({ ran, image: stored, warning: expect.stringContaining(`It ran ${ran}, ${why}`), blocker: null });
+      expect(got.warning).toContain(`It keeps ${stored}`);
+      // Without the data, an empty database on the catalog image.
+      expect(pick(engine, null, line, ran, false)).toMatchObject({ blocker: null, image: engineVersion(engine, line)?.image });
+    }
+    // An older release on the catalog's base: the catalog's newer patch opens its data.
+    expect(pick("postgres", null, "17", "postgres:17.5-alpine")).toMatchObject({ image: "postgres:17.6-alpine", blocker: null });
+    expect(pick("mongo", null, "8.0", `mongo:8.0.20@sha256:${"c".repeat(64)}`)).toMatchObject({ image: "mongo:8.0.34", blocker: null });
+    // Newer data of another line: refused.
+    for (const [engine, line, ran] of [["mariadb", "11.4", "mariadb:11.8.2"]] as const) {
       const got = pick(engine, null, line, ran);
       expect(got.image).toBe(engineVersion(engine, line)?.image as string);
       expect(got.blocker).toContain(`Its data was written by ${ran}, newer than`);

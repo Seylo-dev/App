@@ -1055,3 +1055,122 @@ func TestITMongoAnyImage(t *testing.T) {
 		t.Fatalf("containers after the failed %s (%s): %+v", mongo80, started, list)
 	}
 }
+
+// postgres18 is the catalog's PostgreSQL 18, whose images keep each
+// major's data in a folder of its own under a volume at
+// /var/lib/postgresql.
+const postgres18 = "postgres:18.6-alpine"
+
+// TestITPostgresOtherMajorKeepsData runs the PostgreSQL moves across the
+// 18 folder change on real Docker (recreate deploys on the same data
+// volume, the panel's environment and pg_isready health check), and why
+// databases.setVersion pins PGDATA (pgdata.ts, 0.2.11):
+//
+//   - An 18 database (volume at /var/lib/postgresql) set to 17 starts
+//     healthy on an EMPTY database: 17 looks in /var/lib/postgresql/data,
+//     which its VOLUME line makes an anonymous volume. Moved back to 18,
+//     the data is there again (it never left 18/docker).
+//   - With PGDATA pinned to the folder of the cluster that runs
+//     (/var/lib/postgresql/18/docker), 17 refuses the 18 data files, the
+//     deploy fails and the 18 container comes back with the data.
+//   - A 17 database (volume at /var/lib/postgresql/data) set to 18 needs no
+//     pin: 18 refuses the volume at the old folder, and 17 comes back.
+//   - A database made from an image whose tag names no release gets PGDATA
+//     /var/lib/postgresql/docker (databases.create): an image older than 18
+//     then keeps its data on the volume, not in the anonymous volume of its
+//     VOLUME line, so a recreate keeps it.
+func TestITPostgresOtherMajorKeepsData(t *testing.T) {
+	e := newIT(t)
+	e.pull(postgres17, postgres18)
+	const pass = "OtherMajorPassword123"
+	pg := func(name, dataPath string, env ...string) *dbIT {
+		d := e.database(name, agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, 5432, dataPath, nil,
+			[]string{"sh", "-c", `pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1`},
+			append([]string{"POSTGRES_USER=postgres", "POSTGRES_PASSWORD=" + pass, "POSTGRES_DB=app"}, env...)...)
+		d.spec.Deploy.HealthTimeout = durationpb.New(45 * time.Second)
+		return d
+	}
+	psql := func(d *dbIT, container, query string) (string, int) {
+		return execStdin(t, e, container, []string{"psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "app", "-v", "ON_ERROR_STOP=1", "-q", "-tA"},
+			query, "PGPASSWORD="+pass)
+	}
+	// pg_isready answers before the first start's init scripts are done: wait for a query.
+	query := func(d *dbIT, container, q string) string {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			out, code := psql(d, container, q)
+			if code == 0 {
+				return out
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %q (%d)", q, out, code)
+			}
+			time.Sleep(time.Second)
+		}
+	}
+	setEnv := func(d *dbIT, name, value string) {
+		d.spec = cloneOf(d.spec)
+		d.spec.Env = append(d.spec.Env, &agentv1.EnvVar{Name: name, Value: value})
+	}
+	failsBack := func(d *dbIT, image, old, want string) {
+		t.Helper()
+		p, started := d.try(image)
+		if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
+			t.Fatalf("%s: %v", image, p)
+		}
+		t.Logf("%s: %s", image, p.GetMessage())
+		if got := query(d, old, "select v from t"); got != want {
+			t.Fatalf("data after the failed %s: %q", image, got)
+		}
+		if list := e.containers(d.spec.GetId()); len(list) != 1 || list[0].Name != old || list[0].State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
+			t.Fatalf("containers after the failed %s (%s): %+v", image, started, list)
+		}
+	}
+
+	// 18 to 17 without the pin: healthy, and empty.
+	a := pg("pg-18", "/var/lib/postgresql")
+	c := a.deploy(postgres18)
+	query(a, c, "create table t (v text); insert into t values ('kept on 18')")
+	c = a.deploy(postgres17)
+	if got := query(a, c, "select count(*) from pg_tables where tablename = 't'"); got != "0" {
+		t.Fatalf("17 on an 18 volume without PGDATA sees the table: %q", got)
+	}
+	c = a.deploy(postgres18)
+	if got := query(a, c, "select v from t"); got != "kept on 18" {
+		t.Fatalf("back on 18: %q", got)
+	}
+
+	// 18 to 17 with PGDATA on the cluster that runs: refused, 18 comes back.
+	setEnv(a, "PGDATA", "/var/lib/postgresql/18/docker")
+	c = a.deploy(postgres18)
+	query(a, c, "insert into t values ('pinned')")
+	failsBack(a, postgres17, c, "kept on 18\npinned")
+
+	// 17 to 18: refused without a pin.
+	b := pg("pg-17", "/var/lib/postgresql/data")
+	c = b.deploy(postgres17)
+	query(b, c, "create table t (v text); insert into t values ('kept on 17')")
+	failsBack(b, postgres18, c, "kept on 17")
+
+	// An image older than 18 on the volume at /var/lib/postgresql, with and without the pin, across a
+	// recreate (another variable: the same spec again keeps its container).
+	n := pg("pg-unpinned", "/var/lib/postgresql")
+	c = n.deploy(postgres17)
+	query(n, c, "create table t (v text); insert into t values ('kept')")
+	setEnv(n, "RECREATE", "1")
+	c = n.deploy(postgres17)
+	if got := query(n, c, "select count(*) from pg_tables where tablename = 't'"); got != "0" {
+		t.Fatalf("17 without PGDATA kept its data across a recreate: %q", got)
+	}
+	m := pg("pg-pinned", "/var/lib/postgresql", "PGDATA=/var/lib/postgresql/docker")
+	c = m.deploy(postgres17)
+	query(m, c, "create table t (v text); insert into t values ('kept')")
+	setEnv(m, "RECREATE", "1")
+	c = m.deploy(postgres17)
+	if got := query(m, c, "select v from t"); got != "kept" {
+		t.Fatalf("17 with PGDATA after a recreate: %q", got)
+	}
+	// And 18 on that folder refuses the 17 data: the pin holds for every later change.
+	failsBack(m, postgres18, c, "kept")
+}

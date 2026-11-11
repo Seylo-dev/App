@@ -22,6 +22,7 @@ import {
 import { databaseRuntime } from "../src/modules/databases/desired";
 import { enginesCapability, engineVersions, exposureRefusal } from "../src/modules/databases/engines";
 import { customLine, dataPathOf, engineImage, importedVersion } from "../src/modules/databases/images";
+import { customDataFolder, needsPgdataPin } from "../src/modules/databases/pgdata";
 import {
   type ImagePoint,
   judgeImage,
@@ -29,6 +30,8 @@ import {
   nativePasswordGoneRefusal,
   riskOrder,
 } from "../src/modules/databases/version";
+import { resolveServiceEnv } from "../src/modules/env/desired";
+import { readServiceEnv, writeServiceEnv } from "../src/modules/env/store";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, settleDeploys } from "./seed-helpers";
 import { begin, closeSides, exportZip, side } from "./transfer-helpers";
@@ -207,6 +210,10 @@ describe("any image of the engine", () => {
     expect(nativePasswordCheckNeeded("mysql", [], "8.0", "8.4", { on: true, check: false })).toBe(false);
     expect(nativePasswordCheckNeeded("mysql", [], "8.0", "8.4", { on: false, check: true })).toBe(true);
     expect(nativePasswordCheckNeeded("mariadb", [], "10.11", "11.4", plan)).toBe(false);
+    // A tag that names no release (mysql:8 pulled while it was 8.0, mysql:5) may run a line with the plugin on.
+    expect(nativePasswordCheckNeeded("mysql", [], customLine, "9.1", plan)).toBe(true);
+    expect(nativePasswordCheckNeeded("mysql", [], customLine, customLine, plan)).toBe(true);
+    expect(nativePasswordCheckNeeded("mysql", [], customLine, "8.0", plan)).toBe(false);
     const gone = nativePasswordGoneRefusal(["legacy@%"], "9.1");
     expect(gone.details).toEqual({ reason: "nativePasswordUsers", accounts: "legacy@%", count: "1" });
     expect(gone.message).toContain("a plugin MySQL 9.1 does not have");
@@ -461,6 +468,138 @@ describe("databases.setVersion and create with any image", () => {
     agent.disconnect();
   });
 
+  test("the image that runs is nothing to change, also when its tag names no release", async () => {
+    const { project, node } = seedPlace();
+    const all = { acceptRisk: true, confirmNoBackup: true };
+    for (const [engine, ref] of [
+      ["mongo", "mongo:latest"],
+      ["postgres", "postgres:latest"],
+      ["redis", `redis@${digest}`],
+    ] as const) {
+      // judgeVersion compares lines first, and "custom" does not compare: the image decides.
+      expect(judge(engine, image(engine, ref), image(engine, ref))).toEqual({
+        kind: "current",
+        allowed: false,
+        reason: "current",
+        message: `The database already runs ${ref}: nothing to change.`,
+        risks: [],
+      });
+      const made = await callOp(
+        panel,
+        dbOps.create,
+        { projectId: project.id, name: `${engine}-x`, engine, image: ref, nodeId: node.id },
+        { cookie },
+      );
+      expect(made.status).toBe(200);
+      await settleDeploys(panel);
+      goLive(made.body.serviceId);
+      const before = deployCount(made.body.serviceId);
+      for (const input of [{ image: ref }, { image: ref, ...all }]) {
+        const res = (await callOp(panel, dbOps.setVersion, { serviceId: made.body.serviceId, ...input }, { cookie })) as Res;
+        const got: Record<string, unknown> = { engine, input, ...refusal(res) };
+        expect(got).toEqual({ engine, input, status: 409, reason: "current" });
+      }
+      expect(deployCount(made.body.serviceId)).toBe(before);
+    }
+    expect(judge("keydb", image("keydb", "eqalpha/keydb:latest"), image("keydb", "eqalpha/keydb:latest")).reason).toBe("current");
+  });
+
+  test("versionChoices lists every risk of a catalog choice, not only the most serious", async () => {
+    const { serviceId } = await createDb("postgres", "17");
+    const choices = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+    const of = (version: string) => choices.body.choices.find((c: { version: string }) => c.version === version);
+    expect(of("18")).toMatchObject({ risk: "postgresMajor", risks: ["postgresMajor", "dataPath"] });
+    expect(of("16")).toMatchObject({ risk: "downgrade", risks: ["downgrade"] });
+    expect(of("17")).not.toHaveProperty("risks");
+  });
+
+  const envOf = (serviceId: string) => readServiceEnv(panel.deps.db, panel.deps.secrets, serviceId).text;
+  const pgdataOf = (serviceId: string) => resolveServiceEnv(panel.deps, serviceId).find((v) => v.name === "PGDATA")?.value ?? null;
+
+  test("PostgreSQL 18 to another line pins PGDATA to the folder of the data that runs", async () => {
+    expect(needsPgdataPin("postgres", "/var/lib/postgresql", "", "18", "17")).toBe(true);
+    expect(needsPgdataPin("postgres", "/var/lib/postgresql", "", "18", customLine)).toBe(true);
+    expect(needsPgdataPin("postgres", "/var/lib/postgresql", "", customLine, customLine)).toBe(true);
+    expect(needsPgdataPin("postgres", "/var/lib/postgresql", "", "18", "18")).toBe(false);
+    expect(needsPgdataPin("postgres", "/var/lib/postgresql", "# mine\nPGDATA=/srv/pg\n", "18", "17")).toBe(false);
+    // Older images look in /var/lib/postgresql/data, and Postgres 18 refuses a volume there.
+    expect(needsPgdataPin("postgres", "/var/lib/postgresql/data", "", "17", "18")).toBe(false);
+    expect(needsPgdataPin("mongo", "/var/lib/postgresql", "", "8.0", "9.0")).toBe(false);
+
+    const { serviceId } = await createDb("postgres", "18");
+    const all = { acceptRisk: true, confirmNoBackup: true };
+    expect(envOf(serviceId)).toBe("");
+    // A patch of the line keeps its folder: nothing to pin.
+    const patch = await callOp(panel, dbOps.setVersion, { serviceId, image: "postgres:18.7-alpine" }, { cookie });
+    expect(patch.status).toBe(200);
+    expect(envOf(serviceId)).toBe("");
+    await settleDeploys(panel);
+    goLive(serviceId);
+    // Refused for the risk first: nothing written.
+    const refused = (await callOp(panel, dbOps.setVersion, { serviceId, version: "17", confirmNoBackup: true }, { cookie })) as Res;
+    expect(refusal(refused)).toMatchObject({ status: 409, reason: "riskNotAccepted", risks: "downgrade,dataPath" });
+    expect(refused.body.error.message).toContain(
+      "Seylo runs it on the folder of the data that runs (PGDATA), so it will most likely not start.",
+    );
+    expect(envOf(serviceId)).toBe("");
+
+    const done = await callOp(panel, dbOps.setVersion, { serviceId, version: "17", ...all }, { cookie });
+    expect(done.status).toBe(200);
+    expect(envOf(serviceId)).toContain("\nPGDATA=/var/lib/postgresql/18/docker\n");
+    expect(pgdataOf(serviceId)).toBe("/var/lib/postgresql/18/docker");
+    // The volume stays where it is.
+    expect(panel.deps.db.select().from(volumes).where(eq(volumes.serviceId, serviceId)).get()?.mountPath).toBe("/var/lib/postgresql");
+    const log = panel.deps.db.select().from(deploymentLogs).where(eq(deploymentLogs.deploymentId, done.body.deploymentId)).all();
+    expect(log.map((l) => l.text)).toContain("PGDATA set to /var/lib/postgresql/18/docker, the folder of the data that ran.");
+    await settleDeploys(panel);
+  });
+
+  test("PGDATA set by hand stays, a volume at the old folder gets none, and a release that is not named is read from the container", async () => {
+    const all = { acceptRisk: true, confirmNoBackup: true };
+    const own = await createDb("postgres", "18");
+    const mine = "# mine\nPGDATA=/var/lib/postgresql/18/docker\n";
+    writeServiceEnv(panel.deps.db, panel.deps.secrets, own.serviceId, mine, null);
+    expect((await callOp(panel, dbOps.setVersion, { serviceId: own.serviceId, version: "17", ...all }, { cookie })).status).toBe(200);
+    expect(envOf(own.serviceId)).toBe(mine);
+    await settleDeploys(panel);
+
+    const old = await createDb("postgres", "17");
+    expect((await callOp(panel, dbOps.setVersion, { serviceId: old.serviceId, version: "18", ...all }, { cookie })).status).toBe(200);
+    expect(envOf(old.serviceId)).toBe("");
+    await settleDeploys(panel);
+
+    // On latest the folder depends on the release behind it: the running container says.
+    const { project, node } = seedPlace();
+    const made = await callOp(
+      panel,
+      dbOps.create,
+      { projectId: project.id, name: "pg-latest", engine: "postgres", image: "postgres:latest", nodeId: node.id },
+      { cookie },
+    );
+    await settleDeploys(panel);
+    goLive(made.body.serviceId);
+    const serviceId = made.body.serviceId as string;
+    // As a database from before databases.create set it, or one whose PGDATA was taken out.
+    writeServiceEnv(panel.deps.db, panel.deps.secrets, serviceId, "", null);
+    let answer = { exitCode: 1, stdout: new TextEncoder().encode("") };
+    const execs: unknown[] = [];
+    const agent = fakeAgent(panel, node.id, {
+      exec: (req: unknown) => {
+        execs.push(req);
+        return answer;
+      },
+    });
+    const failed = (await callOp(panel, dbOps.setVersion, { serviceId, image: "postgres:17.6-alpine", ...all }, { cookie })) as Res;
+    expect(refusal(failed)).toMatchObject({ status: 409, reason: "pgdataFailed" });
+    expect({ image: specImage(serviceId), env: envOf(serviceId) }).toEqual({ image: "postgres:latest", env: "" });
+    answer = { exitCode: 0, stdout: new TextEncoder().encode("/var/lib/postgresql/19/docker\n") };
+    expect((await callOp(panel, dbOps.setVersion, { serviceId, image: "postgres:17.6-alpine", ...all }, { cookie })).status).toBe(200);
+    expect(pgdataOf(serviceId)).toBe("/var/lib/postgresql/19/docker");
+    expect(execs).toHaveLength(2);
+    expect(execs[1]).toMatchObject({ command: ["sh", "-c", 'printf "%s\\n" "$PGDATA"'] });
+    agent.disconnect();
+  });
+
   test("databases.create takes any image of the engine and records the line its tag names", async () => {
     const { project, node } = seedPlace();
     const create = (name: string, input: Record<string, unknown>) =>
@@ -484,6 +623,10 @@ describe("databases.setVersion and create with any image", () => {
       expect({ name, status: res.status, version: res.body.version }).toEqual({ name, status: 200, version });
       expect({ name, image: specImage(res.body.serviceId), mount: mountOf(res.body.serviceId) }).toEqual({ name, image: stored, mount });
       expect(dbVersion(res.body.serviceId)).toBe(version);
+      // An image whose tag names no release keeps its data in a folder of the volume whatever release it is:
+      // one older than 18 would keep it in the anonymous volume of its own VOLUME line, gone on the next deploy.
+      const pinned = input.engine === "postgres" && version === customLine;
+      expect({ name, pgdata: pgdataOf(res.body.serviceId) }).toEqual({ name, pgdata: pinned ? customDataFolder : null });
     }
     for (const [name, input] of [
       ["bitnami", { engine: "mongo", image: "bitnami/mongodb:8.0.4" }],
