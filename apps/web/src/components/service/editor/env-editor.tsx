@@ -60,6 +60,9 @@ export function EnvEditor({
   const editorRef = useRef<CodeEditorInstance | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const decorations = useRef<MonacoApi.editor.IEditorDecorationsCollection | null>(null);
+  // The Secret / Public chips, apart from the rest, and the kind of each ("secret" or "public").
+  const chipDecorations = useRef<MonacoApi.editor.IEditorDecorationsCollection | null>(null);
+  const chipLabels = useRef<string[]>([]);
   // The line whose secret is shown because the cursor is on it (0: none).
   const editingLine = useRef(0);
   // Providers are registered once per editor and read the latest state from here.
@@ -86,27 +89,38 @@ export function EnvEditor({
         : secretRanges(a.parsed)
             .filter((r) => r.startLineNumber !== editingLine.current)
             .map((r) => ({ range: range(r), options: { inlineClassName: "seylo-env-secret" } }))),
-      // After the line's last character, so a trailing comment stays next to its value.
-      ...secretChips(a.parsed, ctx, self)
-        .filter((chip) => chip.line <= model.getLineCount())
-        .map((chip) => {
-          const end = model.getLineMaxColumn(chip.line);
-          return {
-            range: new monaco.Range(chip.line, end, chip.line, end),
-            options: {
-              // An empty range: without this Monaco drops its injected text.
-              showIfCollapsed: true,
-              after: {
-                content: t(chip.secret ? "serviceEnv.secret.chip" : "serviceEnv.secret.chipPublic"),
-                inlineClassName: chip.secret ? "seylo-env-chip seylo-env-chip-secret" : "seylo-env-chip seylo-env-chip-public",
-                cursorStops: monaco.editor.InjectedTextCursorStops.None,
-              },
-            },
-          };
-        }),
     ];
     decorations.current ??= editor.createDecorationsCollection();
     decorations.current.set(items);
+
+    // The chips are injected text: setting one makes Monaco lay its line out again, which
+    // loses keys typed meanwhile, so they are set only when a line's chip changes. A chip
+    // stays at the end of its line as the text around it changes.
+    const chips = secretChips(a.parsed, ctx, self).filter((chip) => chip.line <= model.getLineCount());
+    const labels = chips.map((chip) => (chip.secret ? "secret" : "public"));
+    chipDecorations.current ??= editor.createDecorationsCollection();
+    const have = chipDecorations.current.getRanges().map((r, i) => `${r.endLineNumber}:${chipLabels.current[i]}`);
+    const want = chips.map((chip, i) => `${chip.line}:${labels[i]}`);
+    if (have.join(",") === want.join(",")) return;
+    chipLabels.current = labels;
+    chipDecorations.current.set(
+      chips.map((chip) => {
+        // After the line's last character, so a trailing comment stays next to its value.
+        const end = model.getLineMaxColumn(chip.line);
+        return {
+          range: new monaco.Range(chip.line, end, chip.line, end),
+          options: {
+            // An empty range: without this Monaco drops its injected text.
+            showIfCollapsed: true,
+            after: {
+              content: t(chip.secret ? "serviceEnv.secret.chip" : "serviceEnv.secret.chipPublic"),
+              inlineClassName: chip.secret ? "seylo-env-chip seylo-env-chip-secret" : "seylo-env-chip seylo-env-chip-public",
+              cursorStops: monaco.editor.InjectedTextCursorStops.None,
+            },
+          },
+        };
+      }),
+    );
   };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: draw reads the latest state from the ref.
@@ -286,6 +300,8 @@ export function EnvEditor({
     return () => {
       for (const d of disposables) d.dispose();
       decorations.current = null;
+      chipDecorations.current = null;
+      chipLabels.current = [];
       onHandle?.(null);
     };
   };

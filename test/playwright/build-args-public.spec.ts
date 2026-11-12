@@ -113,4 +113,18 @@ test("Environment: Secret and Public chips, with why on hover", async ({ page })
   await expect(secret).toContainText("not as ARG TURNSTILE_SECRET_KEY");
   await expect(secret).toContainText("Not a secret? Put # @public on the line above it.");
   await page.screenshot({ path: `${shots}/env-chip-secret.png` });
+
+  // Typing keeps every key, at the end of a chip's line and on a new line that gets one.
+  await page.mouse.move(0, 0);
+  await lines.filter({ hasText: "NODE_ENV" }).click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("API_TOKEN=abc\n# @secret\nTITLE=Shop");
+  await expect(page.getByText(/Ln 7, Col 11/)).toBeVisible();
+  await expect(lines.filter({ hasText: "API_TOKEN=abc" }).locator(".seylo-env-chip")).toHaveText("Secret");
+  await expect(lines.filter({ hasText: "TITLE=Shop" }).locator(".seylo-env-chip")).toHaveText("Secret");
+  await lines.filter({ hasText: "TURNSTILE_SECRET_KEY" }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("xyz");
+  await expect(lines.filter({ hasText: "TURNSTILE_SECRET_KEY" })).toContainText(`${siteKey}xyz`);
+  await expect(chips).toHaveCount(4);
 });
