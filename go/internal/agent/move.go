@@ -51,7 +51,9 @@ import (
 // address (panel_memory.go); `seylo set-panel` moves the node by hand. A
 // certificate that is expired, not valid yet or for another name is no
 // sign of that (a clock that is not set yet, DNS that still leads to the
-// old server) and keeps moveRetryAfter, in memory only.
+// old server), and neither is Traefik's own default certificate (the
+// panel's proxy has none for the name for a while): they keep
+// moveRetryAfter, in memory only.
 //
 // Only an authenticated session (https:// with a pin or a CA-verified
 // certificate) can move the node. Over plain HTTP anyone on the path can
@@ -335,6 +337,8 @@ func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err er
 	msg := fmt.Sprintf("Could not move to the panel address %s: %s\nThe node keeps connecting through %s and tries again in %s %s.",
 		to.url, conn.PrintableLine(err.Error()), stay, durationWords(retry), again)
 	switch {
+	case conn.TraefikDefaultCertificate(err):
+		msg += " The panel's server had no certificate for that address yet (Traefik answered with its own): the move works once it has one."
 	case inspected:
 		msg += fmt.Sprintf(" The node does not trust that address's certificate: the panel must send its pin, or the certificate must come from a CA in the node's trust store (then `%s set-panel %s` on the node moves it).", brand.Slug, to.url)
 	case untrusted:
@@ -361,8 +365,14 @@ func untrustedCertificate(err error) bool {
 // inspectedCertificate reports whether err is what TLS inspection makes of
 // a certificate: one from an issuer the node does not trust, or one whose
 // key is not the pinned one. An expired or not yet valid certificate, or
-// one for another name, is not.
+// one for another name, is not, and neither is Traefik's own default
+// certificate (conn.TraefikDefaultCertificate): the panel's server has no
+// certificate for the name for a while (its proxy restarted, a certificate
+// is issued again), which passes on its own.
 func inspectedCertificate(err error) bool {
+	if conn.TraefikDefaultCertificate(err) {
+		return false
+	}
 	var unknown x509.UnknownAuthorityError
 	return errors.As(err, &unknown) || errors.Is(err, conn.ErrPinMismatch)
 }

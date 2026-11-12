@@ -287,12 +287,13 @@ func (c *connector) connectOnce(ctx context.Context) error {
 // does not trust, as TLS inspection re-signs it, or a key that is not the
 // pinned one: inspectedCertificate) dials a standing fallback at once
 // too: no panel restart explains it, and waiting only kept the node
-// offline (it took 5 minutes and more). Timeouts, refused connections and
-// other errors keep the wait, so a short panel restart does not flip the
-// node's address. A staged address (the panel moving to another node) goes
-// first once connects failed for stagedAfter: from then on every other
-// attempt dials it, unless the moved panel on this node still waits for
-// its switch.
+// offline (it took 5 minutes and more). Timeouts, refused connections,
+// Traefik's own default certificate (the panel's proxy has no certificate
+// for the name for a while) and other errors keep the wait, so a short
+// panel or proxy restart does not flip the node's address. A staged
+// address (the panel moving to another node) goes first once connects
+// failed for stagedAfter: from then on every other attempt dials it,
+// unless the moved panel on this node still waits for its switch.
 func (c *connector) primaryFailed(cfg FileConfig, target panelTarget, err error) {
 	now := time.Now()
 	if c.primaryDown.IsZero() {
@@ -489,7 +490,10 @@ func (c *connector) hello(cfg FileConfig, server *agentv1.ServerHello) (*agentv1
 }
 
 // afterHandshake records what the first accepted connection taught us:
-// the node id after a join and the pin after trust-on-first-use. Memory is
+// the node id after a join and the pin after trust-on-first-use. A join's
+// stay request (stay_on_address) ends with the join, answered or not: a
+// panel before 0.2.14 never answers it, and sent again on a resume once
+// the panel updated, it would be recorded as `seylo set-panel`. Memory is
 // updated even when config.yml cannot be written: the panel has used up
 // the join token by now, so the next connection must resume with the node
 // key. The write is retried (retryConfigSave) until it lands.
@@ -500,6 +504,10 @@ func (c *connector) afterHandshake(used FileConfig, res *rpc.HandshakeResult, sp
 	changed := false
 	if id := res.Accepted.GetNodeId(); id != "" && (next.NodeID != id || next.JoinToken != "") {
 		next.NodeID, next.JoinToken = id, ""
+		changed = true
+	}
+	if used.NodeID == "" && next.StayOnAddress {
+		next.StayOnAddress = false
 		changed = true
 	}
 	if used.TrustOnFirstUse && next.PanelPin == "" && len(spki) > 0 {

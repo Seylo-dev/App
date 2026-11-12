@@ -177,3 +177,31 @@ func TestDialRefusedConnectionHasNoCertificateHint(t *testing.T) {
 		t.Fatalf("error = %q", msg)
 	}
 }
+
+// Traefik's own certificate is told apart from TLS inspection for callers
+// too (the agent dials a fallback at once only on inspection), also when it
+// came in place of the pinned key; a firewall's CA is not Traefik's.
+func TestTraefikDefaultCertificate(t *testing.T) {
+	traefik := panelBehind(t, "", "TRAEFIK DEFAULT CERT")
+	firewall := panelBehind(t, "Fortinet", "FG800D5818800524")
+	for _, tc := range []struct {
+		name string
+		opts DialOptions
+		want bool
+	}{
+		{"untrusted Traefik default", DialOptions{URL: wsURL(traefik), RootCAs: x509.NewCertPool()}, true},
+		{"Traefik default in place of the pin", DialOptions{URL: wsURL(traefik), PinSHA256: make([]byte, 32)}, true},
+		{"untrusted firewall CA", DialOptions{URL: wsURL(firewall), RootCAs: x509.NewCertPool()}, false},
+		{"firewall CA in place of the pin", DialOptions{URL: wsURL(firewall), PinSHA256: make([]byte, 32)}, false},
+		{"refused connection", DialOptions{URL: "wss://127.0.0.1:1/api/agent/connect"}, false},
+	} {
+		err := dialErr(t, tc.opts)
+		if got := TraefikDefaultCertificate(err); got != tc.want {
+			t.Errorf("%s: TraefikDefaultCertificate = %v, want %v (%v)", tc.name, got, tc.want, err)
+		}
+	}
+	msg := dialErr(t, DialOptions{URL: wsURL(traefik), PinSHA256: make([]byte, 32)}).Error()
+	if !strings.Contains(msg, "answers with Traefik's own certificate") || strings.Contains(msg, "TLS inspection") {
+		t.Fatalf("pinned error = %q", msg)
+	}
+}

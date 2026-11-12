@@ -152,8 +152,12 @@ func Dial(ctx context.Context, opts DialOptions) (*WebSocket, error) {
 
 // pinMismatchError is ErrPinMismatch with the issuer the certificate that
 // came instead claims, already quoted by claimedIssuer
-// (errors.Is(err, ErrPinMismatch) holds).
-type pinMismatchError struct{ issuer string }
+// (errors.Is(err, ErrPinMismatch) holds), and whether it was Traefik's own
+// default certificate (traefikDefault).
+type pinMismatchError struct {
+	issuer         string
+	traefikDefault bool
+}
 
 func (e *pinMismatchError) Error() string {
 	return fmt.Sprintf("%s (the certificate presented says it was issued by %s)", ErrPinMismatch.Error(), e.issuer)
@@ -223,7 +227,8 @@ func claimedIssuer(cert *x509.Certificate) string {
 // public certificate, nearly always a firewall or proxy that decrypts HTTPS
 // on the way (TLS inspection: FortiGate, Zscaler, Palo Alto and the like
 // re-sign every site with their own CA). Traefik's own self-signed
-// certificate means the panel's server has no certificate for the name yet.
+// certificate, also in place of the pinned key, means the panel's server
+// has no certificate for the name yet (TraefikDefaultCertificate).
 // A node that joined over the domain keeps its node by pointing it at the
 // panel's IP and pin (`seylo set-panel`) instead of joining again, so the
 // hint names that command.
@@ -234,23 +239,56 @@ func certificateHint(rawURL string, err error) string {
 	}
 	var pinned *pinMismatchError
 	if errors.As(err, &pinned) {
+		if pinned.traefikDefault {
+			return fmt.Sprintf(". %s answers with Traefik's own certificate instead of the panel's pinned key: the panel's server has no certificate for that address right now, or the address leads to another server", host)
+		}
 		return fmt.Sprintf(". %s did not present the panel's pinned key: a firewall or proxy on this server's network may decrypt HTTPS (TLS inspection), or the address leads to another server", host)
 	}
-	var verify *tls.CertificateVerificationError
-	if !errors.As(err, &verify) || len(verify.UnverifiedCertificates) == 0 {
+	leaf := unknownAuthorityLeaf(err)
+	if leaf == nil {
 		return ""
 	}
-	var unknown x509.UnknownAuthorityError
-	if !errors.As(err, &unknown) {
-		return ""
-	}
-	leaf := verify.UnverifiedCertificates[0]
-	if strings.EqualFold(leaf.Issuer.CommonName, "TRAEFIK DEFAULT CERT") {
+	if traefikDefault(leaf) {
 		return fmt.Sprintf(". %s answers with Traefik's own certificate: the panel's server has no certificate for that name yet (see the panel domain's status)", host)
 	}
 	return fmt.Sprintf(". The certificate for %s says it was issued by %s, an issuer this server does not trust. If that is not who issued the panel's certificate, "+
 		"a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt %s from it, join with the panel's IP address and --pin, "+
 		"or point this node at the panel's IP with `%s set-panel` (the panel's Add node dialog shows the command)", host, claimedIssuer(leaf), host, brand.Slug)
+}
+
+// unknownAuthorityLeaf is the certificate a dial refused because no CA
+// the node trusts issued it, or nil when err is not that.
+func unknownAuthorityLeaf(err error) *x509.Certificate {
+	var verify *tls.CertificateVerificationError
+	var unknown x509.UnknownAuthorityError
+	if !errors.As(err, &verify) || len(verify.UnverifiedCertificates) == 0 || !errors.As(err, &unknown) {
+		return nil
+	}
+	return verify.UnverifiedCertificates[0]
+}
+
+// traefikDefaultIssuer is the issuer (and subject) of the self-signed
+// certificate Traefik serves for a name it has no certificate for.
+const traefikDefaultIssuer = "TRAEFIK DEFAULT CERT"
+
+func traefikDefault(cert *x509.Certificate) bool {
+	return strings.EqualFold(cert.Issuer.CommonName, traefikDefaultIssuer)
+}
+
+// TraefikDefaultCertificate reports whether a dial was refused because the
+// address answered with Traefik's own default certificate, from an issuer
+// the node does not trust or in place of the pinned key: the panel's
+// server has no certificate for the name right now (its proxy restarted
+// and has not loaded its certificates yet, the certificate is being
+// issued again). That passes on its own and is no sign of TLS inspection,
+// which re-signs with a CA of its own.
+func TraefikDefaultCertificate(err error) bool {
+	var pinned *pinMismatchError
+	if errors.As(err, &pinned) {
+		return pinned.traefikDefault
+	}
+	leaf := unknownAuthorityLeaf(err)
+	return leaf != nil && traefikDefault(leaf)
 }
 
 // SPKIFingerprint returns the SHA-256 of a certificate's public key. Pinning
@@ -275,7 +313,8 @@ func PinnedTLSConfig(pin []byte) *tls.Config {
 				return ErrPinMismatch
 			}
 			if subtle.ConstantTimeCompare(SPKIFingerprint(cs.PeerCertificates[0]), pin) != 1 {
-				return &pinMismatchError{issuer: claimedIssuer(cs.PeerCertificates[0])}
+				leaf := cs.PeerCertificates[0]
+				return &pinMismatchError{issuer: claimedIssuer(leaf), traefikDefault: traefikDefault(leaf)}
 			}
 			return nil
 		},

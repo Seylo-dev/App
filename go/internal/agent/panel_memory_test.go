@@ -2,12 +2,24 @@ package agent
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"fmt"
+	"io"
+	"log"
 	"log/slog"
+	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,14 +35,23 @@ func connectedOnce(t *testing.T, panel *rpctest.FakePanel) (datadir.Layout, stri
 	t.Helper()
 	layout := joined(t, panel)
 	a := startDaemon(t, layout)
+	nodeID := joinedAs(t, panel, layout)
+	a.stop(t)
+	panel.WaitDisconnected(nodeID)
+	return layout, nodeID
+}
+
+// joinedAs waits for the agent's first session and for its node id in
+// config.yml. An agent stopped in between joins again on its next start
+// with the token the panel already used, and the panel refuses it.
+func joinedAs(t *testing.T, panel *rpctest.FakePanel, layout datadir.Layout) string {
+	t.Helper()
 	nodeID := panel.WaitConnected("")
 	waitUntil(t, "the node id in config.yml", func() bool {
 		cfg, _ := LoadConfig(layout.ConfigFile())
 		return cfg != nil && cfg.NodeID == nodeID
 	})
-	a.stop(t)
-	panel.WaitDisconnected(nodeID)
-	return layout, nodeID
+	return nodeID
 }
 
 // onDomainWithStandingFallback writes config.yml of a node that moved to
@@ -147,6 +168,152 @@ func TestTimingOutPrimaryKeepsTheStandingFallbackWait(t *testing.T) {
 	})
 	if hosts := panel.AcceptedHosts(); len(hosts) != 1 {
 		t.Fatalf("accepted connections = %v: a timeout dialed the standing fallback before its wait", hosts)
+	}
+}
+
+// traefikDefaultAddress is an https:// address that answers with
+// Traefik's own default certificate (self-signed, "TRAEFIK DEFAULT CERT"):
+// the panel's proxy has no certificate for the name for a while. It names
+// 127.0.0.1, so the issuer is what the node refuses, counting the
+// connections the agent opens to it.
+func traefikDefaultAddress(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "TRAEFIK DEFAULT CERT"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dials atomic.Int32
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			dials.Add(1)
+		}
+	}
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return srv, &dials
+}
+
+// Traefik's own certificate at panel_url is the panel's proxy without a
+// certificate for a while (restarted, certificate store lost, a
+// certificate issued again), not TLS inspection: the standing fallback
+// keeps its 5 minutes, for a domain verified with the CA roots and for a
+// pinned one. Before, the node went to its pinned address at once, and the
+// failed move from there kept it on Stay for good.
+func TestTraefikDefaultCertificateKeepsTheStandingFallbackWait(t *testing.T) {
+	for _, pinned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pinned=%v", pinned), func(t *testing.T) {
+			moveSetup(t, false)
+			standingFallbackAfter = time.Hour
+			panel := rpctest.NewFakePanel(t, rpctest.WithTLS())
+			layout, _ := connectedOnce(t, panel)
+			domain, dials := traefikDefaultAddress(t)
+			panelRoots = x509.NewCertPool()
+			onDomainWithStandingFallback(t, layout, panel, domain.URL)
+			if pinned {
+				cfg := loadCfg(t, layout)
+				cfg.PanelPin = conn.FormatPin(panel.SPKI()) // not the key Traefik answers with
+				if err := SaveConfig(layout.ConfigFile(), cfg); err != nil {
+					t.Fatal(err)
+				}
+			}
+			panel.SetPanelAddress(domain.URL, "")
+
+			a := startDaemon(t, layout)
+			waitUntil(t, "a few refused connects", func() bool { return dials.Load() >= 2 })
+			time.Sleep(300 * time.Millisecond)
+			if hosts := panel.AcceptedHosts(); len(hosts) != 1 {
+				t.Fatalf("accepted connections = %v: Traefik's own certificate dialed the standing fallback before its wait", hosts)
+			}
+			if s, _ := a.d.backend.Status(context.Background()); !strings.Contains(s.Connection.LastError, "answers with Traefik's own certificate") {
+				t.Fatalf("last error = %q", s.Connection.LastError)
+			}
+			if m := loadMemory(t, layout); len(m.MoveWaits) != 0 {
+				t.Fatalf("panel.json = %+v, want no move waits", m)
+			}
+		})
+	}
+}
+
+// A move to an address that answers with Traefik's own certificate fails
+// as before (an hour's wait, in memory only) and the alert does not call
+// it an inspected certificate, so the panel does not keep the node on
+// Stay for it.
+func TestMoveToTraefikDefaultCertificateIsNoInspection(t *testing.T) {
+	moveSetup(t, false)
+	panel := rpctest.NewFakePanel(t, rpctest.WithTLS())
+	domain, dials := traefikDefaultAddress(t)
+	panelRoots = x509.NewCertPool()
+	layout := joined(t, panel)
+	panel.SetPanelAddress(domain.URL, "")
+
+	startDaemon(t, layout)
+	waitUntil(t, "the failed move and the session after it", func() bool { return dials.Load() > 0 && len(panel.AcceptedHosts()) >= 2 })
+	waitUntil(t, "the move alert", func() bool { return len(moveAlerts(panel)) > 0 })
+	alerts := moveAlerts(panel)
+	if len(alerts) != 1 || alerts[0].GetInspectedCertificate() || strings.Contains(alerts[0].GetMessage(), "TLS inspection") ||
+		!strings.Contains(alerts[0].GetMessage(), "tries again in an hour") || !strings.Contains(alerts[0].GetMessage(), "Traefik answered with its own") {
+		t.Fatalf("move alerts = %v", alerts)
+	}
+	if m := loadMemory(t, layout); len(m.MoveWaits) != 0 {
+		t.Fatalf("panel.json = %+v, want no move waits", m)
+	}
+}
+
+// A join's stay request ends with the join, also when the panel cannot
+// read it (before 0.2.14): sent again on a resume after the panel updated,
+// it would read as `seylo set-panel` and keep the node off the domain the
+// owner adds later.
+func TestJoinStayRequestEndsWithTheJoin(t *testing.T) {
+	isolate(t)
+	panel := rpctest.NewFakePanel(t, rpctest.WithTLS())
+	panel.BeforePanelAddress(true)
+	layout := joined(t, panel)
+	// What a join with --pin at the panel's public IP writes (the fake
+	// panel listens on loopback, which never asks to stay).
+	cfg := loadCfg(t, layout)
+	cfg.StayOnAddress = true
+	if err := SaveConfig(layout.ConfigFile(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	startDaemon(t, layout)
+	nodeID := joinedAs(t, panel, layout)
+	if h := panel.Hellos(); !h[0].GetStayOnAddress() || h[0].GetJoin() == nil {
+		t.Fatalf("the join's hello = %v, want it to ask to stay", h[0])
+	}
+	waitUntil(t, "the request gone from config.yml", func() bool {
+		cfg, _ := LoadConfig(layout.ConfigFile())
+		return cfg != nil && !cfg.StayOnAddress
+	})
+
+	// The panel updates to 0.2.14: the node's resume does not ask to stay.
+	panel.BeforePanelAddress(false)
+	hellos := len(panel.Hellos())
+	panel.DropConnections()
+	waitUntil(t, "the reconnect", func() bool { return len(panel.Hellos()) > hellos })
+	panel.WaitConnected(nodeID)
+	if h := panel.Hellos()[hellos]; h.GetStayOnAddress() || h.GetResume() == nil {
+		t.Fatalf("the resume after the join = %v, want no stay request", h)
+	}
+	if got := panel.PanelAddressChoice(nodeID); got != agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_FOLLOW {
+		t.Fatalf("panel address = %v, want FOLLOW", got)
 	}
 }
 
@@ -328,19 +495,19 @@ func TestStatusNamesTheNodeAsThePanelDoes(t *testing.T) {
 	layout := joined(t, panel)
 	a := startDaemon(t, layout)
 	host := a.d.deps.Facts.Get().GetHostname()
-	nodeID := panel.WaitConnected("")
+	nodeID := joinedAs(t, panel, layout)
 	a.stop(t)
 	panel.WaitDisconnected(nodeID)
 	if s, _ := a.d.backend.Status(context.Background()); s.NodeName != host {
 		t.Fatalf("name = %q before the panel named the node, want the hostname %q", s.NodeName, host)
 	}
 
-	panel.SetNodeName(nodeID, "il-tlv")
+	panel.SetNodeName(nodeID, "edge-east")
 	a = startDaemon(t, layout)
 	panel.WaitConnected(nodeID)
 	waitUntil(t, "the panel's name", func() bool {
 		s, _ := a.d.backend.Status(context.Background())
-		return s.NodeName == "il-tlv"
+		return s.NodeName == "edge-east"
 	})
 	a.stop(t)
 	panel.WaitDisconnected(nodeID)
@@ -348,13 +515,13 @@ func TestStatusNamesTheNodeAsThePanelDoes(t *testing.T) {
 	// Restarted while the panel is away: still the panel's name.
 	panel.RefuseAgents(true)
 	a = startDaemon(t, layout)
-	if s, _ := a.d.backend.Status(context.Background()); s.NodeName != "il-tlv" {
+	if s, _ := a.d.backend.Status(context.Background()); s.NodeName != "edge-east" {
 		t.Fatalf("name = %q after a restart, want the panel's", s.NodeName)
 	}
-	if _, _, err := a.d.deps.DesiredSync.Sync(context.Background(), &agentv1.DesiredState{Revision: 7, Settings: &agentv1.NodeSettings{NodeName: "il-tlv-2"}}); err != nil {
+	if _, _, err := a.d.deps.DesiredSync.Sync(context.Background(), &agentv1.DesiredState{Revision: 7, Settings: &agentv1.NodeSettings{NodeName: "edge-east-2"}}); err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := a.d.backend.Status(context.Background()); s.NodeName != "il-tlv-2" {
+	if s, _ := a.d.backend.Status(context.Background()); s.NodeName != "edge-east-2" {
 		t.Fatalf("name = %q, want the desired state's", s.NodeName)
 	}
 }
@@ -366,7 +533,7 @@ func TestAwayReportAfterFailedConnects(t *testing.T) {
 	panel := rpctest.NewFakePanel(t)
 	layout := joined(t, panel)
 	a := startDaemon(t, layout)
-	nodeID := panel.WaitConnected("")
+	nodeID := joinedAs(t, panel, layout)
 	if h := panel.Hellos(); h[0].GetAway() != nil {
 		t.Fatalf("the first hello reported %v", h[0].GetAway())
 	}

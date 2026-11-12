@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
 	"io"
@@ -275,26 +276,40 @@ func TestMoveRetryAfterAFailedMove(t *testing.T) {
 	untrusted := verify(x509.UnknownAuthorityError{})
 	expired := verify(x509.CertificateInvalidError{Reason: x509.Expired})
 	misnamed := verify(x509.HostnameError{Certificate: &x509.Certificate{DNSNames: []string{"old.example.com"}}, Host: "panel.example.com"})
+	// Traefik's own default certificate: the panel's proxy has no
+	// certificate for the name for a while, no firewall re-signed it.
+	traefikDefault := fmt.Errorf("dial panel: %w", &tls.CertificateVerificationError{
+		UnverifiedCertificates: []*x509.Certificate{{Issuer: pkix.Name{CommonName: "TRAEFIK DEFAULT CERT"}}},
+		Err:                    x509.UnknownAuthorityError{},
+	})
 	to := panelTarget{url: "https://panel.example.com"}
+	pinned := panelTarget{url: "https://10.0.0.1:3443", pin: pin}
 	for _, tc := range []struct {
 		name string
 		from panelTarget
 		err  error
 		want time.Duration
+		// kept: the wait is written to panel.json (an inspected certificate).
+		kept bool
 	}{
-		{"untrusted from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, untrusted, untrustedMoveRetryAfter},
-		{"pin mismatch from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, fmt.Errorf("dial panel: %w", conn.ErrPinMismatch), untrustedMoveRetryAfter},
-		{"expired or not yet valid from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, expired, moveRetryAfter},
-		{"another name from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, misnamed, moveRetryAfter},
-		{"unreachable from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, errors.New("dial panel: connect: connection refused"), moveRetryAfter},
-		{"another panel from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, errors.New(`https://panel.example.com answers as another panel ("p2", not "p1")`), moveRetryAfter},
-		{"untrusted from a CA-verified address", panelTarget{url: "https://old.example.com"}, untrusted, moveRetryAfter},
+		{"Traefik's own certificate from a pinned address", pinned, traefikDefault, moveRetryAfter, false},
+		{"untrusted from a pinned address", pinned, untrusted, untrustedMoveRetryAfter, true},
+		{"pin mismatch from a pinned address", pinned, fmt.Errorf("dial panel: %w", conn.ErrPinMismatch), untrustedMoveRetryAfter, true},
+		{"expired or not yet valid from a pinned address", pinned, expired, moveRetryAfter, false},
+		{"another name from a pinned address", pinned, misnamed, moveRetryAfter, false},
+		{"unreachable from a pinned address", pinned, errors.New("dial panel: connect: connection refused"), moveRetryAfter, false},
+		{"another panel from a pinned address", pinned, errors.New(`https://panel.example.com answers as another panel ("p2", not "p1")`), moveRetryAfter, false},
+		{"untrusted from a CA-verified address", panelTarget{url: "https://old.example.com"}, untrusted, moveRetryAfter, true},
 	} {
 		c := &connector{deps: &Deps{}, logger: slog.New(slog.DiscardHandler), cfg: &FileConfig{}}
 		before := time.Now()
 		c.moveFailed(context.Background(), tc.from, to, tc.err)
-		if got := c.moveRetry[moveKey(to)].until.Sub(before); got < tc.want || got > tc.want+time.Minute {
+		w := c.moveRetry[moveKey(to)]
+		if got := w.until.Sub(before); got < tc.want || got > tc.want+time.Minute {
 			t.Errorf("%s: retry in %s, want %s", tc.name, got, tc.want)
+		}
+		if w.kept != tc.kept {
+			t.Errorf("%s: kept in panel.json = %v, want %v", tc.name, w.kept, tc.kept)
 		}
 	}
 }
