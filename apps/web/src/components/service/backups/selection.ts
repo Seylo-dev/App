@@ -93,11 +93,14 @@ export const maxRunChips = 6;
  * The chips under a database run: "Everything on this server" for a
  * backup of everything (also every run from before 0.2.15: none recorded
  * what it held), then one per database with its size ("shop 380 MB", for
- * some tables "shop · 2 tables 1.2 MB"), at most six and "+N", and how
- * many chosen names were skipped. A run still going shows what it was
- * asked for.
+ * some tables "shop · 2 tables 1.2 MB"), at most six and "+N", and what
+ * its warnings are. A backup's warnings depend on its scope: of chosen
+ * databases or tables they are the names skipped because they were gone
+ * ("2 skipped"); of everything, why what it holds could not be measured
+ * (the backup itself is complete). A restore's are notes about it and
+ * get no chip. A run still going shows what it was asked for.
  */
-export function runChips(run: Pick<Run, "target" | "scope" | "selection" | "contents" | "warnings">, kind: string): RunChip[] {
+export function runChips(run: Pick<Run, "kind" | "target" | "scope" | "selection" | "contents" | "warnings">, kind: string): RunChip[] {
   if (run.target !== "database") return [];
   const engine = selectEngine(kind);
   const chips: RunChip[] = [];
@@ -121,8 +124,13 @@ export function runChips(run: Pick<Run, "target" | "scope" | "selection" | "cont
   if (databases.length > maxRunChips) {
     chips.push({ key: "more", label: t("serviceBackups.more", { count: databases.length - maxRunChips }), tone: "track" });
   }
-  if (run.warnings.length > 0)
-    chips.push({ key: "skipped", label: t("serviceBackups.skipped", { count: run.warnings.length }), tone: "amber" });
+  if (run.kind === "backup" && run.warnings.length > 0) {
+    chips.push(
+      run.scope === "databases" || run.scope === "tables"
+        ? { key: "skipped", label: t("serviceBackups.skipped", { count: run.warnings.length }), tone: "amber" }
+        : { key: "unmeasured", label: t("serviceBackups.notMeasured"), tone: "gray" },
+    );
+  }
   return chips;
 }
 

@@ -28,8 +28,9 @@ test("schedule titles say what is backed up", () => {
   expect(policyTitle({ target: "volume", volumeName: "data", selection: null }, "app")).toBe(t("serviceBackups.volume", { name: "data" }));
 });
 
-test("run chips: everything, databases with sizes, +N, skipped; old rows only the scope", () => {
+test("run chips: everything, databases with sizes, +N, skipped or not measured; old rows only the scope", () => {
   const run = (over: Record<string, unknown>) => ({
+    kind: "backup" as const,
     target: "database" as const,
     scope: "everything" as const,
     selection: null,
@@ -62,6 +63,24 @@ test("run chips: everything, databases with sizes, +N, skipped; old rows only th
   // Still running: what it was asked for.
   expect(labels({ scope: "databases", selection: { databases: [{ name: "shop" }, { name: "crm" }] } })).toEqual(["shop", "crm"]);
   expect(runChips(run({ target: "volume", scope: null }) as never, "app")).toEqual([]);
+  // A backup of everything whose measurement failed skipped nothing: it is complete, only not measured.
+  const unmeasured = runChips(
+    run({ contents: { wholeServer: true, databases: [] }, warnings: ["What the backup holds could not be measured: ERROR 1193"] }) as never,
+    "mysql",
+  );
+  expect(unmeasured.map((c) => [c.label, c.tone])).toEqual([
+    [t("serviceBackups.scopeEverything"), "gray"],
+    [t("serviceBackups.notMeasured"), "gray"],
+  ]);
+  // Gone tables of a backup of some tables are skipped.
+  expect(labels({ scope: "tables", contents: { wholeServer: false, databases: [db("shop", 1000, 1)] }, warnings: ["a", "b"] })).toEqual([
+    "shop · 1 table 1 KB",
+    "2 skipped",
+  ]);
+  // A restore's note (no backup before it) is no chip.
+  expect(
+    labels({ kind: "restore", scope: "tables", contents: { wholeServer: false, databases: [db("shop", 1000, 1)] }, warnings: ["note"] }),
+  ).toEqual(["shop · 1 table 1 KB"]);
   expect(sizeAndRows({ sizeBytes: 1_200_000, approxRows: 14_000 })).toBe("1.2 MB · ~14k rows");
   expect(sizeAndRows({ sizeBytes: 8192, approxRows: -1 })).toBe(`8.2 KB · ${t("serviceBackups.rowsUnknown")}`);
 });

@@ -569,6 +569,20 @@ const runHolds: Record<number, { selection: unknown; scope: string; contents: Re
   },
   2: { selection: null, scope: "everything", contents: null, warnings: [] },
   3: { selection: null, scope: "everything", contents: null, warnings: [] },
+  // Complete, but the listing before the dump failed: not measured, nothing skipped.
+  7: {
+    selection: null,
+    scope: "everything",
+    contents: [],
+    warnings: ["What the backup holds could not be measured: listing the databases took longer than 1m0s"],
+  },
+  // The restore of run 1 after both databases were dropped: nothing to back up first.
+  5: {
+    selection: { databases: [{ name: "shop" }, { name: "analytics" }, { name: "legacy" }] },
+    scope: "databases",
+    contents: ["shop", "analytics"].map(withTables),
+    warnings: ["Nothing was backed up first: none of what this backup holds is on the server any more."],
+  },
 };
 
 const run = (i: number, status: string) => ({
@@ -603,6 +617,18 @@ export const demoRuns = () => [
   run(3, "succeeded"),
   { ...run(4, "succeeded"), policyId: null, destinationId: null },
 ];
+
+/** A restore of run 1, two hours ago. */
+const restoreRun = {
+  ...run(5, "succeeded"),
+  kind: "restore",
+  policyId: "b000000000000002",
+  sourceRunId: "r000000000000001",
+  objectKey: "db/2026-11-04.bundle",
+  sizeBytes: 18_100_000,
+  startedAt: ago(2 * hour),
+  finishedAt: ago(2 * hour - 30_000),
+};
 
 export const handlers: Record<string, (input: Input) => unknown> = {
   "services.get": (input: Input) => servicesById[input.serviceId] ?? servicesById[ids.api],
@@ -724,7 +750,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
         : []),
     ],
   }),
-  "backups.listRuns": () => ({ runs: demoRuns(), hasMore: false }),
+  // The newest, a restore; the oldest, a backup of everything whose contents were not measured.
+  "backups.listRuns": () => ({ runs: [restoreRun, ...demoRuns(), { ...run(7, "succeeded"), objectKey: "db/2026-11-02.sql.gz" }], hasMore: false }),
   "backups.listDatabases": (input: Input) => {
     if (!input.database) return { state: "ok", message: null, databases: demoDatabases.map(({ name, sizeBytes, tableCount }) => ({ name, sizeBytes, tableCount })), tables: null, truncated: false };
     return { state: "ok", message: null, databases: demoDatabases.filter((d) => d.name === input.database).map(({ name, sizeBytes, tableCount }) => ({ name, sizeBytes, tableCount })), tables: demoTables[String(input.database)] ?? [], truncated: false };

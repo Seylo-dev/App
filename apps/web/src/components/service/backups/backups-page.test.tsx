@@ -104,19 +104,36 @@ test("each backup lists its databases as chips, the file size and the time it to
     }),
     // Made before 0.2.15, or by an older agent: what it held was never recorded.
     run("r-old", { sizeBytes: 5_000_000 }),
+    // Complete, but the listing before it failed (MySQL 5.7 before the fix): not "skipped".
+    run("r-unmeasured", {
+      contents: { wholeServer: true, databases: [] },
+      warnings: ["What the backup holds could not be measured: listing the databases took longer than 1m0s"],
+    }),
+    // A dropped table brought back: nothing was there to back up first.
+    run("r-restore", {
+      kind: "restore",
+      scope: "tables",
+      sourceRunId: "r-tables",
+      sizeBytes: 1_000,
+      selection: { databases: [{ name: "shop", tables: [{ schema: "public", name: "orders" }] }] },
+      contents: { wholeServer: false, databases: [db("shop", 1_240_000, 1)] },
+      warnings: ["Nothing was backed up first: none of what this backup holds is on the server any more."],
+    }),
     run("r-vol", { target: "volume", volumeId: "vol-1", scope: null, objectKey: "x.tar.gz", sizeBytes: 2_000_000 }),
   ]);
   expect(out).toContain(t("serviceBackups.file", { size: "96 MB" }));
   expect(out).toContain("42s");
   expect(out).toContain(">app 12 MB<");
   expect(out).toContain(">shop 380 MB<");
-  // The whole-server backup and the old one each say so.
-  expect(out.split(`>${t("serviceBackups.scopeEverything")}<`).length - 1).toBe(2);
+  // The whole-server backups and the old one each say so.
+  expect(out.split(`>${t("serviceBackups.scopeEverything")}<`).length - 1).toBe(3);
   // Six databases, then +2, and what was skipped.
   expect(out).toContain(">db5 1 MB<");
   expect(out).not.toContain(">db6 1 MB<");
   expect(out).toContain(">+2<");
-  expect(out).toContain(`>${t("serviceBackups.skipped", { count: 1 })}<`);
+  expect(out.split(`>${t("serviceBackups.skipped", { count: 1 })}<`).length - 1).toBe(1);
+  expect(out).toContain(`>${t("serviceBackups.notMeasured")}<`);
+  expect(out).toContain(">Nothing was backed up first: none of what this backup holds is on the server any more.<");
   expect(out).toContain(">shop · 1 table 1.2 MB<");
   // Chips are fill-only: tinted, no border.
   const chip = out.slice(out.lastIndexOf('data-slot="chip"', out.indexOf(">shop 380 MB<")), out.indexOf(">shop 380 MB<"));
@@ -126,5 +143,5 @@ test("each backup lists its databases as chips, the file size and the time it to
   expect(out).toContain(`aria-label="${t("serviceBackups.showContents")}"`);
   // Volumes have no chips and a plain size.
   expect(out).toContain(">2 MB · ");
-  expect(out.split(`aria-label="${t("serviceBackups.holds")}"`).length - 1).toBe(4);
+  expect(out.split(`aria-label="${t("serviceBackups.holds")}"`).length - 1).toBe(6);
 });

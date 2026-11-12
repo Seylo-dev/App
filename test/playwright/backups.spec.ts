@@ -368,17 +368,24 @@ test.describe("database backups", () => {
 
     const runs = page.getByRole("region", { name: "Backups and restores" });
     const holds = runs.getByRole("list", { name: "What this backup holds" });
-    // Runs 0-3, and the one-off to a deleted destination (everything, made before contents were recorded).
-    await expect(holds).toHaveCount(5);
+    // The restore, runs 0-3, the one-off to a deleted destination and the unmeasured one.
+    await expect(holds).toHaveCount(7);
+    // A restore of chosen databases that were dropped: what it replaced, and that nothing was there to back up first.
+    await expect(holds.nth(0).getByRole("listitem")).toHaveText(["shop 380 MB", "analytics 96 MB"]);
+    await expect(runs.getByText("Nothing was backed up first: none of what this backup holds is on the server any more.")).toBeVisible();
     // A backup of everything: the scope, then each database with its size.
-    await expect(holds.nth(0).getByRole("listitem")).toHaveText(["Everything on this server", "shop 380 MB", "analytics 96 MB", "postgres 7.5 MB"]);
+    await expect(holds.nth(1).getByRole("listitem")).toHaveText(["Everything on this server", "shop 380 MB", "analytics 96 MB", "postgres 7.5 MB"]);
     // Chosen databases, one of them gone at backup time.
-    await expect(holds.nth(1).getByRole("listitem")).toHaveText(["shop 380 MB", "analytics 96 MB", "1 skipped"]);
+    await expect(holds.nth(2).getByRole("listitem")).toHaveText(["shop 380 MB", "analytics 96 MB", "1 skipped"]);
     // Made before contents were recorded: the scope only.
-    await expect(holds.nth(3).getByRole("listitem")).toHaveText(["Everything on this server"]);
+    await expect(holds.nth(4).getByRole("listitem")).toHaveText(["Everything on this server"]);
+    // The one-off to a deleted destination: the scope only, like run 3.
+    await expect(holds.nth(5).getByRole("listitem")).toHaveText(["Everything on this server"]);
+    // Complete, but not measured: nothing was skipped.
+    await expect(holds.nth(6).getByRole("listitem")).toHaveText(["Everything on this server", "Contents not measured"]);
     await expect(runs.getByText("18.4 MB file · 12s")).toBeVisible();
 
-    await runs.getByRole("button", { name: "Show what this backup holds" }).nth(1).click();
+    await runs.getByRole("button", { name: "Show what this backup holds" }).nth(2).click();
     const shop = runs.getByRole("region", { name: "shop" });
     await expect(shop.getByText("public.orders")).toBeVisible();
     await expect(shop.getByText("240 MB · ~310k rows")).toBeVisible();

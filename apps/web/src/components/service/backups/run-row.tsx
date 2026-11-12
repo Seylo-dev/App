@@ -182,6 +182,12 @@ export function RunRow({
         {r.deletedAt && <Chip tone="gray">{t("serviceBackups.deleted")}</Chip>}
         {actions === "destinationGone" && <Chip tone="gray">{t("serviceBackups.destinationDeleted")}</Chip>}
         {r.error && <span className="min-w-0 flex-1 truncate text-[12.5px] text-chip-red-fg">{r.error}</span>}
+        {/* A restore's notes: the backup before it was skipped (nothing of it was left to keep). */}
+        {r.kind === "restore" && !r.error && r.warnings.length > 0 && (
+          <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={r.warnings.join(" ")}>
+            {r.warnings.join(" ")}
+          </span>
+        )}
         <span className="ml-auto text-[12.5px] text-muted-foreground">
           {[
             r.sizeBytes != null ? (isDb ? t("serviceBackups.file", { size: formatBytes(r.sizeBytes) }) : formatBytes(r.sizeBytes)) : null,

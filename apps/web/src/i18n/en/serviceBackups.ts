@@ -114,6 +114,7 @@ export default {
   policyTables: "Database · {database} · {tables}",
   more: "+{count}",
   skipped: { one: "{count} skipped", other: "{count} skipped" },
+  notMeasured: "Contents not measured",
   showContents: "Show what this backup holds",
   hideContents: "Hide what this backup holds",
   andMore: { one: "and {count} more", other: "and {count} more" },
