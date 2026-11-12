@@ -32,6 +32,35 @@ export default {
   certIssuer: "via {issuer}",
   certExpires: "valid until {date}",
   cert: { none: "none", selfSigned: "self-signed", pending: "being issued", valid: "valid", failed: "failed" },
+  selfSigned: {
+    title: "Self-signed certificate",
+    body: "Connections are encrypted, but clients that check certificates refuse this one.",
+    reason: {
+      noHostname: "No TLS host name is set, so the node uses a certificate of its own.",
+      acmeMissing: "The node has no Let's Encrypt certificate for {host} yet.",
+      engine: "MariaDB always serves the certificate it makes itself, with or without a TLS host name.",
+    },
+    lastError: "Last attempt: {error}",
+    getTrusted:
+      "For a trusted one, set a TLS host name under Port and access, give it an A record to the node set to DNS only (not proxied), and let port 80 reach the node.",
+    fixAcme:
+      "Let's Encrypt checks the name over port 80: {host} needs an A record to the node set to DNS only (not proxied), and port 80 has to reach the node.",
+    meanwhile: {
+      postgres:
+        "Until then, node-postgres connects with sslmode=no-verify (or uselibpqcompat=true&sslmode=require); psql and other libpq clients are fine with sslmode=require.",
+      mysql:
+        "Until then, ssl-mode=REQUIRED connects: it encrypts without checking the certificate. VERIFY_CA and VERIFY_IDENTITY need the certificate.",
+      mariadb:
+        "Clients connect with ssl-mode=REQUIRED (mariadb --ssl --skip-ssl-verify-server-cert), which encrypts without checking the certificate.",
+      mongo: "Until then, add tlsAllowInvalidCertificates=true to the URL.",
+      mongoInUrl: "The exposed URL already accepts it (tlsAllowInvalidCertificates=true).",
+      clickhouse: "Until then, add skip_verify=true to the URL.",
+      clickhouseInUrl: "The exposed URL already accepts it (skip_verify=true).",
+      redis: "Until then, tell the client to skip the check (redis-cli --insecure) or give it the certificate (--cacert).",
+    },
+    download: "Download certificate",
+    downloadHint: "or trust this file in the client (sslrootcert, ssl-ca, tlsCAFile).",
+  },
   exposureTitle: "Exposure settings",
   exposureBody: "Who may connect, and which certificate the database presents.",
   allowedIps: "Allowed IPs",

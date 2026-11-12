@@ -34,6 +34,7 @@ import { ConsoleCard, consoleCardHeight } from "../overview/overview-page";
 import { DatabaseShell } from "../terminal/console-pages";
 import type { ServiceDetail } from "../use-service";
 import { maskUrlPassword } from "./mask-url";
+import { SelfSignedNote } from "./self-signed-note";
 
 type Db = OpOutput<typeof databases.get>;
 type Connection = OpOutput<typeof databases.connection>;
@@ -345,10 +346,12 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             <span>
               {t("serviceDatabase.certificate")}: {t(`serviceDatabase.cert.${e.certificate}`)}
               {e.tlsHostname ? ` · ${e.tlsHostname}` : ""}
-              {e.certificateIssuer ? ` · ${t("serviceDatabase.certIssuer", { issuer: e.certificateIssuer })}` : ""}
+              {/* A self-signed certificate's issuer is its own name: the note below says what it is instead. */}
+              {e.certificateIssuer && !e.selfSignedReason ? ` · ${t("serviceDatabase.certIssuer", { issuer: e.certificateIssuer })}` : ""}
               {e.certificateExpiresAt ? ` · ${t("serviceDatabase.certExpires", { date: formatDateTime(e.certificateExpiresAt) })}` : ""}
             </span>
           </div>
+          <SelfSignedNote db={db} serviceName={service.name} />
           {/* Muted, as buttons inside a card are; the user and password change on the Users tab. */}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="bg-muted shadow-none" onClick={() => setEditing(true)}>

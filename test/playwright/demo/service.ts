@@ -734,6 +734,23 @@ export function versionChoicesOf(serviceId: string) {
   };
 }
 
+/** The self-signed certificate the demo's exposed databases serve (no TLS host name), as a node from 0.2.12 reports it. */
+export const demoCertificatePem = `-----BEGIN CERTIFICATE-----
+MIICOTCCAd6gAwIBAgIJAOpOKld5LzqUMAoGCCqGSM49BAMCMBMxETAPBgNVBAMM
+CGRhdGFiYXNlMB4XDTI2MTExMjAxMjU0NVoXDTM2MTEwOTAxMjU0NVowEzERMA8G
+A1UEAwwIZGF0YWJhc2UwggFLMIIBAwYHKoZIzj0CATCB9wIBATAsBgcqhkjOPQEB
+AiEA/////wAAAAEAAAAAAAAAAAAAAAD///////////////8wWwQg/////wAAAAEA
+AAAAAAAAAAAAAAD///////////////wEIFrGNdiqOpPns+u9VXaYhrxlHQawzFOw
+9jvOPD4n0mBLAxUAxJ02CIbnBJNqZnjhE50mt4GffpAEQQRrF9Hy4SxCR/i85uVj
+pEDydwN9gS3rM6D0oTlF2JjClk/jQuL+Gn+bjufrSnwPnhYrzjNXazFezsu2QGg3
+v1H1AiEA/////wAAAAD//////////7zm+q2nF56E87nKwvxjJVECAQEDQgAE8tsP
+zMpGA6M0s1FuX50g1CniS7BPKvBIsreMYHUvVfU+iFRlks+ete+ZWW761311QYKk
+z00HFMphW0aY8tP+waMnMCUwDgYDVR0PAQH/BAQDAgKEMBMGA1UdJQQMMAoGCCsG
+AQUFBwMBMAoGCCqGSM49BAMCA0kAMEYCIQDKVC9zYgDK1yKmvoNVm0UtP/1A33AU
+G+WlAW5oHuNxNQIhANoXmTDyM3L3D6pcnYHIiKVvVLPteFJUAMr19FjZbXwu
+-----END CERTIFICATE-----
+`;
+
 /** databases.get for the demo's Postgres, Redis and ClickHouse (events) databases; databases.spec.ts makes db a pgvector one. */
 export function databaseOf(serviceId: string) {
   const exposure = {
@@ -747,8 +764,12 @@ export function databaseOf(serviceId: string) {
     needsAllowedCidrs: false,
     tlsHostname: null,
     certificate: "selfSigned",
-    certificateIssuer: null,
-    certificateExpiresAt: null,
+    certificateIssuer: "database",
+    certificateExpiresAt: new Date(now + 3650 * day).toISOString(),
+    // No TLS host name: the node's own certificate, which clients that check certificates refuse.
+    selfSignedReason: "noHostname",
+    certificateError: null,
+    certificatePem: demoCertificatePem,
   };
   const base = {
     serviceId,
@@ -778,7 +799,19 @@ export function databaseOf(serviceId: string) {
       engine: "clickhouse",
       version: "26.8",
       internal: { host: "events", port: 9000, database: "events", user: "ch_k3v9q2m8x1", httpPort: 8123 },
-      exposure: { ...exposure, enabled: false, state: "off", host: null, port: null, user: "ch_k3v9q2m8x1", certificate: "none" },
+      exposure: {
+        ...exposure,
+        enabled: false,
+        state: "off",
+        host: null,
+        port: null,
+        user: "ch_k3v9q2m8x1",
+        certificate: "none",
+        certificateIssuer: null,
+        certificateExpiresAt: null,
+        selfSignedReason: null,
+        certificatePem: null,
+      },
       shellClient: "clickhouse-client",
       webUi: { ...base.webUi, tool: "ClickHouse Play", running: false, lastActiveAt: null },
     };

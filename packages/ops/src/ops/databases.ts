@@ -84,6 +84,12 @@ export const DatabaseExposure = Type.Object({
   needsAllowedCidrs: Type.Boolean(),
   /** Host name of the ACME certificate; null means a self-signed certificate. */
   tlsHostname: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * "selfSigned" without tlsHostname (and for MariaDB, which serves its
+   * own); with one "pending" until the node reports its Let's Encrypt
+   * certificate, then "valid", or "failed" while the node serves the
+   * self-signed one and reports an ACME error for it (0.2.12).
+   */
   certificate: Type.Union([
     Type.Literal("none"),
     Type.Literal("selfSigned"),
@@ -94,6 +100,28 @@ export const DatabaseExposure = Type.Object({
   /** The certificate the exposed port serves, as the node reports it; null until it does. */
   certificateIssuer: Type.Union([Type.String(), Type.Null()]),
   certificateExpiresAt: Type.Union([Timestamp, Type.Null()]),
+  /**
+   * Why the exposed port serves a self-signed certificate (0.2.12), which
+   * clients that check certificates refuse: "noHostname" (no tlsHostname),
+   * "acmeMissing" (the node has no Let's Encrypt certificate for
+   * tlsHostname yet, as nodes from 0.2.12 report; certificateError says why
+   * when the node knows), "engine" (MariaDB serves the one it makes itself,
+   * whatever tlsHostname says). Null while the port serves an ACME
+   * certificate, while exposure is off, or when the node does not say.
+   */
+  selfSignedReason: Type.Union([Type.Literal("noHostname"), Type.Literal("acmeMissing"), Type.Literal("engine"), Type.Null()]),
+  /**
+   * With selfSignedReason "acmeMissing": the node's last ACME error for
+   * tlsHostname (the CA's message, for example that it could not reach
+   * port 80 on the node); null while it knows none.
+   */
+  certificateError: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The self-signed certificate the port serves, PEM, as nodes from 0.2.12
+   * report it (it is public: every client sees it), so a client can trust
+   * that file; null otherwise.
+   */
+  certificatePem: Type.Union([Type.String(), Type.Null()]),
 });
 
 export const Database = Type.Object({

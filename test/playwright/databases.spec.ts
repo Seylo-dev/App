@@ -5,16 +5,18 @@
 // for allowed IPs first, an exposure closed until its node is updated, and
 // the Connection tab of a ClickHouse database (native and HTTP URLs) and of
 // a pgvector one, with Change links to the Users tab next to the user and
-// password (database-users.spec.ts). Demo data (demo/*.ts) stands in for the fleet;
+// password (database-users.spec.ts), and a self-signed exposure's note (why,
+// how to get a trusted certificate, client settings meanwhile, the
+// certificate to download). Demo data (demo/*.ts) stands in for the fleet;
 // databases.create is answered here so nothing is deployed.
 //
 // Screenshots: $SHOTS_DIR/databases/*.png.
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { connectionOf, databaseOf, ids as svc } from "./demo/service";
+import { connectionOf, databaseOf, demoCertificatePem, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/databases`;
@@ -299,6 +301,63 @@ test.describe("database engines", () => {
       );
     }
     await page.screenshot({ path: `${shots}/exposed-same-user.png`, fullPage: true });
+  });
+
+  test("a self-signed Postgres exposure says why, how to get a trusted certificate and what connects meanwhile", async ({ page }) => {
+    // As the agent words the CA's answer from Traefik's log (proxy.acmeReason).
+    const acmeError =
+      "The certificate authority refused the certificate (400): 203.0.113.10: Fetching http://db.acme.dev/.well-known/acme-challenge/x: Connection refused";
+    let withHostname = false;
+    // As the panel answers once the node reports that the CA could not reach port 80 for the host name.
+    const failing = () => ({
+      ...databaseOf(svc.db),
+      exposure: {
+        ...databaseOf(svc.db).exposure,
+        host: "db.acme.dev",
+        tlsHostname: "db.acme.dev",
+        certificate: "failed",
+        certificateIssuer: "db.acme.dev",
+        selfSignedReason: "acmeMissing",
+        certificateError: acmeError,
+      },
+    });
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db && withHostname ? failing() : databaseOf(String(input.serviceId))),
+      },
+    });
+    await page.goto(connection(svc.db));
+    const exposed = page.getByRole("region", { name: "Exposed connection" });
+    // No TLS host name: what it means, how to get a trusted one, node-postgres' setting meanwhile.
+    const note = exposed.getByRole("note");
+    await expect(note).toContainText("Self-signed certificate");
+    await expect(note).toContainText("Connections are encrypted, but clients that check certificates refuse this one.");
+    await expect(note).toContainText("No TLS host name is set");
+    await expect(note).toContainText("set a TLS host name under Port and access");
+    await expect(note).toContainText("DNS only");
+    await expect(note).toContainText("node-postgres connects with sslmode=no-verify (or uselibpqcompat=true&sslmode=require)");
+    await expect(note).toContainText("psql and other libpq clients are fine with sslmode=require");
+    // The issuer is the certificate's own name, so it is left out.
+    await expect(exposed).toContainText("Certificate: self-signed");
+    await expect(exposed).not.toContainText("via database");
+    await expect(page.locator('main [data-slot="skeleton"]')).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/exposed-self-signed.png`, fullPage: true });
+    // The node reported the certificate: it downloads, to trust it in the client.
+    const download = page.waitForEvent("download");
+    await note.getByRole("button", { name: "Download certificate" }).click();
+    const file = await download;
+    expect(file.suggestedFilename()).toBe("db.crt");
+    expect(readFileSync(await file.path(), "utf8")).toBe(demoCertificatePem);
+
+    // A host name whose Let's Encrypt certificate failed: the host and the CA's reason.
+    withHostname = true;
+    await page.reload();
+    await expect(exposed).toContainText("Certificate: failed · db.acme.dev");
+    await expect(note).toContainText("The node has no Let's Encrypt certificate for db.acme.dev yet.");
+    await expect(note).toContainText(`Last attempt: ${acmeError}`);
+    await expect(note).toContainText("db.acme.dev needs an A record to the node set to DNS only (not proxied), and port 80 has to reach the node.");
+    await expect(note).not.toContainText("set a TLS host name under Port and access");
+    await page.screenshot({ path: `${shots}/exposed-self-signed-acme-failed.png`, fullPage: true });
   });
 
   test("the password shows with the eye, and the database's console is on its main tab", async ({ page }) => {

@@ -19882,7 +19882,10 @@
                         "tlsHostname",
                         "certificate",
                         "certificateIssuer",
-                        "certificateExpiresAt"
+                        "certificateExpiresAt",
+                        "selfSignedReason",
+                        "certificateError",
+                        "certificatePem"
                       ],
                       "properties": {
                         "enabled": {
@@ -19989,6 +19992,45 @@
                           "anyOf": [
                             {
                               "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "selfSignedReason": {
+                          "anyOf": [
+                            {
+                              "const": "noHostname",
+                              "type": "string"
+                            },
+                            {
+                              "const": "acmeMissing",
+                              "type": "string"
+                            },
+                            {
+                              "const": "engine",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "certificateError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "certificatePem": {
+                          "anyOf": [
+                            {
                               "type": "string"
                             },
                             {
@@ -20797,7 +20839,10 @@
                         "tlsHostname",
                         "certificate",
                         "certificateIssuer",
-                        "certificateExpiresAt"
+                        "certificateExpiresAt",
+                        "selfSignedReason",
+                        "certificateError",
+                        "certificatePem"
                       ],
                       "properties": {
                         "enabled": {
@@ -20904,6 +20949,45 @@
                           "anyOf": [
                             {
                               "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "selfSignedReason": {
+                          "anyOf": [
+                            {
+                              "const": "noHostname",
+                              "type": "string"
+                            },
+                            {
+                              "const": "acmeMissing",
+                              "type": "string"
+                            },
+                            {
+                              "const": "engine",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "certificateError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "certificatePem": {
+                          "anyOf": [
+                            {
                               "type": "string"
                             },
                             {
@@ -21631,7 +21715,10 @@
                         "tlsHostname",
                         "certificate",
                         "certificateIssuer",
-                        "certificateExpiresAt"
+                        "certificateExpiresAt",
+                        "selfSignedReason",
+                        "certificateError",
+                        "certificatePem"
                       ],
                       "properties": {
                         "enabled": {
@@ -21738,6 +21825,45 @@
                           "anyOf": [
                             {
                               "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "selfSignedReason": {
+                          "anyOf": [
+                            {
+                              "const": "noHostname",
+                              "type": "string"
+                            },
+                            {
+                              "const": "acmeMissing",
+                              "type": "string"
+                            },
+                            {
+                              "const": "engine",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "certificateError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "certificatePem": {
+                          "anyOf": [
+                            {
                               "type": "string"
                             },
                             {
@@ -22149,7 +22275,10 @@
                             "tlsHostname",
                             "certificate",
                             "certificateIssuer",
-                            "certificateExpiresAt"
+                            "certificateExpiresAt",
+                            "selfSignedReason",
+                            "certificateError",
+                            "certificatePem"
                           ],
                           "properties": {
                             "enabled": {
@@ -22256,6 +22385,45 @@
                               "anyOf": [
                                 {
                                   "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "selfSignedReason": {
+                              "anyOf": [
+                                {
+                                  "const": "noHostname",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "acmeMissing",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "engine",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "certificateError": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "certificatePem": {
+                              "anyOf": [
+                                {
                                   "type": "string"
                                 },
                                 {

@@ -27,6 +27,9 @@ const db = {
     certificate: "selfSigned",
     certificateIssuer: null,
     certificateExpiresAt: null,
+    selfSignedReason: "noHostname",
+    certificateError: null,
+    certificatePem: null,
   },
   shellClient: "psql",
   webUi: { tool: "pgweb", idleMinutes: 15, running: false, lastActiveAt: null },
@@ -126,4 +129,88 @@ test("an exposure waiting for its node's update stays on, closed: no SSL chip an
   expect(open).toContain(t("serviceDatabase.sslRequired"));
   expect(open).toContain("203.0.113.10");
   expect(open).not.toContain(waitingNote);
+});
+
+/** The markup's text with the entities renderToStaticMarkup writes turned back. */
+const text = (html: string) =>
+  html
+    .replace(/&amp;/g, "&")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+
+test("a self-signed exposure says why, how to get a trusted certificate and what connects meanwhile", async () => {
+  const render = async (database: object) =>
+    text(
+      section(
+        await renderStatic(
+          () => <ConnectionPage service={service} />,
+          [
+            [databases.get, { serviceId: "svc-db" }, database],
+            [databases.connection, { serviceId: "svc-db" }, connection],
+          ],
+        ),
+        t("serviceDatabase.exposed"),
+      ),
+    );
+  const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+
+  // No TLS host name: Postgres clients that verify get node-postgres' setting, and the file to trust.
+  const none = await render({ ...db, exposure: { ...db.exposure, certificateIssuer: "database", certificatePem: pem } });
+  expect(none).toContain(t("serviceDatabase.selfSigned.title"));
+  expect(none).toContain(t("serviceDatabase.selfSigned.body"));
+  expect(none).toContain(t("serviceDatabase.selfSigned.reason.noHostname"));
+  expect(none).toContain(t("serviceDatabase.selfSigned.getTrusted"));
+  expect(none).toContain("sslmode=no-verify");
+  expect(none).toContain(t("serviceDatabase.selfSigned.meanwhile.postgres"));
+  expect(none).toContain(`>${t("serviceDatabase.selfSigned.download")}</button>`);
+  // Its issuer is only its own name.
+  expect(none).not.toContain(t("serviceDatabase.certIssuer", { issuer: "database" }));
+
+  // A host name without its Let's Encrypt certificate: the host and the node's last ACME error.
+  const error = "Timeout during connect (likely firewall problem)";
+  const acme = await render({
+    ...db,
+    exposure: {
+      ...db.exposure,
+      host: "db.example.com",
+      tlsHostname: "db.example.com",
+      certificate: "failed",
+      selfSignedReason: "acmeMissing",
+      certificateError: error,
+    },
+  });
+  expect(acme).toContain(t("serviceDatabase.selfSigned.reason.acmeMissing", { host: "db.example.com" }));
+  expect(acme).toContain(t("serviceDatabase.selfSigned.lastError", { error }));
+  expect(acme).toContain(t("serviceDatabase.selfSigned.fixAcme", { host: "db.example.com" }));
+  expect(acme).not.toContain(t("serviceDatabase.selfSigned.getTrusted"));
+  // No PEM reported (an older node): no download.
+  expect(acme).not.toContain(t("serviceDatabase.selfSigned.download"));
+
+  // MariaDB's own certificate: no host name advice, its clients' setting.
+  const maria = await render({ ...db, engine: "mariadb", exposure: { ...db.exposure, selfSignedReason: "engine" } });
+  expect(maria).toContain(t("serviceDatabase.selfSigned.reason.engine"));
+  expect(maria).toContain(t("serviceDatabase.selfSigned.meanwhile.mariadb"));
+  expect(maria).not.toContain(t("serviceDatabase.selfSigned.getTrusted"));
+
+  // Mongo's exposed URL already accepts it without a host name; with one, the client is told to.
+  expect(await render({ ...db, engine: "mongo" })).toContain(t("serviceDatabase.selfSigned.meanwhile.mongoInUrl"));
+  expect(
+    await render({ ...db, engine: "mongo", exposure: { ...db.exposure, tlsHostname: "m.example.com", selfSignedReason: "acmeMissing" } }),
+  ).toContain(t("serviceDatabase.selfSigned.meanwhile.mongo"));
+
+  // A Let's Encrypt certificate: no note, and its issuer shows.
+  const valid = await render({
+    ...db,
+    exposure: {
+      ...db.exposure,
+      tlsHostname: "db.example.com",
+      certificate: "valid",
+      certificateIssuer: "Let's Encrypt (R11)",
+      selfSignedReason: null,
+    },
+  });
+  expect(valid).not.toContain(t("serviceDatabase.selfSigned.title"));
+  expect(valid).toContain(t("serviceDatabase.certIssuer", { issuer: "Let's Encrypt (R11)" }));
 });

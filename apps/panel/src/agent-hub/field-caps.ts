@@ -43,8 +43,17 @@ export const maxAgentVersionLength = 64;
  * ports and routes fit 256; a service has at most 64 instances during a
  * deploy (32 replicas, old and new).
  */
-export const statusLimits: FieldLimits = { maxString: 2048, maxList: 128, maxListItem: 256 };
+/**
+ * An open port's self-signed certificate (0.2.12): PEM, about 700
+ * characters for the agent's P-256 one and under 2000 with a 253-character
+ * host name. A PEM cut short would be useless: the panel drops one that
+ * does not end whole (databases `servedPem`).
+ */
+const pemLimit = { certificatePem: 4096 };
+export const statusLimits: FieldLimits = { maxString: 2048, maxList: 128, maxListItem: 256, longer: pemLimit };
 const statusPartLimits: FieldLimits = { maxString: 256, maxList: 16, maxListItem: 256 };
+/** Ports keep the PEM and the ACME error for their TLS host name too. */
+const openPortLimits: FieldLimits = { ...statusPartLimits, longer: { ...pemLimit, certificateError: 2048 } };
 
 /** Lists whose newest entries matter (output tails). */
 const tailLists = new Set(["lastLines"]);
@@ -94,7 +103,8 @@ interface StatusLike {
 /** capFields for one ServiceStatus, with the tighter limits of its instances, ports and routes. */
 export function capServiceStatus<T extends StatusLike>(status: T): T {
   capFields(status, statusLimits);
-  for (const part of [...status.instances, ...status.openPorts]) capFields(part, statusPartLimits);
+  for (const part of status.instances) capFields(part, statusPartLimits);
+  for (const port of status.openPorts) capFields(port, openPortLimits);
   for (const route of status.routes) {
     // The message (an ACME error) keeps statusLimits.maxString.
     route.routeId = cut(route.routeId, statusPartLimits.maxString);

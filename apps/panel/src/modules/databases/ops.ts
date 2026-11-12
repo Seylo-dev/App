@@ -25,6 +25,7 @@ import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
 import terminalsModule from "../terminals";
 import { missingExposureCapability, nodeHasCapability } from "./capability";
+import { exposureCertificate } from "./certificate";
 import { edgeToolLink } from "./edge-ticket";
 import {
   databaseSpec,
@@ -67,6 +68,9 @@ function reported(agents: AgentHub | undefined, info: DatabaseInfo) {
     webUiActiveAt: webUi?.running && webUi.lastActiveAt ? timestampDate(webUi.lastActiveAt).toISOString() : null,
     certIssuer: port?.certificateIssuer ? issuerName(port.certificateIssuer) : null,
     certExpiresAt: port?.certificateExpiresAt ? timestampDate(port.certificateExpiresAt) : null,
+    certSelfSigned: port?.certificateSelfSigned ?? false,
+    certError: port?.certificateError ?? "",
+    certPem: port?.certificatePem ?? "",
   };
 }
 
@@ -74,14 +78,11 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
   const address = exposedAddress(info);
   const internal = internalConnection(info);
   const seen = reported(agents, info);
-  const certificate: Database["exposure"]["certificate"] =
-    info.exposure === null
-      ? "none"
-      : !info.row.tlsHostname
-        ? "selfSigned"
-        : seen.certExpiresAt && seen.certExpiresAt.getTime() > now.getTime() && !seen.certIssuer?.includes("self")
-          ? "valid"
-          : "pending";
+  const served = exposureCertificate(
+    info,
+    { issuer: seen.certIssuer, expiresAt: seen.certExpiresAt, selfSigned: seen.certSelfSigned, error: seen.certError, pem: seen.certPem },
+    now,
+  );
   return {
     serviceId: info.service.id,
     projectId: info.service.projectId,
@@ -109,9 +110,12 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
       allowedCidrs: info.exposure?.allowedCidrs ?? [],
       needsAllowedCidrs: info.engine.exposureNeedsAllowlist,
       tlsHostname: info.row.tlsHostname,
-      certificate,
+      certificate: served.certificate,
       certificateIssuer: seen.certIssuer,
       certificateExpiresAt: seen.certExpiresAt?.toISOString() ?? null,
+      selfSignedReason: served.selfSignedReason,
+      certificateError: served.certificateError,
+      certificatePem: served.certificatePem,
     },
     webUi: {
       tool: info.engine.webUiTool,
