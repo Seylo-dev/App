@@ -1,8 +1,8 @@
 // One node in a side sheet, opened from the Nodes table (?node=<id>&view=).
 // Five views:
-//   overview  machine facts, usage graphs, services placed here, and the
-//             machine actions: update the agent, update Docker, reboot,
-//             agent logs
+//   overview  machine facts, usage graphs, services placed here, the
+//             machine actions (update the agent, update Docker, reboot,
+//             agent logs) and the last time away with its reason
 //   health    the node health checks (the heart icon) with fix hints
 //   cleanup   the cleanup the node runs by itself and its recent cleanups
 //   shell     a root shell on the node itself (off until the owner allows it)
@@ -25,7 +25,7 @@ import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
-import { formatAgo, formatBytes } from "../../lib/format";
+import { formatAgo, formatBytes, formatPointTime } from "../../lib/format";
 import { useLiveTopic } from "../../lib/live";
 import type { NodeDetail } from "../../lib/types";
 import { QueryError } from "../query-error";
@@ -209,6 +209,8 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
         </Button>
       </div>
 
+      <LastOffline node={node} />
+
       <NodeGraphs nodeId={node.id} />
 
       <section aria-label={t("nodes.sheet.machine")} className="flex flex-col gap-3">
@@ -324,6 +326,30 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
       />
       <AgentLogsDialog node={node} open={logsOpen} onOpenChange={setLogsOpen} />
     </>
+  );
+}
+
+/** How long the node's last time away with a reason stays on its page. */
+const lastOfflineShownMs = 7 * 86_400_000;
+
+/**
+ * "Was offline from 17:39 to 17:46: <the agent's last connect error>", from
+ * the agent's own report once it was back (nodes.get lastOffline), for a
+ * week. The reason says what the panel could not see: a certificate the
+ * node refused, a name it could not look up.
+ */
+export function LastOffline({ node, now = Date.now() }: { node: NodeDetail; now?: number }) {
+  const report = node.lastOffline;
+  if (!report || now - Date.parse(report.to) > lastOfflineShownMs) return null;
+  const sameDay = new Date(report.from).toDateString() === new Date(report.to).toDateString();
+  return (
+    <p className="m-0 rounded-control bg-raised px-3 py-2.5 text-[12.5px] leading-[18px] text-ink-strong">
+      {t("nodes.sheet.lastOffline", {
+        from: formatPointTime(Date.parse(report.from), true),
+        to: formatPointTime(Date.parse(report.to), !sameDay),
+        reason: report.reason,
+      })}
+    </p>
   );
 }
 

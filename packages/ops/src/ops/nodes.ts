@@ -107,6 +107,45 @@ export const NodeHealthReport = Type.Object({
   results: Type.Array(NodeCheckResult),
 });
 
+/**
+ * Where the node's agent dials (added in 0.2.14). "follow": it moves to the
+ * panel's domain once that is live. "stay": the panel never names the
+ * domain to it, so it keeps the address it dials (the panel's IP and pin,
+ * for a network that decrypts HTTPS).
+ */
+export const PanelAddressChoice = Type.Union([Type.Literal("follow"), Type.Literal("stay")]);
+
+/**
+ * Who chose the Panel address: "owner" in the node's settings, "node"
+ * after `seylo set-panel` on the node, "join" after a join with --pin at the
+ * panel's IP address while the panel had a domain, "inspectedCertificate"
+ * while a PANEL_MOVE_FAILED alert says the domain's certificate was
+ * re-signed on the node's network (until someone chooses), "default" for
+ * nobody (follow).
+ */
+export const PanelAddressChoiceBy = Type.Union([
+  Type.Literal("owner"),
+  Type.Literal("node"),
+  Type.Literal("join"),
+  Type.Literal("inspectedCertificate"),
+  Type.Literal("default"),
+]);
+
+/** The panel refused the agent's last connect while the node was offline (added in 0.2.14). */
+export const NodeRejectedHello = Type.Object({
+  reason: Type.String({ description: 'The HelloRejectReason, "AGENT_TOO_OLD" or "BAD_SIGNATURE".' }),
+  message: Type.String({ description: "What the panel told the agent." }),
+  at: Timestamp,
+});
+
+/** The node's last time away with a reason, from the agent once it connected again (added in 0.2.14). */
+export const NodeOfflineReport = Type.Object({
+  from: Timestamp,
+  to: Timestamp,
+  reason: Type.String({ description: "The last connect error the agent had meanwhile, for example a certificate it does not trust." }),
+  failedAttempts: Type.Integer({ minimum: 0 }),
+});
+
 export const LogRetention = Type.Object({
   maxBytesPerService: Type.Integer({ minimum: 1 << 20, description: "Oldest log segments go first past this size. Default 100 MiB." }),
   maxAgeDays: Type.Integer({ minimum: 1, maximum: 3650, description: "Default 14 days." }),
@@ -163,6 +202,12 @@ export const Node = Type.Object({
     worst: Nullable(NodeCheckStatus),
   }),
   lastSeenAt: Nullable(Timestamp),
+  /**
+   * Offline only: the panel refused the agent's last connect since it was
+   * last seen (a too old agent, a key that does not match), so the row says
+   * why. Left out otherwise (added in 0.2.14).
+   */
+  rejectedHello: Type.Optional(NodeRejectedHello),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -209,6 +254,13 @@ export const NodeDetail = Type.Composite([
      * "http://127.0.0.1:3000" for the panel node; null while it is offline.
      */
     panelAddress: Nullable(Type.String()),
+    /** The Panel address setting; left out for the panel node, which dials loopback (added in 0.2.14). */
+    panelAddressChoice: Type.Optional(PanelAddressChoice),
+    panelAddressChoiceBy: Type.Optional(PanelAddressChoiceBy),
+    /** When it was chosen; null for the default. */
+    panelAddressChoiceAt: Type.Optional(Nullable(Timestamp)),
+    /** The last time the node was away with a reason its agent reported; left out when there is none (added in 0.2.14). */
+    lastOffline: Type.Optional(NodeOfflineReport),
   }),
 ]);
 
@@ -395,7 +447,7 @@ export const updateSettings = defineOp({
   kind: "mutation",
   summary: "Change node settings",
   description:
-    "Changes a node's location label, public address, wildcard domain, how many builds run at once and how much log history each service keeps. Omitted fields stay as they are.",
+    'Changes a node\'s location label, public address, wildcard domain, how many builds run at once, how much log history each service keeps and its Panel address ("follow" moves the node to the panel\'s domain once that is live, "stay" keeps it on the address it dials). Omitted fields stay as they are.',
   input: Type.Object({
     nodeId: Id,
     location: Type.Optional(
@@ -422,6 +474,12 @@ export const updateSettings = defineOp({
     ),
     maxParallelBuilds: Type.Optional(Type.Integer({ minimum: 1, maximum: 16 })),
     logRetention: Type.Optional(LogRetention),
+    /**
+     * The node's Panel address (added in 0.2.14). "follow" on an online node
+     * that does not dial the live domain reconnects it so it moves now. The
+     * panel node refuses it (CONFLICT, details.reason "panelNode").
+     */
+    panelAddressChoice: Type.Optional(PanelAddressChoice),
   }),
   output: NodeDetail,
   permission: permission.global("nodes.manage"),

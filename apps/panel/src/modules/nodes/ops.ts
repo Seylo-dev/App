@@ -7,6 +7,8 @@ import { nodes as nodeOps, OpError } from "@seylo/ops";
 import { NodeCheckStatus } from "@seylo/proto";
 import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm";
 import { rememberConnectAddress } from "../../agent-hub/handshake";
+import { agentMoveTarget } from "../../agent-hub/move-target";
+import { forgetNodeAddressState, setPanelAddressChoice } from "../../agent-hub/panel-address";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { userOf } from "../../auth/principal";
 import { joinTokens, type NodeHealthReport, nodes, servicePlacements, updateRuns, updateSteps } from "../../db/schema";
@@ -161,7 +163,8 @@ function changeNode(ctx: OpContext, nodeId: string, set: Partial<typeof nodes.$i
 const rename = implement(nodeOps.rename, (input, ctx) => {
   const clash = ctx.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.name, input.name)).get();
   if (clash && clash.id !== input.nodeId) throw new OpError("CONFLICT", "Another node already has this name.", { field: "name" });
-  return toNode(ctx, changeNode(ctx, input.nodeId, { name: input.name }));
+  // The agent shows the panel's name for the node (NodeSettings.node_name): a rename reaches it at once.
+  return toNode(ctx, changeNode(ctx, input.nodeId, { name: input.name }, { desired: true }));
 });
 
 const setTags = implement(nodeOps.setTags, (input, ctx) => toNode(ctx, changeNode(ctx, input.nodeId, { tags: input.tags })));
@@ -192,12 +195,29 @@ const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
     set.logMaxBytesPerService = input.logRetention.maxBytesPerService;
     set.logMaxAgeDays = input.logRetention.maxAgeDays;
   }
+  if (input.panelAddressChoice !== undefined && nodeRow(ctx, input.nodeId).isPanelNode) {
+    throw new OpError("CONFLICT", "The panel's own node reaches the panel on this server and never moves.", {
+      reason: "panelNode",
+      field: "panelAddressChoice",
+    });
+  }
   const agentsCare = input.wildcardDomain !== undefined || input.maxParallelBuilds !== undefined || input.logRetention !== undefined;
+  const choiceChanged =
+    input.panelAddressChoice !== undefined && setPanelAddressChoice(ctx.db, input.nodeId, input.panelAddressChoice, "owner");
+  // The choice lives in settings (panel-address.ts); the row still records that the node changed.
+  if (input.panelAddressChoice !== undefined) set.updatedAt = new Date();
   const row = changeNode(ctx, input.nodeId, set, { desired: agentsCare });
   // Other nodes balance load to this one at its address.
   if (input.publicAddress !== undefined) ctx.agents.desired.markDirty({ all: true });
   // A node behind 1:1 NAT may only now have an address to find its location by.
   if (input.publicAddress !== undefined) void detectNodeLocation(ctx, input.nodeId);
+  // Follow from now on: a connected node that does not dial the live domain reconnects and moves (move-target.ts).
+  if (choiceChanged && input.panelAddressChoice === "follow") {
+    const target = agentMoveTarget(ctx.db, input.nodeId);
+    if (target && ctx.agents.isOnline(input.nodeId) && ctx.agents.dialedHost(input.nodeId) !== new URL(target.url).host) {
+      ctx.agents.reconnect(input.nodeId, "The node's Panel address is Follow now: reconnect to move to the panel's domain.");
+    }
+  }
   return toNodeDetail(ctx, row);
 });
 
@@ -211,6 +231,7 @@ const remove = implement(nodeOps.remove, (input, ctx) => {
   }
   ctx.db.delete(nodes).where(eq(nodes.id, row.id)).run();
   rememberConnectAddress(ctx.db, row.id, null);
+  forgetNodeAddressState(ctx.db, row.id);
   ctx.agents.forgetNode(row.id, "node removed from the panel");
   metricsFor(ctx).forgetNode(row.id);
   forgetNodeCertificate(ctx, row.id);

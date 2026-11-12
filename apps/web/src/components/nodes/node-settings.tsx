@@ -1,10 +1,13 @@
 // Node settings in the node sheet. Each group saves on its own op:
 // rename, tags, the general settings (location, wildcard domain, parallel
 // builds, log retention), the can-build switch and games-first CPU (only
-// when Wings is detected), and removing the node. A location the panel
+// when Wings is detected), the Panel address (follow the panel's domain or
+// stay on the node's address; not on the panel node), and removing the
+// node. A location the panel
 // detected from the node's address is marked Detected until the form is
 // saved, which makes it the owner's (locationSource "manual").
 
+import { slug } from "@seylo/brand";
 import { nodes } from "@seylo/ops";
 import { opQueryKey, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
@@ -13,6 +16,7 @@ import { Chip } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input, Label } from "@seylo/ui/components/input";
+import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
@@ -56,6 +60,7 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
   const update = useOpMutation(nodes.updateSettings, { onError: setError });
   const canBuild = useOpMutation(nodes.setCanBuild, { onSuccess: done, onError: setError });
   const gamesFirst = useOpMutation(nodes.setGamesFirstCpu, { onSuccess: done, onError: setError });
+  const choose = useOpMutation(nodes.updateSettings, { onSuccess: done, onError: setError });
   const remove = useOpMutation(nodes.remove);
   const pending = rename.isPending || setTagList.isPending || update.isPending;
 
@@ -181,6 +186,14 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
           />
         )}
       </div>
+
+      {node.panelAddressChoice && (
+        <PanelAddressChoice
+          node={node}
+          pending={choose.isPending}
+          onChange={(choice) => choose.mutate({ nodeId: node.id, panelAddressChoice: choice })}
+        />
+      )}
 
       <div className="flex flex-col gap-2 border-t border-divider pt-4">
         <h3 className="m-0 text-sm font-semibold text-chip-red-fg">{t("nodes.form.remove")}</h3>
@@ -320,6 +333,64 @@ function Field({
       ) : (
         hint && <span className="text-xs text-muted-foreground">{t(hint)}</span>
       )}
+    </div>
+  );
+}
+
+/**
+ * Panel address: follow the panel's domain (the default) or stay on the
+ * address the node connects to, saved on its own. Under it, who chose it
+ * when that was not someone here: the node itself (`seylo set-panel`, a
+ * join with the IP and pin) or an open alert about a re-signed certificate.
+ */
+function PanelAddressChoice({
+  node,
+  pending,
+  onChange,
+}: {
+  node: NodeDetail;
+  pending: boolean;
+  onChange: (choice: "follow" | "stay") => void;
+}) {
+  const by = node.panelAddressChoiceBy;
+  const why =
+    by === "node"
+      ? t("nodes.form.panelAddressBy.node", { command: `${slug} set-panel` })
+      : by === "join"
+        ? t("nodes.form.panelAddressBy.join")
+        : by === "inspectedCertificate"
+          ? t("nodes.form.panelAddressBy.inspectedCertificate")
+          : null;
+  return (
+    <div className="flex flex-col gap-2 border-t border-divider pt-4">
+      <div className="flex flex-col gap-0.5">
+        <span id="node-panel-address" className="text-[13.5px] font-medium">
+          {t("nodes.form.panelAddress")}
+        </span>
+        <span className="text-[12.5px] text-muted-foreground">{t("nodes.form.panelAddressHint")}</span>
+      </div>
+      <RadioGroup
+        value={node.panelAddressChoice}
+        onValueChange={(value) => {
+          if (value !== node.panelAddressChoice) onChange(value as "follow" | "stay");
+        }}
+        aria-labelledby="node-panel-address"
+        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      >
+        <RadioCard
+          value="follow"
+          title={t("nodes.form.panelAddressFollow")}
+          description={t("nodes.form.panelAddressFollowHint")}
+          disabled={pending}
+        />
+        <RadioCard
+          value="stay"
+          title={t("nodes.form.panelAddressStay")}
+          description={t("nodes.form.panelAddressStayHint")}
+          disabled={pending}
+        />
+      </RadioGroup>
+      {why && <p className="m-0 text-[12.5px] text-muted-foreground">{why}</p>}
     </div>
   );
 }

@@ -84,6 +84,8 @@ export function compileNodeSettings(db: PanelDb, node: typeof nodes.$inferSelect
     maxParallelBuilds: node.canBuild ? node.maxParallelBuilds : 0,
     // Agents older than the panel update themselves after they connect.
     autoUpdate: getSetting(db, "autoUpdate") ?? false,
+    // `seylo status` on the node shows the panel's name for it, a rename included.
+    nodeName: node.name,
   });
   for (const contributor of options.contributors ?? []) {
     contributor.node?.({ db, secrets: options.secrets, nodeId: node.id, settings: out });

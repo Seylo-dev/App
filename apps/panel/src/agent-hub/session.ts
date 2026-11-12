@@ -14,8 +14,10 @@
 
 import { create, fromBinary, type MessageInitShape, toBinary } from "@bufbuild/protobuf";
 import { durationFromMs, timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { slug } from "@seylo/brand";
 import {
   CallSchema,
+  type ClientHello,
   CloseSchema,
   CONNECTION_STREAM,
   EventSchema,
@@ -25,15 +27,20 @@ import {
   HelloRejectReason,
   type NodeFacts,
   OpenSchema,
+  PanelAddressChoice,
   parseFrame,
   parseWindow,
   ResultSchema,
   StatusCode,
   windowFrame,
 } from "@seylo/proto";
+import { eq } from "drizzle-orm";
+import { anonymous } from "../auth/principal";
 import type { PanelDb } from "../db/client";
+import { nodes } from "../db/schema";
 import { newId } from "../ids";
 import type { Logger } from "../logger";
+import { writeAuditEvent } from "../ops/audit";
 import type { EdgeTicketKey } from "../security/edge-ticket-key";
 import {
   agentStatusError,
@@ -48,8 +55,9 @@ import { Channel, ProtocolViolation } from "./channel";
 import { capFields, factsLimits, maxAgentVersionLength } from "./field-caps";
 import { decideHello } from "./handshake";
 import type { AgentHub, AgentTransport, ConnectedAgent } from "./hub";
+import { panelAddressChoice, recordHelloRejection, recordNodeConnected, recordStayRequest } from "./panel-address";
 import { PanelServiceError } from "./panel-service-types";
-import { signAccept, signReject } from "./signature";
+import { helloSignedBytes, signAccept, signReject, verifyEd25519 } from "./signature";
 import type { OpenedStream } from "./streams";
 import { agentVersionAllowed } from "./version";
 import { FrameWriter } from "./writer";
@@ -351,11 +359,9 @@ export class AgentSession {
 
     const minimum = this.deps.hub.minimumAgentVersion();
     if (!agentVersionAllowed(hello.agentVersion, minimum)) {
-      this.reject(
-        HelloRejectReason.AGENT_TOO_OLD,
-        `This agent (${hello.agentVersion}) is too old for this panel. It needs ${minimum} or newer.`,
-        minimum ?? "",
-      );
+      const message = `This agent (${hello.agentVersion}) is too old for this panel. It needs ${minimum} or newer.`;
+      this.noteRefusedResume(hello, HelloRejectReason.AGENT_TOO_OLD, message);
+      this.reject(HelloRejectReason.AGENT_TOO_OLD, message, minimum ?? "");
       return;
     }
 
@@ -364,6 +370,7 @@ export class AgentSession {
       panelNodeFromInstallerOnly: this.deps.panelNodeFromInstallerOnly ?? false,
     });
     if (!decision.ok) {
+      this.noteRefusedResume(hello, decision.reason, decision.message);
       this.reject(decision.reason, decision.message);
       return;
     }
@@ -375,6 +382,8 @@ export class AgentSession {
       return;
     }
     this.state = "ready";
+    this.noteConnected(decision.nodeId, hello);
+    const { panelAddress, nodeName } = this.addressFor(decision.nodeId);
     const move = this.moveTargetFor(decision.nodeId);
     const panelUrl = move?.url ?? "";
     const panelPin = move?.pin ?? "";
@@ -397,9 +406,81 @@ export class AgentSession {
         panelUrl,
         panelPin,
         panelSignature,
+        panelAddress,
+        nodeName,
       },
     });
     this.deps.logger.info({ nodeId: decision.nodeId, sessionId: this.sessionId, joined: decision.joined }, "agent connected");
+  }
+
+  /**
+   * A refused resume of a known, enabled node that is not connected: kept
+   * for its Offline row (panel-address.ts). AGENT_TOO_OLD counts only with
+   * the node's valid signature, so nobody else can make a node look
+   * refused; a bad signature is the refusal itself. Never fails the handshake.
+   */
+  private noteRefusedResume(hello: ClientHello, reason: HelloRejectReason, message: string): void {
+    if (hello.credential.case !== "resume") return;
+    const { nodeId, signature } = hello.credential.value;
+    try {
+      const row = this.deps.db
+        .select({ publicKey: nodes.publicKey, disabledAt: nodes.disabledAt })
+        .from(nodes)
+        .where(eq(nodes.id, nodeId))
+        .get();
+      if (!row || row.disabledAt || this.deps.hub.isOnline(nodeId)) return;
+      if (
+        reason === HelloRejectReason.AGENT_TOO_OLD &&
+        !verifyEd25519(row.publicKey, helloSignedBytes(this.deps.panelId, nodeId, this.nonce), signature)
+      ) {
+        return;
+      }
+      recordHelloRejection(this.deps.db, nodeId, reason, message);
+    } catch (error) {
+      this.deps.logger.warn({ nodeId, err: error }, "could not record the refused agent hello");
+    }
+  }
+
+  /**
+   * An accepted session: a stay request (ClientHello.stay_on_address) is
+   * recorded before HelloAccepted names an address, the reason the agent
+   * was away is kept and its refused hello forgotten. Never fails the handshake.
+   */
+  private noteConnected(nodeId: string, hello: ClientHello): void {
+    try {
+      if (hello.stayOnAddress && (hello.credential.case === "join" || hello.credential.case === "resume")) {
+        const by = recordStayRequest(this.deps.db, nodeId, hello.credential.case);
+        if (by) {
+          this.deps.logger.info({ nodeId, by }, "the node asked to stay on the panel address it dials");
+          const name = this.deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? null;
+          writeAuditEvent(this.deps.db, {
+            eventId: "nodes.panelAddressRequest",
+            principal: anonymous,
+            input: { nodeId, panelAddressChoice: "stay", by: by === "join" ? "join with --pin at an IP address" : `${slug} set-panel` },
+            targetLabel: name,
+            ip: this.remoteIp,
+            userAgent: null,
+          });
+        }
+      }
+      if (hello.credential.case === "resume") recordNodeConnected(this.deps.db, nodeId, hello.away);
+    } catch (error) {
+      this.deps.logger.warn({ nodeId, err: error }, "could not record what the agent's hello reported");
+    }
+  }
+
+  /** HelloAccepted.panel_address and node_name; a failure leaves them empty. */
+  private addressFor(nodeId: string): { panelAddress: PanelAddressChoice; nodeName: string } {
+    try {
+      const choice = panelAddressChoice(this.deps.db, nodeId).choice;
+      return {
+        panelAddress: choice === "stay" ? PanelAddressChoice.STAY : PanelAddressChoice.FOLLOW,
+        nodeName: this.deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? "",
+      };
+    } catch (error) {
+      this.deps.logger.warn({ nodeId, err: error }, "could not read the node's panel address");
+      return { panelAddress: PanelAddressChoice.UNSPECIFIED, nodeName: "" };
+    }
   }
 
   /** The address to move this node to; a failure here never fails the handshake. */

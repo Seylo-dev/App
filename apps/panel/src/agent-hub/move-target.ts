@@ -5,9 +5,10 @@
 // stays empty: an "active" domain has a public certificate, which agents
 // check with their system roots (an ACME certificate's key changes on
 // renewal, so pinning it would break the next renewal). The panel's own node
-// keeps dialing loopback and never gets a target. Agents connected over plain
-// HTTP ignore it (anyone on that path could have named the address), so
-// they stay until they join again with the https:// command
+// keeps dialing loopback and never gets a target, and neither does a node
+// whose Panel address is "stay" (panel-address.ts). Agents connected over
+// plain HTTP ignore it (anyone on that path could have named the address),
+// so they stay until they join again with the https:// command
 // (go/internal/agent/move.go).
 
 import { eq } from "drizzle-orm";
@@ -17,6 +18,7 @@ import type { Logger } from "../logger";
 import "../modules/settings/domain";
 import { getSetting } from "../settings";
 import type { AgentHub } from "./hub";
+import { panelAddressChoice } from "./panel-address";
 
 export interface AgentMoveTarget {
   /** Base URL like "https://panel.example.com" (agents add the connect path). */
@@ -34,12 +36,17 @@ export function liveDomainTarget(db: PanelDb): AgentMoveTarget | null {
   return { url: `https://${domain}`, pin: "" };
 }
 
-/** What HelloAccepted.panel_url/panel_pin carry for this node, or null to leave them empty. */
+/**
+ * What HelloAccepted.panel_url/panel_pin carry for this node, or null to
+ * leave them empty: also null for a node whose Panel address is "stay"
+ * (panel-address.ts), which keeps the address it dials.
+ */
 export function agentMoveTarget(db: PanelDb, nodeId: string): AgentMoveTarget | null {
   const target = liveDomainTarget(db);
   if (!target) return null;
   const node = db.select({ isPanelNode: nodes.isPanelNode }).from(nodes).where(eq(nodes.id, nodeId)).get();
   if (!node || node.isPanelNode) return null;
+  if (panelAddressChoice(db, nodeId).choice === "stay") return null;
   return target;
 }
 

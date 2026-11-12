@@ -1,5 +1,6 @@
 // The node list (Nodes.dc.html): status, name, location (a detected one
-// with a tooltip, and DB-IP's credit under the list) and badges;
+// with a tooltip, and DB-IP's credit under the list), badges and, for an
+// offline node, why (its refused hello) or when it was last seen;
 // addresses; CPU, memory and disk bars; agent version with "Update now";
 // the can-build and games-first switches; Health and Settings. The live
 // topic "panel" refreshes it when a node changes or reports usage.
@@ -24,7 +25,7 @@ import { IconHeart, IconServer2 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
-import { formatPercent, formatUsedOfTotal } from "../../lib/format";
+import { formatAgo, formatPercent, formatUsedOfTotal } from "../../lib/format";
 import type { NodeRow } from "../../lib/types";
 import { useTableFits } from "../../lib/use-table-fits";
 import { QueryError } from "../query-error";
@@ -233,9 +234,26 @@ function Identity({ node, onOpen }: RowProps) {
           <div className="mt-0.5 text-xs text-muted-foreground">{node.location ?? t("nodes.noLocation")}</div>
         )}
         <Badges node={node} />
+        <OfflineReason node={node} />
       </div>
     </div>
   );
+}
+
+/**
+ * Under an offline node's badges, why when the panel knows: the hello it
+ * refused since the node was last seen (a too old agent, a key that does
+ * not match), else when it was last seen.
+ */
+export function OfflineReason({ node }: { node: NodeRow }) {
+  if (node.status !== "offline") return null;
+  const text = node.rejectedHello
+    ? t("nodes.offlineRefused", { when: formatAgo(node.rejectedHello.at), message: node.rejectedHello.message })
+    : node.lastSeenAt
+      ? t("nodes.offlineLastSeen", { when: formatAgo(node.lastSeenAt) })
+      : null;
+  if (!text) return null;
+  return <div className="mt-1.5 max-w-[320px] text-xs leading-4 text-chip-red-fg">{text}</div>;
 }
 
 function Address({ node }: { node: NodeRow }) {

@@ -6,6 +6,7 @@
 
 import { BuildStage, CrashAction, type CrashReport, DeployStage, HealthState, NodeAlertKind, UpdateTarget } from "@seylo/proto";
 import { eq } from "drizzle-orm";
+import { inspectedKeyMark } from "../../agent-hub/panel-address";
 import { backupRuns, builds, deployments, nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
@@ -218,16 +219,21 @@ export function subscribeAgentEvents(deps: Deps): void {
     const name = nodeName(deps, nodeId) ?? "A node";
     if (alert.resolved) {
       deps.alerts.resolve(prefix);
+      if (alert.kind === NodeAlertKind.PANEL_MOVE_FAILED) deps.live.publish(`node:${nodeId}`, { type: "invalidate", ops: ["nodes.get"] });
       return;
     }
     if (deps.alerts.isOpen(prefix)) return;
+    // A move that failed on an inspected certificate keeps the node on its address while it is open
+    // (agent-hub/panel-address.ts): the key says so.
+    const inspected = alert.kind === NodeAlertKind.PANEL_MOVE_FAILED && alert.inspectedCertificate ? inspectedKeyMark : "";
     deps.alerts.raise({
       event,
-      key: `${prefix}${Date.now()}`,
+      key: `${prefix}${inspected}${Date.now()}`,
       title: `${name}: ${alert.message.split("\n")[0]?.slice(0, 160) || event.replaceAll("_", " ")}`,
       message: alert.message.slice(0, 1000),
       nodeId,
     });
+    if (alert.kind === NodeAlertKind.PANEL_MOVE_FAILED) deps.live.publish(`node:${nodeId}`, { type: "invalidate", ops: ["nodes.get"] });
   });
 
   agents.onEvent("updateResult", (nodeId, result) => {

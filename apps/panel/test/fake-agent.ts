@@ -6,6 +6,7 @@
 
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { create, type DescMessage, fromBinary, getOption, type MessageInitShape, type MessageShape, toBinary } from "@bufbuild/protobuf";
+import { timestampFromMs } from "@bufbuild/protobuf/wkt";
 import {
   AgentService,
   CallSchema,
@@ -74,6 +75,10 @@ export interface FakeAgentOptions {
   name?: string;
   /** Default handlers for state sync (snapshot, SyncDesired, ApplyService, RemoveService). Default true. */
   stateSync?: boolean;
+  /** ClientHello.stay_on_address: ask for Panel address "stay" (set-panel, a join with --pin at an IP). */
+  stayOnAddress?: boolean;
+  /** ClientHello.away: why the agent could not connect meanwhile. */
+  away?: { lastError: string; sinceMs?: number; failedAttempts?: number };
   /** Extra headers on the WebSocket upgrade (what a proxy in front of the panel adds). */
   headers?: Record<string, string>;
 }
@@ -300,6 +305,16 @@ export class FakeAgent {
               capabilities: this.options.capabilities ?? [],
             } as never,
             credential,
+            stayOnAddress: this.options.stayOnAddress ?? false,
+            ...(this.options.away
+              ? {
+                  away: {
+                    lastError: this.options.away.lastError,
+                    failedAttempts: this.options.away.failedAttempts ?? 1,
+                    ...(this.options.away.sinceMs !== undefined ? { since: timestampFromMs(this.options.away.sinceMs) } : {}),
+                  },
+                }
+              : {}),
           },
         },
       });

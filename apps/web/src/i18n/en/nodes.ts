@@ -28,6 +28,9 @@ export default {
     healthFail: "Health check failed",
     healthWarn: "Health warnings",
   },
+  // Under an offline node's badges: why, when the panel knows.
+  offlineRefused: "Refused {when}: {message}",
+  offlineLastSeen: "Last seen {when}",
   noLocation: "No location set",
   locationDetectedTip: "Detected from the server's IP address. Change it in the node's settings.",
   detectedLocations: "Detected locations:",
@@ -130,6 +133,8 @@ export default {
     noFacts: "The agent has not reported the machine yet.",
     services: "Services on this node",
     noServices: "Nothing runs here yet.",
+    // The agent's own report once it is back: what kept it from the panel.
+    lastOffline: "Was offline from {from} to {to}: {reason}",
     capabilities: "Agent capabilities",
   },
   facts: {
@@ -205,6 +210,19 @@ export default {
       "This node gets the source, git credentials and build-time secrets of everything it builds, from any project, and the images it builds run on every node. Services build on their own node first. Turn it off for servers you do not fully trust and for small nodes.",
     gamesFirst: "Game servers first",
     gamesFirstHint: "Wings runs on this node: give game servers CPU priority over this panel's services when the CPU is busy.",
+    panelAddress: "Panel address",
+    panelAddressHint: "Where this node's agent connects to the panel.",
+    panelAddressFollow: "Follow the panel's domain",
+    panelAddressFollowHint: "Moves to the panel's domain once it is live, so the node finds the panel if its IP address changes.",
+    panelAddressStay: "Stay on this address",
+    panelAddressStayHint:
+      "Keeps the address it connects to now, such as the panel's IP and pin. For a server whose network decrypts HTTPS (TLS inspection), which breaks the domain for it.",
+    panelAddressBy: {
+      node: "Chosen on the node with {command}.",
+      join: "Chosen when the node joined with the panel's IP address and pin.",
+      inspectedCertificate:
+        "Kept here because the node's network re-signed the panel domain's certificate (TLS inspection), see the node's alert. Choose Follow to try the domain again.",
+    },
     saved: "Node saved.",
     remove: "Remove node",
     removeTitle: "Remove {name}?",

@@ -49370,6 +49370,28 @@
                         }
                       ]
                     },
+                    "rejectedHello": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "at"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                          "type": "string"
+                        },
+                        "message": {
+                          "description": "What the panel told the agent.",
+                          "type": "string"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -49513,6 +49535,80 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "panelAddressChoice": {
+                      "anyOf": [
+                        {
+                          "const": "follow",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stay",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "panelAddressChoiceBy": {
+                      "anyOf": [
+                        {
+                          "const": "owner",
+                          "type": "string"
+                        },
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "join",
+                          "type": "string"
+                        },
+                        {
+                          "const": "inspectedCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "default",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "panelAddressChoiceAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastOffline": {
+                      "type": "object",
+                      "required": [
+                        "from",
+                        "to",
+                        "reason",
+                        "failedAttempts"
+                      ],
+                      "properties": {
+                        "from": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "to": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "description": "The last connect error the agent had meanwhile, for example a certificate it does not trust.",
+                          "type": "string"
+                        },
+                        "failedAttempts": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      }
                     }
                   }
                 }
@@ -50156,6 +50252,28 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "rejectedHello": {
+                            "type": "object",
+                            "required": [
+                              "reason",
+                              "message",
+                              "at"
+                            ],
+                            "properties": {
+                              "reason": {
+                                "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                                "type": "string"
+                              },
+                              "message": {
+                                "description": "What the panel told the agent.",
+                                "type": "string"
+                              },
+                              "at": {
+                                "format": "date-time",
+                                "type": "string"
+                              }
+                            }
                           },
                           "createdAt": {
                             "format": "date-time",
@@ -50901,6 +51019,28 @@
                         }
                       ]
                     },
+                    "rejectedHello": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "at"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                          "type": "string"
+                        },
+                        "message": {
+                          "description": "What the panel told the agent.",
+                          "type": "string"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -51633,6 +51773,28 @@
                         }
                       ]
                     },
+                    "rejectedHello": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "at"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                          "type": "string"
+                        },
+                        "message": {
+                          "description": "What the panel told the agent.",
+                          "type": "string"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -52149,6 +52311,28 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "rejectedHello": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "at"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                          "type": "string"
+                        },
+                        "message": {
+                          "description": "What the panel told the agent.",
+                          "type": "string"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
                     },
                     "createdAt": {
                       "format": "date-time",
@@ -52675,6 +52859,28 @@
                         }
                       ]
                     },
+                    "rejectedHello": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "at"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                          "type": "string"
+                        },
+                        "message": {
+                          "description": "What the panel told the agent.",
+                          "type": "string"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -52791,7 +52997,7 @@
       "post": {
         "operationId": "nodes.updateSettings",
         "summary": "Change node settings",
-        "description": "Changes a node's location label, public address, wildcard domain, how many builds run at once and how much log history each service keeps. Omitted fields stay as they are.",
+        "description": "Changes a node's location label, public address, wildcard domain, how many builds run at once, how much log history each service keeps and its Panel address (\"follow\" moves the node to the panel's domain once that is live, \"stay\" keeps it on the address it dials). Omitted fields stay as they are.",
         "tags": [
           "nodes"
         ],
@@ -52880,6 +53086,18 @@
                         "type": "integer"
                       }
                     }
+                  },
+                  "panelAddressChoice": {
+                    "anyOf": [
+                      {
+                        "const": "follow",
+                        "type": "string"
+                      },
+                      {
+                        "const": "stay",
+                        "type": "string"
+                      }
+                    ]
                   }
                 }
               }
@@ -53346,6 +53564,28 @@
                         }
                       ]
                     },
+                    "rejectedHello": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "at"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "description": "The HelloRejectReason, \"AGENT_TOO_OLD\" or \"BAD_SIGNATURE\".",
+                          "type": "string"
+                        },
+                        "message": {
+                          "description": "What the panel told the agent.",
+                          "type": "string"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -53489,6 +53729,80 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "panelAddressChoice": {
+                      "anyOf": [
+                        {
+                          "const": "follow",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stay",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "panelAddressChoiceBy": {
+                      "anyOf": [
+                        {
+                          "const": "owner",
+                          "type": "string"
+                        },
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "join",
+                          "type": "string"
+                        },
+                        {
+                          "const": "inspectedCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "default",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "panelAddressChoiceAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastOffline": {
+                      "type": "object",
+                      "required": [
+                        "from",
+                        "to",
+                        "reason",
+                        "failedAttempts"
+                      ],
+                      "properties": {
+                        "from": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "to": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "description": "The last connect error the agent had meanwhile, for example a certificate it does not trust.",
+                          "type": "string"
+                        },
+                        "failedAttempts": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      }
                     }
                   }
                 }

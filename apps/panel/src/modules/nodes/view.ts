@@ -6,6 +6,13 @@ import { fromJson } from "@bufbuild/protobuf";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { type NodeFacts, NodeFactsSchema, ServicePhase } from "@seylo/proto";
 import { count, eq } from "drizzle-orm";
+import {
+  lastHelloRejection,
+  lastOfflineReport,
+  type PanelAddressChoice,
+  type PanelAddressChoiceBy,
+  panelAddressChoice,
+} from "../../agent-hub/panel-address";
 import { isNewer } from "../../agent-hub/version";
 import type { NodeHealthReport, nodes } from "../../db/schema";
 import { projects, servicePlacements, services } from "../../db/schema";
@@ -102,8 +109,46 @@ export function toNode(deps: Deps, row: NodeRow) {
     serviceCount,
     health: { checkedAt: iso(row.healthCheckedAt), worst: worstStatus(row.healthReport) },
     lastSeenAt: online ? new Date().toISOString() : iso(row.lastSeenAt),
+    ...(!online && !row.disabledAt ? rejectedHelloOf(deps, row) : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** The offline node's refused hello since it was last seen (agent-hub/panel-address.ts), as the row shows it. */
+function rejectedHelloOf(deps: Deps, row: NodeRow) {
+  const last = lastHelloRejection(deps.db, row.id, row.lastSeenAt);
+  return last ? { rejectedHello: { reason: last.reason, message: last.message, at: new Date(last.at).toISOString() } } : {};
+}
+
+interface AddressDetail {
+  panelAddressChoice?: PanelAddressChoice;
+  panelAddressChoiceBy?: PanelAddressChoiceBy;
+  panelAddressChoiceAt?: string | null;
+  lastOffline?: { from: string; to: string; reason: string; failedAttempts: number };
+}
+
+/** The Panel address setting and the last reported time away, for nodes.get. */
+function addressDetail(deps: Deps, row: NodeRow): AddressDetail {
+  const offline = lastOfflineReport(deps.db, row.id);
+  const lastOffline = offline
+    ? {
+        lastOffline: {
+          from: new Date(offline.from).toISOString(),
+          to: new Date(offline.to).toISOString(),
+          reason: offline.reason,
+          failedAttempts: offline.failedAttempts,
+        },
+      }
+    : {};
+  // The panel node dials loopback and never moves: it has no choice to show.
+  if (row.isPanelNode) return lastOffline;
+  const choice = panelAddressChoice(deps.db, row.id);
+  return {
+    panelAddressChoice: choice.choice,
+    panelAddressChoiceBy: choice.by,
+    panelAddressChoiceAt: choice.at === null ? null : new Date(choice.at).toISOString(),
+    ...lastOffline,
   };
 }
 
@@ -153,5 +198,6 @@ export function toNodeDetail(deps: Deps, row: NodeRow) {
     desiredRevision: row.desiredRevision,
     appliedRevision: view?.synced ? Number(view.appliedRevision) : null,
     panelAddress: deps.agents.dialedAddress(row.id),
+    ...addressDetail(deps, row),
   };
 }
