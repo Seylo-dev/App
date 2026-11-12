@@ -9,6 +9,7 @@ import { expect, test } from "bun:test";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
 import { formatDateTime } from "../format";
+import type { ServiceDetail } from "../use-service";
 import { deleteRunCopy, fileKept, type Run, RunRow, runActions, runLabel, runMenu } from "./run-row";
 
 const run = (over: Partial<Run> = {}): Run => ({
@@ -29,10 +30,23 @@ const run = (over: Partial<Run> = {}): Run => ({
   deletedAt: null,
   startedAt: "2026-11-12T21:19:00.000Z",
   finishedAt: "2026-11-12T21:19:12.000Z",
+  selection: null,
+  scope: "everything",
+  contents: null,
+  warnings: [],
   ...over,
 });
 
-const render = (r: Run) => renderStatic(() => <RunRow run={r} onRestore={() => {}} onDownload={() => {}} onDelete={() => {}} />);
+const service = {
+  id: "s000000000000001",
+  projectId: "p000000000000001",
+  name: "db",
+  kind: "postgres",
+  placements: [],
+} as unknown as ServiceDetail;
+
+const render = (r: Run) =>
+  renderStatic(() => <RunRow service={service} run={r} onRestore={() => {}} onDownload={() => {}} onDelete={() => {}} />);
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const actionsButton = `aria-label="${t("serviceBackups.actions")}"`;
 

@@ -16,6 +16,13 @@
 // says, once done, that the file stayed in the bucket. Demo data
 // (demo/service.ts demoRuns) stands in for the panel;
 // runAll, runNow, downloadUrl, deleteRun and restore are answered here.
+// A database's Backups tab also shows what each backup holds: schedule
+// titles that say what they back up, chips per database on the runs (sizes
+// inside the database, the compressed file on the right), the tables of a
+// backup on expand, a schedule of chosen databases and tables made in the
+// dialog from the live listing, and the restore dialog naming what it
+// replaces. Demo data (demo/service.ts demoDatabases) stands in for the
+// server.
 //
 // Screenshots: $SHOTS_DIR/backups/*.png.
 
@@ -345,5 +352,113 @@ test.describe("backups", () => {
     const orphanRow = card.locator(":scope > div").filter({ hasText: "Destination deleted" });
     await orphanRow.getByRole("button", { name: "Backup actions" }).click();
     await expect(page.getByRole("menuitem")).toHaveText(["Remove from list"]);
+  });
+});
+
+test.describe("database backups", () => {
+  test.use({ storageState: stateFile });
+  test.beforeAll(() => mkdirSync(shots, { recursive: true }));
+
+  test("each backup shows what it holds; its tables open under it", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(backupsTab);
+    const schedules = page.getByRole("region", { name: "Backup schedules" });
+    await expect(schedules.getByText("Database · Everything on this server")).toBeVisible();
+    await expect(schedules.getByText("Database · shop, analytics, legacy")).toBeVisible();
+
+    const runs = page.getByRole("region", { name: "Backups and restores" });
+    const holds = runs.getByRole("list", { name: "What this backup holds" });
+    // Runs 0-3, and the one-off to a deleted destination (everything, made before contents were recorded).
+    await expect(holds).toHaveCount(5);
+    // A backup of everything: the scope, then each database with its size.
+    await expect(holds.nth(0).getByRole("listitem")).toHaveText(["Everything on this server", "shop 380 MB", "analytics 96 MB", "postgres 7.5 MB"]);
+    // Chosen databases, one of them gone at backup time.
+    await expect(holds.nth(1).getByRole("listitem")).toHaveText(["shop 380 MB", "analytics 96 MB", "1 skipped"]);
+    // Made before contents were recorded: the scope only.
+    await expect(holds.nth(3).getByRole("listitem")).toHaveText(["Everything on this server"]);
+    await expect(runs.getByText("18.4 MB file · 12s")).toBeVisible();
+
+    await runs.getByRole("button", { name: "Show what this backup holds" }).nth(1).click();
+    const shop = runs.getByRole("region", { name: "shop" });
+    await expect(shop.getByText("public.orders")).toBeVisible();
+    await expect(shop.getByText("240 MB · ~310k rows")).toBeVisible();
+    await expect(shop.getByText("audit.events")).toBeVisible();
+    await expect(shop.getByText("1.2 MB · rows unknown")).toBeVisible();
+    await expect(runs.getByText('The database "legacy" no longer exists, so it was skipped.')).toBeVisible();
+    await page.screenshot({ path: `${shots}/runs.png`, fullPage: true });
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.screenshot({ path: `${shots}/runs-phone.png`, fullPage: true });
+  });
+
+  test("a schedule of chosen databases, then of some tables of one", async ({ page }) => {
+    let sent: Record<string, unknown> | null = null;
+    await installDemo(page, {
+      overrides: {
+        "backups.createPolicy": (input) => {
+          sent = input;
+          return { id: "b000000000000009", ...input, destinationName: "acme-backups (R2)", volumeName: null, nextRunAt: null, lastRun: null, createdAt: new Date().toISOString() };
+        },
+      },
+    });
+    await page.goto(backupsTab);
+    await page.getByRole("button", { name: "Add schedule" }).click();
+    const dialog = page.getByRole("dialog", { name: "Add schedule" });
+    await expect(dialog.getByText("All databases, with users and roles. 3 databases · 484 MB now")).toBeVisible();
+    await dialog.getByRole("radio", { name: "Chosen databases" }).click();
+    await expect(dialog.getByText("Users and roles are not in this backup.")).toBeVisible();
+    await dialog.getByRole("combobox", { name: "Databases" }).click();
+    const list = page.getByRole("listbox");
+    await expect(list.getByRole("option")).toHaveCount(3);
+    await expect(list.getByRole("option", { name: /^shop/ })).toContainText("380 MB");
+    await list.getByRole("option", { name: /^shop/ }).click();
+    await list.getByRole("option", { name: /^analytics/ }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toBeHidden();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Pick a single database to choose tables.")).toBeVisible();
+    await page.screenshot({ path: `${shots}/dialog-databases.png` });
+
+    // One database: some of its tables.
+    await dialog.getByRole("button", { name: "Remove analytics" }).click();
+    await dialog.getByRole("combobox", { name: "Only these tables" }).click();
+    await expect(page.getByRole("option", { name: /^public\.orders/ })).toContainText("240 MB · ~310k rows");
+    await page.getByRole("option", { name: /^public\.orders/ }).click();
+    await page.getByRole("option", { name: /^public\.customers/ }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toBeHidden();
+    await expect(dialog.getByText("A table that another table references can only be restored together with it.")).toBeVisible();
+    await page.screenshot({ path: `${shots}/dialog-tables.png` });
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent).toMatchObject({
+      target: "database",
+      selection: {
+        databases: [
+          {
+            name: "shop",
+            tables: [
+              { schema: "public", name: "orders" },
+              { schema: "public", name: "customers" },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test("the restore of chosen databases names what it replaces", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(backupsTab);
+    const runs = page.getByRole("region", { name: "Backups and restores" });
+    await runs.getByRole("button", { name: "Backup actions" }).nth(1).click();
+    await page.getByRole("menuitem", { name: "Restore" }).click();
+    const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog"));
+    await expect(dialog.getByText(/This replaces the databases shop and analytics on db with their state from/)).toBeVisible();
+    await expect(dialog.getByText("Other databases and all users stay as they are.", { exact: false })).toBeVisible();
+    await expect(dialog.getByRole("list", { name: "What this backup holds" }).getByRole("listitem")).toHaveText(["shop 380 MB", "analytics 96 MB"]);
+    await expect(dialog.getByText("Back up the current data first")).toBeVisible();
+    // Past the dialog's opening motion.
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/restore.png` });
   });
 });

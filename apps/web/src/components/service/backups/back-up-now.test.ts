@@ -28,6 +28,10 @@ const run = (over: Partial<Run> = {}): Run => ({
   deletedAt: null,
   startedAt: "2026-11-13T09:00:00.000Z",
   finishedAt: null,
+  selection: null,
+  scope: null,
+  contents: null,
+  warnings: [],
   ...over,
 });
 

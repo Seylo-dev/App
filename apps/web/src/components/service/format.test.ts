@@ -3,6 +3,7 @@ import { nextSeq, toLogInput } from "./deploy-log";
 import {
   formatBytes,
   formatClock,
+  formatCount,
   formatDuration,
   formatMode,
   formatOctal,
@@ -11,6 +12,17 @@ import {
   shortDigest,
   shortSha,
 } from "./format";
+
+describe("formatCount", () => {
+  test("k, M and B, one decimal under 10", () => {
+    expect(formatCount(812)).toBe("812");
+    expect(formatCount(1_240)).toBe("1.2k");
+    expect(formatCount(14_200)).toBe("14k");
+    expect(formatCount(3_400_000)).toBe("3.4M");
+    expect(formatCount(2_000_000_000)).toBe("2B");
+    expect(formatCount(-1)).toBe("-");
+  });
+});
 
 describe("formatBytes", () => {
   test("decimal units with one decimal under 100", () => {

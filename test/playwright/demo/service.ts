@@ -534,11 +534,48 @@ const fileEntry = (name: string, isDir: boolean, size: number) => ({
   gid: 1000,
 });
 
+/** What the demo database server holds (backups.listDatabases, run contents). */
+export const demoDatabases = [
+  { name: "shop", sizeBytes: 380_000_000, approxRows: 412_000, tableCount: 4 },
+  { name: "analytics", sizeBytes: 96_000_000, approxRows: 2_100_000, tableCount: 2 },
+  { name: "postgres", sizeBytes: 7_500_000, approxRows: -1, tableCount: 0 },
+];
+export const demoTables: Record<string, { schema: string; name: string; sizeBytes: number; approxRows: number }[]> = {
+  shop: [
+    { schema: "public", name: "orders", sizeBytes: 240_000_000, approxRows: 310_000 },
+    { schema: "public", name: "order_items", sizeBytes: 120_000_000, approxRows: 98_000 },
+    { schema: "public", name: "customers", sizeBytes: 18_800_000, approxRows: 14_200 },
+    { schema: "audit", name: "events", sizeBytes: 1_200_000, approxRows: -1 },
+  ],
+  analytics: [
+    { schema: "public", name: "page_views", sizeBytes: 90_000_000, approxRows: 2_000_000 },
+    { schema: "public", name: "sessions", sizeBytes: 6_000_000, approxRows: 100_000 },
+  ],
+  postgres: [],
+};
+const withTables = (name: string) => {
+  const d = demoDatabases.find((x) => x.name === name) as (typeof demoDatabases)[number];
+  return { ...d, tablesTruncated: false, tables: demoTables[name] ?? [] };
+};
+const summary = ({ tables: _tables, ...d }: ReturnType<typeof withTables>) => d;
+/** Per run: what it was asked for and what it holds (run 3 is from before contents were recorded). */
+const runHolds: Record<number, { selection: unknown; scope: string; contents: ReturnType<typeof withTables>[] | null; warnings: string[] }> = {
+  0: { selection: null, scope: "everything", contents: ["shop", "analytics", "postgres"].map(withTables), warnings: [] },
+  1: {
+    selection: { databases: [{ name: "shop" }, { name: "analytics" }, { name: "legacy" }] },
+    scope: "databases",
+    contents: ["shop", "analytics"].map(withTables),
+    warnings: ['The database "legacy" no longer exists, so it was skipped.'],
+  },
+  2: { selection: null, scope: "everything", contents: null, warnings: [] },
+  3: { selection: null, scope: "everything", contents: null, warnings: [] },
+};
+
 const run = (i: number, status: string) => ({
   id: `r00000000000000${i}`,
   kind: "backup",
   serviceId: ids.db,
-  policyId: "b000000000000001",
+  policyId: i === 1 ? "b000000000000002" : "b000000000000001",
   destinationId: "x000000000000001",
   target: "database",
   volumeId: null,
@@ -546,12 +583,16 @@ const run = (i: number, status: string) => ({
   sourceRunId: null,
   sourceStartedAt: null,
   status,
-  objectKey: `db/2026-11-0${5 - i}.sql.zst`,
+  objectKey: i === 1 ? "db/2026-11-04.bundle" : `db/2026-11-0${5 - i}.sql.gz`,
   sizeBytes: 18_400_000 - i * 300_000,
   error: status === "failed" ? "S3 said: SignatureDoesNotMatch" : null,
   deletedAt: null,
   startedAt: ago(i * day + 3 * hour),
   finishedAt: ago(i * day + 3 * hour - 12_000),
+  selection: runHolds[i]?.selection ?? null,
+  scope: runHolds[i]?.scope ?? "everything",
+  contents: runHolds[i]?.contents ? { wholeServer: runHolds[i]?.scope === "everything", databases: runHolds[i].contents.map(summary) } : null,
+  warnings: runHolds[i]?.warnings ?? [],
 });
 
 /** The Backups tab's runs; the oldest, a one-off, went to a destination deleted since (destinationId null). */
@@ -654,14 +695,45 @@ export const handlers: Record<string, (input: Input) => unknown> = {
         schedule: "0 3 * * *",
         keepLast: 14,
         stopService: false,
+        selection: null,
         enabled: true,
         nextRunAt: new Date(now + 9 * hour).toISOString(),
         lastRun: { id: "r000000000000000", status: "succeeded", finishedAt: ago(15 * hour) },
         createdAt: ago(20 * day),
       },
+      ...(input.serviceId === ids.db
+        ? [
+            {
+              id: "b000000000000002",
+              serviceId: input.serviceId,
+              destinationId: "x000000000000001",
+              destinationName: "acme-backups (R2)",
+              target: "database",
+              volumeId: null,
+              volumeName: null,
+              schedule: "0 * * * *",
+              keepLast: 48,
+              stopService: false,
+              selection: { databases: [{ name: "shop" }, { name: "analytics" }, { name: "legacy" }] },
+              enabled: true,
+              nextRunAt: new Date(now + 40 * 60_000).toISOString(),
+              lastRun: { id: "r000000000000001", status: "succeeded", finishedAt: ago(day + 3 * hour) },
+              createdAt: ago(10 * day),
+            },
+          ]
+        : []),
     ],
   }),
   "backups.listRuns": () => ({ runs: demoRuns(), hasMore: false }),
+  "backups.listDatabases": (input: Input) => {
+    if (!input.database) return { state: "ok", message: null, databases: demoDatabases.map(({ name, sizeBytes, tableCount }) => ({ name, sizeBytes, tableCount })), tables: null, truncated: false };
+    return { state: "ok", message: null, databases: demoDatabases.filter((d) => d.name === input.database).map(({ name, sizeBytes, tableCount }) => ({ name, sizeBytes, tableCount })), tables: demoTables[String(input.database)] ?? [], truncated: false };
+  },
+  "backups.runContents": (input: Input) => {
+    const i = Number(String(input.runId).slice(-1));
+    const holds = runHolds[i];
+    return { scope: holds?.scope ?? "everything", contents: holds?.contents ? { wholeServer: holds.scope === "everything", databases: holds.contents } : null, warnings: holds?.warnings ?? [] };
+  },
   "backups.listDestinations": () => ({ destinations: [], choices: [{ id: "x000000000000001", name: "acme-backups", provider: "r2", bucket: "acme-backups" }] }),
   "databases.get": (input: Input) => databaseOf(String(input.serviceId)),
   "databases.connection": (input: Input) => connectionOf(String(input.serviceId)),

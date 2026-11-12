@@ -1,9 +1,11 @@
 // The Backups tab (also on database pages): schedules of the database or a
 // volume to an S3/R2 destination, "Back up now" (every enabled schedule;
 // each schedule's menu backs up just that one), the run history with
-// restore (type the name to confirm), download (straight from the bucket)
-// and delete. A failed restore or delete says why inside its dialog, which
-// stays open; nothing is left on the card after it closes.
+// what each backup holds (databases as chips, their tables on expand),
+// restore (type the name to confirm; the text says what is replaced),
+// download (straight from the bucket) and delete. A failed restore or
+// delete says why inside its dialog, which stays open; nothing is left on
+// the card after it closes.
 
 import { backups, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -33,7 +35,8 @@ import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
 import { failRunNow, useBackUpNow } from "./back-up-now";
 import { PolicyDialog } from "./policy-dialog";
-import { deleteRunCopy, fileKept, type Run, RunRow } from "./run-row";
+import { deleteRunCopy, fileKept, type Run, RunChips, RunRow } from "./run-row";
+import { policyTitle, restoreText, runChips } from "./selection";
 
 type Policy = OpOutput<typeof backups.listPolicies>["policies"][number];
 
@@ -131,9 +134,7 @@ function PolicyRow({ service, policy: p, onEdit }: { service: ServiceDetail; pol
         aria-label={t("serviceBackups.enabled")}
       />
       <span className="flex min-w-0 flex-col gap-0.5">
-        <b className="font-semibold">
-          {p.target === "database" ? t("serviceBackups.database") : t("serviceBackups.volume", { name: p.volumeName ?? "" })}
-        </b>
+        <b className="font-semibold">{policyTitle(p, service.kind)}</b>
         <span className="text-[12.5px] text-ink-strong">
           {t("serviceBackups.policyLine", { schedule: describeCron(p.schedule), destination: p.destinationName, keep: p.keepLast })}
         </span>
@@ -198,6 +199,12 @@ function RunsCard({ service }: { service: ServiceDetail }) {
   const remove = useOpMutation(backups.deleteRun, { onSuccess: () => invalidate(backups.listRuns) });
   const download = useOpMutation(backups.downloadUrl, { onSuccess: (link) => openDownload(link.url), onError: fail });
   const downloadRun = (r: Run) => download.mutate({ serviceId: service.id, runId: r.id });
+  // A restore of some tables names them: what the backup holds.
+  const held = useOp(
+    backups.runContents,
+    { serviceId: service.id, runId: restoring.run?.id ?? "" },
+    { enabled: restoring.run?.scope === "tables", retry: retryOp },
+  );
   const lastPage = before[before.length - 1];
   const older = useOp(
     backups.listRuns,
@@ -226,6 +233,7 @@ function RunsCard({ service }: { service: ServiceDetail }) {
           {runs.map((r) => (
             <RunRow
               key={r.id}
+              service={service}
               run={r}
               onRestore={() => restoring.show(r)}
               onDownload={() => downloadRun(r)}
@@ -233,14 +241,7 @@ function RunsCard({ service }: { service: ServiceDetail }) {
             />
           ))}
           {before.map((b) => (
-            <OlderRuns
-              key={b}
-              serviceId={service.id}
-              before={b}
-              onRestore={restoring.show}
-              onDownload={downloadRun}
-              onDelete={deleting.show}
-            />
+            <OlderRuns key={b} service={service} before={b} onRestore={restoring.show} onDownload={downloadRun} onDelete={deleting.show} />
           ))}
           {more && oldest && (
             <div className="flex justify-center border-t border-divider py-3">
@@ -256,7 +257,16 @@ function RunsCard({ service }: { service: ServiceDetail }) {
         open={restoring.open}
         onOpenChange={restoring.onOpenChange}
         title={t("serviceBackups.restoreTitle", { when: restoring.run ? formatDateTime(restoring.run.startedAt) : "" })}
-        description={t("serviceBackups.restoreBody", { name: service.name })}
+        description={
+          restoring.run
+            ? restoreText(
+                restoring.run,
+                service,
+                formatDateTime(restoring.run.startedAt),
+                held.data?.contents?.databases[0]?.tablesTruncated ? null : held.data?.contents?.databases[0]?.tables,
+              )
+            : ""
+        }
         confirmText={service.name}
         confirmLabel={t("serviceBackups.restore")}
         destructive
@@ -268,6 +278,9 @@ function RunsCard({ service }: { service: ServiceDetail }) {
             : undefined
         }
       >
+        {restoring.run && restoring.run.scope !== null && restoring.run.scope !== "everything" && (
+          <RunChips chips={runChips(restoring.run, service.kind).filter((c) => c.key !== "skipped")} label={t("serviceBackups.holds")} />
+        )}
         <CheckLabel
           className="flex items-center gap-2 text-[13px]"
           checked={backupFirst}
@@ -319,23 +332,30 @@ function useRunDialog() {
 }
 
 function OlderRuns({
-  serviceId,
+  service,
   before,
   onRestore,
   onDownload,
   onDelete,
 }: {
-  serviceId: string;
+  service: ServiceDetail;
   before: string;
   onRestore: (r: Run) => void;
   onDownload: (r: Run) => void;
   onDelete: (r: Run) => void;
 }) {
-  const page = useOp(backups.listRuns, { serviceId, limit: 50, before }, { retry: retryOp });
+  const page = useOp(backups.listRuns, { serviceId: service.id, limit: 50, before }, { retry: retryOp });
   return (
     <>
       {page.data?.runs.map((r) => (
-        <RunRow key={r.id} run={r} onRestore={() => onRestore(r)} onDownload={() => onDownload(r)} onDelete={() => onDelete(r)} />
+        <RunRow
+          key={r.id}
+          service={service}
+          run={r}
+          onRestore={() => onRestore(r)}
+          onDownload={() => onDownload(r)}
+          onDelete={() => onDelete(r)}
+        />
       ))}
     </>
   );

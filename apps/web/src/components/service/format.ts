@@ -17,6 +17,21 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${value.toFixed(digits).replace(/\.0$/, "")} ${units[unit]}`;
 }
 
+const countUnits = ["", "k", "M", "B"] as const;
+
+/** 812, 1.2k, 14k, 3.4M: a count, rounded like formatBytes. */
+export function formatCount(count: number | null | undefined): string {
+  if (count == null || !Number.isFinite(count) || count < 0) return "-";
+  let value = count;
+  let unit = 0;
+  while (value >= 1000 && unit < countUnits.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  const digits = unit === 0 || value >= 10 ? 0 : 1;
+  return `${value.toFixed(digits).replace(/\.0$/, "")}${countUnits[unit]}`;
+}
+
 /** 1.2 MB/s */
 export function formatRate(bytesPerSec: number | null | undefined): string {
   if (bytesPerSec == null) return "-";
