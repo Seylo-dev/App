@@ -59,6 +59,9 @@ export function problemMessage(d: Pick<Diagnostic, "code" | "params" | "message"
   const key = messageKeys[d.code];
   if (!key) return d.message;
   if (d.code === "unknown-service" && d.params.target === "project") return t("serviceEnv.problem.noShared");
+  // No public address to switch to: the internal reference would not work in a browser either.
+  if (d.code === "hardcoded-reference" && d.params.reason === "noPublic")
+    return t("serviceEnv.problem.hardcodedReferenceUnreachable", d.params);
   return t(key, d.params);
 }
 
@@ -72,7 +75,10 @@ export function problemDetail(d: Pick<Diagnostic, "code" | "params" | "detail">,
 
 /** Why the reference is better, and for another service's public URL, where INTERNAL_URL works instead. */
 function hardcodedDetail(params: Record<string, string>): string {
-  const reason = hardcodedReasons[params.reason ?? ""];
+  const reason =
+    params.reason === "noPublic" && params.publicReference
+      ? "serviceEnv.problem.hardcodedReferenceNoPublicThen"
+      : hardcodedReasons[params.reason ?? ""];
   const parts = reason ? [t(reason, params)] : [];
   if (params.internalReference) {
     parts.push(

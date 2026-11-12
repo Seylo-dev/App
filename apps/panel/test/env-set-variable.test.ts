@@ -4,7 +4,8 @@
 // hardcoded-reference hint the panel returns with every save.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { domains as domainOps, env as envOps } from "@seylo/ops";
+import { analyzeEnv } from "@seylo/env-analyzer";
+import { databases as dbOps, domains as domainOps, env as envOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog } from "../src/db/schema";
 import { setDnsLookups } from "../src/modules/domains/dns";
@@ -36,7 +37,7 @@ async function world() {
   const api = seedService(panel, { projectId: project.id, name: "api", ports: [3000], nodeIds: [fsn.id] });
   const web = seedService(panel, { projectId: project.id, name: "web", ports: [8080], nodeIds: [fsn.id], deployed: true });
   expect((await callOp(panel, domainOps.addAuto, { serviceId: api.id }, { cookie })).status).toBe(200);
-  return { project, api, web };
+  return { project, fsn, api, web };
 }
 
 const setText = (serviceId: string, text: string) => callOp(panel, envOps.set, { serviceId, text }, { cookie });
@@ -62,6 +63,41 @@ describe("hardcoded-reference from the panel", () => {
     expect(JSON.stringify(saved.body.diagnostics)).not.toContain("fsn.example.com");
     const analyzed = await callOp(panel, envOps.analyze, { serviceId: web.id }, { cookie });
     expect(analyzed.body.diagnostics).toEqual(saved.body.diagnostics);
+  });
+
+  test("a database URL with its password is only a match for callers who may read it", async () => {
+    const { project, fsn, web } = await world();
+    const db = await callOp(panel, dbOps.create, { projectId: project.id, name: "db", engine: "postgres", nodeId: fsn.id }, { cookie });
+    expect(db.status).toBe(200);
+    const ownerView = await callOp(panel, envOps.references, { serviceId: web.id }, { cookie });
+    const dbTarget = ownerView.body.targets.find((t: { name: string }) => t.name === "db");
+    const url = dbTarget.variables.find((v: { name: string }) => v.name === "INTERNAL_URL").value as string;
+    expect(url).toContain("@db:");
+    await setText(web.id, `DATABASE_URL=${url}\n`);
+    const hint = (body: { diagnostics: { code: string; params: Record<string, string> }[] }) =>
+      body.diagnostics.filter((d) => d.code === "hardcoded-reference").map((d) => d.params.reference);
+    expect(hint((await callOp(panel, envOps.analyze, { serviceId: web.id }, { cookie })).body)).toEqual(["${{db.INTERNAL_URL}}"]);
+
+    // A member who edits web but cannot read db's credentials: no hint, from any op, so a guessed password is not confirmed.
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", web.id, ["env.view", "env.edit"]);
+    const asMember = { cookie: member.cookie };
+    expect(hint((await callOp(panel, envOps.analyze, { serviceId: web.id }, asMember)).body)).toEqual([]);
+    const edited = await setVariable({ serviceId: web.id, key: "LOG_LEVEL", value: "debug" }, member.cookie);
+    expect(edited.status).toBe(200);
+    expect(hint(edited.body)).toEqual([]);
+    const guessed = await callOp(panel, envOps.set, { serviceId: web.id, text: `DATABASE_URL=${url}\nGUESS=${url}\n` }, asMember);
+    expect(guessed.status).toBe(200);
+    expect(hint(guessed.body)).toEqual([]);
+    // The web editor runs the analyzer on env.references, which hides the same values: both agree.
+    const memberView = await callOp(panel, envOps.references, { serviceId: web.id }, asMember);
+    expect(analyzeEnv(`DATABASE_URL=${url}\n`, memberView.body).diagnostics.filter((d) => d.code === "hardcoded-reference")).toEqual([]);
+
+    grant(panel, member.user.id, "service", db.body.serviceId, ["databases.credentials"]);
+    expect(hint((await callOp(panel, envOps.analyze, { serviceId: web.id }, asMember)).body)).toEqual([
+      "${{db.INTERNAL_URL}}",
+      "${{db.INTERNAL_URL}}",
+    ]);
   });
 });
 
@@ -114,6 +150,34 @@ describe("env.setVariable", () => {
     expect(broken.body.error.details).toMatchObject({ field: "value", key: "B" });
     expect(JSON.stringify(broken.body)).not.toContain("tok-9f8e7d");
     expect(await textOf(web.id)).toBe('LOG_LEVEL=debug\nGREETING="hello there"\n');
+  });
+
+  test("refuses a change that would make the text longer than env.get can return", async () => {
+    const { project, web } = await world();
+    await setText(web.id, "A=1\n");
+    const max = envOps.envTextMaxLength;
+    const big = await setVariable({ serviceId: web.id, key: "CERT", value: "x".repeat(max) });
+    expect(big.status).toBe(400);
+    expect(big.body.error.details).toMatchObject({ field: "value", key: "CERT" });
+    // Near the limit, a short append is too much as well; up to it is fine.
+    const near = `A=1\nPAD=${"p".repeat(max - 20)}\n`;
+    expect((await setText(web.id, near)).status).toBe(200);
+    expect((await setVariable({ serviceId: web.id, key: "LONGER_KEY", value: "123456789" })).status).toBe(400);
+    expect((await setVariable({ serviceId: web.id, key: "B", value: "1" })).status).toBe(200);
+    const got = await callOp(panel, envOps.get, { serviceId: web.id }, { cookie });
+    expect(got.status).toBe(200);
+    expect(got.body.text).toBe(`${near}B=1\n`);
+
+    expect((await callOp(panel, envOps.setShared, { projectId: project.id, text: near }, { cookie })).status).toBe(200);
+    const shared = await callOp(
+      panel,
+      envOps.setSharedVariable,
+      { projectId: project.id, key: "LONGER_KEY", value: "123456789" },
+      { cookie },
+    );
+    expect(shared.status).toBe(400);
+    expect(shared.body.error.details).toMatchObject({ field: "value", key: "LONGER_KEY" });
+    expect((await callOp(panel, envOps.getShared, { projectId: project.id }, { cookie })).status).toBe(200);
   });
 
   test("a stale expectedUpdatedAt is a conflict; without one it edits what is saved now", async () => {

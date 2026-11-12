@@ -96,6 +96,9 @@ export default {
       "{key} is read in the browser, which cannot reach {target}'s internal address, so the fix uses its public one.",
     hardcodedReferenceNoPublic:
       "{key} is read in the browser, which cannot reach {target}'s internal address. Give {target} a public address and use that instead.",
+    hardcodedReferenceNoPublicThen:
+      "{key} is read in the browser, which cannot reach {target}'s internal address. Give {target} a public address, then use {publicReference}.",
+    hardcodedReferenceUnreachable: "{key} uses {target}'s internal address, which browsers cannot reach",
     hardcodedReferenceInternalBrowser: "A server-side variable can use {internalReference} instead when both services share a node.",
     hardcodedReferenceInternalServer: "Read on the server, {key} can also use {internalReference} when both services share a node.",
   },

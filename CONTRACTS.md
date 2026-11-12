@@ -4360,12 +4360,20 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `env.setShared`, and `env.setSharedVariable` returns its output. Both are
   `mcp: true` mutations (no approval) with `sensitive.input: ["value"]`, so
   the audit log and transcripts show the key, never the value (a removal
-  shows `[redacted]` too).
+  shows `[redacted]` too). An edit that would make the text longer than
+  `envTextMaxLength` (262144 UTF-16 code units, `EnvText`'s `maxLength`) is
+  BAD_REQUEST `field: value`: env.get returns the text as `EnvText`, and a
+  longer one would fail its output check for everyone.
 - `hardcoded-reference` (`env-analyzer/src/hardcoded.ts`), severity
   `info`: a value whose whole text is a target's (or the service's own,
-  `self.builtins`) `URL`, `DOMAIN`, `INTERNAL_URL`, `INTERNAL_HOST`,
-  `EXPOSED_URL` or `EXPOSED_HOST`, or which starts with one of the URLs
-  followed by `/`, `?` or `#` (`&` after a URL with a query). Scheme and
+  `self.builtins`) `URL`, `INTERNAL_URL` or `EXPOSED_URL`, or `DOMAIN` or
+  `INTERNAL_HOST` for a key that names a host or a domain (ends in `HOST`,
+  `HOSTNAME`, `HOSTS`, `ADDR`, `ADDRESS`, `SERVER`, `SERVER_NAME`, `DOMAIN`
+  or `DOMAINS`; not `DOMAIN` for a mail key such as `MAIL_DOMAIN` or
+  `SMTP_HOST`), or which starts with one of the URLs followed by `/`, `?`
+  or `#` (`&` after a URL with a query). `EXPOSED_HOST` alone is never
+  matched: a database's is the node's address unless it has a TLS host
+  name, shared by everything on the node. Scheme and
   host compare case-insensitively, user info and path exactly, and a
   trailing slash is ignored: the fix replaces the matched text, so the
   resolved value stays the same (`https://api.example.com/` becomes
@@ -4373,18 +4381,25 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   references). Skipped: lines with syntax problems, text inside references,
   empty values and built-ins, own variables of a target (`scope: plain`)
   and shared variables, `localhost` and loopback addresses, a host that is
-  an IP or a number, a bare IP URL without port or user, a host name
-  without a dot unless the key names a host (`..._HOST`, `_HOSTNAME`,
-  `_ADDR`, `_SERVER`, ...), a value two services share, and an internal
-  address of a service on another node (the cross-node error covers it).
+  an IP or a number, a bare IP URL without port or user, a value two
+  services share, and an internal address of a service on another node
+  (the cross-node error covers it).
   Keys starting with `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `REACT_APP_`,
   `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_` or `VUE_APP_` run in a browser:
   an internal match there suggests the public variable (`EXPOSED_*`, else
-  `URL`/`DOMAIN`; `params.reason` `public`, or `noPublic` when the target
-  has none), and the detail says a server-side variable can use
-  `INTERNAL_URL` when both services share a node (`params.internalReference`).
-  Message, detail, params and fix name the key and the reference only,
-  never the value: values can be secrets and MCP hands diagnostics to models.
+  `URL`/`DOMAIN`; `params.reason` `public`), and the detail says a
+  server-side variable can use `INTERNAL_URL` when both services share a
+  node (`params.internalReference`). When the target has no public address
+  with a value (`params.reason` `noPublic`) there is nothing a browser can
+  use: no fix, `params.reference` empty, the message says browsers cannot
+  reach the internal address, and `params.publicReference` names the
+  variable to use once it has one (`${{worker.URL}}`, empty when its kind
+  has none). Message, detail, params and fix name the key and the
+  reference only, never the value: values can be secrets and MCP hands
+  diagnostics to models. The panel computes it (env.set, env.setVariable,
+  env.analyze) on the caller's env.references context, values the caller
+  may not read hidden, so a database URL with its password is a match only
+  for callers with databases.credentials, the same as in the web editor.
 - Edge tickets (`modules/databases/edge-ticket.ts`; the agent's
   `edge.TicketVerifier` must accept exactly this): token
   `<payload>.<signature>`, both base64url without padding; payload is the

@@ -143,7 +143,7 @@ describe("hardcoded-reference", () => {
   });
 
   test("scheme and host compare case-insensitively, user info and path exactly", () => {
-    expect(found("A=HTTPS://API.Example.COM/v1\nB=api.EXAMPLE.com\n")).toEqual([
+    expect(found("A=HTTPS://API.Example.COM/v1\nAPI_DOMAIN=api.EXAMPLE.com\n")).toEqual([
       ["HTTPS://API.Example.COM", "${{api.URL}}"],
       ["api.EXAMPLE.com", "${{api.DOMAIN}}"],
     ]);
@@ -185,10 +185,22 @@ describe("hardcoded-reference", () => {
     for (const prefix of ["REACT_APP_", "NUXT_PUBLIC_", "EXPO_PUBLIC_", "GATSBY_", "VUE_APP_", "PUBLIC_"]) {
       expect(hints(`${prefix}API=http://api:3000\n`)[0]?.params.reference).toBe("${{api.URL}}");
     }
-    // Without a domain there is no public address to switch to: the hint says so and keeps the value.
-    const noDomain = hints("VITE_WORKER=http://worker:9000\n")[0];
-    expect(noDomain?.params).toMatchObject({ reason: "noPublic", reference: "${{worker.INTERNAL_URL}}", internalReference: "" });
-    expect(noDomain?.detail).toContain("Give worker a public address");
+  });
+
+  test("a browser variable with the internal address of a service without a public one: no fix, no internal reference", () => {
+    const noDomain = hints("VITE_WORKER=http://worker:9000/jobs\n")[0];
+    expect(noDomain).toMatchObject({
+      severity: "info",
+      message: "VITE_WORKER uses worker's internal address, which browsers cannot reach",
+      detail:
+        "VITE_WORKER is read in the browser, which cannot reach worker's internal address. Give worker a public address, then use ${{worker.URL}}.",
+      params: { reason: "noPublic", matched: "INTERNAL_URL", reference: "", internalReference: "", publicReference: "${{worker.URL}}" },
+      fixes: [],
+    });
+    // Nothing a model could apply that a browser cannot use.
+    expect(JSON.stringify(noDomain)).not.toContain("INTERNAL_URL}}");
+    // A server-side variable still gets the internal reference.
+    expect(found("WORKER=http://worker:9000/jobs\n")).toEqual([["http://worker:9000", "${{worker.INTERNAL_URL}}"]]);
   });
 
   test("the message, detail and params name the key and the reference, never the value", () => {
@@ -234,11 +246,49 @@ describe("hardcoded-reference", () => {
     expect(found("PG_HOST=203.0.113.10\n")).toEqual([]);
   });
 
-  test("a bare host name without a dot counts only for keys that name a host", () => {
-    expect(found("QUEUE_CONNECTION=api\nDRIVER=db\nAPI_HOST=api\nDB_HOSTNAME=db\nREDIS_ADDR=api\n")).toEqual([
+  test("a host name alone counts only for keys that name a host or a domain", () => {
+    expect(found("QUEUE_CONNECTION=api\nDRIVER=db\nAPI_HOST=api\nDB_HOSTNAME=db\nREDIS_ADDR=api\nPGHOST=db\n")).toEqual([
       ["api", "${{api.INTERNAL_HOST}}"],
       ["db", "${{db.INTERNAL_HOST}}"],
       ["api", "${{api.INTERNAL_HOST}}"],
+      ["db", "${{db.INTERNAL_HOST}}"],
+    ]);
+    // With a dot too: the same name in a key that is not about a host is a coincidence.
+    expect(found("NOTE=api.example.com\nAPP_NAME=shop.example.com\n")).toEqual([]);
+    expect(found("ALLOWED_HOSTS=shop.example.com\nCOOKIE_DOMAIN=shop.example.com\nSERVER_NAME=api.example.com\n")).toEqual([
+      ["shop.example.com", "${{web.DOMAIN}}"],
+      ["shop.example.com", "${{web.DOMAIN}}"],
+      ["api.example.com", "${{api.DOMAIN}}"],
+    ]);
+    // A mail domain reads like a site's domain but is its own setting; an internal mail host is still that service.
+    expect(found("MAIL_DOMAIN=shop.example.com\nMAILGUN_DOMAIN=shop.example.com\nSMTP_HOST=api.example.com\nSMTP_HOST=api\n")).toEqual([
+      ["api", "${{api.INTERNAL_HOST}}"],
+    ]);
+  });
+
+  test("a database's EXPOSED_HOST alone is not matched: it can be the node's address, shared by everything on it", () => {
+    // db exposed through the node's DNS name, no TLS host name of its own.
+    const onNode: AnalyzeContext = {
+      ...context,
+      targets: context.targets.map((t) =>
+        t.name !== "db"
+          ? t
+          : {
+              ...t,
+              variables: t.variables.map((v) =>
+                v.name === "EXPOSED_HOST"
+                  ? { ...v, value: "de1.host.net" }
+                  : v.name === "EXPOSED_URL"
+                    ? { ...v, value: "postgres://app:s3cr3t-pw@de1.host.net:15432/shop?sslmode=require" }
+                    : v,
+              ),
+            },
+      ),
+    };
+    expect(found("SSH_HOST=de1.host.net\nPGHOST=de1.host.net\nSFTP_SERVER=DE1.host.net\n", onNode)).toEqual([]);
+    // The connection URL, with its port and user, is that database.
+    expect(found("DATABASE_URL=postgres://app:s3cr3t-pw@de1.host.net:15432/shop?sslmode=require\n", onNode)).toEqual([
+      ["postgres://app:s3cr3t-pw@de1.host.net:15432/shop?sslmode=require", "${{db.EXPOSED_URL}}"],
     ]);
   });
 

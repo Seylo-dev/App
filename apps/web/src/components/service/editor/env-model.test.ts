@@ -234,6 +234,36 @@ describe("hardcoded service URLs", () => {
     expect(quickFixActions(result.diagnostics, second, second, "web").map((a) => a.title)).toEqual(["Use ${{api.INTERNAL_URL}}"]);
   });
 
+  test("a browser variable with the internal address of a service without a domain: a hint with no code action", () => {
+    const withWorker: AnalyzeContext = {
+      ...local,
+      targets: [
+        ...local.targets,
+        {
+          name: "worker",
+          kind: "service",
+          serviceId: "s000000000000006",
+          serviceKind: "app",
+          nodes: [de],
+          internalHost: "worker",
+          exposed: false,
+          variables: [
+            { name: "URL", value: "", scope: "public", sensitive: false, description: "public URL" },
+            { name: "INTERNAL_URL", value: "http://worker:9000", scope: "internal", sensitive: false, description: "internal URL" },
+          ],
+        },
+      ],
+    };
+    const text = "NEXT_PUBLIC_WORKER=http://worker:9000/jobs\n";
+    const diagnostics = analyzeEnv(text, withWorker).diagnostics;
+    const [marker] = toMarkers(diagnostics, "web").filter((m) => m.code === "hardcoded-reference");
+    expect(marker?.severity).toBe(markerSeverity.info);
+    expect(marker?.message).toBe(
+      "NEXT_PUBLIC_WORKER uses worker's internal address, which browsers cannot reach\nNEXT_PUBLIC_WORKER is read in the browser, which cannot reach worker's internal address. Give worker a public address, then use ${{worker.URL}}.",
+    );
+    expect(quickFixActions(diagnostics, 0, text.length, "web")).toEqual([]);
+  });
+
   test("next to an error, the error's fix comes first", () => {
     // The whole file selected: the typo's "Change to api" (an error) before the hints.
     const actions = quickFixActions(result.diagnostics, 0, env.length, "web");

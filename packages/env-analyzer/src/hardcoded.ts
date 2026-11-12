@@ -8,12 +8,19 @@
 import { missingNodes } from "./nodes";
 import { formatReference } from "./references";
 import type { LineIndex } from "./source";
-import type { AnalyzeContext, Diagnostic, EnvEntry, QuickFix, ReferenceTarget, ReferenceVariable } from "./types";
+import type { AnalyzeContext, Diagnostic, EnvEntry, QuickFix, ReferenceTarget, ReferenceVariable, SourceRange } from "./types";
 
 const urlVariables: readonly string[] = ["URL", "EXPOSED_URL", "INTERNAL_URL"];
-const hostVariables: readonly string[] = ["DOMAIN", "EXPOSED_HOST", "INTERNAL_HOST"];
+/**
+ * Built-ins a whole value is compared with as a host name. Not EXPOSED_HOST:
+ * a database's is the node's own address unless it has a TLS host name, so
+ * SSH_HOST=<the node> would be told to use the database's exposure (and go
+ * empty when exposure is turned off). Its EXPOSED_URL, with the port and the
+ * user, is specific enough and still matches.
+ */
+const hostVariables: readonly string[] = ["DOMAIN", "INTERNAL_HOST"];
 /** Among equal matches of one target, the public variable first. */
-const preference: readonly string[] = ["URL", "EXPOSED_URL", "DOMAIN", "EXPOSED_HOST", "INTERNAL_URL", "INTERNAL_HOST"];
+const preference: readonly string[] = ["URL", "EXPOSED_URL", "DOMAIN", "INTERNAL_URL", "INTERNAL_HOST"];
 
 /**
  * Name prefixes bundlers put into browser code: Next.js, Vite, SvelteKit and
@@ -35,8 +42,11 @@ export function isBrowserVariable(key: string): boolean {
   return browserPrefixes.some((prefix) => key.startsWith(prefix));
 }
 
-/** Keys that name a host: a host name without a dot ("redis") only counts for them. */
-const hostKey = /(HOST|HOSTNAME|HOSTS|ADDR|ADDRESS|SERVER)$/i;
+/** Keys that name a host or a domain: a whole value is compared with a host name only for them. */
+const hostKey = /(HOST|HOSTNAME|HOST_NAME|HOSTS|ADDR|ADDRESS|SERVER|SERVER_NAME|DOMAIN|DOMAINS)$/i;
+
+/** Keys of mail settings: a mail domain often reads like a site's (MAIL_DOMAIN=example.com) but is its own setting. */
+const mailKey = /(^|_)(E?MAIL[A-Z0-9]*|SMTP|IMAP|POP3?|MX)(_|$)/i;
 
 interface Candidate {
   target: ReferenceTarget;
@@ -72,14 +82,15 @@ export function checkHardcoded(index: LineIndex, entry: EnvEntry, context: Analy
 
   const browser = isBrowserVariable(entry.key);
   const kind = urlVariables.includes(variable.name) ? "url" : "host";
+  const range = index.range(start, matchEnd);
   // Browsers cannot reach the project network: a browser variable gets the public address.
   const publicName = internal && browser ? counterpart(target, kind, "public") : null;
+  if (internal && browser && !publicName) return [unreachable(entry, target, variable, kind, range)];
   const suggested = publicName ?? variable.name;
   const reference = formatReference(target.name, suggested);
-  const reason = internal && browser ? (publicName ? "public" : "noPublic") : "same";
+  const reason = publicName ? "public" : "same";
   // Where INTERNAL_URL is worth a word: next to another service's public URL (a host alone would need the port too).
-  const internalName =
-    self || kind !== "url" || reason === "noPublic" || (internal && !browser) ? null : counterpart(target, kind, "internal");
+  const internalName = self || kind !== "url" || (internal && !browser) ? null : counterpart(target, kind, "internal");
   const internalReference = internalName ? formatReference(target.name, internalName) : "";
 
   const sentences: string[] = [];
@@ -87,13 +98,9 @@ export function checkHardcoded(index: LineIndex, entry: EnvEntry, context: Analy
     sentences.push(
       `This is ${target.name}'s ${variable.name} written out. ${reference} gives the same value and stays right when ${target.name}'s address changes.`,
     );
-  } else if (reason === "public") {
-    sentences.push(
-      `${entry.key} is read in the browser, which cannot reach ${target.name}'s internal address, so the fix uses its public one.`,
-    );
   } else {
     sentences.push(
-      `${entry.key} is read in the browser, which cannot reach ${target.name}'s internal address. Give ${target.name} a public address and use that instead.`,
+      `${entry.key} is read in the browser, which cannot reach ${target.name}'s internal address, so the fix uses its public one.`,
     );
   }
   if (internalReference && browser) {
@@ -117,11 +124,52 @@ export function checkHardcoded(index: LineIndex, entry: EnvEntry, context: Analy
         reason,
         browser: String(browser),
         internalReference,
+        publicReference: "",
       },
-      range: index.range(start, matchEnd),
+      range,
       fixes: fixFor(index, entry, raw, match.length, matchEnd, reference),
     },
   ];
+}
+
+/**
+ * A browser variable with the internal address of a service that has no
+ * public one. The internal reference would not work in a browser either, so
+ * there is no fix and no "can use": the hint names the public variable to
+ * use once the service has an address (publicReference, empty when its kind
+ * has none).
+ */
+function unreachable(
+  entry: EnvEntry,
+  target: ReferenceTarget,
+  variable: ReferenceVariable,
+  kind: "url" | "host",
+  range: SourceRange,
+): Diagnostic {
+  const later = (kind === "url" ? ["URL", "EXPOSED_URL"] : ["DOMAIN", "EXPOSED_HOST"]).find((name) =>
+    target.variables.some((v) => v.name === name && v.scope === "public"),
+  );
+  const publicReference = later ? formatReference(target.name, later) : "";
+  const then = publicReference ? `Give ${target.name} a public address, then use ${publicReference}.` : `Give ${target.name} a public address and use that instead.`;
+  return {
+    code: "hardcoded-reference",
+    severity: "info",
+    message: `${entry.key} uses ${target.name}'s internal address, which browsers cannot reach`,
+    detail: `${entry.key} is read in the browser, which cannot reach ${target.name}'s internal address. ${then}`,
+    params: {
+      key: entry.key,
+      target: target.name,
+      variable: "",
+      matched: variable.name,
+      reference: "",
+      reason: "noPublic",
+      browser: "true",
+      internalReference: "",
+      publicReference,
+    },
+    range,
+    fixes: [],
+  };
 }
 
 /** The reference over the matched text, first edit (UIs title the fix by it); single quotes also become double ones. */
@@ -173,7 +221,7 @@ function candidates(context: AnalyzeContext): Candidate[] {
 function bestMatch(raw: string, key: string, list: readonly Candidate[]): Match | null {
   let best: Match[] = [];
   for (const candidate of list) {
-    const length = hostVariables.includes(candidate.variable.name) ? hostMatch(raw, candidate.value, key) : urlMatch(raw, candidate.value);
+    const length = hostVariables.includes(candidate.variable.name) ? hostMatch(raw, candidate, key) : urlMatch(raw, candidate.value);
     if (length <= 0) continue;
     const top = best[0]?.length ?? 0;
     if (length > top) best = [{ candidate, length }];
@@ -184,10 +232,15 @@ function bestMatch(raw: string, key: string, list: readonly Candidate[]): Match 
   return best.sort((a, b) => rank(a) - rank(b))[0] ?? null;
 }
 
-/** The whole value is the host (case-insensitive). */
-function hostMatch(raw: string, host: string, key: string): number {
-  if (genericHost(host)) return -1;
-  if (!host.includes(".") && !hostKey.test(key)) return -1;
+/**
+ * The whole value is the host (case-insensitive), for a key that names a
+ * host or a domain: a host name alone says little about what the variable
+ * is for, a URL with its scheme does.
+ */
+function hostMatch(raw: string, candidate: Candidate, key: string): number {
+  const host = candidate.value;
+  if (genericHost(host) || !hostKey.test(key)) return -1;
+  if (candidate.variable.name === "DOMAIN" && mailKey.test(key)) return -1;
   return raw.toLowerCase() === host.toLowerCase() ? raw.length : -1;
 }
 

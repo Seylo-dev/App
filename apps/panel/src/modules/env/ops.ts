@@ -66,6 +66,17 @@ function visibility(ctx: OpContext, projectId: string) {
   };
 }
 
+/**
+ * The analyzer context as the caller may see it (env.references), also for
+ * the diagnostics env.set, env.setVariable and env.analyze return: the
+ * hardcoded-reference hint compares values with built-ins, so a database URL
+ * with its password must not be a match for someone who cannot read it (the
+ * hint would confirm a guessed password). The web editor gets this context too.
+ */
+function callerContext(ctx: OpContext, graph: ReturnType<typeof buildEnvGraph>, service: ServiceRow) {
+  return contextFor(graph, service.id, { canSee: visibility(ctx, service.projectId) });
+}
+
 export const get = implement(envOps.get, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
   const stored = readServiceEnv(ctx.db, ctx.secrets, service.id);
@@ -156,9 +167,20 @@ function refuseStale(what: "environment" | "shared"): never {
  */
 function editVariable(text: string, key: string, value: string | null): string {
   const edit = setEnvVariable(text, key, value);
-  if (edit.ok) return edit.text;
-  if (edit.reason === "not-set") throw new OpError("NOT_FOUND", `${key} is not set, so there is nothing to remove.`, { field: "key", key });
-  throw new OpError("BAD_REQUEST", edit.message, { field: edit.reason === "invalid-key" ? "key" : "value", key });
+  if (!edit.ok) {
+    if (edit.reason === "not-set")
+      throw new OpError("NOT_FOUND", `${key} is not set, so there is nothing to remove.`, { field: "key", key });
+    throw new OpError("BAD_REQUEST", edit.message, { field: edit.reason === "invalid-key" ? "key" : "value", key });
+  }
+  // env.get and env.getShared return the text as EnvText: a longer one would fail their output check for everyone.
+  if (edit.text.length > envOps.envTextMaxLength) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `With this value of ${key} the environment would be longer than ${envOps.envTextMaxLength} characters. Shorten the value or remove other variables first.`,
+      { field: "value", key, maxLength: String(envOps.envTextMaxLength) },
+    );
+  }
+  return edit.text;
 }
 
 /** Whether running instances still have the old values after a change, and the live updates every service env write sends. */
@@ -173,7 +195,7 @@ function afterServiceWrite(ctx: OpContext, service: ServiceRow, changed: boolean
 export const set = implement(envOps.set, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
   const graph = buildEnvGraph(ctx, service.projectId);
-  const { parsed, diagnostics } = analyzeEnv(input.text, contextFor(graph, service.id));
+  const { parsed, diagnostics } = analyzeEnv(input.text, callerContext(ctx, graph, service));
   const errors = syntaxErrors(parsed.problems);
   if (errors.length > 0) refuseSyntax(errors);
   assertVisible(ctx, graph, service.projectId, [service.name], parsed);
@@ -213,14 +235,14 @@ export const setVariable = implement(envOps.setVariable, (input, ctx) => {
       changed: stored.text !== text,
     };
   });
-  const { diagnostics } = analyzeEnv(saved.text, contextFor(graph, service.id));
+  const { diagnostics } = analyzeEnv(saved.text, callerContext(ctx, graph, service));
   return { updatedAt: saved.at.toISOString(), diagnostics, restartNeeded: afterServiceWrite(ctx, service, saved.changed) };
 });
 
 export const references = implement(envOps.references, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
   const graph = buildEnvGraph(ctx, service.projectId);
-  return contextFor(graph, service.id, { canSee: visibility(ctx, service.projectId) });
+  return callerContext(ctx, graph, service);
 });
 
 export const analyze = implement(envOps.analyze, (input, ctx) => {
@@ -228,7 +250,7 @@ export const analyze = implement(envOps.analyze, (input, ctx) => {
   const graph = buildEnvGraph(ctx, service.projectId);
   const self = graph.services.find((s) => s.row.id === service.id);
   if (!self) return { diagnostics: [] };
-  return { diagnostics: analyzeParsed(self.parsed, contextFor(graph, service.id)) };
+  return { diagnostics: analyzeParsed(self.parsed, callerContext(ctx, graph, service)) };
 });
 
 function requireProject(ctx: OpContext, projectId: string) {
