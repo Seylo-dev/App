@@ -45,6 +45,8 @@ export const DiagnosticCode = Type.Union(
     "empty-reference",
     "reference-cycle",
     "hardcoded-reference",
+    "single-quoted-reference",
+    "bare-reference",
   ].map((code) => Type.Literal(code)),
 );
 
@@ -228,7 +230,8 @@ export const analyze = defineOp({
   kind: "query",
   summary: "Check a service's environment",
   description:
-    "Runs the env analyzer over the saved .env of a service and returns its diagnostics: syntax errors, unknown references, and internal addresses of services on another node (there is no cross-node private network). The web editor runs the same analyzer locally on unsaved text.",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
+    "Runs the env analyzer over the saved .env of a service and returns its diagnostics: syntax errors, unknown references, internal addresses of services on another node (there is no cross-node private network), and warnings for references the app would get as text (single-quoted-reference: a ${{target.VARIABLE}} in single quotes; bare-reference: api.URL written without ${{ }}), each with its fix. The web editor runs the same analyzer locally on unsaved text.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({ diagnostics: Type.Array(Diagnostic) }),
   permission: serviceScope("env.view"),

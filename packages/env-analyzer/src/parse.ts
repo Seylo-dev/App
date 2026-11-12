@@ -209,5 +209,12 @@ export function stringifyEnv(variables: readonly { key: string; value: string }[
 
 function quoteIfNeeded(value: string): string {
   if (value === "" || /^[^\s"'`#\\]+$/.test(value)) return value;
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}"`;
+  return `"${escapeDouble(value)}"`;
+}
+
+const doubleEscapes: Record<string, string> = { "\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t" };
+
+/** Text that reads back as value between double quotes: \, ", line breaks and tabs escaped (references stay references). */
+export function escapeDouble(value: string): string {
+  return value.replace(/[\\"\n\r\t]/g, (ch) => doubleEscapes[ch] ?? ch);
 }

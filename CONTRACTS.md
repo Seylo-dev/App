@@ -23,7 +23,7 @@ packages/brand/           generated brand constants for TypeScript (@seylo/brand
 packages/proto/           generated protocol + frame codec for TypeScript (@seylo/proto)
 packages/ops/             operation registry: contracts, generators, typed client (@seylo/ops)
 packages/ui/              UI kit (shadcn-style components) and design tokens (@seylo/ui)
-packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, hardcoded service addresses (`hardcoded-reference`), literal host names (`hostMentions`), which variables are secrets (`classifySecret`, `publicPrefixes`), one-variable edits (`setEnvVariable`) (@seylo/env-analyzer)
+packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, hardcoded service addresses (`hardcoded-reference`), references the app gets as text (`single-quoted-reference`, `bare-reference`), literal host names (`hostMentions`), which variables are secrets (`classifySecret`, `publicPrefixes`), one-variable edits (`setEnvVariable`) (@seylo/env-analyzer)
 packages/zip/             streaming zip writer (store, deflate, data descriptors, zip64) and a strict zip reader that runs in browsers (@seylo/zip/write, @seylo/zip/read)
 installer/                install.sh.tmpl + generated brand.env and install.sh (scripts/render-installer.sh)
 openapi.json              generated from the op registry (scripts/gen-openapi.ts)
@@ -4672,6 +4672,48 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   env.analyze) on the caller's env.references context, values the caller
   may not read hidden, so a database URL with its password is a match only
   for callers with databases.credentials, the same as in the web editor.
+- References the app gets as text (`env-analyzer/src/literal.ts`),
+  severity `warning` like `empty-reference`: counted as problems
+  in the editor, never blocking a save (only syntax errors do), returned by
+  env.set, env.setVariable and env.analyze with their fixes. Lines with
+  syntax problems are skipped.
+  `single-quoted-reference`: a well-formed `${{target.VARIABLE}}` inside a
+  single-quoted value (single quotes keep their text as is, so the app gets
+  the characters), one warning per reference on its text, `params`
+  `key`, `reference` (as written), `target`, `variable`. No reference check
+  (unknown service, cross-node, ...) runs on the literal text. The fix
+  (`title` "Use double quotes", the web editor's own title too) is the
+  value in double quotes: the two quotes replaced and, outside the
+  references, `\`, `"`, `$`, line breaks and tabs escaped (`\\`, `\"`,
+  `\$`, `\n`, `\r`, `\t`), one small edit each, so the edits never carry
+  the value; the resolved value is the same text with the references
+  resolved. No fix when double quotes cannot read back the same text (a
+  CRLF line break inside the value, a broken `${{` next to the reference).
+  `bare-reference`: `name.VARIABLE` written without `${{ }}` in an unquoted
+  or double-quoted value (backticks and single quotes never), as the whole
+  value or as a token: right before it the start, a blank, a quote, `,`
+  `;` `=` `:` `|` `(` `<` `[`, or `/` but not `//` (a host after `://`
+  is left alone, so is one after `@`); right after it the end, a blank, a
+  quote, `,` `;` `/` `:` `|` `?` `#` `&` `)` `>` `]` (never `.`, so
+  `api.DOMAIN.com` is no token, nor `@`, `-` or `=`). Text inside `${{ }}`
+  and a double-quoted value's escapes never count. VARIABLE must be in
+  capitals (letters, digits, `_`, starting with a letter or `_`), so
+  `example.com`, `file.txt`, `api.domain` and `1.2` never match. It warns
+  when name is a target (a service, the service itself with
+  `self.builtins`, or `project`; case-insensitive like references) with a
+  variable of exactly that name (`params.reason` `reference`, fix "Use
+  `${{api.DOMAIN}}`", `params.reference` the reference with the target's
+  name), or when VARIABLE is a built-in name (`builtinNames`: every name in
+  `appVariables` and `clickhouseVariables`) and name is a target without it
+  (`noVariable`, no fix) or no target but shaped like a service name (lower
+  case DNS label with a letter; `unknownService`): then the targets that
+  have that variable a typo away (the same rule as unknown-service's "Did
+  you mean") are named in the message ("Did you mean api?",
+  `params.suggestions`, comma-separated) with one fix each to
+  `${{<name>.VARIABLE}}`. `params`: `key`, `token`, `target`, `variable`,
+  `reference`, `wrapped` (the token in `${{ }}` as written), `reason`,
+  `suggestions`. Message, detail, params and fixes name the key, the token
+  and references only, never the rest of the value.
 - Edge tickets (`modules/databases/edge-ticket.ts`; the agent's
   `edge.TicketVerifier` must accept exactly this): token
   `<payload>.<signature>`, both base64url without padding; payload is the
@@ -5778,7 +5820,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   that looks secret, with why on hover, and quick fixes from
   `editor/env-model.ts` `quickFixActions`: errors' fixes first, and a
   `hardcoded-reference` hint and its fix keep the info severity, a blue
-  underline outside the problem count), `env/references-panel.tsx` (the References panel: first the
+  underline outside the problem count; `single-quoted-reference` and
+  `bare-reference` are warnings, amber and counted like `empty-reference`,
+  and `fixTitle` names the double-quote fix "Use double quotes"), `env/references-panel.tsx` (the References panel: first the
   edited service with `env.references` `self.builtins` only, each inserting
   `${{<its name>.VAR}}`, never its own .env keys, and no such group when
   `self.builtins` is empty or missing; then `targets`. A variable whose

@@ -66,6 +66,7 @@ export default {
   },
   fix: {
     use: "Use {text}",
+    doubleQuotes: "Use double quotes",
     move: "Move {service} to {node}",
     expose: "Expose {service}",
   },
@@ -103,6 +104,18 @@ export default {
     hardcodedReferenceUnreachable: "{key} uses {target}'s internal address, which browsers cannot reach",
     hardcodedReferenceInternalBrowser: "A server-side variable can use {internalReference} instead when both services share a node.",
     hardcodedReferenceInternalServer: "Read on the server, {key} can also use {internalReference} when both services share a node.",
+    singleQuotedReference: "Single quotes keep {reference} as text: the app gets it literally",
+    singleQuotedReferenceDetail:
+      "Double quotes replace {reference} with its value; single quotes are for text that has to stay as written.",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{ }} is the reference syntax, not a template
+    bareReference: "Looks like a reference written without ${{ }}: the app gets the text {token}",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{ }} is the reference syntax, not a template
+    bareReferenceSuggest: "Looks like a reference written without ${{ }}: the app gets the text {token}. Did you mean {suggestions}?",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{ }} is the reference syntax, not a template
+    bareReferenceWrap: "Wrap it in ${{ }} to use {target}'s {variable}: {reference}.",
+    bareReferenceNoVariable: "{target} has no {variable}, so {wrapped} would not work either.",
+    bareReferenceUnknown: "There is no service named {target} in this project.",
+    bareReferenceNoShared: "This project has no shared variables, so {wrapped} would not work either.",
   },
   shared: {
     title: "Shared variables",

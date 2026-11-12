@@ -3,14 +3,18 @@
 // of a service that runs on another node. There is no cross-node private
 // network, so db:5432 or ${{db.INTERNAL_URL}} only works for services that
 // have an instance on every node this service runs on. hardcoded.ts adds a
-// hint for another service's address written out instead of referenced.
+// hint for another service's address written out instead of referenced,
+// literal.ts warnings for references the app gets as text ('${{api.URL}}'
+// in single quotes, api.URL without ${{ }}).
 
 import { checkHardcoded } from "./hardcoded";
 import { hostMentions } from "./hosts";
+import { checkBareReferences, checkSingleQuoted } from "./literal";
 import { missingNodes } from "./nodes";
 import { parseEnv } from "./parse";
 import { formatReference, sharedTarget } from "./references";
 import { LineIndex } from "./source";
+import { suggest } from "./suggest";
 import type {
   AnalyzeContext,
   AnalyzeResult,
@@ -59,6 +63,7 @@ export function analyzeParsed(parsed: ParsedEnv, context: AnalyzeContext): Diagn
     if (entry.quote !== "single") diagnostics.push(...checkLiteralAddresses(index, entry, context));
     if (!parsed.problems.some((p) => p.range.start < entry.range.end && p.range.end > entry.range.start)) {
       diagnostics.push(...checkHardcoded(index, entry, context));
+      diagnostics.push(...checkSingleQuoted(index, entry), ...checkBareReferences(index, entry, context));
     }
   }
 
@@ -282,33 +287,6 @@ function findCycle(
     return null;
   };
   return visit(start.target, start.variable);
-}
-
-/** A "Did you mean" fix when a known name is a typo away (case or up to two edits). */
-function suggest(wrong: string, known: readonly string[], range: SourceRange): QuickFix[] {
-  // Short names get fewer edits, so "db" never suggests "api".
-  const limit = wrong.length >= 6 ? 2 : wrong.length >= 3 ? 1 : 0;
-  let best: { name: string; distance: number } | null = null;
-  for (const name of known) {
-    if (name === wrong) continue;
-    const distance = editDistance(name.toLowerCase(), wrong.toLowerCase());
-    if (distance <= limit && (!best || distance < best.distance)) best = { name, distance };
-  }
-  return best ? [{ kind: "edit", title: `Change to ${best.name}`, edits: [{ range, text: best.name }] }] : [];
-}
-
-/** Levenshtein distance, small inputs only. */
-function editDistance(a: string, b: string): number {
-  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      current[j] = Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, (previous[j - 1] ?? 0) + cost);
-    }
-    previous = current;
-  }
-  return previous[b.length] ?? 0;
 }
 
 function diag(

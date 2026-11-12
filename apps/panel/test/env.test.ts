@@ -213,8 +213,9 @@ describe("env ops", () => {
       .find((t: { name: string }) => t.name === "web")
       .variables.find((v: { name: string }) => v.name === "BACK");
     expect(back).toMatchObject({ value: null, dependsOn: [{ target: "api", variable: "WEB" }] });
+    // The single-quoted SELF stays text, with a warning that says so.
     const analyzed = await callOp(panel, envOps.analyze, { serviceId: api.id }, { cookie });
-    expect(analyzed.body.diagnostics.map((d: { code: string }) => d.code)).toEqual(["reference-cycle"]);
+    expect(analyzed.body.diagnostics.map((d: { code: string }) => d.code)).toEqual(["reference-cycle", "single-quoted-reference"]);
   });
 
   test("shared variables: no references, conflicts, and the services still running old values", async () => {

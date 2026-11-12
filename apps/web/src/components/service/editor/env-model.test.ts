@@ -5,6 +5,7 @@ import {
   fixTitle,
   markerSeverity,
   problemMessage,
+  problemSummary,
   quickFixActions,
   referenceRanges,
   secretChips,
@@ -291,5 +292,78 @@ describe("hardcoded service URLs", () => {
       ["Use ${{api.URL}}", markerSeverity.info, false],
       ["Use ${{api.INTERNAL_URL}}", markerSeverity.info, false],
     ]);
+  });
+});
+
+describe("references the app gets as text", () => {
+  // web on de-fsn-1 next to api, which has a domain.
+  const local: AnalyzeContext = {
+    self: { serviceId: "s000000000000004", name: "web", nodes: [de] },
+    targets: [
+      {
+        name: "api",
+        kind: "service",
+        serviceId: "s000000000000005",
+        serviceKind: "app",
+        nodes: [de],
+        internalHost: "api",
+        exposed: true,
+        variables: [
+          { name: "URL", value: "https://api.example.com", scope: "public", sensitive: false, description: "public URL" },
+          { name: "DOMAIN", value: "api.example.com", scope: "public", sensitive: false, description: "domain" },
+        ],
+      },
+    ],
+  };
+  const env = ["API='${{api.URL}}/v1'", "API_HOST=api.DOMAIN", "OTHER=apu.DOMAIN", "LOOSE=blabla.DOMAIN", ""].join("\n");
+  const result = analyzeEnv(env, local);
+  const apply = (edits: readonly { range: { start: number; end: number }; text: string }[]) => {
+    let out = env;
+    for (const e of [...edits].sort((a, b) => b.range.start - a.range.start))
+      out = out.slice(0, e.range.start) + e.text + out.slice(e.range.end);
+    return out;
+  };
+
+  test("warning markers with the catalog's messages, counted like an empty reference, no error line", () => {
+    const markers = toMarkers(result.diagnostics, "web");
+    expect(markers.map((m) => [m.code, m.startLineNumber, m.severity])).toEqual([
+      ["single-quoted-reference", 1, markerSeverity.warning],
+      ["bare-reference", 2, markerSeverity.warning],
+      ["bare-reference", 3, markerSeverity.warning],
+      ["bare-reference", 4, markerSeverity.warning],
+    ]);
+    expect(markers.map((m) => m.message)).toEqual([
+      "Single quotes keep ${{api.URL}} as text: the app gets it literally\nDouble quotes replace ${{api.URL}} with its value; single quotes are for text that has to stay as written.",
+      "Looks like a reference written without ${{ }}: the app gets the text api.DOMAIN\nWrap it in ${{ }} to use api's DOMAIN: ${{api.DOMAIN}}.",
+      "Looks like a reference written without ${{ }}: the app gets the text apu.DOMAIN. Did you mean api?\nThere is no service named apu in this project.",
+      "Looks like a reference written without ${{ }}: the app gets the text blabla.DOMAIN\nThere is no service named blabla in this project.",
+    ]);
+    expect(errorLines(result.diagnostics)).toEqual([]);
+    expect(problemSummary(result.diagnostics).map((p) => [p.line, p.severity])).toEqual([
+      [1, "warning"],
+      [2, "warning"],
+      [3, "warning"],
+      [4, "warning"],
+    ]);
+  });
+
+  test("code actions: double quotes for the single-quoted value, the reference for the bare one", () => {
+    const quoted = quickFixActions(result.diagnostics, env.indexOf("api.URL"), env.indexOf("api.URL"), "web");
+    expect(quoted.map((a) => [a.title, a.severity, a.isPreferred])).toEqual([["Use double quotes", markerSeverity.warning, true]]);
+    expect(apply(quoted[0]?.edits ?? []).split("\n")[0]).toBe('API="${{api.URL}}/v1"');
+
+    const at = env.indexOf("api.DOMAIN");
+    const bare = quickFixActions(result.diagnostics, at, at, "web");
+    expect(bare.map((a) => a.title)).toEqual(["Use ${{api.DOMAIN}}"]);
+    expect(apply(bare[0]?.edits ?? []).split("\n")[1]).toBe("API_HOST=${{api.DOMAIN}}");
+
+    const typo = env.indexOf("apu.DOMAIN");
+    expect(quickFixActions(result.diagnostics, typo, typo, "web").map((a) => a.title)).toEqual(["Use ${{api.DOMAIN}}"]);
+    const loose = env.indexOf("blabla");
+    expect(quickFixActions(result.diagnostics, loose, loose, "web")).toEqual([]);
+
+    // The footer's buttons name the fixes the same way.
+    const [single] = result.diagnostics;
+    expect(single?.fixes.map((f) => fixTitle(f, "web", single))).toEqual(["Use double quotes"]);
   });
 });

@@ -6,7 +6,7 @@
 //   setEnvVariable(text, "API_URL", "${{api.URL}}/v1")  replaces the last API_URL line's value, or appends one
 //   setEnvVariable(text, "API_URL", null)              removes every API_URL line
 
-import { isValidKey, parseEnv } from "./parse";
+import { escapeDouble, isValidKey, parseEnv } from "./parse";
 import type { EnvEntry, ParsedEnv, QuoteStyle } from "./types";
 
 export type EnvEdit =
@@ -74,7 +74,7 @@ function render(value: string, style: QuoteStyle): string | null {
       // The rule stringifyEnv quotes by: no blanks, quotes, # or backslash.
       return value === "" || /^[^\s"'`#\\]+$/.test(value) ? value : null;
     case "double":
-      return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}"`;
+      return `"${escapeDouble(value)}"`;
     case "single":
       // Single quotes take no references: a value with one goes in double quotes.
       return value.includes("'") || value.includes("${{") ? null : `'${value}'`;

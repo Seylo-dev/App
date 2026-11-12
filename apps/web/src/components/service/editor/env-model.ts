@@ -39,6 +39,15 @@ const messageKeys: Record<string, MessageKey> = {
   "service-not-exposed": "serviceEnv.problem.notExposed",
   "empty-reference": "serviceEnv.problem.emptyReference",
   "hardcoded-reference": "serviceEnv.problem.hardcodedReference",
+  "single-quoted-reference": "serviceEnv.problem.singleQuotedReference",
+  "bare-reference": "serviceEnv.problem.bareReference",
+};
+
+/** The bare-reference detail by params.reason. */
+const bareReasons: Record<string, MessageKey> = {
+  reference: "serviceEnv.problem.bareReferenceWrap",
+  noVariable: "serviceEnv.problem.bareReferenceNoVariable",
+  unknownService: "serviceEnv.problem.bareReferenceUnknown",
 };
 
 const hardcodedReasons: Record<string, MessageKey> = {
@@ -62,6 +71,8 @@ export function problemMessage(d: Pick<Diagnostic, "code" | "params" | "message"
   // No public address to switch to: the internal reference would not work in a browser either.
   if (d.code === "hardcoded-reference" && d.params.reason === "noPublic")
     return t("serviceEnv.problem.hardcodedReferenceUnreachable", d.params);
+  // A typo of a service: the names it is close to.
+  if (d.code === "bare-reference" && d.params.suggestions) return t("serviceEnv.problem.bareReferenceSuggest", d.params);
   return t(key, d.params);
 }
 
@@ -69,6 +80,13 @@ export function problemDetail(d: Pick<Diagnostic, "code" | "params" | "detail">,
   // What the service can reference of itself instead (its DOMAIN, URL, ...), when the panel sent them.
   if (d.code === "self-reference") return d.params.builtins ? t("serviceEnv.problem.selfReferenceDetail", d.params) : "";
   if (d.code === "hardcoded-reference") return hardcodedDetail(d.params);
+  if (d.code === "single-quoted-reference") return t("serviceEnv.problem.singleQuotedReferenceDetail", d.params);
+  if (d.code === "bare-reference") {
+    if (d.params.reason === "unknownService" && d.params.target === "project")
+      return t("serviceEnv.problem.bareReferenceNoShared", d.params);
+    const reason = bareReasons[d.params.reason ?? ""];
+    return reason ? t(reason, d.params) : "";
+  }
   const key = detailKeys[d.code];
   return key ? t(key, { ...d.params, self: selfName }) : "";
 }
@@ -93,10 +111,15 @@ function hardcodedDetail(params: Record<string, string>): string {
   return parts.join(" ");
 }
 
-/** Button text for a quick fix. */
-export function fixTitle(fix: QuickFix, selfName: string): string {
+/**
+ * Button text for a quick fix. An edit is named by its first edit's text
+ * ("Use ${{api.URL}}"), except the double quotes for a single-quoted
+ * reference, whose edits are quotes and escapes.
+ */
+export function fixTitle(fix: QuickFix, selfName: string, diagnostic?: Pick<Diagnostic, "code">): string {
   switch (fix.kind) {
     case "edit":
+      if (diagnostic?.code === "single-quoted-reference") return t("serviceEnv.fix.doubleQuotes");
       return t("serviceEnv.fix.use", { text: fix.edits[0]?.text ?? "" });
     case "moveService":
       return t("serviceEnv.fix.move", { service: selfName, node: fix.nodeName });
@@ -122,7 +145,7 @@ export function quickFixActions(diagnostics: readonly Diagnostic[], from: number
     if (d.range.end < from || d.range.start > to) continue;
     for (const fix of d.fixes) {
       if (fix.kind !== "edit") continue;
-      out.push({ title: fixTitle(fix, selfName), severity: markerSeverity[d.severity], diagnostic: d, edits: fix.edits });
+      out.push({ title: fixTitle(fix, selfName, d), severity: markerSeverity[d.severity], diagnostic: d, edits: fix.edits });
     }
   }
   // Stable: errors before hints, each in file order.

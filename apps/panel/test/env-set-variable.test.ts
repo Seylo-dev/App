@@ -101,6 +101,52 @@ describe("hardcoded-reference from the panel", () => {
   });
 });
 
+describe("references the app gets as text, from the panel", () => {
+  test("single-quoted and bare references come back as warnings with their fixes, and never block a save", async () => {
+    const { web } = await world();
+    const text = "API='${{api.URL}}/v1'\nAPI_HOST=api.DOMAIN\nLOOSE=blabla.DOMAIN\n";
+    const saved = await setText(web.id, text);
+    expect(saved.status).toBe(200);
+    expect(await textOf(web.id)).toBe(text);
+    expect(codes(saved.body)).toEqual([
+      ["single-quoted-reference", 1],
+      ["bare-reference", 2],
+      ["bare-reference", 3],
+    ]);
+    const [quoted, bare, loose] = saved.body.diagnostics;
+    expect(quoted).toMatchObject({
+      severity: "warning",
+      message: "Single quotes keep ${{api.URL}} as text: the app gets it literally",
+      params: { key: "API", reference: "${{api.URL}}" },
+      fixes: [{ kind: "edit", title: "Use double quotes" }],
+    });
+    expect(bare).toMatchObject({
+      severity: "warning",
+      message: "Looks like a reference written without ${{ }}: the app gets the text api.DOMAIN",
+      params: { key: "API_HOST", token: "api.DOMAIN", reference: "${{api.DOMAIN}}" },
+      fixes: [{ kind: "edit", title: "Use ${{api.DOMAIN}}", edits: [{ text: "${{api.DOMAIN}}" }] }],
+    });
+    expect(loose).toMatchObject({ severity: "warning", params: { token: "blabla.DOMAIN", reason: "unknownService" }, fixes: [] });
+    // Until fixed, the app gets the text as written.
+    const resolved = resolveServiceEnv(panel.deps, web.id);
+    expect(resolved.find((v) => v.name === "API")?.value).toBe("${{api.URL}}/v1");
+    expect(resolved.find((v) => v.name === "API_HOST")?.value).toBe("api.DOMAIN");
+
+    const analyzed = await callOp(panel, envOps.analyze, { serviceId: web.id }, { cookie });
+    expect(analyzed.status).toBe(200);
+    expect(analyzed.body.diagnostics).toEqual(saved.body.diagnostics);
+
+    // env.setVariable returns them too; with the fix applied the warning is gone and the value resolves.
+    const one = await setVariable({ serviceId: web.id, key: "API_HOST", value: "${{api.DOMAIN}}" });
+    expect(one.status).toBe(200);
+    expect(codes(one.body)).toEqual([
+      ["single-quoted-reference", 1],
+      ["bare-reference", 3],
+    ]);
+    expect(resolveServiceEnv(panel.deps, web.id).find((v) => v.name === "API_HOST")?.value).toBe("api.fsn.example.com");
+  });
+});
+
 describe("env.setVariable", () => {
   test("replaces the value of the last line with the key, keeping its quotes, export, comments and # @public", async () => {
     const { web } = await world();

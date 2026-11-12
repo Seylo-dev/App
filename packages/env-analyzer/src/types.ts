@@ -94,7 +94,19 @@ export type ContextCode =
    * written out (its URL, DOMAIN, INTERNAL_URL, ...), so a fix offers the
    * reference. Never names the value, only the key and the reference.
    */
-  | "hardcoded-reference";
+  | "hardcoded-reference"
+  /**
+   * Warning: a ${{target.VARIABLE}} inside single quotes, which keep it as
+   * text. The fix puts the value in double quotes, escaped to read the same.
+   */
+  | "single-quoted-reference"
+  /**
+   * Warning: target.VARIABLE written without ${{ }} in an unquoted or
+   * double-quoted value, so the app gets the text. The fix wraps it, or
+   * for an unknown target suggests close names. Names the token, never
+   * the rest of the value.
+   */
+  | "bare-reference";
 
 export type DiagnosticCode = SyntaxCode | ContextCode;
 

@@ -47,6 +47,9 @@ export const clickhouseVariables: readonly BuiltinVariable[] = [
   v("INTERNAL_HTTP_PORT", "plain", "HTTP interface port on the project network"),
 ];
 
+/** Every built-in variable name of any kind (URL, DOMAIN, INTERNAL_URL, ..., INTERNAL_HTTP_PORT). */
+export const builtinNames: ReadonlySet<string> = new Set([...appVariables, ...clickhouseVariables].map((b) => b.name));
+
 /** Database service kinds; @seylo/ops databaseEngineIds lists the same (this package has no dependencies). */
 const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"]);
 
