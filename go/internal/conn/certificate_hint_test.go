@@ -77,12 +77,14 @@ func dialErr(t *testing.T, opts DialOptions) error {
 
 // A firewall that decrypts HTTPS re-signs the panel's certificate with its
 // own CA: the error names that issuer and says what it likely is, and keeps
-// the x509 error for callers.
+// the x509 error for callers. A node that joined over the domain is told it
+// can keep its node and point it at the panel's IP (set-panel).
 func TestDialNamesTheIssuerOfAnUntrustedCertificate(t *testing.T) {
 	srv := panelBehind(t, "Fortinet", "FG800D5818800524")
 	err := dialErr(t, DialOptions{URL: wsURL(srv), RootCAs: x509.NewCertPool()})
 	msg := err.Error()
-	for _, want := range []string{`says it was issued by "Fortinet, FG800D5818800524"`, "TLS inspection", "exempt 127.0.0.1", "--pin"} {
+	for _, want := range []string{`says it was issued by "Fortinet, FG800D5818800524"`, "TLS inspection", "exempt 127.0.0.1", "--pin",
+		"or point this node at the panel's IP with `seylo set-panel`"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q does not say %q", msg, want)
 		}

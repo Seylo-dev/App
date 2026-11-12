@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log/slog"
@@ -49,6 +50,9 @@ type deps struct {
 	openClient func(profile string) (*panelapi.Client, error)
 	// agentStatus replaces asking the local agent's socket in tests.
 	agentStatus func(ctx context.Context) (localapi.NodeStatus, error)
+	// panelRoots verifies `set-panel`'s address without a pin; nil means
+	// the system roots. Tests set it.
+	panelRoots *x509.CertPool
 	// anyOS lets tests run the node commands off Linux.
 	anyOS bool
 }

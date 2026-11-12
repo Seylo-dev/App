@@ -67,6 +67,22 @@ func (c *connector) unprovenRejection(target panelTarget, rej *rpc.RejectedError
 		return ""
 	}
 	cfg := c.config()
+	if why := unsignedRejection(cfg, rej); why != "" || cfg.PanelKey == "" || len(rej.Rejected.GetPanelSignature()) > 0 {
+		return why
+	}
+	if cfg.Fallback != nil && cfg.Fallback.Standing && rej.Rejected.GetReason() != agentv1.HelloRejectReason_HELLO_REJECT_REASON_ALREADY_CONNECTED {
+		return "it is not signed, so the pinned previous address is tried too"
+	}
+	return ""
+}
+
+// unsignedRejection returns why a HelloRejected does not come from the
+// panel cfg recorded, by its signature alone, or "" when it does or there
+// is nothing to check it against: no identity key recorded, or no
+// signature from a panel that never signed. Pinning is no proof here:
+// `seylo set-panel` (set_panel.go) uses it on an address and pin its owner
+// typed.
+func unsignedRejection(cfg FileConfig, rej *rpc.RejectedError) string {
 	if cfg.PanelKey == "" {
 		return ""
 	}
@@ -79,9 +95,6 @@ func (c *connector) unprovenRejection(target panelTarget, rej *rpc.RejectedError
 	}
 	if cfg.PanelProves {
 		return "it is not signed, and this node's panel signs"
-	}
-	if cfg.Fallback != nil && cfg.Fallback.Standing && rej.Rejected.GetReason() != agentv1.HelloRejectReason_HELLO_REJECT_REASON_ALREADY_CONNECTED {
-		return "it is not signed, so the pinned previous address is tried too"
 	}
 	return ""
 }
@@ -117,19 +130,8 @@ func (c *connector) checkPanelIdentity(url string, res *rpc.HandshakeResult) err
 	c.cfgMu.Lock()
 	defer c.cfgMu.Unlock()
 	cfg := *c.cfg
-	if cfg.PanelKey != "" {
-		known, _ := decodePanelKey(cfg.PanelKey) // Validate checked it
-		if !bytes.Equal(known, key) {
-			return fmt.Errorf("%s answers with another panel identity key: %w", url, errOtherPanel)
-		}
-	}
-	switch {
-	case len(sig) > 0:
-		if !rpc.VerifyPanelAccept(ed25519.PublicKey(key), res.Server, res.Client, res.Accepted) {
-			return fmt.Errorf("%s: the panel's signature does not match its identity key: %w", url, errOtherPanel)
-		}
-	case cfg.PanelProves:
-		return fmt.Errorf("%s did not prove the panel's identity (no panel_signature, which this panel sent before): %w", url, errOtherPanel)
+	if err := verifyPanelIdentity(cfg, url, res); err != nil {
+		return err
 	}
 
 	next := cfg
@@ -149,5 +151,28 @@ func (c *connector) checkPanelIdentity(url string, res *rpc.HandshakeResult) err
 		"panel_id", next.PanelID, "signed", next.PanelProves)
 	*c.cfg = next
 	c.saveConfigLocked()
+	return nil
+}
+
+// verifyPanelIdentity checks an accepted handshake at url against the
+// identity cfg recorded: the same identity key, a panel_signature that
+// verifies, and one at all once the panel proved itself.
+func verifyPanelIdentity(cfg FileConfig, url string, res *rpc.HandshakeResult) error {
+	key := res.Accepted.GetEdgeTicketPublicKey()
+	sig := res.Accepted.GetPanelSignature()
+	if cfg.PanelKey != "" {
+		known, _ := decodePanelKey(cfg.PanelKey) // Validate checked it
+		if !bytes.Equal(known, key) {
+			return fmt.Errorf("%s answers with another panel identity key: %w", url, errOtherPanel)
+		}
+	}
+	switch {
+	case len(sig) > 0:
+		if !rpc.VerifyPanelAccept(ed25519.PublicKey(key), res.Server, res.Client, res.Accepted) {
+			return fmt.Errorf("%s: the panel's signature does not match its identity key: %w", url, errOtherPanel)
+		}
+	case cfg.PanelProves:
+		return fmt.Errorf("%s did not prove the panel's identity (no panel_signature, which this panel sent before): %w", url, errOtherPanel)
+	}
 	return nil
 }

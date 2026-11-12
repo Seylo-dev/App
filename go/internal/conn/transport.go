@@ -224,6 +224,9 @@ func claimedIssuer(cert *x509.Certificate) string {
 // on the way (TLS inspection: FortiGate, Zscaler, Palo Alto and the like
 // re-sign every site with their own CA). Traefik's own self-signed
 // certificate means the panel's server has no certificate for the name yet.
+// A node that joined over the domain keeps its node by pointing it at the
+// panel's IP and pin (`seylo set-panel`) instead of joining again, so the
+// hint names that command.
 func certificateHint(rawURL string, err error) string {
 	host := rawURL
 	if u, perr := url.Parse(rawURL); perr == nil && u.Hostname() != "" {
@@ -245,7 +248,9 @@ func certificateHint(rawURL string, err error) string {
 	if strings.EqualFold(leaf.Issuer.CommonName, "TRAEFIK DEFAULT CERT") {
 		return fmt.Sprintf(". %s answers with Traefik's own certificate: the panel's server has no certificate for that name yet (see the panel domain's status)", host)
 	}
-	return fmt.Sprintf(". The certificate for %s says it was issued by %s, an issuer this server does not trust. If that is not who issued the panel's certificate, a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt %s from it, or join with the panel's IP address and --pin", host, claimedIssuer(leaf), host)
+	return fmt.Sprintf(". The certificate for %s says it was issued by %s, an issuer this server does not trust. If that is not who issued the panel's certificate, "+
+		"a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt %s from it, join with the panel's IP address and --pin, "+
+		"or point this node at the panel's IP with `%s set-panel` (the panel's Add node dialog shows the command)", host, claimedIssuer(leaf), host, brand.Slug)
 }
 
 // SPKIFingerprint returns the SHA-256 of a certificate's public key. Pinning

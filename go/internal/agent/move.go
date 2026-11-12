@@ -236,10 +236,13 @@ func (c *connector) move(ctx context.Context, from, to panelTarget, panelID stri
 	return nil, nil, fmt.Errorf("%w: %w", errMoveFailed, err)
 }
 
-// moved records a successful move in config.yml.
-func (c *connector) moved(ctx context.Context, from, to panelTarget) {
-	c.cfgMu.Lock()
-	next := *c.cfg
+// movedConfig is cfg after a move from one address to another (moved, and
+// `seylo set-panel`, set_panel.go): to becomes panel_url and panel_pin,
+// from the fallback for one cycle, insecure_transport and
+// trust_on_first_use go. Everything else stays (node_id, the panel's
+// identity, staged).
+func movedConfig(cfg FileConfig, from, to panelTarget) FileConfig {
+	next := cfg
 	fallback := &PanelAddress{PanelURL: from.url, PanelPin: from.pin, InsecureTransport: from.insecure}
 	if old := next.Fallback; !standingCandidate(fallback) && standingCandidate(old) {
 		// Moving from one domain to the next: the pinned address the node
@@ -251,13 +254,20 @@ func (c *connector) moved(ctx context.Context, from, to panelTarget) {
 	next.Fallback = fallback
 	next.PanelURL, next.PanelPin = to.url, to.pin
 	next.InsecureTransport, next.TrustOnFirstUse = false, false
+	return next
+}
+
+// moved records a successful move in config.yml.
+func (c *connector) moved(ctx context.Context, from, to panelTarget) {
+	c.cfgMu.Lock()
+	next := movedConfig(*c.cfg, from, to)
 	*c.cfg = next
 	c.saveConfigLocked()
 	c.cfgMu.Unlock()
 	clear(c.moveRetry)
 	c.moveAlerted = ""
 	c.logger.Info("moved to the panel's new address; the old one stays as a fallback until a reconnect there works",
-		"panel_url", to.url, "fallback", fallback.PanelURL)
+		"panel_url", to.url, "fallback", next.Fallback.PanelURL)
 	// An alert raised before a restart is not remembered, so every move
 	// resolves; the panel ignores a resolve without an open alert.
 	c.moveAlert(ctx, &agentv1.NodeAlert{

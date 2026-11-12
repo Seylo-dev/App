@@ -14,6 +14,7 @@ func nodeCommands(d *deps) []*cobra.Command {
 	cmds := []*cobra.Command{
 		newAgentCommand(d),
 		newJoinCommand(d),
+		newSetPanelCommand(d),
 		newStatusCommand(d),
 		newStartCommand(d),
 		newRestartCommand(d),
