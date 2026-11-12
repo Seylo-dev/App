@@ -257,14 +257,14 @@ function decorate(info: DatabaseInfo, u: EngineUser, all: readonly EngineUser[],
   const main = isMainUser(info, u);
   const features = engineFeatures(info);
   let system = false;
-  let can = { password: true, rename: true, delete: true, makeMain: features.canSwitch };
+  let can = { passwordChange: true, rename: true, delete: true, makeMain: features.canSwitch };
   let why: string | null = null;
   const no = (reason: string, keep: Partial<typeof can> = {}) => {
-    can = { password: false, rename: false, delete: false, makeMain: false, ...keep };
+    can = { passwordChange: false, rename: false, delete: false, makeMain: false, ...keep };
     why = reason;
   };
   if (main) {
-    can = { password: true, rename: features.rename !== "none", delete: false, makeMain: false };
+    can = { passwordChange: true, rename: features.rename !== "none", delete: false, makeMain: false };
     why = mainWhy;
   } else if (!manageableName(u.name) || (u.host !== null && !manageableName(u.host))) {
     no(shellWhy);
@@ -277,7 +277,7 @@ function decorate(info: DatabaseInfo, u: EngineUser, all: readonly EngineUser[],
   } else if (isMysql(info) && u.name === "root") {
     system = true;
     const remote = u.host === "%";
-    can = { password: false, rename: false, delete: remote, makeMain: remote };
+    can = { passwordChange: false, rename: false, delete: remote, makeMain: remote };
     why =
       u.host === "localhost"
         ? "Used inside the container: the image and Seylo's own steps sign in with it. It always has the main user's password."
@@ -307,7 +307,7 @@ function decorate(info: DatabaseInfo, u: EngineUser, all: readonly EngineUser[],
     locked: u.locked,
     ownsObjects: u.ownsObjects,
     definerObjects: u.definerObjects,
-    renameNeedsPassword: engine === "mongo" ? !main : u.passwordKind === "md5",
+    passwordForRename: engine === "mongo" ? !main : u.passwordKind === "md5",
     can,
     why,
   };
@@ -328,8 +328,8 @@ function storedMainUser(info: DatabaseInfo, reason: string, features: ReturnType
     locked: false,
     ownsObjects: null,
     definerObjects: null,
-    renameNeedsPassword: false,
-    can: { password: restart, rename: restart && features.rename === "restart", delete: false, makeMain: false },
+    passwordForRename: false,
+    can: { passwordChange: restart, rename: restart && features.rename === "restart", delete: false, makeMain: false },
     why: restart ? mainWhy : reason,
   };
 }
@@ -526,7 +526,11 @@ export const listUsers = implement(dbOps.users, async (input, ctx) => {
   if (blocked || info.engine.redisLike) {
     const main = blocked
       ? storedMainUser(info, blocked.message, features)
-      : { ...storedMainUser(info, "", features), can: { password: true, rename: false, delete: false, makeMain: false }, why: mainWhy };
+      : {
+          ...storedMainUser(info, "", features),
+          can: { passwordChange: true, rename: false, delete: false, makeMain: false },
+          why: mainWhy,
+        };
     return {
       ...base,
       presets: features.presets,
@@ -543,7 +547,7 @@ export const listUsers = implement(dbOps.users, async (input, ctx) => {
       ...base,
       presets: features.presets,
       // The password is what has to change: Postgres through its trusted socket, MySQL through root, else the one that works (known).
-      users: [{ ...main, can: { ...main.can, password: true }, why: read.message }],
+      users: [{ ...main, can: { ...main.can, passwordChange: true }, why: read.message }],
       truncated: false,
       signIn: "failed" as const,
       message: read.message,
@@ -631,7 +635,7 @@ export const setUserPassword = implement(dbOps.setUserPassword, async (input, ct
     const listing = await inspect(ctx, info);
     const found = findUser(info, listing, input.user);
     const user = decorate(info, found, listing.users, false);
-    if (!user.can.password)
+    if (!user.can.passwordChange)
       throw new OpError("CONFLICT", user.why ?? "Seylo does not change this user's password.", { reason: "systemUser" });
     const password = input.password ?? generatePassword();
     const result = await runExec(ctx, info, setPasswordExec(engine, admin(info), target(found), password));
@@ -693,7 +697,7 @@ export const renameUser = implement(dbOps.renameUser, async (input, ctx) => {
       throw new OpError("BAD_REQUEST", "That is its name already.", { field: "name" });
     assertFree(info, listing, to);
     assertDefiners(info, found, input.acceptOrphanDefiners);
-    if (user.renameNeedsPassword && !input.password)
+    if (user.passwordForRename && !input.password)
       throw new OpError(
         "BAD_REQUEST",
         engine === "mongo"

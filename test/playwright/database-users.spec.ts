@@ -202,7 +202,7 @@ test.describe("database users", () => {
       main: { user: "root", rename: "switch", canSwitch: true },
       users: [
         { ...usersOf(svc.db).users[0], name: "root", authDatabase: "admin", roles: ["root@admin"] },
-        { ...usersOf(svc.db).users[2], name: "analytics", authDatabase: "admin", roles: ["read@shop"], renameNeedsPassword: true },
+        { ...usersOf(svc.db).users[2], name: "analytics", authDatabase: "admin", roles: ["read@shop"], passwordForRename: true },
       ],
     };
     await installDemo(page, {

@@ -204,7 +204,7 @@ function accessLabel(access: User["access"], database: string): string {
 
 function UserRow({ users, user, database, onOpen }: { users: Users; user: User; database: string; onOpen: (open: Open) => void }) {
   const offline = users.signIn !== "ok";
-  const menuItems = !user.main && (user.can.password || user.can.rename || user.can.delete || user.can.makeMain);
+  const menuItems = !user.main && (user.can.passwordChange || user.can.rename || user.can.delete || user.can.makeMain);
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control bg-field px-3 py-2.5 transition-colors duration-200">
       <span className="flex min-w-0 flex-1 flex-col gap-1">
@@ -233,7 +233,7 @@ function UserRow({ users, user, database, onOpen }: { users: Users; user: User; 
       </span>
       {user.main ? (
         <span className="flex shrink-0 flex-wrap items-center gap-2">
-          {user.can.password && (
+          {user.can.passwordChange && (
             <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen(mainPasswordDialog(users))}>
               {t("serviceDatabaseUsers.changePassword")}
             </Button>
@@ -262,7 +262,7 @@ function UserRow({ users, user, database, onOpen }: { users: Users; user: User; 
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="max-w-[300px]">
-              <DropdownMenuItem disabled={!user.can.password} onSelect={() => onOpen({ kind: "password", user })}>
+              <DropdownMenuItem disabled={!user.can.passwordChange} onSelect={() => onOpen({ kind: "password", user })}>
                 {t("serviceDatabaseUsers.changePassword")}
               </DropdownMenuItem>
               <DropdownMenuItem disabled={!user.can.rename} onSelect={() => onOpen({ kind: "rename", user })}>
@@ -646,7 +646,7 @@ function RenameDialog({ service, users, user, onClose }: { service: ServiceDetai
           onSubmit={(e) => {
             e.preventDefault();
             if (!valid) return;
-            const pw = generatedOr(password, user.renameNeedsPassword);
+            const pw = generatedOr(password, user.passwordForRename);
             rename.mutate({
               serviceId: service.id,
               user: refOf(user),
@@ -669,7 +669,7 @@ function RenameDialog({ service, users, user, onClose }: { service: ServiceDetai
               <Input id="dr-host" className="max-w-[260px] font-mono" value={host} onChange={(e) => setHost(e.target.value)} />
             </Field>
           )}
-          {user.renameNeedsPassword && (
+          {user.passwordForRename && (
             <>
               <p role="note" className="m-0 rounded-control bg-muted px-3 py-2.5 text-[12.5px] leading-normal text-ink-strong">
                 {users.engine === "mongo"
@@ -703,7 +703,7 @@ function RenameDialog({ service, users, user, onClose }: { service: ServiceDetai
   );
 }
 
-/** Generated passwords need no field: renameNeedsPassword asks one to be generated when left on Generate. */
+/** Generated passwords need no field: passwordForRename asks one to be generated when left on Generate. */
 function generatedOr(password: string | null | undefined, needed: boolean): string | undefined {
   if (password) return password;
   return needed ? randomPassword() : undefined;
@@ -734,7 +734,7 @@ function RenameMainDialog({
 }) {
   const invalidate = useInvalidate();
   const [name, setName] = useState("");
-  const [withPassword, setWithPassword] = useState(users.users.find((u) => u.main)?.renameNeedsPassword ?? false);
+  const [withPassword, setWithPassword] = useState(users.users.find((u) => u.main)?.passwordForRename ?? false);
   const [password, setPassword] = useState<string | null | undefined>(undefined);
   const [restart, setRestart] = useState(true);
   const finished = useRef(false);
@@ -752,7 +752,7 @@ function RenameMainDialog({
     },
   });
   const main = users.users.find((u) => u.main);
-  const needsPassword = main?.renameNeedsPassword ?? false;
+  const needsPassword = main?.passwordForRename ?? false;
   const definers = main?.definerObjects ?? 0;
   const [acceptDefiners, setAcceptDefiners] = useState(false);
   const valid =

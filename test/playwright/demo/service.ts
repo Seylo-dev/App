@@ -841,7 +841,7 @@ export function connectionOf(serviceId: string) {
   };
 }
 
-const can = (password: boolean, rename: boolean, del: boolean, makeMain: boolean) => ({ password, rename, delete: del, makeMain });
+const can = (password: boolean, rename: boolean, del: boolean, makeMain: boolean) => ({ passwordChange: password, rename, delete: del, makeMain });
 const dbUser = (over: Input) => ({
   host: null,
   authDatabase: null,
@@ -852,7 +852,7 @@ const dbUser = (over: Input) => ({
   locked: false,
   ownsObjects: null,
   definerObjects: null,
-  renameNeedsPassword: false,
+  passwordForRename: false,
   can: can(true, true, true, true),
   why: null,
   ...over,

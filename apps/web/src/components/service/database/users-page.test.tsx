@@ -7,7 +7,12 @@ import { UsersPage } from "./users-page";
 
 const service = { id: "svc-db", projectId: "prj-1", name: "db", kind: "postgres", placements: [] } as unknown as ServiceDetail;
 
-const can = (password: boolean, rename: boolean, del: boolean, makeMain: boolean) => ({ password, rename, delete: del, makeMain });
+const can = (password: boolean, rename: boolean, del: boolean, makeMain: boolean) => ({
+  passwordChange: password,
+  rename,
+  delete: del,
+  makeMain,
+});
 const user = (over: Record<string, unknown>) => ({
   host: null,
   authDatabase: null,
@@ -18,7 +23,7 @@ const user = (over: Record<string, unknown>) => ({
   locked: false,
   ownsObjects: 0,
   definerObjects: null,
-  renameNeedsPassword: false,
+  passwordForRename: false,
   can: can(true, true, true, true),
   why: null,
   ...over,

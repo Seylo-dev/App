@@ -511,10 +511,10 @@ export const DatabaseUser = Type.Object({
   /** MySQL and MariaDB: views, routines, triggers and events that run as it (DEFINER); null for the other engines. */
   definerObjects: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   /** A rename needs a new password: MongoDB (a new user with the same roles) and Postgres md5 passwords. */
-  renameNeedsPassword: Type.Boolean(),
+  passwordForRename: Type.Boolean(),
   /** What the Users tab may do with it. */
   can: Type.Object({
-    password: Type.Boolean(),
+    passwordChange: Type.Boolean(),
     rename: Type.Boolean(),
     delete: Type.Boolean(),
     /** databases.switchMainUser with existing: true. */
@@ -628,7 +628,7 @@ export const renameUser = defineOp({
     name: Identifier,
     /** MySQL and MariaDB: the new host; the old one when left out. */
     host: Type.Optional(UserHost),
-    /** Sets this password with the rename; needed where renameNeedsPassword. */
+    /** Sets this password with the rename; needed where passwordForRename. */
     password: Type.Optional(UserPassword),
     acceptOrphanDefiners: Type.Optional(Type.Boolean()),
     /** Postgres main user: false skips the restart. */

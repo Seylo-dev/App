@@ -20155,7 +20155,7 @@
                         "locked",
                         "ownsObjects",
                         "definerObjects",
-                        "renameNeedsPassword",
+                        "passwordForRename",
                         "can",
                         "why"
                       ],
@@ -20248,19 +20248,19 @@
                             }
                           ]
                         },
-                        "renameNeedsPassword": {
+                        "passwordForRename": {
                           "type": "boolean"
                         },
                         "can": {
                           "type": "object",
                           "required": [
-                            "password",
+                            "passwordChange",
                             "rename",
                             "delete",
                             "makeMain"
                           ],
                           "properties": {
-                            "password": {
+                            "passwordChange": {
                               "type": "boolean"
                             },
                             "rename": {
@@ -22569,7 +22569,7 @@
                           "locked",
                           "ownsObjects",
                           "definerObjects",
-                          "renameNeedsPassword",
+                          "passwordForRename",
                           "can",
                           "why"
                         ],
@@ -22662,19 +22662,19 @@
                               }
                             ]
                           },
-                          "renameNeedsPassword": {
+                          "passwordForRename": {
                             "type": "boolean"
                           },
                           "can": {
                             "type": "object",
                             "required": [
-                              "password",
+                              "passwordChange",
                               "rename",
                               "delete",
                               "makeMain"
                             ],
                             "properties": {
-                              "password": {
+                              "passwordChange": {
                                 "type": "boolean"
                               },
                               "rename": {

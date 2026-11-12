@@ -139,22 +139,22 @@ describe("databases.users", () => {
       main: true,
       system: false,
       access: "serverAdmin",
-      can: { password: true, rename: true, delete: false, makeMain: false },
+      can: { passwordChange: true, rename: true, delete: false, makeMain: false },
     });
     expect(res.body.users[1]).toMatchObject({
       access: "readWrite",
       ownsObjects: 2,
-      can: { password: true, rename: true, delete: true, makeMain: true },
+      can: { passwordChange: true, rename: true, delete: true, makeMain: true },
     });
     // An md5 password is cleared by a rename, so the rename asks for one.
-    expect(res.body.users[2]).toMatchObject({ access: "custom", renameNeedsPassword: true });
+    expect(res.body.users[2]).toMatchObject({ access: "custom", passwordForRename: true });
     agent.disconnect();
   });
 
   test("offline: only the stored main user, nothing to change; the Redis-likes: default and why", async () => {
     const { serviceId } = await createDb("postgres");
     const offline = await callOp(panel, dbOps.users, { serviceId }, { cookie });
-    expect(offline.body).toMatchObject({ signIn: "offline", users: [{ name: "postgres", main: true, can: { password: false } }] });
+    expect(offline.body).toMatchObject({ signIn: "offline", users: [{ name: "postgres", main: true, can: { passwordChange: false } }] });
     expect(offline.body.message).toContain("is not connected");
 
     const redis = await createDb("redis");
@@ -178,8 +178,8 @@ describe("databases.users", () => {
     const res = await callOp(panel, dbOps.users, { serviceId }, { cookie });
     const byKey = Object.fromEntries((res.body.users as { name: string; host: string }[]).map((u) => [`${u.name}@${u.host}`, u]));
     expect(byKey["root@%"]).toMatchObject({ main: true, can: { rename: true, delete: false } });
-    expect(byKey["root@localhost"]).toMatchObject({ system: true, can: { password: false, rename: false, delete: false } });
-    expect(byKey["odd\\name@%"]).toMatchObject({ can: { password: false, rename: false, delete: false } });
+    expect(byKey["root@localhost"]).toMatchObject({ system: true, can: { passwordChange: false, rename: false, delete: false } });
+    expect(byKey["odd\\name@%"]).toMatchObject({ can: { passwordChange: false, rename: false, delete: false } });
     expect(res.body.main).toMatchObject({ rename: "switch" });
     agent.disconnect();
 
@@ -201,7 +201,7 @@ describe("databases.users", () => {
     expect(outOfStep.body.message).toContain("root user kept an older password");
     rootSignsIn = false;
     const failed = await callOp(panel, dbOps.users, { serviceId }, { cookie });
-    expect(failed.body).toMatchObject({ signIn: "failed", users: [{ name: "root", main: true, can: { password: true } }] });
+    expect(failed.body).toMatchObject({ signIn: "failed", users: [{ name: "root", main: true, can: { passwordChange: true } }] });
     late.disconnect();
   });
 });
