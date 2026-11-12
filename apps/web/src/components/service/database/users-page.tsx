@@ -211,7 +211,7 @@ function UserRow({ users, user, database, onOpen }: { users: Users; user: User; 
   const menuItems = !user.main && (user.can.passwordChange || user.can.rename || user.can.delete || user.can.makeMain);
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control bg-field px-3 py-2.5 transition-colors duration-200">
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 flex-[1_1_220px] flex-col gap-1">
         <span className="flex flex-wrap items-center gap-2">
           <b className="font-mono text-[13px] font-medium [overflow-wrap:anywhere]">
             {user.name}

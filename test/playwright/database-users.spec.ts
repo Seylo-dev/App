@@ -43,6 +43,14 @@ test.describe("database users", () => {
     for (const item of ["Change password", "Rename", "Make this the main user", "Delete"]) await expect(page.getByRole("menuitem", { name: item })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.screenshot({ path: `${shots}/postgres.png`, fullPage: true });
+    // On a phone the main user's buttons go under its name, which stays on one line.
+    await page.setViewportSize({ width: 390, height: 900 });
+    const name = rows.first().getByText("postgres", { exact: true });
+    await expect.poll(async () => (await name.boundingBox())?.height ?? 0).toBeLessThan(24);
+    const nameBox = await name.boundingBox();
+    const buttonBox = await rows.first().getByRole("button", { name: "Change password" }).boundingBox();
+    expect(buttonBox?.y ?? 0).toBeGreaterThan((nameBox?.y ?? 0) + (nameBox?.height ?? 0));
+    await page.screenshot({ path: `${shots}/postgres-phone.png`, fullPage: true });
   });
 
   test("Change next to the password lands on the main user's password; the result names the services to redeploy", async ({ page }) => {
