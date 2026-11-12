@@ -36,6 +36,16 @@ export function deleteRunCopy(r: Run | null): { title: string; description: stri
   return { title: t("serviceBackups.deleteRunTitle"), description: t("serviceBackups.deleteRunBody"), confirmLabel: t("service.remove") };
 }
 
+/**
+ * True when the dialog said the file is deleted from the bucket, but the
+ * destination was deleted meanwhile (in another tab, or by someone else,
+ * before this list refetched): the panel only marked the backup deleted
+ * and the file stayed.
+ */
+export function fileKept(asked: Run, done: Run): boolean {
+  return runActions(asked) === "restorable" && done.destinationId === null;
+}
+
 export function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: () => void; onDelete: () => void }) {
   const failed = r.status === "failed";
   const running = r.status === "running";

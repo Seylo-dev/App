@@ -4,7 +4,9 @@
 // stays in the bucket. A failed delete or restore says why inside its
 // dialog, which stays open, and nothing is left on the card once it closes
 // (before, the message sat under the card's last row, against its left
-// edge). Demo data (demo/service.ts demoRuns) stands in for the panel;
+// edge). A Delete whose destination was deleted after the list loaded
+// says, once done, that the file stayed in the bucket. Demo data
+// (demo/service.ts demoRuns) stands in for the panel;
 // deleteRun and restore are answered here.
 //
 // Screenshots: $SHOTS_DIR/backups/*.png.
@@ -68,6 +70,35 @@ test.describe("backups", () => {
     await expect(done).toContainText("Deleted");
     await expect(card.getByText("Destination deleted", { exact: true })).toHaveCount(0);
     await expect(done.getByRole("button", { name: "Backup actions" })).toHaveCount(0);
+  });
+
+  test("a Delete whose destination was deleted meanwhile says the file stayed in the bucket", async ({ page }) => {
+    // The list still shows the destination (this tab had not refetched yet
+    // when it was deleted elsewhere); the panel only marks the backup deleted.
+    const newest = "r000000000000000";
+    let removedAt: string | null = null;
+    const gone = (r: ReturnType<typeof demoRuns>[number]) => ({ ...r, destinationId: null, deletedAt: removedAt });
+    await installDemo(page, {
+      overrides: {
+        "backups.listRuns": () => ({ runs: demoRuns().map((r) => (r.id === newest && removedAt ? gone(r) : r)), hasMore: false }),
+        "backups.deleteRun": () => {
+          removedAt = new Date().toISOString();
+          const run = demoRuns().find((r) => r.id === newest);
+          return run && gone(run);
+        },
+      },
+    });
+    await page.goto(backupsTab);
+    const card = page.getByRole("region", { name: "Backups and restores" });
+    const first = card.locator(":scope > div").filter({ has: page.getByRole("button", { name: "Backup actions" }) }).first();
+    await first.getByRole("button", { name: "Backup actions" }).click();
+    await page.getByRole("menuitem", { name: "Remove", exact: true }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("Its file is deleted from the bucket");
+    await dialog.getByRole("button", { name: "Remove" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText("The backup's destination was deleted meanwhile")).toBeVisible();
+    await page.screenshot({ path: `${shots}/file-kept.png` });
   });
 
   test("a failed delete or restore says why in its dialog, never under the card", async ({ page }) => {

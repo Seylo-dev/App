@@ -52,4 +52,6 @@ export default {
   forgetRunTitle: "Remove this backup from the list?",
   forgetRunBody:
     "Its destination was deleted, so the panel cannot reach its file. The backup is marked deleted here and the file stays in the bucket: delete it there by hand if you want it gone.",
+  fileKept:
+    "The backup's destination was deleted meanwhile, so the backup was only removed from the list. Its file stays in the bucket: delete it there by hand if you want it gone.",
 } as const;

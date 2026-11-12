@@ -31,7 +31,7 @@ import { RowsSkeleton } from "../service-skeletons";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
 import { PolicyDialog } from "./policy-dialog";
-import { deleteRunCopy, type Run, RunRow } from "./run-row";
+import { deleteRunCopy, fileKept, type Run, RunRow } from "./run-row";
 
 type Policy = OpOutput<typeof backups.listPolicies>["policies"][number];
 
@@ -274,9 +274,13 @@ function RunsCard({ service }: { service: ServiceDetail }) {
         onOpenChange={deleting.onOpenChange}
         {...deleteRunCopy(deleting.run)}
         destructive
-        onConfirm={() =>
-          deleting.run ? remove.mutateAsync({ serviceId: service.id, runId: deleting.run.id }).then(() => undefined) : undefined
-        }
+        onConfirm={() => {
+          const asked = deleting.run;
+          if (!asked) return undefined;
+          return remove.mutateAsync({ serviceId: service.id, runId: asked.id }).then((done) => {
+            if (fileKept(asked, done)) toast.warning(t("serviceBackups.fileKept"));
+          });
+        }}
       />
     </Card>
   );

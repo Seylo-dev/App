@@ -8,7 +8,7 @@
 import { expect, test } from "bun:test";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
-import { deleteRunCopy, type Run, RunRow, runActions } from "./run-row";
+import { deleteRunCopy, fileKept, type Run, RunRow, runActions } from "./run-row";
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: "r000000000000001",
@@ -82,4 +82,13 @@ test("the delete dialog: Delete removes the file from the bucket, Remove from li
   });
   // While the dialog has no run (never shown with one), it reads as the plain delete.
   expect(deleteRunCopy(null)).toEqual(remove);
+});
+
+test("a Delete whose destination was deleted meanwhile is told the file stayed in the bucket", () => {
+  const removed = { deletedAt: "2026-11-13T08:00:00.000Z" };
+  // The list still showed the destination, the panel answered without one: only marked deleted.
+  expect(fileKept(run(), run({ ...removed, destinationId: null }))).toBe(true);
+  // A plain delete took the file out of the bucket; Remove from list already said the file stays.
+  expect(fileKept(run(), run(removed))).toBe(false);
+  expect(fileKept(run({ destinationId: null }), run({ ...removed, destinationId: null }))).toBe(false);
 });

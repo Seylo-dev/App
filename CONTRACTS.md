@@ -4929,8 +4929,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   A destination a schedule still writes to cannot be deleted
   (`deleteDestination`: CONFLICT `inUse`; the schedules' foreign key
   restricts it too), so no schedule is ever left without one. Deleting a
-  destination clears `destinationId` on its runs (foreign key, set null),
-  and the panel has no keys for that bucket from then on: `restore` of such
+  destination clears `destinationId` on its runs (foreign key, set null)
+  and invalidates `backups.listRuns` on `service:<id>` of every service
+  with runs there, so a Backups tab already open switches those rows to
+  "Destination deleted"; the panel has no keys for that bucket from then
+  on: `restore` of such
   a backup is refused (CONFLICT `noDestination`, before any restore run is
   recorded; the restore job checks again), and `deleteRun` only marks it
   deleted, without a request to any bucket, so its object stays there to

@@ -432,6 +432,40 @@ describe("schedules and runs", () => {
     agent.disconnect();
   });
 
+  test("deleting a destination tells open Backups tabs of the services with backups there to refetch their runs", async () => {
+    const { project, node, dbId, destinationId } = await setup();
+    const db2 = await callOp(panel, dbOps.create, { projectId: project.id, name: "db2", engine: "postgres", nodeId: node.id }, { cookie });
+    const otherId = db2.body.serviceId as string;
+    const otherDest = await callOp(panel, backupOps.createDestination, { ...destinationInput(), name: "R2 us" }, { cookie });
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, [], [signed]);
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    backupResult(node.id, run.body.id);
+    const elsewhere = await callOp(
+      panel,
+      backupOps.runNow,
+      { serviceId: otherId, target: "database", destinationId: otherDest.body.id },
+      { cookie },
+    );
+    backupResult(node.id, elsewhere.body.id);
+
+    const told: { topic: string; ops: string[] }[] = [];
+    const socket = {
+      id: "tab",
+      send: (m: { type: string; topic?: string; event?: { ops?: string[] } }) => {
+        if (m.type === "event" && m.topic) told.push({ topic: m.topic, ops: m.event?.ops ?? [] });
+      },
+    } as never;
+    panel.deps.live.subscribe(socket, `service:${dbId}`);
+    panel.deps.live.subscribe(socket, `service:${otherId}`);
+    expect((await callOp(panel, backupOps.deleteDestination, { destinationId }, { cookie })).status).toBe(200);
+    // Without it, a tab opened before the delete kept offering Restore, and a
+    // Delete that promised to remove the file from the bucket, which stayed there.
+    expect(told).toContainEqual({ topic: `service:${dbId}`, ops: [backupOps.listRuns.id] });
+    // A service whose backups went to another destination is left alone.
+    expect(told.filter((t) => t.topic === `service:${otherId}`)).toEqual([]);
+    agent.disconnect();
+  });
+
   test("a node may only report its own run's object; older rows naming another object are neither restored nor deleted", async () => {
     const { node, project, dbId, destinationId } = await setup();
     const other = seedService(panel, { projectId: project.id, name: "other", nodeIds: [node.id] });

@@ -107,8 +107,19 @@ export const deleteDestination = implement(backupOps.deleteDestination, (input, 
       reason: "inUse",
     });
   }
+  // Collected before the delete clears destinationId on the runs (foreign
+  // key, set null): a Backups tab already open on one of these services
+  // still lists the backups as restorable, and its Delete would promise to
+  // remove a file the panel no longer has keys for.
+  const serviceIds = ctx.db
+    .selectDistinct({ serviceId: backupRuns.serviceId })
+    .from(backupRuns)
+    .where(eq(backupRuns.destinationId, row.id))
+    .all()
+    .map((r) => r.serviceId);
   ctx.db.delete(backupDestinations).where(eq(backupDestinations.id, row.id)).run();
   ctx.live.publish("panel", { type: "invalidate", ops: [backupOps.listDestinations.id] });
+  for (const serviceId of serviceIds) invalidateService(ctx, serviceId, [backupOps.listRuns.id]);
   return {};
 });
 
