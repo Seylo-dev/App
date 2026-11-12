@@ -324,7 +324,8 @@ LOG_LEVEL=info
 SMTP_HOST=\${{project.SMTP_HOST}}
 `;
 
-const refs = {
+/** env.references for worker (env-references.spec.ts builds a longer list from it). */
+export const envReferences = {
   // Its own built-ins as the panel sends them: no domain and no port yet (ports: []), so only INTERNAL_HOST has a value.
   self: {
     serviceId: ids.worker,
@@ -550,7 +551,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
     };
   },
   "env.get": () => ({ text: envText, variables: [], sharedCount: 3, updatedAt: ago(day) }),
-  "env.references": () => refs,
+  "env.references": () => envReferences,
   "env.getShared": () => ({ text: "SMTP_HOST=smtp.example.com\nSMTP_USER=mailer\nSMTP_PASS=hunter2hunter2\n", variables: [], updatedAt: ago(day) }),
   // github.installations, github.repos and github.branches: repos.ts.
   "webhooks.getTrigger": () => ({ configured: true, hint: "x9Qa", lastUsedAt: ago(3 * hour), createdAt: ago(10 * day) }),

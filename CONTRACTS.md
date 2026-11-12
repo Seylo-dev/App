@@ -5867,7 +5867,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   on a phone (project tabs, service tabs, the settings sections, the node
   sheet's views, template categories) use `scroll-row` with
   `scrollFadeRef`, which the kit's `TabList` and `Segmented` carry
-  themselves, and scroll the current item into view. From md up the
+  themselves, and scroll the current item into view. Lists that scroll
+  up and down inside a card (the Environment tab's References) use
+  `scroll-column` with `scrollFadeColumnRef`: no scrollbar, the top or
+  bottom edge that hides items fades, and Tab stops 24 px clear of it. From md up the
   service tabs show every tab instead (a mouse wheel cannot scroll a
   sideways row): one row at 1440 px, wrapping below with a track line per
   40 px row. Unknown paths go to `routes/_app/$.tsx` (the 404 next to
@@ -6037,7 +6040,26 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the password). Whether a group
   is reachable and the exposed variable a struck-through tip names go by the
   chips shown. References to an empty variable stay valid in the editor and
-  resolve once it has a value), `terminal/xterm-view.tsx` +
+  resolve once it has a value. Its title and hints stay put while the
+  groups scroll inside the card (`scroll-column`, no scrollbar, faded
+  edges), and the panel is never taller than the editor card next to it
+  (`maxHeight`, measured with a ResizeObserver). Each group (the service
+  itself, each other service, the shared variables) collapses and expands
+  on its header row, a button with `aria-expanded` (click, Enter, Space);
+  collapsed, it shows its chip count ("api ... 34 variables") and renders
+  no chips, so Tab skips them. The service itself and groups of up to 12
+  chips (`collapseAbove`, more than a database's 9) start expanded, a
+  longer one collapsed; Expand all / Collapse all in the header (when
+  there are two groups or more) expands them all while any is collapsed,
+  else collapses them all. The choices are kept per browser and project
+  (`env/references-collapse.ts`: localStorage
+  `seylo.envReferences.collapsed.<projectId>`, a JSON object of group key
+  to collapsed, `self` for the service itself, `service:<id>`, `shared`;
+  every access in try/catch, blocked storage starts from the defaults).
+  The column (`referencesColumn`) sizes from its row, a size container:
+  320 px until the editor has 600 px, then up to 440 px; it wraps under
+  the editor when the editor would get less than 520 px and is then up to
+  440 px wide), `terminal/xterm-view.tsx` +
   `terminal/session.ts` + `terminal/use-terminal-session.ts` (ticketed
   terminal sockets, one xterm write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
   `copy/` (the header's "..." `ServiceMenu` with the Clone and Move to
@@ -6105,7 +6127,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   data: worker first with only its own built-ins that have a value
   (`INTERNAL_HOST`, no domain or port yet) and their tips, none of its own
   variables, a click inserting `${{worker.INTERNAL_HOST}}`; an exposed database's
-  internal variables on another node struck through, the Expose link),
+  internal variables on another node struck through, the Expose link;
+  with api's own variables and a billing service (34 and 24 chips), both
+  start collapsed with their counts, Expand all keeps the page as tall as
+  before while the list scrolls inside a panel as tall as the editor with
+  no scrollbar width and faded edges, by wheel (not the page), Page Down
+  and Tab to the last chip; collapse and expand by click, Enter and Space
+  survive reloads; 440 px next to the editor at 1440, wider than 320 px
+  with a 600 px editor at 1280, under the editor at 390 with no sideways
+  scroll),
   `env-hint.spec.ts` (a hardcoded service URL is a blue info
   squiggle outside the problems, and Ctrl+. offers Use `${{api.URL}}`,
   which keeps the path), `console.spec.ts` (the Console | Shell switch in place

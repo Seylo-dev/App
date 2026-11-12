@@ -1,7 +1,8 @@
 // The Environment tab (Environment.dc.html): the .env editor with live
 // diagnostics, the References panel, save with Cmd/Ctrl+S, and after a save
 // that running instances do not have yet, a prompt to deploy (a restart
-// keeps the values of the last deploy).
+// keeps the values of the last deploy). The panel is never taller than the
+// editor card: its groups scroll inside it.
 
 import { type AnalyzeContext, analyzeEnv, type Diagnostic } from "@seylo/env-analyzer";
 import { deployments, env, OpError, type OpOutput, services } from "@seylo/ops";
@@ -14,7 +15,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconAlertCircle, IconBraces, IconEye, IconEyeOff, IconStack2 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { type RefObject, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { useActiveDeploy } from "../active-deploy";
@@ -25,7 +26,7 @@ import { useInvalidate } from "../invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
-import { buildsFromRepository, ReferencesPanel } from "./references-panel";
+import { buildsFromRepository, ReferencesPanel, referencesColumn } from "./references-panel";
 import { SharedVariablesSheet } from "./shared-sheet";
 
 const emptyContext = (service: ServiceDetail): AnalyzeContext => ({
@@ -54,6 +55,8 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
   const [conflict, setConflict] = useState(false);
   const [sharedOpen, setSharedOpen] = useState(false);
   const handle = useRef<EnvEditorHandle | null>(null);
+  const editorCard = useRef<HTMLElement | null>(null);
+  const editorHeight = useHeight(editorCard);
 
   const context = references.data ?? null;
   const analysis = useMemo(() => analyzeEnv(text, context ?? emptyContext(service)), [text, context, service]);
@@ -164,8 +167,13 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
           {t("serviceEnv.appliedBody")}
         </Callout>
       )}
-      <div className="flex flex-wrap items-start gap-4">
-        <section aria-label={t("serviceEnv.title")} className="min-w-0 flex-[999_1_520px] rounded-card bg-card shadow-card">
+      {/* A size container: the References column takes its width from this row (referencesColumn). */}
+      <div className="@container flex flex-wrap items-start gap-4">
+        <section
+          ref={editorCard}
+          aria-label={t("serviceEnv.title")}
+          className="min-w-0 flex-[999_1_520px] rounded-card bg-card shadow-card"
+        >
           <div className="flex flex-wrap items-center gap-2.5 border-b border-divider px-4 py-3.5">
             <h2 className="m-0 text-[15px] font-semibold">{t("serviceEnv.title")}</h2>
             {/* The only way into the project's shared variables, so it looks like the button it is. */}
@@ -259,10 +267,11 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
               projectId={service.projectId}
               reveal={reveal}
               builtFromRepository={buildsFromRepository(service.sourceConfig)}
+              maxHeight={editorHeight}
               onInsert={(v) => handle.current?.insert(v)}
             />
           ) : references.isError ? (
-            <div className="max-w-[380px] min-w-0 flex-[1_1_320px]">
+            <div className={referencesColumn}>
               <OpErrorNote error={references.error} />
             </div>
           ) : (
@@ -274,10 +283,32 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
   );
 }
 
+/**
+ * The element's height, measured before the first paint and again as it
+ * resizes (the problem list in its footer wraps). Undefined until measured
+ * and where nothing measures (static rendering).
+ */
+function useHeight(ref: RefObject<HTMLElement | null>): number | undefined {
+  const [height, setHeight] = useState<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const next = Math.round(el.offsetHeight);
+      setHeight((current) => (current === next ? current : next));
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    update();
+    return () => observer.disconnect();
+  }, [ref]);
+  return height;
+}
+
 /** The editor card (title bar, 420px of lines, status bar) and the references panel while the variables load. */
 export function EnvironmentSkeleton() {
   return (
-    <LoadingRegion label={t("common.loading")} className="flex flex-wrap items-start gap-4">
+    <LoadingRegion label={t("common.loading")} className="@container flex flex-wrap items-start gap-4">
       <div className="min-w-0 flex-[999_1_520px] rounded-card bg-card shadow-card">
         <div className="flex items-center gap-2.5 border-b border-divider px-4 py-3.5">
           <SkeletonText className="w-24 text-[15px]" />
@@ -309,7 +340,7 @@ export function EnvironmentSkeleton() {
 /** The references panel while the project's services load. */
 function ReferencesSkeleton() {
   return (
-    <div className="flex max-w-[380px] min-w-0 flex-[1_1_320px] flex-col rounded-card bg-card shadow-card">
+    <div className={cn(referencesColumn, "flex flex-col rounded-card bg-card shadow-card")}>
       <div className="flex flex-col gap-1 border-b border-divider px-[18px] pt-4 pb-3">
         <SkeletonText className="w-24 text-[15px]" />
         <SkeletonText className="w-full text-[12.5px]" />

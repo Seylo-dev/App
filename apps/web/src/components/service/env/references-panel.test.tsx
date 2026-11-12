@@ -4,7 +4,9 @@
 // gets no group for it. A variable that is empty right now gets no chip and
 // a group left with none is not shown; a value the caller may not see
 // (null) is not empty and keeps its chip. A service built from a
-// repository is told that each deploy also sets GIT_SHA.
+// repository is told that each deploy also sets GIT_SHA. A group with many
+// chips starts collapsed with its count, and the groups scroll inside the
+// card under the title and hint (references-collapse.test.ts has the rest).
 
 import { expect, test } from "bun:test";
 import { type AnalyzeContext, appVariables, databaseVariables, type ReferenceTarget, type ReferenceVariable } from "@seylo/env-analyzer";
@@ -312,4 +314,74 @@ test("a service built from a repository is told about GIT_SHA next to its refere
 test("repository sources are the ones whose deploys build a commit", () => {
   for (const type of ["github", "provider", "git"]) expect(buildsFromRepository({ type })).toBe(true);
   for (const type of ["image", "inline", "upload", "none"]) expect(buildsFromRepository({ type })).toBe(false);
+});
+
+/** Whether a group's header says it is expanded: the aria-expanded of the header button around its name. */
+const expandedOf = (html: string, group: string) => {
+  const name = html.indexOf(`<b class="font-semibold">${group}</b>`);
+  expect(name).toBeGreaterThan(-1);
+  const header = html.lastIndexOf("aria-expanded=", name);
+  return html.slice(header, header + 'aria-expanded="true"'.length) === 'aria-expanded="true"';
+};
+
+/** api with its own 29 variables next to its 5 built-ins: 34 chips. */
+const longApi = {
+  ...api,
+  variables: [
+    ...api.variables.slice(0, 5),
+    ...Array.from({ length: 29 }, (_, i) => ({
+      name: `API_VAR_${i + 1}`,
+      value: "x",
+      scope: "plain" as const,
+      sensitive: true,
+      description: "variable of this service",
+    })),
+  ],
+};
+
+test("a group with many chips starts collapsed with its count, the service itself and short groups expanded", async () => {
+  const worker = service("worker", builtins({ INTERNAL_HOST: "worker" }));
+  const out = await render(context({}, [longApi, worker, shared({ SMTP_HOST: "smtp.example.com" })]));
+  expect(groups(out)).toEqual(["web", "api", "worker", t("serviceEnv.refs.project")]);
+  // api: only its header, with how many chips it holds.
+  expect(expandedOf(out, "api")).toBe(false);
+  expect(chipsOf(out, "api")).toEqual([]);
+  expect(out).toContain(t("serviceEnv.refs.count", { count: 34 }));
+  expect(out).not.toContain("API_VAR_1");
+  // The others show their chips and no count.
+  expect(expandedOf(out, "web")).toBe(true);
+  expect(chipsOf(out, "web")).toEqual(["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT"]);
+  expect(expandedOf(out, "worker")).toBe(true);
+  expect(chipsOf(out, "worker")).toEqual(["INTERNAL_HOST"]);
+  expect(expandedOf(out, t("serviceEnv.refs.project"))).toBe(true);
+  expect(out).not.toContain(t("serviceEnv.refs.count", { count: 1 }));
+  // One group is collapsed: the header offers to expand them all.
+  expect(out).toContain(`>${t("serviceEnv.refs.expandAll")}</button>`);
+  expect(out).not.toContain(t("serviceEnv.refs.collapseAll"));
+  // As many chips as a database's whole set stay expanded (api's 6 here).
+  expect(expandedOf(await render(context()), "api")).toBe(true);
+});
+
+test("every group expanded: the header offers Collapse all; with one group, no such button", async () => {
+  const out = await render(context());
+  expect(out).toContain(`>${t("serviceEnv.refs.collapseAll")}</button>`);
+  expect(out).not.toContain(t("serviceEnv.refs.expandAll"));
+  const one = await render(context({ builtins: undefined }));
+  expect(groups(one)).toEqual(["api"]);
+  expect(one).not.toContain(t("serviceEnv.refs.collapseAll"));
+  expect(one).not.toContain(t("serviceEnv.refs.expandAll"));
+});
+
+test("the groups scroll inside the card with no scrollbar, the title and hint stay above them", async () => {
+  const out = await render(context({}, [longApi]));
+  const list = out.indexOf('data-slot="references-list"');
+  expect(list).toBeGreaterThan(-1);
+  // scroll-column: overflow-y auto with the scrollbar hidden (packages/ui/src/styles/tailwind.css).
+  expect(out.slice(out.lastIndexOf("<div", list), out.indexOf(">", list))).toContain("scroll-column");
+  // The hint is above the list, the groups inside it.
+  expect(out.indexOf(t("serviceEnv.refs.hint", { nodes: node.name }))).toBeLessThan(list);
+  expect(out.indexOf('<b class="font-semibold">web</b>')).toBeGreaterThan(list);
+  // Up to 440px wide (380px before).
+  expect(out).toContain("max-w-[440px]");
+  expect(out).not.toContain("max-w-[380px]");
 });

@@ -34,6 +34,10 @@ export default {
     notReachable: "Not reachable from {nodes}.",
     unreachable: "Only for services on {nodes}",
     unreachableUse: "Only for services on {nodes}. {self} runs on {selfNodes}, so use {variable}.",
+    // A collapsed group shows only how many chips it holds.
+    count: { one: "{count} variable", other: "{count} variables" },
+    expandAll: "Expand all",
+    collapseAll: "Collapse all",
   },
   hover: {
     becomes: "Becomes",
