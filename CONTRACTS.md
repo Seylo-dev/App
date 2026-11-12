@@ -200,8 +200,11 @@ build of this agent runs on (`build.Service` counts the builds per
 builder), and only builders of ours in the builds' DOCKER_CONFIG (`docker
 buildx stop <builder>`, then `docker buildx inspect --bootstrap <builder>`,
 which starts the same container again and waits for BuildKit). A restart
-after which the worker still has no server is not repeated for that
-builder for 10 minutes. Two places do it: before a build uses an existing
+after which the worker still has no server, or whose stop or bootstrap
+failed, is not repeated for that builder for 10 minutes; one cut short
+because the build was cancelled (or the check ended) is tried again by the
+next build or check, and the cancelled build ends as cancelled without a
+"restarting it failed" line. Two places do it: before a build uses an existing
 builder (`build.Options.WorkerDNS`), with one line in the build log, "-->
 The build worker had no DNS server it could use (it started while Docker's
 DNS setting was lost or broken); restarted it, which keeps the build

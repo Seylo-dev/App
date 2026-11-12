@@ -31,8 +31,10 @@ type fakeRunner struct {
 	// noBuildx plays a node without the buildx plugin: `buildx` fails and
 	// the legacy `docker build` refuses buildx's flags, like the real CLI.
 	noBuildx bool
-	// restarted is called for `buildx stop <builder>`.
+	// restarted is called for `buildx stop <builder>`. stop runs first
+	// when set, and an error from it fails the stop instead.
 	restarted func(builder string)
+	stop      func(ctx context.Context, builder string) error
 }
 
 func (f *fakeRunner) Run(ctx context.Context, c Cmd) error {
@@ -62,6 +64,11 @@ func (f *fakeRunner) Run(ctx context.Context, c Cmd) error {
 		f.mu.Unlock()
 		if !found {
 			return &ExitError{Cmd: "docker", Code: 1}
+		}
+		if f.stop != nil && strings.HasPrefix(args, "buildx stop") {
+			if err := f.stop(ctx, c.Args[len(c.Args)-1]); err != nil {
+				return err
+			}
 		}
 		if f.restarted != nil && strings.HasPrefix(args, "buildx stop") {
 			f.restarted(c.Args[len(c.Args)-1])

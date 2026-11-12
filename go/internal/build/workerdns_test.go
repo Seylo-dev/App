@@ -2,12 +2,14 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 )
@@ -152,6 +154,69 @@ func TestStaleWorkerRestartNeverLoops(t *testing.T) {
 	}
 	if got := svc.RestartStaleWorkers(context.Background(), []string{svc1Builder}); len(got) != 0 {
 		t.Fatalf("the check restarted %v again", got)
+	}
+}
+
+// A restart cut short by its caller's context (the build's own cancel, a
+// newer push in its place, or the Container DNS check ending) says nothing
+// about the restart: it is not held back for dnsRestartPause, and the
+// cancelled build's log has no "restarting it failed" line. The next build
+// restarts the worker.
+func TestStaleWorkerRestartCutShortIsTriedAgain(t *testing.T) {
+	fr := &fakeRunner{builders: []string{svc1Builder}}
+	dns := &fakeWorkerDNS{stale: map[string]bool{svc1Builder: true}}
+	var mu sync.Mutex
+	var cut func()
+	// cutNext: the next stop calls end, then fails the way a killed docker
+	// does, and the worker keeps running stale.
+	cutNext := func(end func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		cut = end
+	}
+	fr.stop = func(ctx context.Context, _ string) error {
+		mu.Lock()
+		end := cut
+		cut = nil
+		mu.Unlock()
+		if end == nil {
+			return nil
+		}
+		end()
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+		return errors.New("signal: killed")
+	}
+	rep := newReports()
+	svc := newDNSTestService(t, fr, rep, dns)
+
+	cutNext(func() { _ = svc.Cancel("b1") })
+	p, log := buildLog(t, svc, rep, inlineRequest("b1"))
+	if p.GetStage() != agentv1.BuildStage_BUILD_STAGE_CANCELLED || strings.Contains(log, "restarting it failed") {
+		t.Fatalf("b1 = %v %q:\n%s", p.GetStage(), p.GetMessage(), log)
+	}
+	if n := count(fr.commands(), "docker buildx build"); n != 0 {
+		t.Fatalf("the cancelled build ran %d builds", n)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cutNext(cancel)
+	if got := svc.RestartStaleWorkers(ctx, []string{svc1Builder}); len(got) != 0 {
+		t.Fatalf("the check that ended restarted %v", got)
+	}
+	if n := count(fr.commands(), "docker buildx stop"); n != 2 {
+		t.Fatalf("%d stops, want 2: the check held back by b1's cut restart", n)
+	}
+
+	p, log = buildLog(t, svc, rep, inlineRequest("b2"))
+	if p.GetStage() != agentv1.BuildStage_BUILD_STAGE_SUCCEEDED || strings.Count(log, dnsRestartedLine+"\n") != 1 {
+		t.Fatalf("b2 = %v %q:\n%s", p.GetStage(), p.GetMessage(), log)
+	}
+	if n := count(fr.commands(), "docker buildx stop"); n != 3 {
+		t.Fatalf("%d stops, want 3", n)
 	}
 }
 

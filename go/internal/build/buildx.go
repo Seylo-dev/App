@@ -175,6 +175,10 @@ const (
 	dnsRestarted
 	dnsNotHelped
 	dnsRestartFailed
+	// dnsCut: the caller's context ended during the restart (a cancelled
+	// build, or a newer push in its place). That says nothing about the
+	// restart, so it is not held back for dnsRestartPause.
+	dnsCut
 )
 
 // buildxEnv finds and creates the builders, one per project, and
@@ -208,8 +212,8 @@ var ErrNoBuildx = &InvalidError{Msg: "docker buildx is not installed on this nod
 // builder returns the builder name to build with for scope, creating it
 // on first use, and marks it in use until release is called. An existing
 // builder that no build uses now and whose worker lost its DNS servers is
-// restarted first (restartForDNS). Without buildx it fails with
-// ErrNoBuildx.
+// restarted first (restartForDNS); when ctx ends during that restart it
+// returns ctx's error. Without buildx it fails with ErrNoBuildx.
 func (b *buildxEnv) builder(ctx context.Context, log io.Writer, scope string) (name string, release func(), err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -250,6 +254,8 @@ func (b *buildxEnv) builder(ctx context.Context, log io.Writer, scope string) (n
 			fmt.Fprintln(log, dnsNotHelpedLine)
 		case dnsRestartFailed:
 			fmt.Fprintf(log, dnsRestartErrorLine+"\n", err)
+		case dnsCut:
+			return "", nil, err
 		}
 	}
 	b.initMaps()
@@ -295,16 +301,29 @@ func (b *buildxEnv) restartForDNS(ctx context.Context, name string) (dnsRestart,
 	// buildx stops only a builder in our DOCKER_CONFIG, and the bootstrap
 	// starts the same container again and waits until BuildKit answers.
 	if _, err := b.cli.out(ctx, "buildx", "stop", name); err != nil {
-		return dnsRestartFailed, err
+		return b.restartFailed(ctx, name, err)
 	}
 	if _, err := b.cli.out(ctx, "buildx", "inspect", "--bootstrap", name); err != nil {
-		return dnsRestartFailed, err
+		return b.restartFailed(ctx, name, err)
 	}
 	if b.dns.Worker(ctx, name) == WorkerDNSStale {
 		return dnsNotHelped, nil
 	}
 	delete(b.dnsRestarts, name)
 	return dnsRestarted, nil
+}
+
+// restartFailed is restartForDNS's result for err from the stop or the
+// bootstrap. When ctx ended, the restart was cut short rather than failed:
+// the next build or check tries again (a worker that did stop boots fresh
+// on the next build either way), and ctx's error is returned (b.mu is
+// held).
+func (b *buildxEnv) restartFailed(ctx context.Context, name string, err error) (dnsRestart, error) {
+	if ctx.Err() != nil {
+		delete(b.dnsRestarts, name)
+		return dnsCut, ctx.Err()
+	}
+	return dnsRestartFailed, err
 }
 
 // restartStale restarts the workers of these builders that lost their DNS
@@ -324,6 +343,9 @@ func (b *buildxEnv) restartStale(ctx context.Context, builders []string) (restar
 				errs = map[string]error{}
 			}
 			errs[name] = err
+		case dnsCut:
+			// The check ended; the rest wait for the next one.
+			return restarted, errs
 		}
 	}
 	return restarted, errs
