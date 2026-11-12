@@ -129,7 +129,8 @@ export function CodeEditor({
     if (!editor || echo || editor.getValue() === value) return;
     const model = editor.getModel();
     if (!model) return;
-    editor.executeEdits("reload", [{ range: model.getFullModelRange(), text: value }]);
+    // The edit reports the reload through onDidChangeModelContent: that is no echo (echo.ts).
+    echoes.current.reload(() => editor.executeEdits("reload", [{ range: model.getFullModelRange(), text: value }]));
   }, [value]);
 
   useEffect(() => {

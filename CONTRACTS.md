@@ -5435,7 +5435,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `lib/service-display.ts`, `components/query-error.tsx` (`QueryError`
   renders 501 as "not built yet"), `components/pickers.tsx` (`NodePicker` from
   `nodes.choices`, `ProjectPicker`). In `components/service/`: `editor/code-editor.tsx`
-  (`CodeEditor`, lazy Monaco with only the editor worker; a value it reported through onChange is an echo, never a reload, `echo.ts`),
+  (`CodeEditor`, lazy Monaco with only the editor worker; a value it reported through onChange is an echo, never a reload; a reload's own change event records nothing and forgets the earlier reports, so a later reload back to an older text applies, `echo.ts`),
   `editor/env-editor.tsx` (.env editor with env-analyzer markers, hovers,
   completions, a Secret chip after each variable builds and crash reports
   treat as a secret and Public after a framework-public or `# @public` one
