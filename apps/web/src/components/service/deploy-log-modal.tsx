@@ -1,6 +1,8 @@
 // Full logs of one deployment in a modal (Deployments.dc.html): title with
 // commit, status and who/when, the five step cards, the whole log in a
-// virtualized LogViewer, and Copy / Download / Close.
+// virtualized LogViewer, and Copy / Download / Close. Up to 1280px wide, so
+// build output lines fit; on a phone it takes the screen less 16px a side
+// and the step cards wrap.
 
 import { deployments } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -34,7 +36,7 @@ export function DeployLogModal({
 }) {
   return (
     <Dialog open={deployment !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="top-[84px] flex max-h-[calc(100dvh-108px)] max-w-[960px] flex-col overflow-hidden p-0">
+      <DialogContent className="top-[84px] flex max-h-[calc(100dvh-108px)] max-w-[min(1280px,calc(100vw-32px))] flex-col overflow-hidden p-0">
         {deployment && <ModalBody serviceId={serviceId} source={source} initial={deployment} />}
       </DialogContent>
     </Dialog>
