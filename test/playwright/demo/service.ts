@@ -614,6 +614,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "databases.get": (input: Input) => databaseOf(String(input.serviceId)),
   "databases.connection": (input: Input) => connectionOf(String(input.serviceId)),
   "databases.versionChoices": (input: Input) => versionChoicesOf(String(input.serviceId)),
+  "databases.users": (input: Input) => usersOf(String(input.serviceId)),
   "previews.getSettings": () => ({ settings: { enabled: true, domainPattern: "", maxPreviews: 5 }, available: true, unavailableReason: null }),
   "previews.list": () => ({
     previews: [
@@ -840,5 +841,64 @@ export function connectionOf(serviceId: string) {
   };
 }
 
+const can = (password: boolean, rename: boolean, del: boolean, makeMain: boolean) => ({ password, rename, delete: del, makeMain });
+const dbUser = (over: Input) => ({
+  host: null,
+  authDatabase: null,
+  main: false,
+  system: false,
+  access: "readWrite",
+  roles: [],
+  locked: false,
+  ownsObjects: null,
+  definerObjects: null,
+  renameNeedsPassword: false,
+  can: can(true, true, true, true),
+  why: null,
+  ...over,
+});
+
+/**
+ * databases.users for the demo databases: Postgres with its main user, an
+ * app user that owns tables and a read-only one; Redis with its one
+ * default user; ClickHouse with its image's user and a SQL one.
+ * database-users.spec.ts adds a MongoDB.
+ */
+export function usersOf(serviceId: string) {
+  const base = { truncated: false, hosts: false, canCreate: true, notice: null, signIn: "ok", message: null };
+  if (serviceId === ids.redis)
+    return {
+      ...base,
+      engine: "redis",
+      presets: [],
+      canCreate: false,
+      notice:
+        "Redis has one user, default, and only its password changes here. Users made with ACL SETUSER live in memory only: Seylo starts Redis without an ACL file, so the next restart or deploy would remove them.",
+      main: { user: "default", rename: "none", canSwitch: false },
+      users: [dbUser({ name: "default", main: true, access: "serverAdmin", can: can(true, false, false, false), why: "Seylo signs in with this one. Make another user the main one first." })],
+    };
+  if (serviceId === ids.clickhouse)
+    return {
+      ...base,
+      engine: "clickhouse",
+      presets: ["readOnly", "readWrite", "databaseAdmin", "serverAdmin"],
+      main: { user: "ch_k3v9q2m8x1", rename: "restart", canSwitch: false },
+      users: [
+        dbUser({ name: "ch_k3v9q2m8x1", main: true, access: "serverAdmin", can: can(true, true, false, false), why: "Seylo signs in with this one. Make another user the main one first." }),
+        dbUser({ name: "grafana", access: "readOnly", roles: ["events.*: SELECT, SHOW"], can: can(true, true, true, false) }),
+      ],
+    };
+  return {
+    ...base,
+    engine: "postgres",
+    presets: ["readOnly", "readWrite", "serverAdmin"],
+    main: { user: "postgres", rename: "inPlace", canSwitch: true },
+    users: [
+      dbUser({ name: "postgres", main: true, access: "serverAdmin", roles: ["SUPERUSER", "CREATEROLE", "CREATEDB"], ownsObjects: 0, can: can(true, true, false, false), why: "Seylo signs in with this one. Make another user the main one first." }),
+      dbUser({ name: "shop_app", roles: ["pg_read_all_data", "pg_write_all_data"], ownsObjects: 12 }),
+      dbUser({ name: "metabase", access: "readOnly", roles: ["pg_read_all_data"], ownsObjects: 0 }),
+    ],
+  };
+}
 
 export { logEntries };

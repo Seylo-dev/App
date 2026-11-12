@@ -23,7 +23,8 @@ export type TabPath =
   | "advanced"
   | "notes"
   | "settings"
-  | "connection";
+  | "connection"
+  | "users";
 
 export interface ServiceTab {
   /** Path below /p/$projectId/s/$serviceId; "" is the overview. */
@@ -78,6 +79,7 @@ export const composeTabs: readonly ServiceTab[] = [
 
 export const databaseTabs: readonly ServiceTab[] = [
   tab("connection", "service.tabs.connection"),
+  tab("users", "service.tabs.users"),
   tab("backups", "service.tabs.backups"),
   tab("logs", "service.tabs.logs"),
   tab("metrics", "service.tabs.metrics"),

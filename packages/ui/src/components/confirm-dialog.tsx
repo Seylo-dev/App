@@ -22,6 +22,8 @@ export interface ConfirmDialogProps {
    * Use it for actions that cannot be undone.
    */
   confirmText?: string;
+  /** Keeps the confirm button off while what the children ask for is missing (a required checkbox, a name). */
+  confirmDisabled?: boolean;
   /**
    * Runs on confirm. The dialog shows a busy button while a returned promise
    * is pending, closes when it resolves, and stays open showing the error's
@@ -40,6 +42,7 @@ export function ConfirmDialog({
   cancelLabel,
   destructive = false,
   confirmText,
+  confirmDisabled = false,
   onConfirm,
 }: ConfirmDialogProps) {
   const labels = useUiLabels();
@@ -56,7 +59,7 @@ export function ConfirmDialog({
     }
   }, [open]);
 
-  const locked = confirmText !== undefined && typed.trim() !== confirmText;
+  const locked = (confirmText !== undefined && typed.trim() !== confirmText) || confirmDisabled;
 
   async function run(e: React.FormEvent) {
     e.preventDefault();

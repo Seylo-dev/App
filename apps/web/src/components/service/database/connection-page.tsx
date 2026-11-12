@@ -2,15 +2,14 @@
 // for services on the same node, the exposed URL with TLS for everything
 // else (toggle, allowed IPs, certificate; the same user and password as
 // inside), the on-demand web UI, a pre-logged-in shell, the backup
-// summary, and resetting the password.
+// summary, and Change links next to the user and the password, which open
+// the Users tab (users-page.tsx) with the main user's dialog.
 
 import { backups, databases, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
-import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
-import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
@@ -23,7 +22,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLock, IconTable, IconTerminal2 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { describeCron } from "../cron-text";
@@ -97,7 +96,7 @@ function ConnectionSkeleton() {
   return (
     <LoadingRegion label={t("common.loading")} className="flex flex-wrap items-start gap-4">
       <div className="flex min-w-0 flex-[999_1_520px] flex-col gap-4">
-        <SectionCardSkeleton titleWidth="w-36" description={false} actions={<ButtonSkeleton size="sm" className="w-28" />}>
+        <SectionCardSkeleton titleWidth="w-36" description={false}>
           <SkeletonText className="w-24 text-[12.5px]" />
           <Skeleton className="-mt-1.5 h-[38px]" />
           <div className="flex flex-wrap gap-2.5">
@@ -138,10 +137,10 @@ function ConnectionSkeleton() {
  * tiles share what is left, so a generated user name stays on one line;
  * a value wider than the card still wraps instead of ending in an ellipsis.
  */
-function Tile({ label, value, secret = false }: { label: string; value: string; secret?: boolean }) {
+function Tile({ label, value, secret = false, action }: { label: string; value: string; secret?: boolean; action?: ReactNode }) {
   return (
     <div className="flex min-w-[104px] max-w-full flex-[1_1_auto] flex-col gap-[5px]">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <TileLabel label={label} action={action} />
       <span className="flex-1 rounded-control bg-field px-[11px] py-2 font-mono text-[13px] [overflow-wrap:anywhere]">
         {secret ? "••••••••" : value || "-"}
       </span>
@@ -149,29 +148,62 @@ function Tile({ label, value, secret = false }: { label: string; value: string; 
   );
 }
 
+function TileLabel({ label, action }: { label: string; action?: ReactNode }) {
+  return (
+    <span className="flex items-baseline gap-2 text-xs text-muted-foreground">
+      <span>{label}</span>
+      {action && <span className="ml-auto">{action}</span>}
+    </span>
+  );
+}
+
+/**
+ * The tiles' Change link: the Users tab, with the main user's name or
+ * password dialog open. Only for people who see the credentials
+ * (databases.connection answered), who may change them there too.
+ */
+function ChangeLink({ service, change }: { service: ServiceDetail; change: "name" | "password" }) {
+  return (
+    <Link
+      to="/p/$projectId/s/$serviceId/users"
+      params={{ projectId: service.projectId, serviceId: service.id }}
+      search={{ change }}
+      aria-label={change === "name" ? t("serviceDatabase.changeUser") : t("serviceDatabase.changePassword")}
+      className="cursor-pointer font-medium text-link transition-colors duration-200"
+    >
+      {t("serviceDatabase.change")}
+    </Link>
+  );
+}
+
 /** The password, hidden until the eye shows it (the Connection URL's field), with copy; dots while it loads. */
-function PasswordTile({ password }: { password: string | null }) {
+function PasswordTile({ password, action }: { password: string | null; action?: ReactNode }) {
   if (password === null) return <Tile label={t("serviceDatabase.password")} value="" secret />;
   return (
     <div className="flex min-w-[180px] max-w-full flex-[1_1_auto] flex-col gap-[5px]">
-      <span className="text-xs text-muted-foreground">{t("serviceDatabase.password")}</span>
+      <TileLabel label={t("serviceDatabase.password")} action={action} />
       <CopyField value={password} secret aria-label={t("serviceDatabase.password")} />
     </div>
   );
 }
 
+/** The Change links of the User and Password tiles; the Redis-like engines' one user has no other name. */
+function changeLinks(service: ServiceDetail, db: Db, conn: Connection | null) {
+  if (!conn) return { user: undefined, password: undefined };
+  const redisLike = db.internal.database === "";
+  return {
+    user: redisLike ? undefined : <ChangeLink service={service} change="name" />,
+    password: <ChangeLink service={service} change="password" />,
+  };
+}
+
 function InternalCard({ service, db, conn, connError }: { service: ServiceDetail; db: Db; conn: Connection | null; connError: unknown }) {
-  const [reset, setReset] = useState(false);
+  const links = changeLinks(service, db, conn);
   return (
     <Section
       label={t("serviceDatabase.internal")}
       title={t("serviceDatabase.internal")}
       badge={<span className="text-[12.5px] text-muted-foreground">{t("serviceDatabase.internalFor", { node: db.nodeName })}</span>}
-      actions={
-        <Button size="sm" onClick={() => setReset(true)}>
-          {t("serviceDatabase.reset.button")}
-        </Button>
-      }
     >
       <span className="text-[12.5px] font-medium text-ink-strong">{t("serviceDatabase.url")}</span>
       {conn ? (
@@ -210,15 +242,14 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
         <Tile label={t("serviceDatabase.port")} value={String(db.internal.port)} />
         {db.internal.httpPort != null && <Tile label={t("serviceDatabase.httpPort")} value={String(db.internal.httpPort)} />}
         {db.internal.database !== "" && <Tile label={t("serviceDatabase.database")} value={db.internal.database} />}
-        <Tile label={t("serviceDatabase.user")} value={db.internal.user} />
-        <PasswordTile password={conn?.internal.password ?? null} />
+        <Tile label={t("serviceDatabase.user")} value={db.internal.user} action={links.user} />
+        <PasswordTile password={conn?.internal.password ?? null} action={links.password} />
       </div>
       {db.variant === "pgvector" && (
         <p className="m-0 text-[12.5px] leading-normal text-ink-strong">
           {t("serviceDatabase.pgvectorBefore")} <CopyCode code="CREATE EXTENSION vector;" /> {t("serviceDatabase.pgvectorAfter")}
         </p>
       )}
-      {reset && <ResetPassword service={service} onClose={() => setReset(false)} />}
     </Section>
   );
 }
@@ -231,6 +262,7 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
     onError: fail,
   });
   const e = db.exposure;
+  const links = changeLinks(service, db, conn);
   // On, but closed until the node's agent can keep the port TLS only: the setting stays and reopens by itself.
   const waiting = e.state === "waitingForNodeUpdate";
   return (
@@ -288,8 +320,8 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             <Tile label={t("serviceDatabase.host")} value={conn?.exposed?.host ?? e.host ?? ""} />
             <Tile label={t("serviceDatabase.port")} value={String(conn?.exposed?.port ?? e.port ?? "")} />
             {db.internal.database !== "" && <Tile label={t("serviceDatabase.database")} value={db.internal.database} />}
-            <Tile label={t("serviceDatabase.user")} value={e.user} />
-            <PasswordTile password={conn?.exposed?.password ?? conn?.internal.password ?? null} />
+            <Tile label={t("serviceDatabase.user")} value={e.user} action={links.user} />
+            <PasswordTile password={conn?.exposed?.password ?? conn?.internal.password ?? null} action={links.password} />
           </div>
           <div className="flex flex-wrap gap-x-[18px] gap-y-2 text-[12.5px] leading-normal text-ink-strong">
             <span>
@@ -317,7 +349,7 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
               {e.certificateExpiresAt ? ` · ${t("serviceDatabase.certExpires", { date: formatDateTime(e.certificateExpiresAt) })}` : ""}
             </span>
           </div>
-          {/* Muted, as buttons inside a card are; the password is reset once, on the internal card. */}
+          {/* Muted, as buttons inside a card are; the user and password change on the Users tab. */}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="bg-muted shadow-none" onClick={() => setEditing(true)}>
               {t("serviceDatabase.portAndAccess")}
@@ -425,48 +457,6 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
 function validPort(text: string): boolean {
   const p = Number(text.trim());
   return text.trim() !== "" && Number.isInteger(p) && p >= 1024 && p <= 65535;
-}
-
-/** The database's one password: services using it inside or through the exposed port are listed as affected. */
-function ResetPassword({ service, onClose }: { service: ServiceDetail; onClose: () => void }) {
-  const invalidate = useInvalidate();
-  const [result, setResult] = useState<OpOutput<typeof databases.resetPassword> | null>(null);
-  // The confirm dialog closes itself once the reset succeeded; that must not close the new password with it.
-  const done = useRef(false);
-  const reset = useOpMutation(databases.resetPassword, {
-    onSuccess: (res) => {
-      done.current = true;
-      setResult(res);
-      invalidate(databases.connection);
-    },
-  });
-  if (result)
-    return (
-      <Dialog open onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="flex flex-col gap-3">
-          <DialogTitle>{t("serviceDatabase.reset.doneTitle")}</DialogTitle>
-          <DialogDescription>{t("serviceDatabase.reset.doneBody", { count: result.affectedServiceIds.length })}</DialogDescription>
-          <CopyField value={result.password} aria-label={t("serviceDatabase.password")} />
-          {/* A MySQL or MariaDB root user that kept an older password: the panel says how to fix it. */}
-          {result.warning && <Callout tone="warning">{result.warning}</Callout>}
-          <Button variant="primary" className="self-end" onClick={onClose}>
-            {t("service.close")}
-          </Button>
-        </DialogContent>
-      </Dialog>
-    );
-  return (
-    <ConfirmDialog
-      open
-      onOpenChange={(o) => !o && !done.current && onClose()}
-      title={t("serviceDatabase.reset.title")}
-      description={t("serviceDatabase.reset.body")}
-      confirmText={service.name}
-      confirmLabel={t("serviceDatabase.reset.confirm")}
-      destructive
-      onConfirm={() => reset.mutateAsync({ serviceId: service.id, user: "internal" }).then(() => undefined)}
-    />
-  );
 }
 
 function ToolsCard({ service, db }: { service: ServiceDetail; db: Db }) {

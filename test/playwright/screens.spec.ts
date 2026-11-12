@@ -68,9 +68,11 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["compose-file", service(svc.stack, "source")],
   // A database (Database.dc.html).
   ["database-connection", service(svc.db, "connection")],
+  ["database-users", service(svc.db, "users")],
   ["database-backups", service(svc.db, "backups")],
   ["redis-connection", service(svc.redis, "connection")],
   ["clickhouse-connection", service(svc.clickhouse, "connection")],
+  ["redis-users", service(svc.redis, "users")],
   // Settings.
   ...(
     [

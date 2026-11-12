@@ -61,15 +61,8 @@ export default {
   shellSubtitle: "Already signed in. What you type runs against the database.",
   shellConnected: "Connected with {client} to {name}",
   scheduleBackups: "Schedule backups",
-  reset: {
-    button: "Reset password",
-    title: "Reset the database password?",
-    body: "It is one password, inside and through the exposed port. Services that reference it get the new one on their next deploy or restart; anything else using the old one stops connecting, wherever it connects from. Type the service name to confirm.",
-    confirm: "Reset",
-    doneTitle: "New password",
-    doneBody: {
-      one: "Copy it now. {count} service needs a restart to pick it up.",
-      other: "Copy it now. {count} services need a restart to pick it up.",
-    },
-  },
+  /** The link next to the user and the password, to the Users tab. */
+  change: "Change",
+  changeUser: "Change the user",
+  changePassword: "Change the password",
 } as const;

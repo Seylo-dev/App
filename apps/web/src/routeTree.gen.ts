@@ -65,6 +65,7 @@ import { Route as AppPProjectIdSServiceIdSettingsRouteImport } from "./routes/_a
 import { Route as AppPProjectIdSServiceIdShellRouteImport } from "./routes/_app/p/$projectId/s/$serviceId/shell"
 import { Route as AppPProjectIdSServiceIdSourceRouteImport } from "./routes/_app/p/$projectId/s/$serviceId/source"
 import { Route as AppPProjectIdSServiceIdStorageRouteImport } from "./routes/_app/p/$projectId/s/$serviceId/storage"
+import { Route as AppPProjectIdSServiceIdUsersRouteImport } from "./routes/_app/p/$projectId/s/$serviceId/users"
 
 const AppRoute = AppRouteImport.update({
   id: "/_app",
@@ -364,6 +365,12 @@ const AppPProjectIdSServiceIdStorageRoute =
     path: "/storage",
     getParentRoute: () => AppPProjectIdSServiceIdRoute,
   } as any)
+const AppPProjectIdSServiceIdUsersRoute =
+  AppPProjectIdSServiceIdUsersRouteImport.update({
+    id: "/users",
+    path: "/users",
+    getParentRoute: () => AppPProjectIdSServiceIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof AppIndexRoute
@@ -420,6 +427,7 @@ export interface FileRoutesByFullPath {
   "/p/$projectId/s/$serviceId/shell": typeof AppPProjectIdSServiceIdShellRoute
   "/p/$projectId/s/$serviceId/source": typeof AppPProjectIdSServiceIdSourceRoute
   "/p/$projectId/s/$serviceId/storage": typeof AppPProjectIdSServiceIdStorageRoute
+  "/p/$projectId/s/$serviceId/users": typeof AppPProjectIdSServiceIdUsersRoute
   "/p/$projectId/s/$serviceId/": typeof AppPProjectIdSServiceIdIndexRoute
 }
 export interface FileRoutesByTo {
@@ -475,6 +483,7 @@ export interface FileRoutesByTo {
   "/p/$projectId/s/$serviceId/shell": typeof AppPProjectIdSServiceIdShellRoute
   "/p/$projectId/s/$serviceId/source": typeof AppPProjectIdSServiceIdSourceRoute
   "/p/$projectId/s/$serviceId/storage": typeof AppPProjectIdSServiceIdStorageRoute
+  "/p/$projectId/s/$serviceId/users": typeof AppPProjectIdSServiceIdUsersRoute
   "/p/$projectId/s/$serviceId": typeof AppPProjectIdSServiceIdIndexRoute
 }
 export interface FileRoutesById {
@@ -534,6 +543,7 @@ export interface FileRoutesById {
   "/_app/p/$projectId/s/$serviceId/shell": typeof AppPProjectIdSServiceIdShellRoute
   "/_app/p/$projectId/s/$serviceId/source": typeof AppPProjectIdSServiceIdSourceRoute
   "/_app/p/$projectId/s/$serviceId/storage": typeof AppPProjectIdSServiceIdStorageRoute
+  "/_app/p/$projectId/s/$serviceId/users": typeof AppPProjectIdSServiceIdUsersRoute
   "/_app/p/$projectId/s/$serviceId/": typeof AppPProjectIdSServiceIdIndexRoute
 }
 export interface FileRouteTypes {
@@ -593,6 +603,7 @@ export interface FileRouteTypes {
     | "/p/$projectId/s/$serviceId/shell"
     | "/p/$projectId/s/$serviceId/source"
     | "/p/$projectId/s/$serviceId/storage"
+    | "/p/$projectId/s/$serviceId/users"
     | "/p/$projectId/s/$serviceId/"
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -648,6 +659,7 @@ export interface FileRouteTypes {
     | "/p/$projectId/s/$serviceId/shell"
     | "/p/$projectId/s/$serviceId/source"
     | "/p/$projectId/s/$serviceId/storage"
+    | "/p/$projectId/s/$serviceId/users"
     | "/p/$projectId/s/$serviceId"
   id:
     | "__root__"
@@ -706,6 +718,7 @@ export interface FileRouteTypes {
     | "/_app/p/$projectId/s/$serviceId/shell"
     | "/_app/p/$projectId/s/$serviceId/source"
     | "/_app/p/$projectId/s/$serviceId/storage"
+    | "/_app/p/$projectId/s/$serviceId/users"
     | "/_app/p/$projectId/s/$serviceId/"
   fileRoutesById: FileRoutesById
 }
@@ -1113,6 +1126,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppPProjectIdSServiceIdStorageRouteImport
       parentRoute: typeof AppPProjectIdSServiceIdRoute
     }
+    "/_app/p/$projectId/s/$serviceId/users": {
+      id: "/_app/p/$projectId/s/$serviceId/users"
+      path: "/users"
+      fullPath: "/p/$projectId/s/$serviceId/users"
+      preLoaderRoute: typeof AppPProjectIdSServiceIdUsersRouteImport
+      parentRoute: typeof AppPProjectIdSServiceIdRoute
+    }
   }
 }
 
@@ -1184,6 +1204,7 @@ interface AppPProjectIdSServiceIdRouteChildren {
   AppPProjectIdSServiceIdShellRoute: typeof AppPProjectIdSServiceIdShellRoute
   AppPProjectIdSServiceIdSourceRoute: typeof AppPProjectIdSServiceIdSourceRoute
   AppPProjectIdSServiceIdStorageRoute: typeof AppPProjectIdSServiceIdStorageRoute
+  AppPProjectIdSServiceIdUsersRoute: typeof AppPProjectIdSServiceIdUsersRoute
   AppPProjectIdSServiceIdIndexRoute: typeof AppPProjectIdSServiceIdIndexRoute
 }
 
@@ -1209,6 +1230,7 @@ const AppPProjectIdSServiceIdRouteChildren: AppPProjectIdSServiceIdRouteChildren
     AppPProjectIdSServiceIdShellRoute: AppPProjectIdSServiceIdShellRoute,
     AppPProjectIdSServiceIdSourceRoute: AppPProjectIdSServiceIdSourceRoute,
     AppPProjectIdSServiceIdStorageRoute: AppPProjectIdSServiceIdStorageRoute,
+    AppPProjectIdSServiceIdUsersRoute: AppPProjectIdSServiceIdUsersRoute,
     AppPProjectIdSServiceIdIndexRoute: AppPProjectIdSServiceIdIndexRoute,
   }
 

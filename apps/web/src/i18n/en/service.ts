@@ -48,6 +48,7 @@ export default {
     notes: "Notes",
     settings: "Settings",
     connection: "Connection",
+    users: "Users",
   },
   status: {
     idle: "Not deployed",

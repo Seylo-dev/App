@@ -55,7 +55,9 @@ function section(out: string, label: string): string {
   return out.slice(start, end < 0 ? undefined : end);
 }
 
-test("the exposed card shows the database's own user and password, with one reset for the database", async () => {
+const usersLink = (change: string) => `href="/p/prj-1/s/svc-db/users?change=${change}"`;
+
+test("the exposed card shows the database's own user and password; both cards' Change links open the Users tab", async () => {
   const out = await renderStatic(
     () => <ConnectionPage service={service} />,
     [
@@ -66,15 +68,37 @@ test("the exposed card shows the database's own user and password, with one rese
   const exposed = section(out, t("serviceDatabase.exposed"));
   expect(exposed).not.toBe("");
   // The same tiles as inside: the user, and the password behind the eye with copy.
-  expect(exposed).toContain(`>${t("serviceDatabase.user")}</span>`);
+  expect(exposed).toContain(`>${t("serviceDatabase.user")}<`);
   expect(exposed).toContain(">postgres</span>");
   expect(exposed).toMatch(new RegExp(`data-slot="copy-field-value" aria-label="[^"]*${t("serviceDatabase.password")}"`));
   expect(exposed).toContain(t("serviceDatabase.sameUserAfter"));
-  // Nothing promises a separate user, and the password is reset once, on the internal card.
+  // Nothing promises a separate user.
   expect(out).not.toContain("separate user");
   expect(out).not.toContain("exposed password");
-  expect(exposed).not.toContain(t("serviceDatabase.reset.button"));
-  expect(section(out, t("serviceDatabase.internal"))).toContain(t("serviceDatabase.reset.button"));
+  // Next to the user and the password, on both cards: the Users tab with the main user's dialog.
+  for (const card of [exposed, section(out, t("serviceDatabase.internal"))]) {
+    expect(card).toContain(usersLink("name"));
+    expect(card).toContain(usersLink("password"));
+    expect(card).toContain(`aria-label="${t("serviceDatabase.changePassword")}"`);
+  }
+  // The reset itself lives on the Users tab now.
+  expect(out).not.toContain("Reset password");
+});
+
+test("no Change links without the credentials; the Redis-likes' one user only has its password to change", async () => {
+  const pending = await renderStatic(() => <ConnectionPage service={service} />, [[databases.get, { serviceId: "svc-db" }, db]]);
+  expect(pending).not.toContain("/users?change=");
+  const redis = { ...db, engine: "redis", internal: { ...db.internal, database: "", user: "default", port: 6379 } };
+  const out = await renderStatic(
+    () => <ConnectionPage service={service} />,
+    [
+      [databases.get, { serviceId: "svc-db" }, redis],
+      [databases.connection, { serviceId: "svc-db" }, connection],
+    ],
+  );
+  const internal = section(out, t("serviceDatabase.internal"));
+  expect(internal).toContain(usersLink("password"));
+  expect(internal).not.toContain(usersLink("name"));
 });
 
 test("an exposure waiting for its node's update stays on, closed: no SSL chip and no address", async () => {
