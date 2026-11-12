@@ -49,8 +49,10 @@ export interface EnvGraph {
   /**
    * Whether target.variable holds a secret (env-analyzer classifySecret: its
    * "# @public"/"# @secret" comment, a framework public prefix such as
-   * NEXT_PUBLIC_ (public), its name, its value, a reference to a secret such
-   * as a database password, or its resolved value); unknown variables are not.
+   * NEXT_PUBLIC_ (public unless it holds a URL with a password or references
+   * a database credential), its name, its value, a reference to a secret
+   * such as a database password, or its resolved value); unknown variables
+   * are not.
    */
   isSecret(target: string, variable: string): boolean;
 }
@@ -173,6 +175,27 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
     return ownValue(service, variable);
   };
 
+  // Whether target.variable carries a database credential: a database's PASSWORD or connection
+  // URL (its sensitive built-ins), or a variable whose references lead to one. Shared variables
+  // hold no references (a URL with a password in one shows in the resolved value). A loop carries none.
+  const credentialMemo = new Map<string, boolean | "visiting">();
+  const carriesCredential = (target: string, variable: string): boolean => {
+    if (target === sharedTarget) return false;
+    const service = byName.get(target.toLowerCase());
+    if (!service) return false;
+    const builtin = service.builtins.find((b) => b.name === variable);
+    if (builtin) return builtin.sensitive;
+    const id = `${service.row.id}.${variable}`;
+    const known = credentialMemo.get(id);
+    if (known !== undefined) return known === true;
+    const entry = service.parsed.entries.findLast((e) => e.key === variable);
+    if (!entry) return false;
+    credentialMemo.set(id, "visiting");
+    const result = entry.references.some((ref) => carriesCredential(ref.target, ref.variable));
+    credentialMemo.set(id, result);
+    return result;
+  };
+
   // Memo per "service.KEY" like values; a loop counts as secret (never guessed public).
   const secretMemo = new Map<string, boolean | "visiting">();
   const isSecret = (target: string, variable: string): boolean => {
@@ -191,10 +214,12 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
     const entry = service.parsed.entries.findLast((e) => e.key === variable);
     if (!entry) return false;
     secretMemo.set(id, "visiting");
-    // A "# @public"/"# @secret" comment or a framework public prefix decides; otherwise the
-    // resolved value counts too (a reference to a plain variable that holds a token).
+    // A "# @public"/"# @secret" comment or a framework public prefix decides (a prefixed one that
+    // holds a password stays a secret); otherwise the resolved value counts too (a reference to a
+    // plain variable that holds a token).
     const result = classifySecret(service.parsed, entry, {
       referenceIsSecret: (ref) => isSecret(ref.target, ref.variable),
+      referenceIsCredential: (ref) => carriesCredential(ref.target, ref.variable),
       resolvedValue: () => ownValue(service, variable),
     }).secret;
     secretMemo.set(id, result);

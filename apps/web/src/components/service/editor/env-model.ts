@@ -208,8 +208,12 @@ const reasonKeys: Record<Exclude<SecretVerdict["reason"], "publicPrefix" | "comm
 export function secretHover(key: string, verdict: SecretVerdict): string[] {
   const code = (text: string) => `\`${text}\``;
   if (verdict.secret) {
-    const why =
-      verdict.reason === "comment"
+    const why = verdict.publicPrefix
+      ? // A password under a framework public prefix: say why the prefix did not make it public.
+        verdict.reason === "reference"
+        ? t("serviceEnv.secret.whyPrefixReference", { reference: code(verdict.detail ?? ""), prefix: code(verdict.publicPrefix) })
+        : t("serviceEnv.secret.whyPrefixValue", { prefix: code(verdict.publicPrefix) })
+      : verdict.reason === "comment"
         ? t("serviceEnv.secret.whySecretComment", { comment: code("# @secret") })
         : verdict.reason in reasonKeys
           ? t(reasonKeys[verdict.reason as keyof typeof reasonKeys], { reference: code(verdict.detail ?? "") })

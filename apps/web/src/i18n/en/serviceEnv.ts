@@ -53,6 +53,8 @@ export default {
     whyReference: "it uses {reference}, which is a secret.",
     whySecretComment: "the {comment} comment says so.",
     whyPrefix: "the framework ships {prefix} variables to every browser.",
+    whyPrefixValue: "it holds a URL with a password, so its {prefix} prefix does not make it public.",
+    whyPrefixReference: "it uses {reference}, which carries a database password, so its {prefix} prefix does not make it public.",
     whyPublicComment: "the {comment} comment says so.",
     secretEffect:
       "Dockerfile and Railpack builds get it only as a build secret ({mount}), not as {arg}; Nixpacks builds do not get it. Crash reports and troubleshoot uploads hide its value.",

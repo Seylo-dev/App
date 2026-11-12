@@ -157,4 +157,23 @@ describe("env editor model", () => {
     // Without a context (the shared variables), names, values and comments still decide.
     expect(secretChips(env.parsed, null, "project").map((c) => c.line)).toEqual([2, 4, 7]);
   });
+
+  test("chips: a password under a public prefix is a Secret, and the hover says why the prefix did not decide", () => {
+    const env = analyzeEnv(
+      ["PUBLIC_DATABASE_URL=postgres://app:pw@db.example.com/app", "NEXT_PUBLIC_DB=${{db.INTERNAL_URL}}", ""].join("\n"),
+      context,
+    );
+    const chips = secretChips(env.parsed, context, "worker");
+    expect(chips.map((c) => [c.line, c.secret])).toEqual([
+      [1, true],
+      [2, true],
+    ]);
+    expect(chips[0]?.hover[0]).toBe(
+      "**`PUBLIC_DATABASE_URL` is a secret** - it holds a URL with a password, so its `PUBLIC_` prefix does not make it public.",
+    );
+    expect(chips[1]?.hover[0]).toBe(
+      "**`NEXT_PUBLIC_DB` is a secret** - it uses `db.INTERNAL_URL`, which carries a database password, so its `NEXT_PUBLIC_` prefix does not make it public.",
+    );
+    expect(chips[1]?.hover[2]).toBe("Not a secret? Put `# @public` on the line above it.");
+  });
 });

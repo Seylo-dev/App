@@ -6,9 +6,11 @@
 // ARG NAME, and agents strip secret values from crash reports and
 // troubleshoot uploads. So a value is a secret when its name says so, when
 // it looks like a credential, or when it references one; a name with a
-// framework's public prefix (publicPrefixes) is public whatever it holds;
-// and a "# @public" or "# @secret" comment on the line above (or after the
-// value) overrides all of that for one variable.
+// framework's public prefix (publicPrefixes) is public whatever its name or
+// a token-like value says, but not when it holds a password (a URL with
+// one, or a reference to a database credential); and a "# @public" or
+// "# @secret" comment on the line above (or after the value) overrides all
+// of that for one variable.
 
 import { substituteReferences } from "./references";
 import { findVariable } from "./resolve";
@@ -30,7 +32,10 @@ const tokenLike = /^[A-Za-z0-9_\-+/=.]{24,}$/;
  * calling it a secret protects nothing, and keeps it from the build that
  * needs it (a Dockerfile's ARG NAME stays empty, Nixpacks leaves it out).
  * Prefixes are case-sensitive, as the frameworks match them. "# @secret"
- * still makes one a secret. The one list every check uses (isSecretName,
+ * still makes one a secret, and so does a password in it (a URL with one,
+ * or a reference to a database credential): PUBLIC_ is also a plain word
+ * ("PUBLIC_DATABASE_URL", the outside address) in apps that are not
+ * SvelteKit or Astro. The one list every check uses (isSecretName,
  * classifySecret, the web editor's masking).
  */
 export const publicPrefixes: readonly { prefix: string; frameworks: string }[] = [
@@ -54,9 +59,14 @@ export function isSecretName(key: string): boolean {
   return publicPrefixOf(key) === null && secretName.test(key);
 }
 
+/** The value is a URL with a password in it (scheme://user:pass@host). */
+function hasUrlPassword(value: string): boolean {
+  return urlWithPassword.test(value);
+}
+
 /** The value looks like a credential whatever its name. */
 export function looksSecret(value: string): boolean {
-  if (urlWithPassword.test(value)) return true;
+  if (hasUrlPassword(value)) return true;
   // A path or URL is long without being a key; a token mixes letters and digits.
   return tokenLike.test(value) && !value.includes("/") && /[0-9]/.test(value) && /[A-Za-z]/.test(value);
 }
@@ -92,11 +102,24 @@ export interface SecretVerdict {
   detail?: string;
   /** Public by a comment or a prefix although its name or value alone would have made it a secret. */
   overridesGuess?: boolean;
+  /**
+   * A secret although its name has this framework public prefix: it holds a
+   * password (reason value: a URL with one; reason reference: a reference
+   * that carries a database credential).
+   */
+  publicPrefix?: string;
 }
 
 export interface ClassifyOptions {
   /** Whether a reference carries a secret (a database password, another service's secret); none do by default. */
   referenceIsSecret?: (ref: EnvReference) => boolean;
+  /**
+   * Whether a reference carries a database credential (a database's
+   * PASSWORD or connection URL, or a variable that references one); none
+   * do by default. Such a reference keeps a variable with a framework
+   * public prefix a secret, which another secret does not.
+   */
+  referenceIsCredential?: (ref: EnvReference) => boolean;
   /** The value with its references resolved, null when they do not; asked only when nothing else decided. */
   resolvedValue?: () => string | null;
 }
@@ -113,9 +136,25 @@ function guess(entry: EnvEntry, options: ClassifyOptions): SecretVerdict {
 }
 
 /**
+ * A password under a framework public prefix: a URL with one as written, a
+ * reference `referenceIsCredential` says carries a database credential, or
+ * a resolved value that is a URL with a password. Null when there is none.
+ */
+function credentialUnderPrefix(entry: EnvEntry, prefix: string, options: ClassifyOptions): SecretVerdict | null {
+  if (hasUrlPassword(entry.value)) return { secret: true, reason: "value", publicPrefix: prefix };
+  const ref = options.referenceIsCredential ? entry.references.find(options.referenceIsCredential) : undefined;
+  if (ref) return { secret: true, reason: "reference", detail: `${ref.target}.${ref.variable}`, publicPrefix: prefix };
+  const resolved = entry.references.length > 0 ? options.resolvedValue?.() : null;
+  if (resolved && hasUrlPassword(resolved)) return { secret: true, reason: "value", publicPrefix: prefix };
+  return null;
+}
+
+/**
  * Whether one entry is a secret, and why: its comment, else a framework
- * public prefix (public), else its name, its value, a reference
- * `referenceIsSecret` says carries a secret, or its resolved value.
+ * public prefix (public, unless it holds a password: a URL with one or a
+ * reference `referenceIsCredential` says carries a database credential),
+ * else its name, its value, a reference `referenceIsSecret` says carries a
+ * secret, or its resolved value.
  */
 export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, entry: EnvEntry, options: ClassifyOptions = {}): SecretVerdict {
   const override = secretOverride(parsed, entry);
@@ -124,30 +163,55 @@ export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, ent
   if (override === "secret") return { secret: true, reason: "comment" };
   if (override === "public") return { secret: false, reason: "comment", overridesGuess: looked() };
   const prefix = publicPrefixOf(entry.key);
-  if (prefix) return { secret: false, reason: "publicPrefix", detail: prefix, overridesGuess: looked() };
+  if (prefix) {
+    return credentialUnderPrefix(entry, prefix, options) ?? { secret: false, reason: "publicPrefix", detail: prefix, overridesGuess: looked() };
+  }
   return guess(entry, options);
 }
 
 /**
  * Whether one entry is a secret: its override, else a framework public
- * prefix (not a secret), else its name, its value, or any reference
- * `referenceIsSecret` says carries one (a database password, another
- * service's secret).
+ * prefix (not a secret unless it holds a password: a URL with one, or a
+ * reference `referenceIsCredential` says carries a database credential),
+ * else its name, its value, or any reference `referenceIsSecret` says
+ * carries one (a database password, another service's secret).
  */
 export function isSecretEntry(
   parsed: Pick<ParsedEnv, "comments" | "text">,
   entry: EnvEntry,
   referenceIsSecret: (ref: EnvReference) => boolean = () => false,
+  referenceIsCredential: (ref: EnvReference) => boolean = () => false,
 ): boolean {
-  return classifySecret(parsed, entry, { referenceIsSecret }).secret;
+  return classifySecret(parsed, entry, { referenceIsSecret, referenceIsCredential }).secret;
+}
+
+/**
+ * Whether target.name carries a database credential in the analyzer
+ * context: a built-in variable (no dependsOn) of a service that is a
+ * secret (the sensitive ones are a database's PASSWORD and connection
+ * URLs), or a service's own variable whose references (dependsOn) lead to
+ * one. Shared variables hold no references; a URL with a password in one
+ * shows in the resolved value.
+ */
+function carriesCredential(context: AnalyzeContext, target: string, name: string, seen: Set<string>): boolean {
+  const found = findVariable(context, target, name);
+  if (!found || found.target.kind !== "service") return false;
+  const v = found.variable;
+  if (v.dependsOn === undefined) return v.secret ?? v.sensitive;
+  const id = `${found.target.name.toLowerCase()}.${v.name}`;
+  if (seen.has(id)) return false;
+  seen.add(id);
+  return v.dependsOn.some((d) => carriesCredential(context, d.target, d.variable, seen));
 }
 
 /**
  * classifySecret for every entry of a service's env with what the panel
  * sent in the analyzer context (env.references): a referenced variable is
  * a secret by its `secret` flag (the panel's own decision), else by
- * `sensitive`, and the resolved value uses the context's values. So the
- * editor shows, for unsaved text, what builds and crash reports will do.
+ * `sensitive`, a reference carries a database credential as
+ * carriesCredential says, and the resolved value uses the context's
+ * values. So the editor shows, for unsaved text, what builds and crash
+ * reports will do.
  */
 export function classifyEntries(parsed: ParsedEnv, context: AnalyzeContext): SecretVerdict[] {
   const variable = (target: string, name: string) => findVariable(context, target, name)?.variable ?? null;
@@ -157,6 +221,7 @@ export function classifyEntries(parsed: ParsedEnv, context: AnalyzeContext): Sec
         const v = variable(ref.target, ref.variable);
         return v ? (v.secret ?? v.sensitive) : false;
       },
+      referenceIsCredential: (ref) => carriesCredential(context, ref.target, ref.variable, new Set()),
       resolvedValue: () => {
         if (entry.quote === "single") return entry.value;
         const out = substituteReferences(entry.value, (target, name) => variable(target, name)?.value ?? null);

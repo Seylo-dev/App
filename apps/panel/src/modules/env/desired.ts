@@ -80,8 +80,8 @@ export function receivesShared(kind: string): boolean {
 /**
  * The service's variables with a real secret flag (EnvGraph.isSecret: the
  * variable's "# @public"/"# @secret" comment, else a framework public prefix
- * such as NEXT_PUBLIC_ (public), else its name, value, resolved value or a
- * reference to a secret). Secret values never reach a Nixpacks build (it
+ * such as NEXT_PUBLIC_ (public unless it holds a password), else its name,
+ * value, resolved value or a reference to a secret). Secret values never reach a Nixpacks build (it
  * bakes variables into the image), are no Dockerfile build arg (ARG NAME)
  * and agents strip them from crash reports and troubleshoot uploads;
  * Railpack and Dockerfile builds mount every variable as a BuildKit secret
