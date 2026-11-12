@@ -32,16 +32,9 @@ func Serve(ctx context.Context, socket string, b Backend, logger *slog.Logger) e
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		return fmt.Errorf("creating socket folder: %w", err)
 	}
-	if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("removing stale socket: %w", err)
-	}
-	ln, err := net.Listen("unix", socket)
+	ln, err := listen(socket)
 	if err != nil {
-		return fmt.Errorf("listening on %s: %w", socket, err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		ln.Close()
-		return fmt.Errorf("chmod %s: %w", socket, err)
+		return err
 	}
 	srv := &http.Server{Handler: Handler(b), ReadHeaderTimeout: 10 * time.Second, ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelWarn)}
 	stop := context.AfterFunc(ctx, func() {
@@ -56,6 +49,37 @@ func Serve(ctx context.Context, socket string, b Backend, logger *slog.Logger) e
 		return nil
 	}
 	return err
+}
+
+// listen binds a socket next to socket, makes it 0600 and renames it onto
+// socket, replacing a stale one. A plain listen on socket makes the path
+// show up at bind, before listen and the chmod: the CLI dials as soon as
+// Available sees the path (`seylo status` right after the agent started)
+// and got "connection refused", or reached a socket other accounts could
+// still use. Renamed into place, the path is there only once the socket
+// takes connections, root only.
+func listen(socket string) (net.Listener, error) {
+	tmp := socket + ".new"
+	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("removing stale socket: %w", err)
+	}
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: tmp, Net: "unix"})
+	if err != nil {
+		return nil, fmt.Errorf("listening on %s: %w", socket, err)
+	}
+	// Serve removes socket once it stops; tmp is gone after the rename.
+	ln.SetUnlinkOnClose(false)
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		ln.Close()
+		_ = os.Remove(tmp)
+		return nil, fmt.Errorf("chmod %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, socket); err != nil {
+		ln.Close()
+		_ = os.Remove(tmp)
+		return nil, fmt.Errorf("putting the socket at %s: %w", socket, err)
+	}
+	return ln, nil
 }
 
 // Handler is the HTTP API over b, mounted on the socket by Serve.

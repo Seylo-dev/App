@@ -345,10 +345,19 @@ func TestRunJoinsAndStops(t *testing.T) {
 	panel.AddJoinToken("t")
 	layout := shortLayout(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
+	var runErr error
+	done := make(chan struct{})
 	go func() {
-		done <- Run(ctx, Options{Layout: layout, Join: &JoinOptions{PanelURL: panel.URL(), Token: "t"}})
+		runErr = Run(ctx, Options{Layout: layout, Join: &JoinOptions{PanelURL: panel.URL(), Token: "t"}})
+		close(done)
 	}()
+	// Stopped before isolate's cleanup puts the timing back, also when a
+	// check below fails: an agent left running reads it from its reconnect
+	// loop, a data race that fails whichever test runs next.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 	panel.WaitConnected("")
 	waitUntil(t, "the local socket", func() bool { return localapi.Available(layout.AgentSocket()) })
 	v, err := localapi.NewClient(layout).Version(ctx)
@@ -363,9 +372,9 @@ func TestRunJoinsAndStops(t *testing.T) {
 	}
 	cancel()
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+	case <-done:
+		if runErr != nil {
+			t.Fatal(runErr)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return after cancel")
