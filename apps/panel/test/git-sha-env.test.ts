@@ -157,6 +157,38 @@ describe("GIT_SHA for deployments built from a repository", () => {
     }
   });
 
+  test("a commit id set as GIT_SHA by hand reaches the build as a build arg, not as a secret", async () => {
+    // Before: 40 hex characters looked like a token, so the node made it no build arg and
+    // Nixpacks left it out: the image baked APP_VERSION="" again.
+    const id = await createApp("api", gitSource);
+    const ci = await createApp("ci", gitSource);
+    writeServiceEnv(panel.deps.db, panel.deps.secrets, ci, `GIT_SHA=${shaB}\n`, null);
+    nodeChecksOut(shaA);
+    const cases: [string, string][] = [
+      [`GIT_SHA=${shaB}\n`, ""],
+      ["", `GIT_SHA=${shaB}\n`],
+      // Through a reference to another service's GIT_SHA.
+      ["GIT_SHA=${{ci.GIT_SHA}}\n", ""],
+    ];
+    for (const [own, shared] of cases) {
+      writeServiceEnv(panel.deps.db, panel.deps.secrets, id, own, null);
+      writeProjectEnv(panel.deps.db, panel.deps.secrets, projectId, shared, null);
+      await deployLive(id);
+      const sent = (fleet.builds.at(-1)?.request.env ?? []) as { name: string; value: string; secret: boolean }[];
+      expect([own, shared, sent.find((v) => v.name === "GIT_SHA")]).toEqual([
+        own,
+        shared,
+        expect.objectContaining({ name: "GIT_SHA", value: shaB, secret: false }),
+      ]);
+      expect(containerEnv(id).GIT_SHA).toBe(shaB);
+    }
+    // A "# @secret" comment still makes it one.
+    writeServiceEnv(panel.deps.db, panel.deps.secrets, id, `# @secret\nGIT_SHA=${shaB}\n`, null);
+    writeProjectEnv(panel.deps.db, panel.deps.secrets, projectId, "", null);
+    await deployLive(id);
+    expect(fleet.builds.at(-1)?.request.env).toContainEqual(expect.objectContaining({ name: "GIT_SHA", value: shaB, secret: true }));
+  });
+
   test("a rollback runs with the commit of the deployment it runs again", async () => {
     const id = await createApp("api", gitSource);
     nodeChecksOut(shaA);

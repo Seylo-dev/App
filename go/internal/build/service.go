@@ -467,6 +467,31 @@ func withGitSHA(env []*agentv1.EnvVar, commit string) []*agentv1.EnvVar {
 	return append(slices.Clip(env), &agentv1.EnvVar{Name: GitSHAVar, Value: commit})
 }
 
+// ownGitSHANote is the log line for a build from git whose variables set
+// GIT_SHA themselves, so the agent passes no commit; "" otherwise. A
+// secret one gets a word more where it is lost: a Dockerfile build sees it
+// only as a BuildKit secret (ARG GIT_SHA stays empty) and a Nixpacks build
+// not at all, which would otherwise look like a build without GIT_SHA.
+func ownGitSHANote(req *agentv1.BuildRequest, commit string) string {
+	env := req.GetEnv()
+	i := slices.IndexFunc(env, func(e *agentv1.EnvVar) bool { return e.GetName() == GitSHAVar })
+	if commit == "" || i < 0 {
+		return ""
+	}
+	note := GitSHAVar + " is set in the service's variables (or the project's shared ones), so the commit checked out is not passed"
+	if !env[i].GetSecret() {
+		return note
+	}
+	public := ` (a "# @public" comment above it makes it public)`
+	switch {
+	case req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != "" || req.GetBuilder() == agentv1.Builder_BUILDER_DOCKERFILE:
+		return note + "; it is a secret there, so it is no build arg (ARG " + GitSHAVar + " stays empty)" + public
+	case req.GetBuilder() == agentv1.Builder_BUILDER_NIXPACKS:
+		return note + "; it is a secret there, so the Nixpacks build does not see it" + public
+	}
+	return note
+}
+
 // build runs the chosen builder and leaves the image tagged as the
 // request's image reference in the local Docker. commit is the one fetch
 // checked out ("" when the source is not git).
@@ -483,6 +508,8 @@ func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 	buildVars := withGitSHA(req.GetEnv(), commit)
 	if len(buildVars) > len(req.GetEnv()) {
 		fmt.Fprintf(j, "--> %s=%s\n", GitSHAVar, commit)
+	} else if note := ownGitSHANote(req, commit); note != "" {
+		fmt.Fprintf(j, "--> %s\n", note)
 	}
 
 	inline := req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != ""

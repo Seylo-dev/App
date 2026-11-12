@@ -22,6 +22,19 @@ export function isSecretName(key: string): boolean {
   return secretName.test(key);
 }
 
+/**
+ * Names whose value is never a credential, whatever it looks like: GIT_SHA
+ * holds a commit id (40 hex characters), which looksSecret takes for a
+ * token, and a secret GIT_SHA reaches no Dockerfile build arg (ARG GIT_SHA)
+ * and no Nixpacks build. A "# @secret" comment or a reference to a secret
+ * still makes one a secret.
+ */
+const publicNames = new Set(["GIT_SHA"]);
+
+export function isPublicName(key: string): boolean {
+  return publicNames.has(key);
+}
+
 /** The value looks like a credential whatever its name. */
 export function looksSecret(value: string): boolean {
   if (urlWithPassword.test(value)) return true;
@@ -47,9 +60,10 @@ export function secretOverride(parsed: Pick<ParsedEnv, "comments" | "text">, ent
 }
 
 /**
- * Whether one entry is a secret: its override, else its name, its value, or
- * any reference `referenceIsSecret` says carries one (a database password,
- * another service's secret).
+ * Whether one entry is a secret: its override, else its name, its value
+ * (unless the name is a public one, isPublicName), or any reference
+ * `referenceIsSecret` says carries one (a database password, another
+ * service's secret).
  */
 export function isSecretEntry(
   parsed: Pick<ParsedEnv, "comments" | "text">,
@@ -58,6 +72,6 @@ export function isSecretEntry(
 ): boolean {
   const override = secretOverride(parsed, entry);
   if (override) return override === "secret";
-  if (isSecretName(entry.key) || looksSecret(entry.value)) return true;
+  if (isSecretName(entry.key) || (!isPublicName(entry.key) && looksSecret(entry.value))) return true;
   return entry.references.some(referenceIsSecret);
 }

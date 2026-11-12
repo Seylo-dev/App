@@ -8,6 +8,7 @@
 import {
   type AnalyzeContext,
   builtinVariablesFor,
+  isPublicName,
   isSecretEntry,
   looksSecret,
   type NodeRef,
@@ -198,7 +199,7 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
       override !== null
         ? override === "secret"
         : isSecretEntry(service.parsed, entry, (ref) => isSecret(ref.target, ref.variable)) ||
-          looksSecret(ownValue(service, variable) ?? "");
+          (!isPublicName(variable) && looksSecret(ownValue(service, variable) ?? ""));
     secretMemo.set(id, result);
     return result;
   };

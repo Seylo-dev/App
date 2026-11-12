@@ -337,8 +337,43 @@ func TestOwnGitSHAWins(t *testing.T) {
 				if strings.Contains(run.log, "--> GIT_SHA=") {
 					t.Fatalf("the log claims the agent set GIT_SHA:\n%s", run.log)
 				}
+				if !strings.Contains(run.log, "--> GIT_SHA is set in the service's variables") || strings.Contains(run.log, "secret there") {
+					t.Fatalf("the log does not say where GIT_SHA comes from:\n%s", run.log)
+				}
 			})
 		}
+	}
+}
+
+// A GIT_SHA of the service's own that the panel marks secret (a "# @secret"
+// comment) is no build arg and stays out of Nixpacks: the log says so, as
+// it would otherwise look like a build that got no GIT_SHA at all.
+func TestSecretOwnGitSHASaysSo(t *testing.T) {
+	url, _, _ := twoCommitGitServer(t)
+	own := &agentv1.EnvVar{Name: GitSHAVar, Value: "ff9410c96aa507f27425f3c5dbb8e6bf8c4c37f9", Secret: true}
+	for _, c := range []struct {
+		builder agentv1.Builder
+		says    string
+	}{
+		{agentv1.Builder_BUILDER_DOCKERFILE, "it is a secret there, so it is no build arg (ARG GIT_SHA stays empty)"},
+		{agentv1.Builder_BUILDER_NIXPACKS, "it is a secret there, so the Nixpacks build does not see it"},
+		{agentv1.Builder_BUILDER_RAILPACK, ""},
+	} {
+		t.Run(c.builder.String(), func(t *testing.T) {
+			run := runGitSHABuild(t, gitRequest(url, c.builder, "", own))
+			if _, n := run.buildArg(GitSHAVar); n != 0 {
+				t.Fatalf("a secret GIT_SHA became a build arg: %v", run.build.Args)
+			}
+			if c.says == "" {
+				if strings.Contains(run.log, "secret there") {
+					t.Fatalf("Railpack sees secrets, yet the log says it lost GIT_SHA:\n%s", run.log)
+				}
+				return
+			}
+			if !strings.Contains(run.log, "--> GIT_SHA is set in the service's variables") || !strings.Contains(run.log, c.says) {
+				t.Fatalf("the log does not say why GIT_SHA is missing (want %q):\n%s", c.says, run.log)
+			}
+		})
 	}
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isSecretEntry, isSecretName, looksSecret, parseEnv, secretOverride } from "../src";
+import { isPublicName, isSecretEntry, isSecretName, looksSecret, parseEnv, secretOverride } from "../src";
 
 describe("secret classification", () => {
   test("names, values and references", () => {
@@ -21,6 +21,23 @@ describe("secret classification", () => {
       ["NODE_ENV", false],
       ["DATABASE_URL", true],
       ["API", false],
+    ]);
+  });
+
+  test("GIT_SHA holds a commit id, not a credential, unless a comment or a reference says so", () => {
+    // Before: 40 hex characters looked like a token, so a GIT_SHA set by hand reached no build arg.
+    const sha = "ff9410c96aa507f27425f3c5dbb8e6bf8c4c37f9";
+    expect(looksSecret(sha)).toBe(true);
+    expect(isPublicName("GIT_SHA")).toBe(true);
+    expect(isPublicName("COMMIT")).toBe(false);
+    const text = `GIT_SHA=${sha}\nCOMMIT=${sha}\n# @secret\nGIT_SHA=${sha}\nGIT_SHA=\${{vault.TOKEN}}\n`;
+    const parsed = parseEnv(text);
+    const credential = (ref: { target: string; variable: string }) => ref.target === "vault";
+    expect(parsed.entries.map((e) => [e.key, isSecretEntry(parsed, e, credential)])).toEqual([
+      ["GIT_SHA", false],
+      ["COMMIT", true],
+      ["GIT_SHA", true],
+      ["GIT_SHA", true],
     ]);
   });
 
