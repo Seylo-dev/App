@@ -353,10 +353,16 @@ func TestRunJoinsAndStops(t *testing.T) {
 	}()
 	// Stopped before isolate's cleanup puts the timing back, also when a
 	// check below fails: an agent left running reads it from its reconnect
-	// loop, a data race that fails whichever test runs next.
+	// loop, a data race that fails whichever test runs next. The wait is
+	// bounded so a Run that hangs after cancel fails this test instead of
+	// blocking the package until go test's timeout.
 	t.Cleanup(func() {
 		cancel()
-		<-done
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("Run still running at cleanup")
+		}
 	})
 	panel.WaitConnected("")
 	waitUntil(t, "the local socket", func() bool { return localapi.Available(layout.AgentSocket()) })
