@@ -28,6 +28,23 @@ export interface DeployNodeResult {
   message: string;
   /** Digest the node runs, from its state report; fills image digests of image sources. */
   digest: string | null;
+  /**
+   * The image HEALTHCHECK the node gated the rollout on (DeployProgress
+   * image_health_check, agents from 0.2.14), seconds with Docker's defaults
+   * filled in. Absent when none applied.
+   */
+  imageHealthCheck?: StoredImageHealthCheck;
+  /** How long the node waits for the new version to be healthy (DeployProgress health_timeout), when it said. */
+  healthWaitSeconds?: number;
+}
+
+/** DeployNodeResult.imageHealthCheck: the ops' services.ImageHealthCheck. */
+export interface StoredImageHealthCheck {
+  test: string[];
+  intervalSeconds: number;
+  timeoutSeconds: number;
+  startPeriodSeconds: number;
+  retries: number;
 }
 
 /** What a move to another project changed besides the service row, to undo on failure. */

@@ -219,6 +219,16 @@ func (m *Moby) InspectImage(ctx context.Context, ref string) (Image, error) {
 	}
 	if res.Config != nil {
 		img.Labels = res.Config.Labels
+		if hc := res.Config.Healthcheck; hc != nil && len(hc.Test) > 0 {
+			img.Healthcheck = &HealthConfig{
+				Test:          hc.Test,
+				Interval:      hc.Interval,
+				Timeout:       hc.Timeout,
+				StartPeriod:   hc.StartPeriod,
+				StartInterval: hc.StartInterval,
+				Retries:       hc.Retries,
+			}
+		}
 	}
 	if t, err := time.Parse(time.RFC3339Nano, res.Created); err == nil {
 		img.Created = t
@@ -337,6 +347,7 @@ func (m *Moby) InspectContainer(ctx context.Context, id string) (ContainerDetail
 		d.Pid = s.Pid
 		d.StartedAt = parseDockerTime(s.StartedAt)
 		d.FinishedAt = parseDockerTime(s.FinishedAt)
+		d.Health = containerHealth(s.Health)
 	}
 	if c.NetworkSettings != nil {
 		for name, ep := range c.NetworkSettings.Networks {
@@ -351,6 +362,20 @@ func (m *Moby) InspectContainer(ctx context.Context, id string) (ContainerDetail
 		d.Publish = publishedPorts(c.HostConfig.PortBindings)
 	}
 	return d, nil
+}
+
+// containerHealth is Docker's health status with its latest check, nil
+// when Docker runs no check for the container.
+func containerHealth(h *container.Health) *ContainerHealth {
+	if h == nil || h.Status == "" || h.Status == container.NoHealthcheck {
+		return nil
+	}
+	out := &ContainerHealth{Status: string(h.Status), FailingStreak: h.FailingStreak}
+	if n := len(h.Log); n > 0 && h.Log[n-1] != nil {
+		out.Output = h.Log[n-1].Output
+		out.ExitCode = h.Log[n-1].ExitCode
+	}
+	return out
 }
 
 // publishedPorts turns a container's TCP port bindings into PortPublish

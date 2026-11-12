@@ -25,12 +25,22 @@ type Result struct {
 	// Output explains a failure (HTTP status, command output, dial error),
 	// truncated to 4 KiB.
 	Output string
+	// Starting: no verdict yet (Docker's check of the image's HEALTHCHECK
+	// is still starting). A Watch keeps its state.
+	Starting bool
+	// Final: the failure is Docker's verdict, the image's retries already
+	// counted. A Watch takes it at once.
+	Final bool
 }
 
 // Prober runs health checks.
 type Prober interface {
 	// Probe runs the check once. A nil check means the default TCP check on
-	// the first TCP port of ports, or healthy when there are none.
+	// the first TCP port of ports, or healthy when there are none. So does
+	// an image check (HealthCheck.image): its verdict is Docker's, which
+	// reconcile reads from the container itself (FromDocker); a prober only
+	// gets it where the address matters (a container moving to another
+	// project's network).
 	Probe(ctx context.Context, target Target, check *agentv1.HealthCheck, ports []*agentv1.PortSpec) Result
 	// WaitHealthy probes until a probe passes, or ctx ends (the caller sets
 	// the deploy health timeout on ctx). The error carries the last

@@ -33,7 +33,16 @@ import {
 } from "@seylo/proto";
 import { and, asc, desc, eq, inArray, isNull, max, ne } from "drizzle-orm";
 import type { AgentStream } from "../../agent-hub/calls";
-import { builds, type DeployStep, deployments, nodes, servicePlacements, services, sourceUploads } from "../../db/schema";
+import {
+  builds,
+  type DeployNodeResult,
+  type DeployStep,
+  deployments,
+  nodes,
+  servicePlacements,
+  services,
+  sourceUploads,
+} from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { RefusedSpec } from "../../desired";
 import { checkWaitingDomains } from "../domains/no-route";
@@ -43,6 +52,7 @@ import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService } from "../services/rows";
 import { assertImageAllowed } from "../services/source-guard";
 import { needsBuild, readSpec, runSettingsOf } from "../services/spec";
+import { reportedHealth, reportedWaitMs } from "./image-health";
 import { appendLog, LineSplitter } from "./logs";
 import { registryGcJobType } from "./registry-gc";
 import { pickBuildNode, resolveBuild, sourceBranch } from "./source";
@@ -584,6 +594,8 @@ export function recordDeployProgress(s: Pick<EngineState, "deps">, nodeId: strin
   let steps = d.steps;
   const results = { ...d.nodeResults };
   const name = nodeNameOf(s, nodeId);
+  const reported = reportedHealth(progress);
+  if (Object.keys(reported).length > 0) results[nodeId] = { ...(results[nodeId] as DeployNodeResult), ...reported };
   switch (progress.stage) {
     case DeployStage.PULLING:
       steps = setStep(steps, "ship", "running", { detail: `Pulling on ${name}` });
@@ -604,10 +616,15 @@ export function recordDeployProgress(s: Pick<EngineState, "deps">, nodeId: strin
       });
       break;
     case DeployStage.SUCCEEDED:
-      results[nodeId] = { status: "ok", message: progress.message, digest: results[nodeId]?.digest ?? null };
+      results[nodeId] = { ...results[nodeId], status: "ok", message: progress.message, digest: results[nodeId]?.digest ?? null };
       break;
     case DeployStage.FAILED:
-      results[nodeId] = { status: "failed", message: progress.message || `The new version did not start on ${name}.`, digest: null };
+      results[nodeId] = {
+        ...results[nodeId],
+        status: "failed",
+        message: progress.message || `The new version did not start on ${name}.`,
+        digest: null,
+      };
       break;
     default:
       break;
@@ -677,9 +694,9 @@ function resultsFromState(s: EngineState, d: DeploymentRow): DeploymentRow["node
       status.phase === ServicePhase.RUNNING &&
       mine.length > 0 &&
       mine.every((i) => i.state === InstanceState.RUNNING && i.health !== HealthState.UNHEALTHY && i.health !== HealthState.STARTING);
-    if (healthy) results[nodeId] = { status: "ok", message: "", digest: mine[0]?.imageDigest || null };
+    if (healthy) results[nodeId] = { ...current, status: "ok", message: "", digest: mine[0]?.imageDigest || null };
     else if (status.phase === ServicePhase.FAILED)
-      results[nodeId] = { status: "failed", message: status.message || "The new version failed.", digest: null };
+      results[nodeId] = { ...current, status: "failed", message: status.message || "The new version failed.", digest: null };
   }
   return results;
 }
@@ -696,7 +713,8 @@ async function checkRollout(s: EngineState, d: DeploymentRow): Promise<void> {
   if (entries.length > 0 && entries.every(([, r]) => r.status === "ok")) return succeed(s, d);
 
   const settings = d.runSettings as { deploy?: { healthTimeoutSeconds?: number } } | null;
-  const healthMs = (settings?.deploy?.healthTimeoutSeconds ?? 300) * 1000;
+  // A node gated on the image's HEALTHCHECK may wait past the setting for its start period: wait as long as it says.
+  const healthMs = Math.max((settings?.deploy?.healthTimeoutSeconds ?? 300) * 1000, reportedWaitMs(d.nodeResults));
   const started = (d.phaseStartedAt ?? d.createdAt).getTime();
   if (Date.now() - started > healthMs + rolloutGraceMs) {
     const waiting = entries.filter(([, r]) => r.status === "pending").map(([id]) => nodeName(s, id));

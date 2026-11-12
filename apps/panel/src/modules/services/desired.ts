@@ -31,7 +31,7 @@ import { openRegistryLogin } from "../registries";
 import { moveCopying } from "./copies";
 import { entryNodeOf } from "./rows";
 import { registryMatches } from "./source-guard";
-import { type RunSettings, readRunSettings, readSpec, restartDelaySeconds } from "./spec";
+import { defaultHealthTimeoutSeconds, type RunSettings, readRunSettings, readSpec, restartDelaySeconds } from "./spec";
 
 export type ServiceSpecInit = MessageInitShape<typeof ServiceSpecSchema>;
 
@@ -159,7 +159,7 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
         mode: 0o644,
       })),
     ports: run.ports.map((p) => ({ containerPort: p.containerPort, protocol: p.protocol === "udp" ? PortProtocol.UDP : PortProtocol.TCP })),
-    healthCheck: run.healthCheck ? healthCheckOf(run.healthCheck) : undefined,
+    healthCheck: run.healthCheck ? healthCheckOf(run.healthCheck) : imageHealthCheckOf(run, kind, svc.protected),
     crashPolicy: {
       restart: spec.crashPolicy.restart,
       stopAfterCrashes: spec.crashPolicy.stopAfterCrashes,
@@ -182,7 +182,7 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
     },
     deploy: {
       mode: run.deploy.mode === "recreate" ? DeployMode.RECREATE : DeployMode.ROLLING,
-      healthTimeout: seconds(run.deploy.healthTimeoutSeconds),
+      healthTimeout: healthTimeoutOf(run.deploy.healthTimeoutSeconds),
     },
   };
 
@@ -231,6 +231,28 @@ function healthCheckOf(h: NonNullable<RunSettings["healthCheck"]>): NonNullable<
     startPeriod: seconds(h.startPeriodSeconds),
     failureThreshold: h.failureThreshold,
   };
+}
+
+/**
+ * The image's own HEALTHCHECK as the check of an app or compose member
+ * without one of its own (HealthCheck.image): deployed from 0.2.14
+ * (run.imageHealthCheck), not the panel, and not a member whose compose file
+ * turns health checks off. Undefined otherwise: TCP on the first port, as
+ * before. Agents before 0.2.14 read it as that default too.
+ */
+function imageHealthCheckOf(run: RunSettings, kind: ServiceKind, isProtected: boolean): ServiceSpecInit["healthCheck"] {
+  if (!run.imageHealthCheck || isProtected || run.member?.imageHealthCheck === false) return undefined;
+  if (kind !== ServiceKind.APP && kind !== ServiceKind.COMPOSE_MEMBER) return undefined;
+  return { probe: { case: "image", value: {} } };
+}
+
+/**
+ * DeployStrategy.health_timeout: unset while the service keeps the default
+ * (300 s, the agent's own default), so an agent gated on the image's
+ * HEALTHCHECK may wait longer for its start period; any other value as set.
+ */
+function healthTimeoutOf(secondsSet: number) {
+  return secondsSet === defaultHealthTimeoutSeconds ? undefined : seconds(secondsSet);
 }
 
 /** Service ids placed on a node whose spec the compiler should ask for. */

@@ -16279,6 +16279,47 @@
                             }
                           ]
                         },
+                        "imageHealthCheck": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "test",
+                                "intervalSeconds",
+                                "timeoutSeconds",
+                                "startPeriodSeconds",
+                                "retries"
+                              ],
+                              "properties": {
+                                "test": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "intervalSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "timeoutSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "startPeriodSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "retries": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "crashPolicy": {
                           "type": "object",
                           "required": [
@@ -21382,7 +21423,7 @@
       "post": {
         "operationId": "databases.resetPassword",
         "summary": "Reset a database password",
-        "description": "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them (Redis, Valkey and KeyDB too, which would start with the old one again); a stopped database is refused (notRunning). MySQL and MariaDB give root the same password as the admin, also an admin other than root (MYSQL_ROOT_PASSWORD, MARIADB_ROOT_PASSWORD); warning says when root kept an older password because it could not sign in to change it.",
+        "description": "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy (a restart keeps the old one); anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them (Redis, Valkey and KeyDB too, which would start with the old one again); a stopped database is refused (notRunning). MySQL and MariaDB give root the same password as the admin, also an admin other than root (MYSQL_ROOT_PASSWORD, MARIADB_ROOT_PASSWORD); warning says when root kept an older password because it could not sign in to change it.",
         "tags": [
           "databases"
         ],
@@ -27662,6 +27703,47 @@
                             "failureThreshold": {
                               "minimum": 1,
                               "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
                               "type": "integer"
                             }
                           }
@@ -34372,7 +34454,7 @@
       "post": {
         "operationId": "env.set",
         "summary": "Save a service's environment",
-        "description": "Replaces the service's whole .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy or restart. To change one variable and keep the others as they are, use env.setVariable.",
+        "description": "Replaces the service's whole .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy (a restart keeps the values of the last deploy); restartNeeded says the service runs with older values. To change one variable and keep the others as they are, use env.setVariable.",
         "tags": [
           "env"
         ],
@@ -34744,7 +34826,7 @@
       "post": {
         "operationId": "env.setShared",
         "summary": "Save a project's shared variables",
-        "description": "Replaces the project's shared variables (.env text). Shared variables cannot reference services. Services that use them get the new values on their next deploy or restart.",
+        "description": "Replaces the project's shared variables (.env text). Shared variables cannot reference services. Services that use them get the new values on their next deploy, not on a restart.",
         "tags": [
           "env"
         ],
@@ -35121,7 +35203,7 @@
       "post": {
         "operationId": "env.setSharedVariable",
         "summary": "Set one of a project's shared variables",
-        "description": "Sets one shared variable and keeps the others as they are, like env.setVariable for a service: the last line with the key gets the new value (its quoting, comments and # @public kept), a new key is appended, value null removes every line with the key (NOT_FOUND when there is none). Refused when the text would grow past 262144 characters. Shared variables cannot reference services. Services that use them get the new value on their next deploy or restart.",
+        "description": "Sets one shared variable and keeps the others as they are, like env.setVariable for a service: the last line with the key gets the new value (its quoting, comments and # @public kept), a new key is appended, value null removes every line with the key (NOT_FOUND when there is none). Refused when the text would grow past 262144 characters. Shared variables cannot reference services. Services that use them get the new value on their next deploy, not on a restart.",
         "tags": [
           "env"
         ],
@@ -35513,7 +35595,7 @@
       "post": {
         "operationId": "env.setVariable",
         "summary": "Set one variable of a service's environment",
-        "description": "Sets one variable and keeps the rest of the .env text as it is, so a caller that cannot read the other values (model callers get env.get redacted) changes only this line. An existing key keeps its line: the value of the last line with that key (the one that wins) is replaced, in its quote style when the value fits it, with its export, its trailing comment and the comment lines above it (# @public stays). A new key is appended as KEY=value. value null removes every line with the key (NOT_FOUND when there is none). Give the value unquoted; ${{target.VARIABLE}} references are allowed, and a value with spaces or a newline is written in double quotes. Same checks as env.set, and refused when the text would grow past 262144 characters; the diagnostics of the whole file come back (hardcoded-reference: a value that spells out a service's URL, with a fix to its reference). The new value applies on the next deploy or restart.",
+        "description": "Sets one variable and keeps the rest of the .env text as it is, so a caller that cannot read the other values (model callers get env.get redacted) changes only this line. An existing key keeps its line: the value of the last line with that key (the one that wins) is replaced, in its quote style when the value fits it, with its export, its trailing comment and the comment lines above it (# @public stays). A new key is appended as KEY=value. value null removes every line with the key (NOT_FOUND when there is none). Give the value unquoted; ${{target.VARIABLE}} references are allowed, and a value with spaces or a newline is written in double quotes. Same checks as env.set, and refused when the text would grow past 262144 characters; the diagnostics of the whole file come back (hardcoded-reference: a value that spells out a service's URL, with a fix to its reference). The new value applies on the next deploy, not on a restart.",
         "tags": [
           "env"
         ],
@@ -40371,6 +40453,47 @@
                         }
                       ]
                     },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "crashPolicy": {
                       "type": "object",
                       "required": [
@@ -43414,6 +43537,47 @@
                             "failureThreshold": {
                               "minimum": 1,
                               "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
                               "type": "integer"
                             }
                           }
@@ -63617,6 +63781,47 @@
                             }
                           ]
                         },
+                        "imageHealthCheck": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "test",
+                                "intervalSeconds",
+                                "timeoutSeconds",
+                                "startPeriodSeconds",
+                                "retries"
+                              ],
+                              "properties": {
+                                "test": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "intervalSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "timeoutSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "startPeriodSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "retries": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "crashPolicy": {
                           "type": "object",
                           "required": [
@@ -65976,6 +66181,47 @@
                         }
                       ]
                     },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "crashPolicy": {
                       "type": "object",
                       "required": [
@@ -67529,6 +67775,47 @@
                             "failureThreshold": {
                               "minimum": 1,
                               "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
                               "type": "integer"
                             }
                           }
@@ -69466,7 +69753,7 @@
       "post": {
         "operationId": "services.setHealthCheck",
         "summary": "Set a service's health check and deploy strategy",
-        "description": "Sets the custom health check (null = TCP on the first port) and how deploys roll out: rolling (zero downtime, health gated) or recreate, and how long a new version may take to become healthy. Applies on the next deploy.",
+        "description": "Sets the custom health check and how deploys roll out: rolling (zero downtime, health gated) or recreate, and how long a new version may take to become healthy. null = the default: the image's own HEALTHCHECK when it declares one (apps and compose members; deploys wait for Docker to call the container healthy, through its start period), else TCP on the first port. With the image's HEALTHCHECK the default health timeout (300) grows to its start period plus retries x (interval + timeout) plus a minute; any other timeout is used as set. Applies on the next deploy.",
         "tags": [
           "services"
         ],
@@ -71388,6 +71675,47 @@
                             "failureThreshold": {
                               "minimum": 1,
                               "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
                               "type": "integer"
                             }
                           }
@@ -73379,6 +73707,47 @@
                             "failureThreshold": {
                               "minimum": 1,
                               "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageHealthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "retries": {
+                              "minimum": 0,
                               "type": "integer"
                             }
                           }
@@ -75959,6 +76328,47 @@
                                 "failureThreshold": {
                                   "minimum": 1,
                                   "maximum": 100,
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "imageHealthCheck": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "test",
+                                "intervalSeconds",
+                                "timeoutSeconds",
+                                "startPeriodSeconds",
+                                "retries"
+                              ],
+                              "properties": {
+                                "test": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "intervalSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "timeoutSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "startPeriodSeconds": {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                "retries": {
+                                  "minimum": 0,
                                   "type": "integer"
                                 }
                               }

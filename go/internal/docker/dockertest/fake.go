@@ -31,6 +31,9 @@ type Container struct {
 	Restarts int
 	// Networks maps network name to IP.
 	Networks map[string]string
+	// Health is Docker's health status: "starting" from each start when
+	// the image has a HEALTHCHECK (Fake.Images), changed with SetHealth.
+	Health *docker.ContainerHealth
 }
 
 // Fake implements docker.Engine.
@@ -58,6 +61,10 @@ type Fake struct {
 	ExitOnStart map[string]int
 	// ExecFunc answers ExecRun; nil returns exit code 0.
 	ExecFunc func(containerID string, cmd []string) (int, []byte)
+	// Images holds the config InspectImage reports for a reference (its
+	// HEALTHCHECK); other present images have none. Set before the image
+	// is used, or under the test's own synchronization.
+	Images map[string]docker.Image
 	// Now is time.Now unless set.
 	Now func() time.Time
 	// Calls counts calls by method name.
@@ -79,7 +86,36 @@ func New() *Fake {
 		FailPull:    map[string]error{},
 		FailStart:   map[string]error{},
 		ExitOnStart: map[string]int{},
+		Images:      map[string]docker.Image{},
 		Calls:       map[string]int{},
+	}
+}
+
+// imageHealthLocked is the HEALTHCHECK of ref Docker would run, nil for
+// none or NONE. Callers hold f.mu.
+func (f *Fake) imageHealthLocked(ref string) *docker.HealthConfig {
+	hc := f.Images[ref].Healthcheck
+	if hc == nil || len(hc.Test) == 0 || hc.Test[0] == "NONE" {
+		return nil
+	}
+	return hc
+}
+
+// SetHealth sets Docker's health status of a container that has one, with
+// the latest check's output, as Docker's own check would.
+func (f *Fake) SetHealth(id, status, output string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.find(id)
+	if c == nil || c.Health == nil {
+		return
+	}
+	c.Health.Status, c.Health.Output = status, output
+	if status == docker.HealthUnhealthy {
+		c.Health.ExitCode = 1
+		c.Health.FailingStreak++
+	} else {
+		c.Health.ExitCode, c.Health.FailingStreak = 0, 0
 	}
 }
 
@@ -166,7 +202,9 @@ func (f *Fake) InspectImage(ctx context.Context, ref string) (docker.Image, erro
 	if !f.images[ref] {
 		return docker.Image{}, fmt.Errorf("%w: image %s", docker.ErrNotFound, ref)
 	}
-	return docker.Image{ID: "sha256:" + ref, RepoTags: []string{ref}}, nil
+	img := f.Images[ref]
+	img.ID, img.RepoTags = "sha256:"+ref, []string{ref}
+	return img, nil
 }
 
 func (f *Fake) ListImages(ctx context.Context, labels map[string]string) ([]docker.Image, error) {
@@ -251,11 +289,17 @@ func (f *Fake) InspectContainer(ctx context.Context, id string) (docker.Containe
 	}
 	publish := slices.Clone(c.Spec.Publish)
 	docker.SortPublish(publish)
+	var hc *docker.ContainerHealth
+	if c.Health != nil {
+		h := *c.Health
+		hc = &h
+	}
 	return docker.ContainerDetails{
 		ID: c.ID, Name: c.Spec.Name, Image: c.Spec.Image, ImageID: "sha256:" + c.Spec.Image,
 		Labels: maps.Clone(c.Spec.Labels), State: c.state(), Running: c.Running,
 		ExitCode: c.ExitCode, OOMKilled: c.OOM, StartedAt: c.Started, FinishedAt: c.Finished,
 		RestartCount: c.Restarts, Tty: c.Spec.Tty, Networks: maps.Clone(c.Networks), Publish: publish,
+		Health: hc,
 	}, nil
 }
 
@@ -319,6 +363,10 @@ func (f *Fake) StartContainer(ctx context.Context, id string) error {
 		c.Restarts++
 	}
 	c.Running, c.Started, c.Finished, c.ExitCode, c.OOM = true, f.now(), time.Time{}, 0, false
+	if f.imageHealthLocked(c.Spec.Image) != nil {
+		// Docker starts every run of a checked container as starting.
+		c.Health = &docker.ContainerHealth{Status: docker.HealthStarting}
+	}
 	for n := range c.Networks {
 		c.Networks[n] = f.nextIP()
 	}

@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "seylo/agent/v1/backup.proto";
 import "seylo/agent/v1/metrics.proto";
 import "seylo/agent/v1/node.proto";
+import "seylo/agent/v1/service.proto";
 import "seylo/agent/v1/state.proto";
 
 // Event is the payload of EVENT frames after the handshake. Delivery
@@ -105,6 +106,14 @@ message DeployProgress {
   uint64 generation = 2;
   DeployStage stage = 3;
   string message = 4;
+  // The image HEALTHCHECK the new generation is gated on (HealthCheck.image
+  // on an image that declares one), with DEPLOY_STAGE_HEALTH_CHECKING and
+  // the final stages. Unset otherwise, and from agents before 0.2.14.
+  ImageHealthCheck image_health_check = 5;
+  // With DEPLOY_STAGE_HEALTH_CHECKING: how long the agent waits for the new
+  // generation to become healthy (DeployStrategy.health_timeout, or longer
+  // for the image's HEALTHCHECK). Unset from agents before 0.2.14.
+  google.protobuf.Duration health_timeout = 6;
 }
 
 enum DeployStage {

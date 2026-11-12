@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/moby/moby/client"
 )
@@ -21,6 +22,8 @@ type fakeDaemon struct {
 	mu      sync.Mutex
 	created map[string]any
 	inspect string
+	// image answers GET /images/app:1/json when set.
+	image string
 }
 
 func (f *fakeDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +41,9 @@ func (f *fakeDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/c1/json"):
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, f.inspect)
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/images/app:1/json") && f.image != "":
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, f.image)
 	default:
 		http.NotFound(w, r)
 	}
@@ -152,5 +158,61 @@ func TestInspectContainerReportsBindings(t *testing.T) {
 	}
 	if d.Publish[0].Host() != "127.0.0.1:3000" || d.Publish[1].Host() != "0.0.0.0:3443" {
 		t.Fatalf("hosts = %s, %s", d.Publish[0].Host(), d.Publish[1].Host())
+	}
+}
+
+// InspectContainer reports Docker's own health status with the output and
+// exit code of the latest check, and none for a container Docker does not
+// check.
+func TestInspectContainerReportsDockerHealth(t *testing.T) {
+	f := &fakeDaemon{inspect: `{"Id":"c1","Name":"/web","State":{"Status":"running","Running":true,
+		"Health":{"Status":"unhealthy","FailingStreak":3,"Log":[
+			{"Start":"2026-11-12T10:00:00Z","End":"2026-11-12T10:00:01Z","ExitCode":1,"Output":"older"},
+			{"Start":"2026-11-12T10:00:10Z","End":"2026-11-12T10:00:11Z","ExitCode":7,"Output":"curl: (7) connection refused"}]}},
+		"Config":{"Image":"app:1","Labels":{}}}`}
+	m := newFakeMoby(t, f)
+	d, err := m.InspectContainer(context.Background(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ContainerHealth{Status: HealthUnhealthy, FailingStreak: 3, Output: "curl: (7) connection refused", ExitCode: 7}
+	if d.Health == nil || *d.Health != want {
+		t.Fatalf("health = %+v, want %+v", d.Health, want)
+	}
+
+	for _, state := range []string{`{"Status":"running","Running":true}`, `{"Status":"running","Running":true,"Health":{"Status":"none"}}`} {
+		f.inspect = `{"Id":"c1","Name":"/web","State":` + state + `,"Config":{"Image":"app:1"}}`
+		d, err := m.InspectContainer(context.Background(), "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Health != nil {
+			t.Errorf("%s: health = %+v, want none", state, d.Health)
+		}
+	}
+}
+
+// InspectImage reports the image's HEALTHCHECK as Docker stores it.
+func TestInspectImageReportsHealthcheck(t *testing.T) {
+	f := &fakeDaemon{image: `{"Id":"sha256:1","Config":{"Healthcheck":{"Test":["CMD-SHELL","curl -fs localhost/healthz"],
+		"Interval":10000000000,"Timeout":3000000000,"StartPeriod":600000000000,"Retries":5}}}`}
+	m := newFakeMoby(t, f)
+	img, err := m.InspectImage(context.Background(), "app:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := img.Healthcheck
+	if hc == nil || !slices.Equal(hc.Test, []string{"CMD-SHELL", "curl -fs localhost/healthz"}) ||
+		hc.Interval != 10*time.Second || hc.Timeout != 3*time.Second || hc.StartPeriod != 10*time.Minute || hc.Retries != 5 {
+		t.Fatalf("healthcheck = %+v", hc)
+	}
+
+	f.image = `{"Id":"sha256:2","Config":{"Cmd":["sh"]}}`
+	img, err = m.InspectImage(context.Background(), "app:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Healthcheck != nil {
+		t.Fatalf("healthcheck = %+v, want none", img.Healthcheck)
 	}
 }

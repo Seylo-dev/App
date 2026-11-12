@@ -66,6 +66,9 @@ type worker struct {
 	// it to the panel user (preparePanelDir), so a failed first start puts
 	// it back for the panel container that ran before. Panel only.
 	panelDirWas *panelDirOwner
+	// rollImage is the image HEALTHCHECK the rollout in progress is gated
+	// on (imageCheckOf), sent with its progress and result.
+	rollImage *agentv1.ImageHealthCheck
 
 	rollMu     sync.Mutex
 	rolling    bool
@@ -465,7 +468,11 @@ func (w *worker) converge(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 		// or crash policy changed): the deploy is done without a restart.
 		w.rec.Succeeded = spec.GetGeneration()
 		w.saveRecord()
-		w.reportDeploy(ctx, spec.GetGeneration(), agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED, "no container changes")
+		img := ""
+		if ref, err := ImageRef(spec.GetImage()); err == nil {
+			img = ref
+		}
+		w.reportDeployImage(ctx, spec.GetGeneration(), agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED, "no container changes", w.imageCheckOf(ctx, spec, img))
 	}
 }
 
@@ -1027,7 +1034,7 @@ func (w *worker) probeRunning(ctx context.Context) {
 			watch = health.NewHealthyWatch(check, w.r.o.Now())
 			w.watches[inst.id] = watch
 		}
-		res := w.r.o.Prober.Probe(ctx, health.Target{ContainerID: inst.id, Address: inst.ip}, check, spec.GetPorts())
+		res := w.probe(ctx, inst, spec)
 		prev, ch := watch.Observe(res, w.r.o.Now())
 		if !ch {
 			continue

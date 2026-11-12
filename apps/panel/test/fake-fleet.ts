@@ -5,7 +5,7 @@
 // stages, DeployProgress, raw byte streams), so the deploy runner is tested
 // end to end without a network.
 
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs, timestampNow } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
 import {
@@ -307,10 +307,17 @@ export class FakeFleet {
   }
 
   /** The node reports a rollout step for a service generation. */
-  deployProgress(nodeId: string, serviceId: string, generation: number, stage: DeployStage, message = ""): void {
+  deployProgress(
+    nodeId: string,
+    serviceId: string,
+    generation: number,
+    stage: DeployStage,
+    message = "",
+    extra: Pick<MessageInitShape<typeof DeployProgressSchema>, "imageHealthCheck" | "healthTimeout"> = {},
+  ): void {
     this.emit(nodeId, {
       case: "deployProgress",
-      value: create(DeployProgressSchema, { serviceId, generation: BigInt(generation), stage, message }),
+      value: create(DeployProgressSchema, { serviceId, generation: BigInt(generation), stage, message, ...extra }),
     });
   }
 

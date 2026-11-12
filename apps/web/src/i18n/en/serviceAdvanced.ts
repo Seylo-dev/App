@@ -7,8 +7,21 @@ export default {
     title: "Health check and deploys",
     description: "New versions get traffic only after they pass. If they never do, the deploy fails and the old version keeps serving.",
     probe: "Check",
-    probes: { default: "Default: TCP on the first port", tcp: "TCP port", http: "HTTP request", command: "Command in the container" },
+    probes: {
+      default: "Default: the image's HEALTHCHECK, else TCP",
+      tcp: "TCP port",
+      http: "HTTP request",
+      command: "Command in the container",
+    },
     defaultHint: "Without ports the service counts as healthy once it is running.",
+    imageCheck: {
+      one: "Image HEALTHCHECK: {command}, every {interval}, start period {start}, {count} retry",
+      other: "Image HEALTHCHECK: {command}, every {interval}, start period {start}, {count} retries",
+    },
+    imageCheckHint:
+      "Deploys switch once Docker calls the new container healthy, and fail when it calls it unhealthy. Pick another check to use your own instead.",
+    tcpCheck: "TCP on port {port}",
+    tcpCheckHint: "Images that declare a HEALTHCHECK use it instead, from their next deploy.",
     port: "Port",
     path: "Path",
     host: "Host header",
@@ -29,7 +42,8 @@ export default {
     rollingHint: "Needs room for two copies for a moment.",
     recreateHint: "For apps that cannot run twice, like ones holding a file lock. Short downtime.",
     healthTimeout: "Health timeout (seconds)",
-    healthTimeoutHint: "How long a new version may take to become healthy.",
+    healthTimeoutHint:
+      "How long a new version may take to become healthy. At the default 300, a deploy waiting for the image's HEALTHCHECK waits longer when its start period needs it.",
   },
   crash: {
     title: "Crash policy",

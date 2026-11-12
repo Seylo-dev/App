@@ -9,6 +9,7 @@ import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
+import { serviceImageHealthCheck } from "../deployments/image-health";
 import { appPort } from "../domains/lookup";
 import { latestCopy, latestTransfer } from "./copies";
 import { displaySource } from "./git-url";
@@ -225,6 +226,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     ports: spec.ports,
     appPort: appPort(db, row),
     healthCheck: spec.healthCheck,
+    imageHealthCheck: serviceImageHealthCheck(db, row),
     crashPolicy: spec.crashPolicy,
     restartDelaySeconds,
     resources: spec.resources,

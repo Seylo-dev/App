@@ -1203,6 +1203,7 @@ type HealthCheck struct {
 	//	*HealthCheck_Tcp
 	//	*HealthCheck_Http
 	//	*HealthCheck_Command
+	//	*HealthCheck_Image
 	Probe isHealthCheck_Probe `protobuf_oneof:"probe"`
 	// Defaults: interval 10s, timeout 5s, start period 0, threshold 3.
 	Interval *durationpb.Duration `protobuf:"bytes,4,opt,name=interval,proto3" json:"interval,omitempty"`
@@ -1279,6 +1280,15 @@ func (x *HealthCheck) GetCommand() *CommandProbe {
 	return nil
 }
 
+func (x *HealthCheck) GetImage() *ImageProbe {
+	if x != nil {
+		if x, ok := x.Probe.(*HealthCheck_Image); ok {
+			return x.Image
+		}
+	}
+	return nil
+}
+
 func (x *HealthCheck) GetInterval() *durationpb.Duration {
 	if x != nil {
 		return x.Interval
@@ -1323,11 +1333,25 @@ type HealthCheck_Command struct {
 	Command *CommandProbe `protobuf:"bytes,3,opt,name=command,proto3,oneof"`
 }
 
+type HealthCheck_Image struct {
+	// Docker's own health status of the container, from the HEALTHCHECK
+	// its image declares (added in 0.2.14). Panels from 0.2.14 send it for
+	// app services and compose members without a check of their own, from
+	// their next deploy. A container Docker runs no check for (the image
+	// declares none, or HEALTHCHECK NONE) gets the default instead: TCP on
+	// the first port. The fields below are not used with it: Docker runs
+	// the image's command with the image's interval, timeout, start period
+	// and retries. Agents before 0.2.14 do not know it and use the default.
+	Image *ImageProbe `protobuf:"bytes,8,opt,name=image,proto3,oneof"`
+}
+
 func (*HealthCheck_Tcp) isHealthCheck_Probe() {}
 
 func (*HealthCheck_Http) isHealthCheck_Probe() {}
 
 func (*HealthCheck_Command) isHealthCheck_Probe() {}
+
+func (*HealthCheck_Image) isHealthCheck_Probe() {}
 
 type TcpProbe struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1489,6 +1513,136 @@ func (x *CommandProbe) GetCommand() []string {
 	return nil
 }
 
+// ImageProbe is HealthCheck.image: Docker's status of the image's own
+// HEALTHCHECK. Healthy passes, unhealthy fails (Docker has counted the
+// image's retries by then), starting waits.
+type ImageProbe struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageProbe) Reset() {
+	*x = ImageProbe{}
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageProbe) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageProbe) ProtoMessage() {}
+
+func (x *ImageProbe) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageProbe.ProtoReflect.Descriptor instead.
+func (*ImageProbe) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{13}
+}
+
+// ImageHealthCheck is the HEALTHCHECK an image declares, as Docker runs it:
+// Docker's defaults are filled in (interval 30s, timeout 30s, start period
+// 0, start interval 5s, retries 3).
+type ImageHealthCheck struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Docker's form: ["CMD", program, args...] or ["CMD-SHELL", command].
+	Test     []string             `protobuf:"bytes,1,rep,name=test,proto3" json:"test,omitempty"`
+	Interval *durationpb.Duration `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	Timeout  *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	// Failures during this time after start do not count.
+	StartPeriod *durationpb.Duration `protobuf:"bytes,4,opt,name=start_period,json=startPeriod,proto3" json:"start_period,omitempty"`
+	// How often the check runs during the start period.
+	StartInterval *durationpb.Duration `protobuf:"bytes,5,opt,name=start_interval,json=startInterval,proto3" json:"start_interval,omitempty"`
+	// Consecutive failures before Docker calls the container unhealthy.
+	Retries       uint32 `protobuf:"varint,6,opt,name=retries,proto3" json:"retries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageHealthCheck) Reset() {
+	*x = ImageHealthCheck{}
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageHealthCheck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageHealthCheck) ProtoMessage() {}
+
+func (x *ImageHealthCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageHealthCheck.ProtoReflect.Descriptor instead.
+func (*ImageHealthCheck) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ImageHealthCheck) GetTest() []string {
+	if x != nil {
+		return x.Test
+	}
+	return nil
+}
+
+func (x *ImageHealthCheck) GetInterval() *durationpb.Duration {
+	if x != nil {
+		return x.Interval
+	}
+	return nil
+}
+
+func (x *ImageHealthCheck) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+func (x *ImageHealthCheck) GetStartPeriod() *durationpb.Duration {
+	if x != nil {
+		return x.StartPeriod
+	}
+	return nil
+}
+
+func (x *ImageHealthCheck) GetStartInterval() *durationpb.Duration {
+	if x != nil {
+		return x.StartInterval
+	}
+	return nil
+}
+
+func (x *ImageHealthCheck) GetRetries() uint32 {
+	if x != nil {
+		return x.Retries
+	}
+	return 0
+}
+
 // CrashPolicy is enforced by the agent (the Docker restart policy is always
 // "no"), so crashes are seen, counted and reported.
 type CrashPolicy struct {
@@ -1508,7 +1662,7 @@ type CrashPolicy struct {
 
 func (x *CrashPolicy) Reset() {
 	*x = CrashPolicy{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[13]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1520,7 +1674,7 @@ func (x *CrashPolicy) String() string {
 func (*CrashPolicy) ProtoMessage() {}
 
 func (x *CrashPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[13]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1533,7 +1687,7 @@ func (x *CrashPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CrashPolicy.ProtoReflect.Descriptor instead.
 func (*CrashPolicy) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{13}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CrashPolicy) GetRestart() bool {
@@ -1572,7 +1726,7 @@ type Resources struct {
 
 func (x *Resources) Reset() {
 	*x = Resources{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[14]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1584,7 +1738,7 @@ func (x *Resources) String() string {
 func (*Resources) ProtoMessage() {}
 
 func (x *Resources) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[14]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1597,7 +1751,7 @@ func (x *Resources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Resources.ProtoReflect.Descriptor instead.
 func (*Resources) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{14}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Resources) GetMemoryLimitBytes() uint64 {
@@ -1640,7 +1794,7 @@ type LoadBalancer struct {
 
 func (x *LoadBalancer) Reset() {
 	*x = LoadBalancer{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[15]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1652,7 +1806,7 @@ func (x *LoadBalancer) String() string {
 func (*LoadBalancer) ProtoMessage() {}
 
 func (x *LoadBalancer) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[15]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1665,7 +1819,7 @@ func (x *LoadBalancer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalancer.ProtoReflect.Descriptor instead.
 func (*LoadBalancer) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{15}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *LoadBalancer) GetRemoteUpstreams() []*RemoteUpstream {
@@ -1695,7 +1849,7 @@ type RemoteUpstream struct {
 
 func (x *RemoteUpstream) Reset() {
 	*x = RemoteUpstream{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[16]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1707,7 +1861,7 @@ func (x *RemoteUpstream) String() string {
 func (*RemoteUpstream) ProtoMessage() {}
 
 func (x *RemoteUpstream) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[16]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,7 +1874,7 @@ func (x *RemoteUpstream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteUpstream.ProtoReflect.Descriptor instead.
 func (*RemoteUpstream) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{16}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RemoteUpstream) GetNodeId() string {
@@ -1741,7 +1895,11 @@ type DeployStrategy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Mode  DeployMode             `protobuf:"varint,1,opt,name=mode,proto3,enum=seylo.agent.v1.DeployMode" json:"mode,omitempty"`
 	// How long a new generation may take to become healthy before the deploy
-	// fails and the old generation keeps serving. Default 5m.
+	// fails and the old generation keeps serving. Unset is 5m; with
+	// HealthCheck.image on a container Docker runs the image's check for
+	// (agents from 0.2.14), at least the image's start period plus its
+	// retries times its interval and timeout, plus a minute. Panels from
+	// 0.2.14 leave it unset while the service keeps the default (300s).
 	HealthTimeout *durationpb.Duration `protobuf:"bytes,2,opt,name=health_timeout,json=healthTimeout,proto3" json:"health_timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1749,7 +1907,7 @@ type DeployStrategy struct {
 
 func (x *DeployStrategy) Reset() {
 	*x = DeployStrategy{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[17]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1761,7 +1919,7 @@ func (x *DeployStrategy) String() string {
 func (*DeployStrategy) ProtoMessage() {}
 
 func (x *DeployStrategy) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[17]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1774,7 +1932,7 @@ func (x *DeployStrategy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployStrategy.ProtoReflect.Descriptor instead.
 func (*DeployStrategy) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{17}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeployStrategy) GetMode() DeployMode {
@@ -1806,7 +1964,7 @@ type ComposeMemberSpec struct {
 
 func (x *ComposeMemberSpec) Reset() {
 	*x = ComposeMemberSpec{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[18]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1818,7 +1976,7 @@ func (x *ComposeMemberSpec) String() string {
 func (*ComposeMemberSpec) ProtoMessage() {}
 
 func (x *ComposeMemberSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[18]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1831,7 +1989,7 @@ func (x *ComposeMemberSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComposeMemberSpec.ProtoReflect.Descriptor instead.
 func (*ComposeMemberSpec) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{18}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ComposeMemberSpec) GetStackId() string {
@@ -1868,7 +2026,7 @@ type BoxSpec struct {
 
 func (x *BoxSpec) Reset() {
 	*x = BoxSpec{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[19]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1880,7 +2038,7 @@ func (x *BoxSpec) String() string {
 func (*BoxSpec) ProtoMessage() {}
 
 func (x *BoxSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[19]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1893,7 +2051,7 @@ func (x *BoxSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BoxSpec.ProtoReflect.Descriptor instead.
 func (*BoxSpec) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{19}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *BoxSpec) GetWorkspaceVolume() string {
@@ -1925,7 +2083,7 @@ type CronSpec struct {
 
 func (x *CronSpec) Reset() {
 	*x = CronSpec{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[20]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1937,7 +2095,7 @@ func (x *CronSpec) String() string {
 func (*CronSpec) ProtoMessage() {}
 
 func (x *CronSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[20]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1950,7 +2108,7 @@ func (x *CronSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CronSpec.ProtoReflect.Descriptor instead.
 func (*CronSpec) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{20}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CronSpec) GetSchedule() string {
@@ -2005,7 +2163,7 @@ type CronJob struct {
 
 func (x *CronJob) Reset() {
 	*x = CronJob{}
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[21]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2017,7 +2175,7 @@ func (x *CronJob) String() string {
 func (*CronJob) ProtoMessage() {}
 
 func (x *CronJob) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_service_proto_msgTypes[21]
+	mi := &file_seylo_agent_v1_service_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2030,7 +2188,7 @@ func (x *CronJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CronJob.ProtoReflect.Descriptor instead.
 func (*CronJob) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{21}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CronJob) GetId() string {
@@ -2165,11 +2323,12 @@ const file_seylo_agent_v1_service_proto_rawDesc = "" +
 	"\fredirect_url\x18\x03 \x01(\tR\vredirectUrl\x120\n" +
 	"\x14allowed_source_cidrs\x18\x04 \x03(\tR\x12allowedSourceCidrs\x125\n" +
 	"\bclose_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acloseAt\x12!\n" +
-	"\fbind_address\x18\x06 \x01(\tR\vbindAddress\"\x86\x03\n" +
+	"\fbind_address\x18\x06 \x01(\tR\vbindAddress\"\xba\x03\n" +
 	"\vHealthCheck\x12,\n" +
 	"\x03tcp\x18\x01 \x01(\v2\x18.seylo.agent.v1.TcpProbeH\x00R\x03tcp\x12/\n" +
 	"\x04http\x18\x02 \x01(\v2\x19.seylo.agent.v1.HttpProbeH\x00R\x04http\x128\n" +
-	"\acommand\x18\x03 \x01(\v2\x1c.seylo.agent.v1.CommandProbeH\x00R\acommand\x125\n" +
+	"\acommand\x18\x03 \x01(\v2\x1c.seylo.agent.v1.CommandProbeH\x00R\acommand\x122\n" +
+	"\x05image\x18\b \x01(\v2\x1a.seylo.agent.v1.ImageProbeH\x00R\x05image\x125\n" +
 	"\binterval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\binterval\x123\n" +
 	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12<\n" +
 	"\fstart_period\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\vstartPeriod\x12+\n" +
@@ -2183,7 +2342,16 @@ const file_seylo_agent_v1_service_proto_rawDesc = "" +
 	"\x04host\x18\x03 \x01(\tR\x04host\x12'\n" +
 	"\x0fexpected_status\x18\x04 \x01(\rR\x0eexpectedStatus\"(\n" +
 	"\fCommandProbe\x12\x18\n" +
-	"\acommand\x18\x01 \x03(\tR\acommand\"\x95\x01\n" +
+	"\acommand\x18\x01 \x03(\tR\acommand\"\f\n" +
+	"\n" +
+	"ImageProbe\"\xac\x02\n" +
+	"\x10ImageHealthCheck\x12\x12\n" +
+	"\x04test\x18\x01 \x03(\tR\x04test\x125\n" +
+	"\binterval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\binterval\x123\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12<\n" +
+	"\fstart_period\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\vstartPeriod\x12@\n" +
+	"\x0estart_interval\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\x12\x18\n" +
+	"\aretries\x18\x06 \x01(\rR\aretries\"\x95\x01\n" +
 	"\vCrashPolicy\x12\x18\n" +
 	"\arestart\x18\x01 \x01(\bR\arestart\x12,\n" +
 	"\x12stop_after_crashes\x18\x02 \x01(\rR\x10stopAfterCrashes\x12>\n" +
@@ -2269,7 +2437,7 @@ func file_seylo_agent_v1_service_proto_rawDescGZIP() []byte {
 }
 
 var file_seylo_agent_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_seylo_agent_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_seylo_agent_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_seylo_agent_v1_service_proto_goTypes = []any{
 	(ServiceKind)(0),              // 0: seylo.agent.v1.ServiceKind
 	(PortProtocol)(0),             // 1: seylo.agent.v1.PortProtocol
@@ -2289,20 +2457,22 @@ var file_seylo_agent_v1_service_proto_goTypes = []any{
 	(*TcpProbe)(nil),              // 15: seylo.agent.v1.TcpProbe
 	(*HttpProbe)(nil),             // 16: seylo.agent.v1.HttpProbe
 	(*CommandProbe)(nil),          // 17: seylo.agent.v1.CommandProbe
-	(*CrashPolicy)(nil),           // 18: seylo.agent.v1.CrashPolicy
-	(*Resources)(nil),             // 19: seylo.agent.v1.Resources
-	(*LoadBalancer)(nil),          // 20: seylo.agent.v1.LoadBalancer
-	(*RemoteUpstream)(nil),        // 21: seylo.agent.v1.RemoteUpstream
-	(*DeployStrategy)(nil),        // 22: seylo.agent.v1.DeployStrategy
-	(*ComposeMemberSpec)(nil),     // 23: seylo.agent.v1.ComposeMemberSpec
-	(*BoxSpec)(nil),               // 24: seylo.agent.v1.BoxSpec
-	(*CronSpec)(nil),              // 25: seylo.agent.v1.CronSpec
-	(*CronJob)(nil),               // 26: seylo.agent.v1.CronJob
-	(*Routing)(nil),               // 27: seylo.agent.v1.Routing
-	(*DevAccess)(nil),             // 28: seylo.agent.v1.DevAccess
-	(*DatabaseSpec)(nil),          // 29: seylo.agent.v1.DatabaseSpec
-	(*durationpb.Duration)(nil),   // 30: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 31: google.protobuf.Timestamp
+	(*ImageProbe)(nil),            // 18: seylo.agent.v1.ImageProbe
+	(*ImageHealthCheck)(nil),      // 19: seylo.agent.v1.ImageHealthCheck
+	(*CrashPolicy)(nil),           // 20: seylo.agent.v1.CrashPolicy
+	(*Resources)(nil),             // 21: seylo.agent.v1.Resources
+	(*LoadBalancer)(nil),          // 22: seylo.agent.v1.LoadBalancer
+	(*RemoteUpstream)(nil),        // 23: seylo.agent.v1.RemoteUpstream
+	(*DeployStrategy)(nil),        // 24: seylo.agent.v1.DeployStrategy
+	(*ComposeMemberSpec)(nil),     // 25: seylo.agent.v1.ComposeMemberSpec
+	(*BoxSpec)(nil),               // 26: seylo.agent.v1.BoxSpec
+	(*CronSpec)(nil),              // 27: seylo.agent.v1.CronSpec
+	(*CronJob)(nil),               // 28: seylo.agent.v1.CronJob
+	(*Routing)(nil),               // 29: seylo.agent.v1.Routing
+	(*DevAccess)(nil),             // 30: seylo.agent.v1.DevAccess
+	(*DatabaseSpec)(nil),          // 31: seylo.agent.v1.DatabaseSpec
+	(*durationpb.Duration)(nil),   // 32: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 33: google.protobuf.Timestamp
 }
 var file_seylo_agent_v1_service_proto_depIdxs = []int32{
 	0,  // 0: seylo.agent.v1.ServiceSpec.kind:type_name -> seylo.agent.v1.ServiceKind
@@ -2313,43 +2483,48 @@ var file_seylo_agent_v1_service_proto_depIdxs = []int32{
 	11, // 5: seylo.agent.v1.ServiceSpec.files:type_name -> seylo.agent.v1.FileMount
 	12, // 6: seylo.agent.v1.ServiceSpec.ports:type_name -> seylo.agent.v1.PortSpec
 	14, // 7: seylo.agent.v1.ServiceSpec.health_check:type_name -> seylo.agent.v1.HealthCheck
-	18, // 8: seylo.agent.v1.ServiceSpec.crash_policy:type_name -> seylo.agent.v1.CrashPolicy
-	19, // 9: seylo.agent.v1.ServiceSpec.resources:type_name -> seylo.agent.v1.Resources
-	27, // 10: seylo.agent.v1.ServiceSpec.routing:type_name -> seylo.agent.v1.Routing
-	20, // 11: seylo.agent.v1.ServiceSpec.load_balancer:type_name -> seylo.agent.v1.LoadBalancer
-	28, // 12: seylo.agent.v1.ServiceSpec.dev_access:type_name -> seylo.agent.v1.DevAccess
-	22, // 13: seylo.agent.v1.ServiceSpec.deploy:type_name -> seylo.agent.v1.DeployStrategy
-	26, // 14: seylo.agent.v1.ServiceSpec.cron_jobs:type_name -> seylo.agent.v1.CronJob
-	23, // 15: seylo.agent.v1.ServiceSpec.compose_member:type_name -> seylo.agent.v1.ComposeMemberSpec
-	29, // 16: seylo.agent.v1.ServiceSpec.database:type_name -> seylo.agent.v1.DatabaseSpec
-	24, // 17: seylo.agent.v1.ServiceSpec.box:type_name -> seylo.agent.v1.BoxSpec
-	25, // 18: seylo.agent.v1.ServiceSpec.cron:type_name -> seylo.agent.v1.CronSpec
+	20, // 8: seylo.agent.v1.ServiceSpec.crash_policy:type_name -> seylo.agent.v1.CrashPolicy
+	21, // 9: seylo.agent.v1.ServiceSpec.resources:type_name -> seylo.agent.v1.Resources
+	29, // 10: seylo.agent.v1.ServiceSpec.routing:type_name -> seylo.agent.v1.Routing
+	22, // 11: seylo.agent.v1.ServiceSpec.load_balancer:type_name -> seylo.agent.v1.LoadBalancer
+	30, // 12: seylo.agent.v1.ServiceSpec.dev_access:type_name -> seylo.agent.v1.DevAccess
+	24, // 13: seylo.agent.v1.ServiceSpec.deploy:type_name -> seylo.agent.v1.DeployStrategy
+	28, // 14: seylo.agent.v1.ServiceSpec.cron_jobs:type_name -> seylo.agent.v1.CronJob
+	25, // 15: seylo.agent.v1.ServiceSpec.compose_member:type_name -> seylo.agent.v1.ComposeMemberSpec
+	31, // 16: seylo.agent.v1.ServiceSpec.database:type_name -> seylo.agent.v1.DatabaseSpec
+	26, // 17: seylo.agent.v1.ServiceSpec.box:type_name -> seylo.agent.v1.BoxSpec
+	27, // 18: seylo.agent.v1.ServiceSpec.cron:type_name -> seylo.agent.v1.CronSpec
 	7,  // 19: seylo.agent.v1.ImageRef.auth:type_name -> seylo.agent.v1.RegistryAuth
-	30, // 20: seylo.agent.v1.ContainerConfig.stop_grace_period:type_name -> google.protobuf.Duration
+	32, // 20: seylo.agent.v1.ContainerConfig.stop_grace_period:type_name -> google.protobuf.Duration
 	1,  // 21: seylo.agent.v1.PortSpec.protocol:type_name -> seylo.agent.v1.PortProtocol
 	13, // 22: seylo.agent.v1.PortSpec.public:type_name -> seylo.agent.v1.PublicPort
 	2,  // 23: seylo.agent.v1.PublicPort.mode:type_name -> seylo.agent.v1.PublicPortMode
-	31, // 24: seylo.agent.v1.PublicPort.close_at:type_name -> google.protobuf.Timestamp
+	33, // 24: seylo.agent.v1.PublicPort.close_at:type_name -> google.protobuf.Timestamp
 	15, // 25: seylo.agent.v1.HealthCheck.tcp:type_name -> seylo.agent.v1.TcpProbe
 	16, // 26: seylo.agent.v1.HealthCheck.http:type_name -> seylo.agent.v1.HttpProbe
 	17, // 27: seylo.agent.v1.HealthCheck.command:type_name -> seylo.agent.v1.CommandProbe
-	30, // 28: seylo.agent.v1.HealthCheck.interval:type_name -> google.protobuf.Duration
-	30, // 29: seylo.agent.v1.HealthCheck.timeout:type_name -> google.protobuf.Duration
-	30, // 30: seylo.agent.v1.HealthCheck.start_period:type_name -> google.protobuf.Duration
-	30, // 31: seylo.agent.v1.CrashPolicy.restart_delay:type_name -> google.protobuf.Duration
-	21, // 32: seylo.agent.v1.LoadBalancer.remote_upstreams:type_name -> seylo.agent.v1.RemoteUpstream
-	3,  // 33: seylo.agent.v1.DeployStrategy.mode:type_name -> seylo.agent.v1.DeployMode
-	30, // 34: seylo.agent.v1.DeployStrategy.health_timeout:type_name -> google.protobuf.Duration
-	30, // 35: seylo.agent.v1.BoxSpec.idle_timeout:type_name -> google.protobuf.Duration
-	30, // 36: seylo.agent.v1.CronSpec.timeout:type_name -> google.protobuf.Duration
-	4,  // 37: seylo.agent.v1.CronSpec.concurrency:type_name -> seylo.agent.v1.CronConcurrency
-	30, // 38: seylo.agent.v1.CronJob.timeout:type_name -> google.protobuf.Duration
-	4,  // 39: seylo.agent.v1.CronJob.concurrency:type_name -> seylo.agent.v1.CronConcurrency
-	40, // [40:40] is the sub-list for method output_type
-	40, // [40:40] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	18, // 28: seylo.agent.v1.HealthCheck.image:type_name -> seylo.agent.v1.ImageProbe
+	32, // 29: seylo.agent.v1.HealthCheck.interval:type_name -> google.protobuf.Duration
+	32, // 30: seylo.agent.v1.HealthCheck.timeout:type_name -> google.protobuf.Duration
+	32, // 31: seylo.agent.v1.HealthCheck.start_period:type_name -> google.protobuf.Duration
+	32, // 32: seylo.agent.v1.ImageHealthCheck.interval:type_name -> google.protobuf.Duration
+	32, // 33: seylo.agent.v1.ImageHealthCheck.timeout:type_name -> google.protobuf.Duration
+	32, // 34: seylo.agent.v1.ImageHealthCheck.start_period:type_name -> google.protobuf.Duration
+	32, // 35: seylo.agent.v1.ImageHealthCheck.start_interval:type_name -> google.protobuf.Duration
+	32, // 36: seylo.agent.v1.CrashPolicy.restart_delay:type_name -> google.protobuf.Duration
+	23, // 37: seylo.agent.v1.LoadBalancer.remote_upstreams:type_name -> seylo.agent.v1.RemoteUpstream
+	3,  // 38: seylo.agent.v1.DeployStrategy.mode:type_name -> seylo.agent.v1.DeployMode
+	32, // 39: seylo.agent.v1.DeployStrategy.health_timeout:type_name -> google.protobuf.Duration
+	32, // 40: seylo.agent.v1.BoxSpec.idle_timeout:type_name -> google.protobuf.Duration
+	32, // 41: seylo.agent.v1.CronSpec.timeout:type_name -> google.protobuf.Duration
+	4,  // 42: seylo.agent.v1.CronSpec.concurrency:type_name -> seylo.agent.v1.CronConcurrency
+	32, // 43: seylo.agent.v1.CronJob.timeout:type_name -> google.protobuf.Duration
+	4,  // 44: seylo.agent.v1.CronJob.concurrency:type_name -> seylo.agent.v1.CronConcurrency
+	45, // [45:45] is the sub-list for method output_type
+	45, // [45:45] is the sub-list for method input_type
+	45, // [45:45] is the sub-list for extension type_name
+	45, // [45:45] is the sub-list for extension extendee
+	0,  // [0:45] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_service_proto_init() }
@@ -2370,15 +2545,16 @@ func file_seylo_agent_v1_service_proto_init() {
 		(*HealthCheck_Tcp)(nil),
 		(*HealthCheck_Http)(nil),
 		(*HealthCheck_Command)(nil),
+		(*HealthCheck_Image)(nil),
 	}
-	file_seylo_agent_v1_service_proto_msgTypes[14].OneofWrappers = []any{}
+	file_seylo_agent_v1_service_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_service_proto_rawDesc), len(file_seylo_agent_v1_service_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

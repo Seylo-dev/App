@@ -254,6 +254,41 @@ type ContainerDetails struct {
 	// (its TCP port bindings), whatever its state. Sorted by container
 	// port, host port, then host address.
 	Publish []PortPublish
+	// Health is Docker's own health status of the container, nil when
+	// Docker runs no health check for it (its image declares none, or
+	// HEALTHCHECK NONE).
+	Health *ContainerHealth
+}
+
+// ContainerHealth is Docker's health status of a container whose image (or
+// config) has a HEALTHCHECK. Docker runs the check itself.
+type ContainerHealth struct {
+	// Status is "starting", "healthy" or "unhealthy".
+	Status string
+	// FailingStreak is the number of failed checks in a row.
+	FailingStreak int
+	// Output and ExitCode are the latest check's (empty before the first).
+	Output   string
+	ExitCode int
+}
+
+// Docker's health statuses (ContainerHealth.Status).
+const (
+	HealthStarting  = "starting"
+	HealthHealthy   = "healthy"
+	HealthUnhealthy = "unhealthy"
+)
+
+// HealthConfig is an image's HEALTHCHECK as Docker stores it. Zero
+// durations and retries mean Docker's defaults.
+type HealthConfig struct {
+	// Test is ["CMD", args...], ["CMD-SHELL", command] or ["NONE"].
+	Test          []string
+	Interval      time.Duration
+	Timeout       time.Duration
+	StartPeriod   time.Duration
+	StartInterval time.Duration
+	Retries       int
 }
 
 // Image is one local image.
@@ -267,6 +302,9 @@ type Image struct {
 	Created     time.Time
 	// Containers using the image (-1 when Docker did not count them).
 	Containers int64
+	// Healthcheck is the image's HEALTHCHECK, nil when it declares none.
+	// Only InspectImage fills it.
+	Healthcheck *HealthConfig
 }
 
 // Network is a managed network.

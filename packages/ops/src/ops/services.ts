@@ -177,7 +177,10 @@ export const Port = Type.Object({
 
 const Seconds = (min: number, max: number) => Type.Integer({ minimum: min, maximum: max });
 
-/** Custom health check. null on a service = TCP on the first port, or "running" without ports. */
+/**
+ * Custom health check. null on a service = the image's own HEALTHCHECK when it declares one (apps and
+ * compose members, from their next deploy), else TCP on the first port, or "running" without ports.
+ */
 export const HealthCheck = Type.Object({
   probe: Type.Union([
     Type.Object({ type: Type.Literal("tcp"), port: Type.Integer({ minimum: 1, maximum: 65535 }) }),
@@ -204,6 +207,22 @@ export const HealthCheck = Type.Object({
   failureThreshold: Type.Integer({ minimum: 1, maximum: 100 }),
 });
 
+/**
+ * The HEALTHCHECK a service's image declares, as its node reported it on
+ * the last deploy (Docker's defaults filled in). Deploys and the health
+ * watch follow Docker's status of it when the service has no check of its
+ * own.
+ */
+export const ImageHealthCheck = Type.Object({
+  /** Docker's form: ["CMD", program, args...] or ["CMD-SHELL", command]. */
+  test: Type.Array(Type.String()),
+  intervalSeconds: Type.Number({ minimum: 0 }),
+  timeoutSeconds: Type.Number({ minimum: 0 }),
+  startPeriodSeconds: Type.Number({ minimum: 0 }),
+  /** Failed checks in a row before Docker calls the container unhealthy. */
+  retries: Type.Integer({ minimum: 0 }),
+});
+
 /** Enforced by the agent: fixed 5s wait between restarts, one alert per crash streak. */
 export const CrashPolicy = Type.Object({
   restart: Type.Boolean({ description: "Off = stay stopped after the first crash." }),
@@ -223,7 +242,10 @@ export const Resources = Type.Object({
 export const DeployStrategy = Type.Object({
   /** rolling = start new, health check, switch, stop old (zero downtime). recreate = stop old first. */
   mode: Type.Union([Type.Literal("rolling"), Type.Literal("recreate")]),
-  /** How long a new version may take to become healthy before the deploy fails and the old one stays. */
+  /**
+   * How long a new version may take to become healthy before the deploy fails and the old one stays.
+   * The default, 300, grows to fit the image's own HEALTHCHECK (its start period and retries) when that applies.
+   */
   healthTimeoutSeconds: Seconds(10, 3600),
 });
 
@@ -365,6 +387,14 @@ export const ServiceDetail = Type.Object({
    */
   appPort: Type.Optional(Type.Union([Type.Integer({ minimum: 1, maximum: 65535 }), Type.Null()])),
   healthCheck: Type.Union([HealthCheck, Type.Null()]),
+  /**
+   * Without a check of its own (healthCheck null), apps and compose members
+   * deployed from 0.2.14 wait for their image's own HEALTHCHECK: what the
+   * node reported for the live deployment (else the one rolling out). Null
+   * when the image declares none, before such a deploy and on nodes before
+   * 0.2.14: then TCP on the first port applies.
+   */
+  imageHealthCheck: Type.Optional(Type.Union([ImageHealthCheck, Type.Null()])),
   crashPolicy: CrashPolicy,
   /** Fixed, shown next to the crash policy. */
   restartDelaySeconds: Type.Integer({ minimum: 0 }),
@@ -520,7 +550,7 @@ export const setHealthCheck = defineOp({
   kind: "mutation",
   summary: "Set a service's health check and deploy strategy",
   description:
-    "Sets the custom health check (null = TCP on the first port) and how deploys roll out: rolling (zero downtime, health gated) or recreate, and how long a new version may take to become healthy. Applies on the next deploy.",
+    "Sets the custom health check and how deploys roll out: rolling (zero downtime, health gated) or recreate, and how long a new version may take to become healthy. null = the default: the image's own HEALTHCHECK when it declares one (apps and compose members; deploys wait for Docker to call the container healthy, through its start period), else TCP on the first port. With the image's HEALTHCHECK the default health timeout (300) grows to its start period plus retries x (interval + timeout) plus a minute; any other timeout is used as set. Applies on the next deploy.",
   input: Type.Object({
     serviceId: Id,
     healthCheck: Type.Union([HealthCheck, Type.Null()]),

@@ -45,6 +45,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		w.rolling, w.rollIDs, w.rollCancel, w.rollSwitched = false, nil, nil, false
 		w.rollMu.Unlock()
 		w.phase = agentv1.ServicePhase_SERVICE_PHASE_UNSPECIFIED
+		w.rollImage = nil
 		w.gateSwitched()
 	}()
 
@@ -91,6 +92,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		w.failDeploy(ctx, rollCtx, spec, hash, err.Error(), nil)
 		return
 	}
+	w.rollImage = w.imageCheckOf(rollCtx, spec, image)
 	if _, _, err := prepareData(rollCtx, w.r.o.Docker, w.r.o.Layout, spec, w.r.o.Scope); err != nil {
 		w.failDeploy(ctx, rollCtx, spec, hash, "preparing volumes: "+err.Error(), nil)
 		return
@@ -206,10 +208,10 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		}
 	}
 
-	w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_HEALTH_CHECKING, "")
-	timeout := spec.GetDeploy().GetHealthTimeout().AsDuration()
-	if timeout <= 0 {
-		timeout = DefaultHealthTimeout
+	timeout, waitLine := healthTimeout(spec, w.rollImage)
+	w.progressHealth(gen, waitLine, w.rollImage, timeout)
+	if waitLine != "" {
+		w.systemLine(gen, "%s", waitLine)
 	}
 	hctx, hcancel := context.WithTimeout(rollCtx, timeout)
 	newLive := w.running(hctx, created)
@@ -228,7 +230,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 			w.failDeploy(ctx, rollCtx, spec, hash, msg, lines)
 			return
 		}
-		err := w.r.o.Prober.WaitHealthy(hctx, health.Target{ContainerID: inst.id, Address: inst.ip}, spec.GetHealthCheck(), spec.GetPorts())
+		err := w.waitHealthy(hctx, inst, spec)
 		if err != nil {
 			reason := err.Error()
 			if cause := context.Cause(rollCtx); cause != nil && !errors.Is(cause, context.Canceled) {
@@ -493,15 +495,21 @@ func (w *worker) progress(gen uint64, stage agentv1.DeployStage, msg string) {
 	})
 }
 
-// reportDeploy queues a final deploy result durably.
+// reportDeploy queues a final deploy result durably, with the image
+// HEALTHCHECK the rollout was gated on.
 func (w *worker) reportDeploy(ctx context.Context, gen uint64, stage agentv1.DeployStage, msg string) {
+	w.reportDeployImage(ctx, gen, stage, msg, w.rollImage)
+}
+
+// reportDeployImage is reportDeploy with the image check to report.
+func (w *worker) reportDeployImage(ctx context.Context, gen uint64, stage agentv1.DeployStage, msg string, img *agentv1.ImageHealthCheck) {
 	if w.r.o.Reports == nil {
 		return
 	}
 	ev := &agentv1.Event{
 		Time: timestamppb.New(w.r.o.Now()),
 		Payload: &agentv1.Event_DeployProgress{DeployProgress: &agentv1.DeployProgress{
-			ServiceId: w.id, Generation: gen, Stage: stage, Message: msg,
+			ServiceId: w.id, Generation: gen, Stage: stage, Message: msg, ImageHealthCheck: img,
 		}},
 	}
 	if err := w.r.o.Reports.Event(context.WithoutCancel(ctx), ev); err != nil {

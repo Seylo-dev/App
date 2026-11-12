@@ -27,6 +27,7 @@ import { MutationError, retryOp } from "../op-state";
 import { servicePort } from "../service-port";
 import type { ServiceDetail } from "../use-service";
 import { joinArgs, splitArgs } from "./args";
+import { defaultCheckText } from "./default-check";
 
 type HealthCheck = NonNullable<ServiceDetail["healthCheck"]>;
 type ProbeType = "default" | HealthCheck["probe"]["type"];
@@ -162,7 +163,7 @@ function HealthCard({ service }: { service: ServiceDetail }) {
           </Field>
         )}
       </div>
-      {type === "default" && <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceAdvanced.health.defaultHint")}</p>}
+      {type === "default" && <DefaultCheck service={service} />}
       {type !== "default" && (
         <FieldGrid className="grid-cols-2 md:grid-cols-4">
           <Field label={t("serviceAdvanced.health.interval")} htmlFor="h-int">
@@ -196,6 +197,22 @@ function HealthCard({ service }: { service: ServiceDetail }) {
         </Field>
       </div>
     </SectionCard>
+  );
+}
+
+/** What applies without a check of the service's own: the image's HEALTHCHECK, TCP on the first port, or running. */
+function DefaultCheck({ service }: { service: ServiceDetail }) {
+  const hasPort = service.ports.some((p) => p.protocol === "tcp");
+  const hint = service.imageHealthCheck
+    ? t("serviceAdvanced.health.imageCheckHint")
+    : hasPort && service.kind === "app"
+      ? t("serviceAdvanced.health.tcpCheckHint")
+      : null;
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="m-0 font-mono text-[12.5px] text-ink-strong">{defaultCheckText(service)}</p>
+      {hint && <p className="m-0 text-[12.5px] text-muted-foreground">{hint}</p>}
+    </div>
   );
 }
 

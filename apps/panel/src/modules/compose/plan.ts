@@ -22,6 +22,8 @@ export interface MemberPlan {
   env: Record<string, string>;
   container: ContainerSettings;
   healthCheck: HealthCheck | null;
+  /** false: the file turns health checks off (healthcheck: disable, test NONE), the image's HEALTHCHECK included. */
+  imageHealthCheck: boolean;
   resources: Resources;
   replicas: number;
   restart: boolean;
@@ -101,6 +103,11 @@ function healthCheckOf(h: ComposeService["healthcheck"]): HealthCheck | null {
     startPeriodSeconds: Math.min(3600, durationSeconds(h.start_period, 0)),
     failureThreshold: Math.min(100, Math.max(1, h.retries ?? 3)),
   };
+}
+
+/** The file turns the service's health checks off, as docker compose does with HEALTHCHECK NONE. */
+function healthChecksOff(h: ComposeService["healthcheck"]): boolean {
+  return h?.disable === true || h?.test?.[0] === "NONE";
 }
 
 /**
@@ -206,6 +213,7 @@ export function planStack(
         stopGraceSeconds: Math.min(3600, Math.max(1, durationSeconds(svc.stop_grace_period, 10))),
       },
       healthCheck: healthCheckOf(svc.healthcheck),
+      imageHealthCheck: !healthChecksOff(svc.healthcheck),
       resources: {
         ...defaultResources,
         memoryLimitBytes: memory && memory >= 6 * 1024 * 1024 ? memory : null,
@@ -258,7 +266,12 @@ export function memberSpec(plan: MemberPlan, stackSource: ComposeSource, base: S
     healthCheck: plan.healthCheck,
     crashPolicy: { ...base.crashPolicy, restart: plan.restart },
     resources: plan.resources,
-    member: { composeService: plan.composeService, dependsOn: [], buildContext: plan.build?.contextPath ?? null },
+    member: {
+      composeService: plan.composeService,
+      dependsOn: [],
+      buildContext: plan.build?.contextPath ?? null,
+      ...(plan.imageHealthCheck ? {} : { imageHealthCheck: false as const }),
+    },
   };
 }
 
@@ -268,7 +281,14 @@ export function fingerprint(
   env: string,
   volumes: readonly { name: string; mountPath: string; readOnly: boolean }[],
 ): string {
-  const member = spec.member ? { composeService: spec.member.composeService, dependsOn: [...spec.member.dependsOn].sort() } : null;
+  const member = spec.member
+    ? {
+        composeService: spec.member.composeService,
+        dependsOn: [...spec.member.dependsOn].sort(),
+        // Only when set, so members from before it compare as they did.
+        ...(spec.member.imageHealthCheck === false ? { imageHealthCheck: false } : {}),
+      }
+    : null;
   return JSON.stringify({
     source: spec.source,
     build: spec.source.type === "image" ? null : { c: spec.build.contextPath, d: spec.build.dockerfilePath, t: spec.build.targetStage },

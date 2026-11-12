@@ -1005,11 +1005,19 @@ func (x *CrashReport) GetExitedAt() *timestamppb.Timestamp {
 }
 
 type DeployProgress struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ServiceId     string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
-	Generation    uint64                 `protobuf:"varint,2,opt,name=generation,proto3" json:"generation,omitempty"`
-	Stage         DeployStage            `protobuf:"varint,3,opt,name=stage,proto3,enum=seylo.agent.v1.DeployStage" json:"stage,omitempty"`
-	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ServiceId  string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
+	Generation uint64                 `protobuf:"varint,2,opt,name=generation,proto3" json:"generation,omitempty"`
+	Stage      DeployStage            `protobuf:"varint,3,opt,name=stage,proto3,enum=seylo.agent.v1.DeployStage" json:"stage,omitempty"`
+	Message    string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	// The image HEALTHCHECK the new generation is gated on (HealthCheck.image
+	// on an image that declares one), with DEPLOY_STAGE_HEALTH_CHECKING and
+	// the final stages. Unset otherwise, and from agents before 0.2.14.
+	ImageHealthCheck *ImageHealthCheck `protobuf:"bytes,5,opt,name=image_health_check,json=imageHealthCheck,proto3" json:"image_health_check,omitempty"`
+	// With DEPLOY_STAGE_HEALTH_CHECKING: how long the agent waits for the new
+	// generation to become healthy (DeployStrategy.health_timeout, or longer
+	// for the image's HEALTHCHECK). Unset from agents before 0.2.14.
+	HealthTimeout *durationpb.Duration `protobuf:"bytes,6,opt,name=health_timeout,json=healthTimeout,proto3" json:"health_timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1070,6 +1078,20 @@ func (x *DeployProgress) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *DeployProgress) GetImageHealthCheck() *ImageHealthCheck {
+	if x != nil {
+		return x.ImageHealthCheck
+	}
+	return nil
+}
+
+func (x *DeployProgress) GetHealthTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.HealthTimeout
+	}
+	return nil
 }
 
 type BuildProgress struct {
@@ -1650,7 +1672,7 @@ var File_seylo_agent_v1_events_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1bseylo/agent/v1/events.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bseylo/agent/v1/backup.proto\x1a\x1cseylo/agent/v1/metrics.proto\x1a\x19seylo/agent/v1/node.proto\x1a\x1aseylo/agent/v1/state.proto\"\xd9\x06\n" +
+	"\x1bseylo/agent/v1/events.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bseylo/agent/v1/backup.proto\x1a\x1cseylo/agent/v1/metrics.proto\x1a\x19seylo/agent/v1/node.proto\x1a\x1cseylo/agent/v1/service.proto\x1a\x1aseylo/agent/v1/state.proto\"\xd9\x06\n" +
 	"\x05Event\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12=\n" +
 	"\vstate_delta\x18\n" +
@@ -1701,7 +1723,7 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"started_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x127\n" +
 	"\texited_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\bexitedAt\"\x9c\x01\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\bexitedAt\"\xae\x02\n" +
 	"\x0eDeployProgress\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x1e\n" +
@@ -1709,7 +1731,9 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"generation\x18\x02 \x01(\x04R\n" +
 	"generation\x121\n" +
 	"\x05stage\x18\x03 \x01(\x0e2\x1b.seylo.agent.v1.DeployStageR\x05stage\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"\xd0\x01\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\x12N\n" +
+	"\x12image_health_check\x18\x05 \x01(\v2 .seylo.agent.v1.ImageHealthCheckR\x10imageHealthCheck\x12@\n" +
+	"\x0ehealth_timeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rhealthTimeout\"\xd0\x01\n" +
 	"\rBuildProgress\x12\x19\n" +
 	"\bbuild_id\x18\x01 \x01(\tR\abuildId\x120\n" +
 	"\x05stage\x18\x02 \x01(\x0e2\x1a.seylo.agent.v1.BuildStageR\x05stage\x12\x18\n" +
@@ -1867,8 +1891,9 @@ var file_seylo_agent_v1_events_proto_goTypes = []any{
 	(*MetricsReport)(nil),         // 20: seylo.agent.v1.MetricsReport
 	(*NodeFacts)(nil),             // 21: seylo.agent.v1.NodeFacts
 	(*BackupProgress)(nil),        // 22: seylo.agent.v1.BackupProgress
-	(*durationpb.Duration)(nil),   // 23: google.protobuf.Duration
-	(HealthState)(0),              // 24: seylo.agent.v1.HealthState
+	(*ImageHealthCheck)(nil),      // 23: seylo.agent.v1.ImageHealthCheck
+	(*durationpb.Duration)(nil),   // 24: google.protobuf.Duration
+	(HealthState)(0),              // 25: seylo.agent.v1.HealthState
 }
 var file_seylo_agent_v1_events_proto_depIdxs = []int32{
 	18, // 0: seylo.agent.v1.Event.time:type_name -> google.protobuf.Timestamp
@@ -1891,25 +1916,27 @@ var file_seylo_agent_v1_events_proto_depIdxs = []int32{
 	18, // 17: seylo.agent.v1.CrashReport.started_at:type_name -> google.protobuf.Timestamp
 	18, // 18: seylo.agent.v1.CrashReport.exited_at:type_name -> google.protobuf.Timestamp
 	2,  // 19: seylo.agent.v1.DeployProgress.stage:type_name -> seylo.agent.v1.DeployStage
-	3,  // 20: seylo.agent.v1.BuildProgress.stage:type_name -> seylo.agent.v1.BuildStage
-	23, // 21: seylo.agent.v1.BuildProgress.duration:type_name -> google.protobuf.Duration
-	24, // 22: seylo.agent.v1.HealthChanged.previous:type_name -> seylo.agent.v1.HealthState
-	24, // 23: seylo.agent.v1.HealthChanged.current:type_name -> seylo.agent.v1.HealthState
-	18, // 24: seylo.agent.v1.CronRun.started_at:type_name -> google.protobuf.Timestamp
-	18, // 25: seylo.agent.v1.CronRun.finished_at:type_name -> google.protobuf.Timestamp
-	4,  // 26: seylo.agent.v1.CronRun.result:type_name -> seylo.agent.v1.CronRunResult
-	18, // 27: seylo.agent.v1.BackupResult.started_at:type_name -> google.protobuf.Timestamp
-	18, // 28: seylo.agent.v1.BackupResult.finished_at:type_name -> google.protobuf.Timestamp
-	5,  // 29: seylo.agent.v1.NodeAlert.kind:type_name -> seylo.agent.v1.NodeAlertKind
-	7,  // 30: seylo.agent.v1.NodeAlert.severity:type_name -> seylo.agent.v1.AlertSeverity
-	6,  // 31: seylo.agent.v1.UpdateResult.target:type_name -> seylo.agent.v1.UpdateTarget
-	18, // 32: seylo.agent.v1.UpdateResult.started_at:type_name -> google.protobuf.Timestamp
-	18, // 33: seylo.agent.v1.UpdateResult.finished_at:type_name -> google.protobuf.Timestamp
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	23, // 20: seylo.agent.v1.DeployProgress.image_health_check:type_name -> seylo.agent.v1.ImageHealthCheck
+	24, // 21: seylo.agent.v1.DeployProgress.health_timeout:type_name -> google.protobuf.Duration
+	3,  // 22: seylo.agent.v1.BuildProgress.stage:type_name -> seylo.agent.v1.BuildStage
+	24, // 23: seylo.agent.v1.BuildProgress.duration:type_name -> google.protobuf.Duration
+	25, // 24: seylo.agent.v1.HealthChanged.previous:type_name -> seylo.agent.v1.HealthState
+	25, // 25: seylo.agent.v1.HealthChanged.current:type_name -> seylo.agent.v1.HealthState
+	18, // 26: seylo.agent.v1.CronRun.started_at:type_name -> google.protobuf.Timestamp
+	18, // 27: seylo.agent.v1.CronRun.finished_at:type_name -> google.protobuf.Timestamp
+	4,  // 28: seylo.agent.v1.CronRun.result:type_name -> seylo.agent.v1.CronRunResult
+	18, // 29: seylo.agent.v1.BackupResult.started_at:type_name -> google.protobuf.Timestamp
+	18, // 30: seylo.agent.v1.BackupResult.finished_at:type_name -> google.protobuf.Timestamp
+	5,  // 31: seylo.agent.v1.NodeAlert.kind:type_name -> seylo.agent.v1.NodeAlertKind
+	7,  // 32: seylo.agent.v1.NodeAlert.severity:type_name -> seylo.agent.v1.AlertSeverity
+	6,  // 33: seylo.agent.v1.UpdateResult.target:type_name -> seylo.agent.v1.UpdateTarget
+	18, // 34: seylo.agent.v1.UpdateResult.started_at:type_name -> google.protobuf.Timestamp
+	18, // 35: seylo.agent.v1.UpdateResult.finished_at:type_name -> google.protobuf.Timestamp
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_events_proto_init() }
@@ -1920,6 +1947,7 @@ func file_seylo_agent_v1_events_proto_init() {
 	file_seylo_agent_v1_backup_proto_init()
 	file_seylo_agent_v1_metrics_proto_init()
 	file_seylo_agent_v1_node_proto_init()
+	file_seylo_agent_v1_service_proto_init()
 	file_seylo_agent_v1_state_proto_init()
 	file_seylo_agent_v1_events_proto_msgTypes[0].OneofWrappers = []any{
 		(*Event_StateDelta)(nil),

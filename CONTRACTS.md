@@ -74,7 +74,7 @@ packages use. "Built" means implemented and tested.
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
 | `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`); a route file it cannot write goes in the service's status (`ServiceStatus.route_write_error`, message and since when, cleared by the next write that works or once the wanted routes are the ones on file again or need no file, since 0.2.13; before, only a "writing routes" warning every 10 s in the journal) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
-| `health` | Service health probes | Built (`Probes`, `Watch`) |
+| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.14) | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; an ACME route with `acme_challenge_on_https` (the panel's domains whose DNS does not point straight at the node, the panel's own domain, every tool host) answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.13; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https, the challenge path over https kept for the app on a domain without `acme_challenge_on_https`, and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with a redirect to https for every path and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareHTTPSRedirect`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
@@ -776,6 +776,36 @@ Summary; the full rules are in `proto/README.md` and the comments of
   generation, message }`; refusals of a stale revision are not reported.
   ApplyService still answers INVALID_ARGUMENT for its one spec. Either
   way the service's log gets one SYSTEM line per refused generation.
+- The image's own HEALTHCHECK (`HealthCheck.image`, `ImageProbe`, since
+  0.2.14; `reconcile/imagehealth.go`): the deploy and the runtime watch of
+  a spec with it follow Docker's health status of the container
+  (`docker.ContainerDetails.Health`, from inspect, read every 500 ms while
+  a deploy waits): healthy passes, unhealthy fails the deploy at once with
+  the latest check's output (`health.FromDocker`, `Final`: Docker counted
+  the image's retries) and makes a running instance UNHEALTHY at once,
+  starting waits (`Starting`: a `Watch` keeps its state). The agent never
+  runs the command itself. A container Docker runs no check for (the image
+  declares none, or HEALTHCHECK NONE) gets the default check: TCP on the
+  first port. A prober given the image check (a project move's check on
+  the new address) runs that default too. Wait: without
+  `DeployStrategy.health_timeout` (panels from 0.2.14 leave it unset at the
+  default 300 s) the rollout waits `max(5m, start_period + retries x
+  (interval + timeout) + 1m)` (`health.ImageWait`, Docker's defaults 30s,
+  30s, 0, 3); a timeout the spec sets wins, and the progress message and
+  the service log say when it is shorter than the image's start period.
+  The agent reads the image's HEALTHCHECK after the pull (`InspectImage`,
+  `docker.Image.Healthcheck`) and sends it as `DeployProgress.
+  image_health_check` (Docker's defaults filled in) with
+  DEPLOY_STAGE_HEALTH_CHECKING, next to `health_timeout` (the wait), and
+  again with the final result, also for a generation that keeps its
+  containers ("no container changes"). With a check of the service's own,
+  Docker still runs the image's HEALTHCHECK and nothing reads its result:
+  the restart policy is "no", the event stream takes only start, die and
+  oom, and routes, load balancing and alerts follow the service's check.
+  HEALTHCHECK NONE in the container config would have to be set when the
+  container is made, so switching between a check of its own and none would
+  need new containers, while health checks stay out of `SpecHash`. Older
+  agents read `HealthCheck.image` as no probe: the TCP default.
 
 ## Conventions
 
@@ -4254,7 +4284,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the only way to create service rows (checks name, node and spec).
   `services.spec` JSON is `ServiceSpecJson` in `services/spec.ts`; run
   settings are snapshotted per deployment (`deployments.run_settings`),
-  so they reach nodes on the next deploy.
+  so they reach nodes on the next deploy. Since 0.2.14 a snapshot has
+  `imageHealthCheck: true`: an app or compose member without a check of
+  its own (not the panel, not a member whose compose file turns health
+  checks off, `member.imageHealthCheck: false`) is sent
+  `HealthCheck.image`; a snapshot from before (no key, or no snapshot)
+  keeps the TCP default, so a panel update changes no running generation.
+  `deploy.health_timeout` is left out of the spec while the service keeps
+  the default 300 (`defaultHealthTimeoutSeconds`). The image check and the
+  wait a node reports go in its `deployments.node_results` entry
+  (`imageHealthCheck`, `healthWaitSeconds`, `deployments/image-health.ts`);
+  the rollout deadline is the longer of the setting and that wait, plus
+  5 minutes, and `services.get` returns `imageHealthCheck` from the live
+  deployment (else the target), which the health check card shows.
 - `deployments/queue.ts` `queueDeploy(deps, { serviceId, trigger, actor, waitFor?, ... })`:
   the only way to deploy. The runner (`deployments/engine.ts`) is a state
   machine on the deployment row, kicked by ops, agent events and the

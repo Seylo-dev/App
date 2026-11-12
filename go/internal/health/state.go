@@ -9,7 +9,10 @@ import (
 // Watch turns a series of probe results for one running instance into a
 // HealthState: STARTING until the first pass (failures inside the start
 // period do not count), HEALTHY after a pass, UNHEALTHY after threshold
-// failures in a row. It is not safe for concurrent use.
+// failures in a row. Docker's verdicts on an image's HEALTHCHECK count as
+// they are: a Starting result changes nothing and a Final failure is
+// UNHEALTHY at once (Docker applied the image's start period and
+// retries). It is not safe for concurrent use.
 type Watch struct {
 	check     *agentv1.HealthCheck
 	startedAt time.Time
@@ -44,7 +47,15 @@ func (w *Watch) Observe(r Result, now time.Time) (previous agentv1.HealthState, 
 		w.state = agentv1.HealthState_HEALTH_STATE_HEALTHY
 		return previous, previous != w.state
 	}
+	if r.Starting {
+		return previous, false
+	}
 	w.LastOutput = r.Output
+	if r.Final {
+		w.failures++
+		w.state = agentv1.HealthState_HEALTH_STATE_UNHEALTHY
+		return previous, previous != w.state
+	}
 	if w.state == agentv1.HealthState_HEALTH_STATE_STARTING && now.Sub(w.startedAt) < w.check.GetStartPeriod().AsDuration() {
 		return previous, false
 	}

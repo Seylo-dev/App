@@ -198,6 +198,15 @@ message HealthCheck {
     TcpProbe tcp = 1;
     HttpProbe http = 2;
     CommandProbe command = 3;
+    // Docker's own health status of the container, from the HEALTHCHECK
+    // its image declares (added in 0.2.14). Panels from 0.2.14 send it for
+    // app services and compose members without a check of their own, from
+    // their next deploy. A container Docker runs no check for (the image
+    // declares none, or HEALTHCHECK NONE) gets the default instead: TCP on
+    // the first port. The fields below are not used with it: Docker runs
+    // the image's command with the image's interval, timeout, start period
+    // and retries. Agents before 0.2.14 do not know it and use the default.
+    ImageProbe image = 8;
   }
   // Defaults: interval 10s, timeout 5s, start period 0, threshold 3.
   google.protobuf.Duration interval = 4;
@@ -225,6 +234,27 @@ message HttpProbe {
 message CommandProbe {
   // Run inside the container; exit code 0 is healthy.
   repeated string command = 1;
+}
+
+// ImageProbe is HealthCheck.image: Docker's status of the image's own
+// HEALTHCHECK. Healthy passes, unhealthy fails (Docker has counted the
+// image's retries by then), starting waits.
+message ImageProbe {}
+
+// ImageHealthCheck is the HEALTHCHECK an image declares, as Docker runs it:
+// Docker's defaults are filled in (interval 30s, timeout 30s, start period
+// 0, start interval 5s, retries 3).
+message ImageHealthCheck {
+  // Docker's form: ["CMD", program, args...] or ["CMD-SHELL", command].
+  repeated string test = 1;
+  google.protobuf.Duration interval = 2;
+  google.protobuf.Duration timeout = 3;
+  // Failures during this time after start do not count.
+  google.protobuf.Duration start_period = 4;
+  // How often the check runs during the start period.
+  google.protobuf.Duration start_interval = 5;
+  // Consecutive failures before Docker calls the container unhealthy.
+  uint32 retries = 6;
 }
 
 // CrashPolicy is enforced by the agent (the Docker restart policy is always
@@ -269,7 +299,11 @@ message RemoteUpstream {
 message DeployStrategy {
   DeployMode mode = 1;
   // How long a new generation may take to become healthy before the deploy
-  // fails and the old generation keeps serving. Default 5m.
+  // fails and the old generation keeps serving. Unset is 5m; with
+  // HealthCheck.image on a container Docker runs the image's check for
+  // (agents from 0.2.14), at least the image's start period plus its
+  // retries times its interval and timeout, plus a minute. Panels from
+  // 0.2.14 leave it unset while the service keeps the default (300s).
   google.protobuf.Duration health_timeout = 2;
 }
 

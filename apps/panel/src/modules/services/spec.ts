@@ -45,6 +45,12 @@ export const MemberSettings = Type.Object({
   dependsOn: Type.Array(Type.String()),
   /** The compose file had a build: section; deploys build this folder of the stack's repo. */
   buildContext: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * false: the compose file turns the member's health checks off
+   * (healthcheck: disable, or test NONE), so its deploys never wait for the
+   * image's own HEALTHCHECK. Not stored otherwise.
+   */
+  imageHealthCheck: Type.Optional(Type.Literal(false)),
 });
 export type MemberSettings = Static<typeof MemberSettings>;
 
@@ -123,7 +129,17 @@ export interface RunSettings {
   deploy: DeployStrategy;
   cron: CronSettings | null;
   member: MemberSettings | null;
+  /**
+   * Without a check of its own (healthCheck null) the deploy waits for the
+   * image's own HEALTHCHECK (HealthCheck.image in the spec). Set by deploys
+   * from 0.2.14; a snapshot from before has none, so the generation it
+   * describes keeps the TCP default it was deployed with.
+   */
+  imageHealthCheck: boolean;
 }
+
+/** DeployStrategy.healthTimeoutSeconds when the service never set one: the agent may wait longer for an image HEALTHCHECK. */
+export const defaultHealthTimeoutSeconds = 300;
 
 /** Fixed wait between crash restarts; the agent enforces it, the UI shows it. */
 export const restartDelaySeconds = 5;
@@ -165,7 +181,7 @@ export function defaultSpec(): ServiceSpecJson {
     healthCheck: null,
     crashPolicy: { restart: true, stopAfterCrashes: 0 },
     resources: { ...defaultResources },
-    deploy: { mode: "rolling", healthTimeoutSeconds: 300 },
+    deploy: { mode: "rolling", healthTimeoutSeconds: defaultHealthTimeoutSeconds },
     cron: null,
     stickySessions: false,
     entryNodeId: null,
@@ -212,6 +228,7 @@ export function checkSpec(spec: ServiceSpecJson): ServiceSpecJson {
   return spec;
 }
 
+/** The run settings a deploy snapshots now. */
 export function runSettingsOf(spec: ServiceSpecJson): RunSettings {
   return {
     container: spec.container,
@@ -221,13 +238,18 @@ export function runSettingsOf(spec: ServiceSpecJson): RunSettings {
     deploy: spec.deploy,
     cron: spec.cron,
     member: spec.member,
+    imageHealthCheck: true,
   };
 }
 
-/** A stored snapshot, or the current settings when the deployment has none. */
+/**
+ * A stored snapshot, or the current settings when the deployment has none.
+ * What deploys before 0.2.14 did not snapshot reads as they ran: no wait
+ * for the image's HEALTHCHECK.
+ */
 export function readRunSettings(raw: unknown, fallback: ServiceSpecJson): RunSettings {
   const current = runSettingsOf(fallback);
-  if (!raw || typeof raw !== "object") return current;
+  if (!raw || typeof raw !== "object") return { ...current, imageHealthCheck: false };
   const row = raw as Partial<RunSettings>;
   return {
     container: { ...defaultContainer, ...row.container },
@@ -237,6 +259,7 @@ export function readRunSettings(raw: unknown, fallback: ServiceSpecJson): RunSet
     deploy: { ...current.deploy, ...row.deploy },
     cron: row.cron === undefined ? current.cron : row.cron,
     member: row.member === undefined ? current.member : row.member,
+    imageHealthCheck: row.imageHealthCheck === true,
   };
 }
 

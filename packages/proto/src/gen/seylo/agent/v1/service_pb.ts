@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/service.proto.
  */
 export const file_seylo_agent_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChxzZXlsby9hZ2VudC92MS9zZXJ2aWNlLnByb3RvEg5zZXlsby5hZ2VudC52MSKYCAoLU2VydmljZVNwZWMSCgoCaWQYASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEikKBGtpbmQYBCABKA4yGy5zZXlsby5hZ2VudC52MS5TZXJ2aWNlS2luZBISCgpnZW5lcmF0aW9uGAUgASgEEg8KB3N0b3BwZWQYBiABKAgSEQoJcHJvdGVjdGVkGAcgASgIEicKBWltYWdlGAggASgLMhguc2V5bG8uYWdlbnQudjEuSW1hZ2VSZWYSMgoJY29udGFpbmVyGAkgASgLMh8uc2V5bG8uYWdlbnQudjEuQ29udGFpbmVyQ29uZmlnEiMKA2VudhgKIAMoCzIWLnNleWxvLmFnZW50LnYxLkVudlZhchIsCgd2b2x1bWVzGAsgAygLMhsuc2V5bG8uYWdlbnQudjEuVm9sdW1lTW91bnQSKAoFZmlsZXMYDCADKAsyGS5zZXlsby5hZ2VudC52MS5GaWxlTW91bnQSJwoFcG9ydHMYDSADKAsyGC5zZXlsby5hZ2VudC52MS5Qb3J0U3BlYxIxCgxoZWFsdGhfY2hlY2sYDiABKAsyGy5zZXlsby5hZ2VudC52MS5IZWFsdGhDaGVjaxIxCgxjcmFzaF9wb2xpY3kYDyABKAsyGy5zZXlsby5hZ2VudC52MS5DcmFzaFBvbGljeRIsCglyZXNvdXJjZXMYECABKAsyGS5zZXlsby5hZ2VudC52MS5SZXNvdXJjZXMSEAoIcmVwbGljYXMYESABKA0SFwoPbmV0d29ya19hbGlhc2VzGBIgAygJEigKB3JvdXRpbmcYEyABKAsyFy5zZXlsby5hZ2VudC52MS5Sb3V0aW5nEjMKDWxvYWRfYmFsYW5jZXIYFCABKAsyHC5zZXlsby5hZ2VudC52MS5Mb2FkQmFsYW5jZXISLQoKZGV2X2FjY2VzcxgVIAEoCzIZLnNleWxvLmFnZW50LnYxLkRldkFjY2VzcxIuCgZkZXBsb3kYFiABKAsyHi5zZXlsby5hZ2VudC52MS5EZXBsb3lTdHJhdGVneRIqCgljcm9uX2pvYnMYFyADKAsyFy5zZXlsby5hZ2VudC52MS5Dcm9uSm9iEjsKDmNvbXBvc2VfbWVtYmVyGB4gASgLMiEuc2V5bG8uYWdlbnQudjEuQ29tcG9zZU1lbWJlclNwZWNIABIwCghkYXRhYmFzZRgfIAEoCzIcLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlU3BlY0gAEiYKA2JveBggIAEoCzIXLnNleWxvLmFnZW50LnYxLkJveFNwZWNIABIoCgRjcm9uGCEgASgLMhguc2V5bG8uYWdlbnQudjEuQ3JvblNwZWNIAEILCglraW5kX3NwZWMiWQoISW1hZ2VSZWYSEQoJcmVmZXJlbmNlGAEgASgJEg4KBmRpZ2VzdBgCIAEoCRIqCgRhdXRoGAMgASgLMhwuc2V5bG8uYWdlbnQudjEuUmVnaXN0cnlBdXRoIkIKDFJlZ2lzdHJ5QXV0aBIOCgZzZXJ2ZXIYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkipAEKD0NvbnRhaW5lckNvbmZpZxIPCgdjb21tYW5kGAEgAygJEhIKCmVudHJ5cG9pbnQYAiADKAkSEwoLd29ya2luZ19kaXIYAyABKAkSDAoEdXNlchgEIAEoCRITCgtzdG9wX3NpZ25hbBgFIAEoCRI0ChFzdG9wX2dyYWNlX3BlcmlvZBgGIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiI1CgZFbnZWYXISDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCRIOCgZzZWNyZXQYAyABKAgiYAoLVm9sdW1lTW91bnQSDAoEbmFtZRgBIAEoCRIWCg5jb250YWluZXJfcGF0aBgCIAEoCRIRCglyZWFkX29ubHkYAyABKAgSGAoQb3duZXJfc2VydmljZV9pZBgEIAEoCSJCCglGaWxlTW91bnQSFgoOY29udGFpbmVyX3BhdGgYASABKAkSDwoHY29udGVudBgCIAEoDBIMCgRtb2RlGAMgASgNIn4KCFBvcnRTcGVjEhYKDmNvbnRhaW5lcl9wb3J0GAEgASgNEi4KCHByb3RvY29sGAIgASgOMhwuc2V5bG8uYWdlbnQudjEuUG9ydFByb3RvY29sEioKBnB1YmxpYxgDIAEoCzIaLnNleWxvLmFnZW50LnYxLlB1YmxpY1BvcnQixQEKClB1YmxpY1BvcnQSEQoJaG9zdF9wb3J0GAEgASgNEiwKBG1vZGUYAiABKA4yHi5zZXlsby5hZ2VudC52MS5QdWJsaWNQb3J0TW9kZRIUCgxyZWRpcmVjdF91cmwYAyABKAkSHAoUYWxsb3dlZF9zb3VyY2VfY2lkcnMYBCADKAkSLAoIY2xvc2VfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhQKDGJpbmRfYWRkcmVzcxgGIAEoCSLAAgoLSGVhbHRoQ2hlY2sSJwoDdGNwGAEgASgLMhguc2V5bG8uYWdlbnQudjEuVGNwUHJvYmVIABIpCgRodHRwGAIgASgLMhkuc2V5bG8uYWdlbnQudjEuSHR0cFByb2JlSAASLwoHY29tbWFuZBgDIAEoCzIcLnNleWxvLmFnZW50LnYxLkNvbW1hbmRQcm9iZUgAEisKCGludGVydmFsGAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEioKB3RpbWVvdXQYBSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SLwoMc3RhcnRfcGVyaW9kGAYgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhkKEWZhaWx1cmVfdGhyZXNob2xkGAcgASgNQgcKBXByb2JlIhgKCFRjcFByb2JlEgwKBHBvcnQYASABKA0iTgoJSHR0cFByb2JlEgwKBHBvcnQYASABKA0SDAoEcGF0aBgCIAEoCRIMCgRob3N0GAMgASgJEhcKD2V4cGVjdGVkX3N0YXR1cxgEIAEoDSIfCgxDb21tYW5kUHJvYmUSDwoHY29tbWFuZBgBIAMoCSJsCgtDcmFzaFBvbGljeRIPCgdyZXN0YXJ0GAEgASgIEhoKEnN0b3BfYWZ0ZXJfY3Jhc2hlcxgCIAEoDRIwCg1yZXN0YXJ0X2RlbGF5GAMgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uItcBCglSZXNvdXJjZXMSHwoSbWVtb3J5X2xpbWl0X2J5dGVzGAEgASgESACIAQESJQoYbWVtb3J5X3Jlc2VydmF0aW9uX2J5dGVzGAIgASgESAGIAQESFwoKY3B1X3dlaWdodBgDIAEoDUgCiAEBEhcKCnBpZHNfbGltaXQYBCABKA1IA4gBAUIVChNfbWVtb3J5X2xpbWl0X2J5dGVzQhsKGV9tZW1vcnlfcmVzZXJ2YXRpb25fYnl0ZXNCDQoLX2NwdV93ZWlnaHRCDQoLX3BpZHNfbGltaXQiYQoMTG9hZEJhbGFuY2VyEjgKEHJlbW90ZV91cHN0cmVhbXMYASADKAsyHi5zZXlsby5hZ2VudC52MS5SZW1vdGVVcHN0cmVhbRIXCg9zdGlja3lfc2Vzc2lvbnMYAiABKAgiLgoOUmVtb3RlVXBzdHJlYW0SDwoHbm9kZV9pZBgBIAEoCRILCgN1cmwYAiABKAkibQoORGVwbG95U3RyYXRlZ3kSKAoEbW9kZRgBIAEoDjIaLnNleWxvLmFnZW50LnYxLkRlcGxveU1vZGUSMQoOaGVhbHRoX3RpbWVvdXQYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iUgoRQ29tcG9zZU1lbWJlclNwZWMSEAoIc3RhY2tfaWQYASABKAkSFwoPY29tcG9zZV9zZXJ2aWNlGAIgASgJEhIKCmRlcGVuZHNfb24YAyADKAkiVAoHQm94U3BlYxIYChB3b3Jrc3BhY2Vfdm9sdW1lGAEgASgJEi8KDGlkbGVfdGltZW91dBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiKRAQoIQ3JvblNwZWMSEAoIc2NoZWR1bGUYASABKAkSEQoJdGltZV96b25lGAIgASgJEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SNAoLY29uY3VycmVuY3kYBCABKA4yHy5zZXlsby5hZ2VudC52MS5Dcm9uQ29uY3VycmVuY3kivwEKB0Nyb25Kb2ISCgoCaWQYASABKAkSEAoIc2NoZWR1bGUYAiABKAkSEQoJdGltZV96b25lGAMgASgJEg8KB2NvbW1hbmQYBCADKAkSKgoHdGltZW91dBgFIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhI0Cgtjb25jdXJyZW5jeRgGIAEoDjIfLnNleWxvLmFnZW50LnYxLkNyb25Db25jdXJyZW5jeRIQCghkaXNhYmxlZBgHIAEoCCqqAQoLU2VydmljZUtpbmQSHAoYU0VSVklDRV9LSU5EX1VOU1BFQ0lGSUVEEAASFAoQU0VSVklDRV9LSU5EX0FQUBABEh8KG1NFUlZJQ0VfS0lORF9DT01QT1NFX01FTUJFUhACEhkKFVNFUlZJQ0VfS0lORF9EQVRBQkFTRRADEhQKEFNFUlZJQ0VfS0lORF9CT1gQBBIVChFTRVJWSUNFX0tJTkRfQ1JPThAFKlsKDFBvcnRQcm90b2NvbBIdChlQT1JUX1BST1RPQ09MX1VOU1BFQ0lGSUVEEAASFQoRUE9SVF9QUk9UT0NPTF9UQ1AQARIVChFQT1JUX1BST1RPQ09MX1VEUBACKm8KDlB1YmxpY1BvcnRNb2RlEiAKHFBVQkxJQ19QT1JUX01PREVfVU5TUEVDSUZJRUQQABIcChhQVUJMSUNfUE9SVF9NT0RFX0ZPUldBUkQQARIdChlQVUJMSUNfUE9SVF9NT0RFX1JFRElSRUNUEAIqXAoKRGVwbG95TW9kZRIbChdERVBMT1lfTU9ERV9VTlNQRUNJRklFRBAAEhcKE0RFUExPWV9NT0RFX1JPTExJTkcQARIYChRERVBMT1lfTU9ERV9SRUNSRUFURRACKooBCg9Dcm9uQ29uY3VycmVuY3kSIAocQ1JPTl9DT05DVVJSRU5DWV9VTlNQRUNJRklFRBAAEhsKF0NST05fQ09OQ1VSUkVOQ1lfRk9SQklEEAESGgoWQ1JPTl9DT05DVVJSRU5DWV9BTExPVxACEhwKGENST05fQ09OQ1VSUkVOQ1lfUkVQTEFDRRADQrcBChJjb20uc2V5bG8uYWdlbnQudjFCDFNlcnZpY2VQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_seylo_agent_v1_access, file_seylo_agent_v1_database, file_seylo_agent_v1_routing]);
+  fileDesc("ChxzZXlsby9hZ2VudC92MS9zZXJ2aWNlLnByb3RvEg5zZXlsby5hZ2VudC52MSKYCAoLU2VydmljZVNwZWMSCgoCaWQYASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEikKBGtpbmQYBCABKA4yGy5zZXlsby5hZ2VudC52MS5TZXJ2aWNlS2luZBISCgpnZW5lcmF0aW9uGAUgASgEEg8KB3N0b3BwZWQYBiABKAgSEQoJcHJvdGVjdGVkGAcgASgIEicKBWltYWdlGAggASgLMhguc2V5bG8uYWdlbnQudjEuSW1hZ2VSZWYSMgoJY29udGFpbmVyGAkgASgLMh8uc2V5bG8uYWdlbnQudjEuQ29udGFpbmVyQ29uZmlnEiMKA2VudhgKIAMoCzIWLnNleWxvLmFnZW50LnYxLkVudlZhchIsCgd2b2x1bWVzGAsgAygLMhsuc2V5bG8uYWdlbnQudjEuVm9sdW1lTW91bnQSKAoFZmlsZXMYDCADKAsyGS5zZXlsby5hZ2VudC52MS5GaWxlTW91bnQSJwoFcG9ydHMYDSADKAsyGC5zZXlsby5hZ2VudC52MS5Qb3J0U3BlYxIxCgxoZWFsdGhfY2hlY2sYDiABKAsyGy5zZXlsby5hZ2VudC52MS5IZWFsdGhDaGVjaxIxCgxjcmFzaF9wb2xpY3kYDyABKAsyGy5zZXlsby5hZ2VudC52MS5DcmFzaFBvbGljeRIsCglyZXNvdXJjZXMYECABKAsyGS5zZXlsby5hZ2VudC52MS5SZXNvdXJjZXMSEAoIcmVwbGljYXMYESABKA0SFwoPbmV0d29ya19hbGlhc2VzGBIgAygJEigKB3JvdXRpbmcYEyABKAsyFy5zZXlsby5hZ2VudC52MS5Sb3V0aW5nEjMKDWxvYWRfYmFsYW5jZXIYFCABKAsyHC5zZXlsby5hZ2VudC52MS5Mb2FkQmFsYW5jZXISLQoKZGV2X2FjY2VzcxgVIAEoCzIZLnNleWxvLmFnZW50LnYxLkRldkFjY2VzcxIuCgZkZXBsb3kYFiABKAsyHi5zZXlsby5hZ2VudC52MS5EZXBsb3lTdHJhdGVneRIqCgljcm9uX2pvYnMYFyADKAsyFy5zZXlsby5hZ2VudC52MS5Dcm9uSm9iEjsKDmNvbXBvc2VfbWVtYmVyGB4gASgLMiEuc2V5bG8uYWdlbnQudjEuQ29tcG9zZU1lbWJlclNwZWNIABIwCghkYXRhYmFzZRgfIAEoCzIcLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlU3BlY0gAEiYKA2JveBggIAEoCzIXLnNleWxvLmFnZW50LnYxLkJveFNwZWNIABIoCgRjcm9uGCEgASgLMhguc2V5bG8uYWdlbnQudjEuQ3JvblNwZWNIAEILCglraW5kX3NwZWMiWQoISW1hZ2VSZWYSEQoJcmVmZXJlbmNlGAEgASgJEg4KBmRpZ2VzdBgCIAEoCRIqCgRhdXRoGAMgASgLMhwuc2V5bG8uYWdlbnQudjEuUmVnaXN0cnlBdXRoIkIKDFJlZ2lzdHJ5QXV0aBIOCgZzZXJ2ZXIYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkipAEKD0NvbnRhaW5lckNvbmZpZxIPCgdjb21tYW5kGAEgAygJEhIKCmVudHJ5cG9pbnQYAiADKAkSEwoLd29ya2luZ19kaXIYAyABKAkSDAoEdXNlchgEIAEoCRITCgtzdG9wX3NpZ25hbBgFIAEoCRI0ChFzdG9wX2dyYWNlX3BlcmlvZBgGIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiI1CgZFbnZWYXISDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCRIOCgZzZWNyZXQYAyABKAgiYAoLVm9sdW1lTW91bnQSDAoEbmFtZRgBIAEoCRIWCg5jb250YWluZXJfcGF0aBgCIAEoCRIRCglyZWFkX29ubHkYAyABKAgSGAoQb3duZXJfc2VydmljZV9pZBgEIAEoCSJCCglGaWxlTW91bnQSFgoOY29udGFpbmVyX3BhdGgYASABKAkSDwoHY29udGVudBgCIAEoDBIMCgRtb2RlGAMgASgNIn4KCFBvcnRTcGVjEhYKDmNvbnRhaW5lcl9wb3J0GAEgASgNEi4KCHByb3RvY29sGAIgASgOMhwuc2V5bG8uYWdlbnQudjEuUG9ydFByb3RvY29sEioKBnB1YmxpYxgDIAEoCzIaLnNleWxvLmFnZW50LnYxLlB1YmxpY1BvcnQixQEKClB1YmxpY1BvcnQSEQoJaG9zdF9wb3J0GAEgASgNEiwKBG1vZGUYAiABKA4yHi5zZXlsby5hZ2VudC52MS5QdWJsaWNQb3J0TW9kZRIUCgxyZWRpcmVjdF91cmwYAyABKAkSHAoUYWxsb3dlZF9zb3VyY2VfY2lkcnMYBCADKAkSLAoIY2xvc2VfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhQKDGJpbmRfYWRkcmVzcxgGIAEoCSLtAgoLSGVhbHRoQ2hlY2sSJwoDdGNwGAEgASgLMhguc2V5bG8uYWdlbnQudjEuVGNwUHJvYmVIABIpCgRodHRwGAIgASgLMhkuc2V5bG8uYWdlbnQudjEuSHR0cFByb2JlSAASLwoHY29tbWFuZBgDIAEoCzIcLnNleWxvLmFnZW50LnYxLkNvbW1hbmRQcm9iZUgAEisKBWltYWdlGAggASgLMhouc2V5bG8uYWdlbnQudjEuSW1hZ2VQcm9iZUgAEisKCGludGVydmFsGAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEioKB3RpbWVvdXQYBSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SLwoMc3RhcnRfcGVyaW9kGAYgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhkKEWZhaWx1cmVfdGhyZXNob2xkGAcgASgNQgcKBXByb2JlIhgKCFRjcFByb2JlEgwKBHBvcnQYASABKA0iTgoJSHR0cFByb2JlEgwKBHBvcnQYASABKA0SDAoEcGF0aBgCIAEoCRIMCgRob3N0GAMgASgJEhcKD2V4cGVjdGVkX3N0YXR1cxgEIAEoDSIfCgxDb21tYW5kUHJvYmUSDwoHY29tbWFuZBgBIAMoCSIMCgpJbWFnZVByb2JlIu4BChBJbWFnZUhlYWx0aENoZWNrEgwKBHRlc3QYASADKAkSKwoIaW50ZXJ2YWwYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIvCgxzdGFydF9wZXJpb2QYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SMQoOc3RhcnRfaW50ZXJ2YWwYBSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SDwoHcmV0cmllcxgGIAEoDSJsCgtDcmFzaFBvbGljeRIPCgdyZXN0YXJ0GAEgASgIEhoKEnN0b3BfYWZ0ZXJfY3Jhc2hlcxgCIAEoDRIwCg1yZXN0YXJ0X2RlbGF5GAMgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uItcBCglSZXNvdXJjZXMSHwoSbWVtb3J5X2xpbWl0X2J5dGVzGAEgASgESACIAQESJQoYbWVtb3J5X3Jlc2VydmF0aW9uX2J5dGVzGAIgASgESAGIAQESFwoKY3B1X3dlaWdodBgDIAEoDUgCiAEBEhcKCnBpZHNfbGltaXQYBCABKA1IA4gBAUIVChNfbWVtb3J5X2xpbWl0X2J5dGVzQhsKGV9tZW1vcnlfcmVzZXJ2YXRpb25fYnl0ZXNCDQoLX2NwdV93ZWlnaHRCDQoLX3BpZHNfbGltaXQiYQoMTG9hZEJhbGFuY2VyEjgKEHJlbW90ZV91cHN0cmVhbXMYASADKAsyHi5zZXlsby5hZ2VudC52MS5SZW1vdGVVcHN0cmVhbRIXCg9zdGlja3lfc2Vzc2lvbnMYAiABKAgiLgoOUmVtb3RlVXBzdHJlYW0SDwoHbm9kZV9pZBgBIAEoCRILCgN1cmwYAiABKAkibQoORGVwbG95U3RyYXRlZ3kSKAoEbW9kZRgBIAEoDjIaLnNleWxvLmFnZW50LnYxLkRlcGxveU1vZGUSMQoOaGVhbHRoX3RpbWVvdXQYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iUgoRQ29tcG9zZU1lbWJlclNwZWMSEAoIc3RhY2tfaWQYASABKAkSFwoPY29tcG9zZV9zZXJ2aWNlGAIgASgJEhIKCmRlcGVuZHNfb24YAyADKAkiVAoHQm94U3BlYxIYChB3b3Jrc3BhY2Vfdm9sdW1lGAEgASgJEi8KDGlkbGVfdGltZW91dBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiKRAQoIQ3JvblNwZWMSEAoIc2NoZWR1bGUYASABKAkSEQoJdGltZV96b25lGAIgASgJEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SNAoLY29uY3VycmVuY3kYBCABKA4yHy5zZXlsby5hZ2VudC52MS5Dcm9uQ29uY3VycmVuY3kivwEKB0Nyb25Kb2ISCgoCaWQYASABKAkSEAoIc2NoZWR1bGUYAiABKAkSEQoJdGltZV96b25lGAMgASgJEg8KB2NvbW1hbmQYBCADKAkSKgoHdGltZW91dBgFIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhI0Cgtjb25jdXJyZW5jeRgGIAEoDjIfLnNleWxvLmFnZW50LnYxLkNyb25Db25jdXJyZW5jeRIQCghkaXNhYmxlZBgHIAEoCCqqAQoLU2VydmljZUtpbmQSHAoYU0VSVklDRV9LSU5EX1VOU1BFQ0lGSUVEEAASFAoQU0VSVklDRV9LSU5EX0FQUBABEh8KG1NFUlZJQ0VfS0lORF9DT01QT1NFX01FTUJFUhACEhkKFVNFUlZJQ0VfS0lORF9EQVRBQkFTRRADEhQKEFNFUlZJQ0VfS0lORF9CT1gQBBIVChFTRVJWSUNFX0tJTkRfQ1JPThAFKlsKDFBvcnRQcm90b2NvbBIdChlQT1JUX1BST1RPQ09MX1VOU1BFQ0lGSUVEEAASFQoRUE9SVF9QUk9UT0NPTF9UQ1AQARIVChFQT1JUX1BST1RPQ09MX1VEUBACKm8KDlB1YmxpY1BvcnRNb2RlEiAKHFBVQkxJQ19QT1JUX01PREVfVU5TUEVDSUZJRUQQABIcChhQVUJMSUNfUE9SVF9NT0RFX0ZPUldBUkQQARIdChlQVUJMSUNfUE9SVF9NT0RFX1JFRElSRUNUEAIqXAoKRGVwbG95TW9kZRIbChdERVBMT1lfTU9ERV9VTlNQRUNJRklFRBAAEhcKE0RFUExPWV9NT0RFX1JPTExJTkcQARIYChRERVBMT1lfTU9ERV9SRUNSRUFURRACKooBCg9Dcm9uQ29uY3VycmVuY3kSIAocQ1JPTl9DT05DVVJSRU5DWV9VTlNQRUNJRklFRBAAEhsKF0NST05fQ09OQ1VSUkVOQ1lfRk9SQklEEAESGgoWQ1JPTl9DT05DVVJSRU5DWV9BTExPVxACEhwKGENST05fQ09OQ1VSUkVOQ1lfUkVQTEFDRRADQrcBChJjb20uc2V5bG8uYWdlbnQudjFCDFNlcnZpY2VQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_seylo_agent_v1_access, file_seylo_agent_v1_database, file_seylo_agent_v1_routing]);
 
 /**
  * ServiceSpec is the desired state of one service on one node. The panel
@@ -553,6 +553,21 @@ export type HealthCheck = Message<"seylo.agent.v1.HealthCheck"> & {
      */
     value: CommandProbe;
     case: "command";
+  } | {
+    /**
+     * Docker's own health status of the container, from the HEALTHCHECK
+     * its image declares (added in 0.2.14). Panels from 0.2.14 send it for
+     * app services and compose members without a check of their own, from
+     * their next deploy. A container Docker runs no check for (the image
+     * declares none, or HEALTHCHECK NONE) gets the default instead: TCP on
+     * the first port. The fields below are not used with it: Docker runs
+     * the image's command with the image's interval, timeout, start period
+     * and retries. Agents before 0.2.14 do not know it and use the default.
+     *
+     * @generated from field: seylo.agent.v1.ImageProbe image = 8;
+     */
+    value: ImageProbe;
+    case: "image";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -664,6 +679,77 @@ export const CommandProbeSchema: GenMessage<CommandProbe> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_service, 12);
 
 /**
+ * ImageProbe is HealthCheck.image: Docker's status of the image's own
+ * HEALTHCHECK. Healthy passes, unhealthy fails (Docker has counted the
+ * image's retries by then), starting waits.
+ *
+ * @generated from message seylo.agent.v1.ImageProbe
+ */
+export type ImageProbe = Message<"seylo.agent.v1.ImageProbe"> & {
+};
+
+/**
+ * Describes the message seylo.agent.v1.ImageProbe.
+ * Use `create(ImageProbeSchema)` to create a new message.
+ */
+export const ImageProbeSchema: GenMessage<ImageProbe> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_service, 13);
+
+/**
+ * ImageHealthCheck is the HEALTHCHECK an image declares, as Docker runs it:
+ * Docker's defaults are filled in (interval 30s, timeout 30s, start period
+ * 0, start interval 5s, retries 3).
+ *
+ * @generated from message seylo.agent.v1.ImageHealthCheck
+ */
+export type ImageHealthCheck = Message<"seylo.agent.v1.ImageHealthCheck"> & {
+  /**
+   * Docker's form: ["CMD", program, args...] or ["CMD-SHELL", command].
+   *
+   * @generated from field: repeated string test = 1;
+   */
+  test: string[];
+
+  /**
+   * @generated from field: google.protobuf.Duration interval = 2;
+   */
+  interval?: Duration | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Duration timeout = 3;
+   */
+  timeout?: Duration | undefined;
+
+  /**
+   * Failures during this time after start do not count.
+   *
+   * @generated from field: google.protobuf.Duration start_period = 4;
+   */
+  startPeriod?: Duration | undefined;
+
+  /**
+   * How often the check runs during the start period.
+   *
+   * @generated from field: google.protobuf.Duration start_interval = 5;
+   */
+  startInterval?: Duration | undefined;
+
+  /**
+   * Consecutive failures before Docker calls the container unhealthy.
+   *
+   * @generated from field: uint32 retries = 6;
+   */
+  retries: number;
+};
+
+/**
+ * Describes the message seylo.agent.v1.ImageHealthCheck.
+ * Use `create(ImageHealthCheckSchema)` to create a new message.
+ */
+export const ImageHealthCheckSchema: GenMessage<ImageHealthCheck> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_service, 14);
+
+/**
  * CrashPolicy is enforced by the agent (the Docker restart policy is always
  * "no"), so crashes are seen, counted and reported.
  *
@@ -700,7 +786,7 @@ export type CrashPolicy = Message<"seylo.agent.v1.CrashPolicy"> & {
  * Use `create(CrashPolicySchema)` to create a new message.
  */
 export const CrashPolicySchema: GenMessage<CrashPolicy> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 13);
+  messageDesc(file_seylo_agent_v1_service, 15);
 
 /**
  * Resources are all optional and off by default. There is deliberately no
@@ -737,7 +823,7 @@ export type Resources = Message<"seylo.agent.v1.Resources"> & {
  * Use `create(ResourcesSchema)` to create a new message.
  */
 export const ResourcesSchema: GenMessage<Resources> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 14);
+  messageDesc(file_seylo_agent_v1_service, 16);
 
 /**
  * LoadBalancer spreads this service's routes over its local replicas and
@@ -762,7 +848,7 @@ export type LoadBalancer = Message<"seylo.agent.v1.LoadBalancer"> & {
  * Use `create(LoadBalancerSchema)` to create a new message.
  */
 export const LoadBalancerSchema: GenMessage<LoadBalancer> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 15);
+  messageDesc(file_seylo_agent_v1_service, 17);
 
 /**
  * RemoteUpstream is a copy of the service on another node. There is no
@@ -789,7 +875,7 @@ export type RemoteUpstream = Message<"seylo.agent.v1.RemoteUpstream"> & {
  * Use `create(RemoteUpstreamSchema)` to create a new message.
  */
 export const RemoteUpstreamSchema: GenMessage<RemoteUpstream> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 16);
+  messageDesc(file_seylo_agent_v1_service, 18);
 
 /**
  * @generated from message seylo.agent.v1.DeployStrategy
@@ -802,7 +888,11 @@ export type DeployStrategy = Message<"seylo.agent.v1.DeployStrategy"> & {
 
   /**
    * How long a new generation may take to become healthy before the deploy
-   * fails and the old generation keeps serving. Default 5m.
+   * fails and the old generation keeps serving. Unset is 5m; with
+   * HealthCheck.image on a container Docker runs the image's check for
+   * (agents from 0.2.14), at least the image's start period plus its
+   * retries times its interval and timeout, plus a minute. Panels from
+   * 0.2.14 leave it unset while the service keeps the default (300s).
    *
    * @generated from field: google.protobuf.Duration health_timeout = 2;
    */
@@ -814,7 +904,7 @@ export type DeployStrategy = Message<"seylo.agent.v1.DeployStrategy"> & {
  * Use `create(DeployStrategySchema)` to create a new message.
  */
 export const DeployStrategySchema: GenMessage<DeployStrategy> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 17);
+  messageDesc(file_seylo_agent_v1_service, 19);
 
 /**
  * @generated from message seylo.agent.v1.ComposeMemberSpec
@@ -848,7 +938,7 @@ export type ComposeMemberSpec = Message<"seylo.agent.v1.ComposeMemberSpec"> & {
  * Use `create(ComposeMemberSpecSchema)` to create a new message.
  */
 export const ComposeMemberSpecSchema: GenMessage<ComposeMemberSpec> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 18);
+  messageDesc(file_seylo_agent_v1_service, 20);
 
 /**
  * @generated from message seylo.agent.v1.BoxSpec
@@ -875,7 +965,7 @@ export type BoxSpec = Message<"seylo.agent.v1.BoxSpec"> & {
  * Use `create(BoxSpecSchema)` to create a new message.
  */
 export const BoxSpecSchema: GenMessage<BoxSpec> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 19);
+  messageDesc(file_seylo_agent_v1_service, 21);
 
 /**
  * @generated from message seylo.agent.v1.CronSpec
@@ -913,7 +1003,7 @@ export type CronSpec = Message<"seylo.agent.v1.CronSpec"> & {
  * Use `create(CronSpecSchema)` to create a new message.
  */
 export const CronSpecSchema: GenMessage<CronSpec> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 20);
+  messageDesc(file_seylo_agent_v1_service, 22);
 
 /**
  * CronJob is one scheduled command of a service (ServiceSpec.cron_jobs).
@@ -976,7 +1066,7 @@ export type CronJob = Message<"seylo.agent.v1.CronJob"> & {
  * Use `create(CronJobSchema)` to create a new message.
  */
 export const CronJobSchema: GenMessage<CronJob> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_service, 21);
+  messageDesc(file_seylo_agent_v1_service, 23);
 
 /**
  * @generated from enum seylo.agent.v1.ServiceKind
