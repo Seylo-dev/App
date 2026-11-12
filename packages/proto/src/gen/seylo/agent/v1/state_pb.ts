@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/state.proto.
  */
 export const file_seylo_agent_v1_state: GenFile = /*@__PURE__*/
-  fileDesc("ChpzZXlsby9hZ2VudC92MS9zdGF0ZS5wcm90bxIOc2V5bG8uYWdlbnQudjEiGQoXR2V0U3RhdGVTbmFwc2hvdFJlcXVlc3QiSwoYR2V0U3RhdGVTbmFwc2hvdFJlc3BvbnNlEi8KCHNuYXBzaG90GAEgASgLMh0uc2V5bG8uYWdlbnQudjEuU3RhdGVTbmFwc2hvdCJ2Cg1TdGF0ZVNuYXBzaG90Eg0KBWVwb2NoGAEgASgEEgsKA3NlcRgCIAEoBBIYChBhcHBsaWVkX3JldmlzaW9uGAMgASgEEi8KCHNlcnZpY2VzGAQgAygLMh0uc2V5bG8uYWdlbnQudjEuU2VydmljZVN0YXR1cyKjAQoKU3RhdGVEZWx0YRINCgVlcG9jaBgBIAEoBBILCgNzZXEYAiABKAQSOAoPc2VydmljZV91cGRhdGVkGAMgASgLMh0uc2V5bG8uYWdlbnQudjEuU2VydmljZVN0YXR1c0gAEhkKD3NlcnZpY2VfcmVtb3ZlZBgEIAEoCUgAEhoKEGFwcGxpZWRfcmV2aXNpb24YBSABKARIAEIICgZjaGFuZ2UigwMKDVNlcnZpY2VTdGF0dXMSEgoKc2VydmljZV9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEisKBXBoYXNlGAMgASgOMhwuc2V5bG8uYWdlbnQudjEuU2VydmljZVBoYXNlEisKCWluc3RhbmNlcxgEIAMoCzIYLnNleWxvLmFnZW50LnYxLkluc3RhbmNlEg8KB21lc3NhZ2UYBSABKAkSLgoKdXBkYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFAoMY3Jhc2hfc3RyZWFrGAcgASgNEisKBnJvdXRlcxgIIAMoCzIbLnNleWxvLmFnZW50LnYxLlJvdXRlU3RhdHVzEiwKCm9wZW5fcG9ydHMYCSADKAsyGC5zZXlsby5hZ2VudC52MS5PcGVuUG9ydBISCgp0dW5uZWxfdXJsGAogASgJEioKBndlYl91aRgLIAEoCzIaLnNleWxvLmFnZW50LnYxLlRvb2xTdGF0dXMigQEKClRvb2xTdGF0dXMSDwoHcnVubmluZxgBIAEoCBIuCgpzdGFydGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIyCg5sYXN0X2FjdGl2ZV9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAilQIKCEluc3RhbmNlEhQKDGNvbnRhaW5lcl9pZBgBIAEoCRIWCg5jb250YWluZXJfbmFtZRgCIAEoCRISCgpnZW5lcmF0aW9uGAMgASgEEg8KB3JlcGxpY2EYBCABKA0SLAoFc3RhdGUYBSABKA4yHS5zZXlsby5hZ2VudC52MS5JbnN0YW5jZVN0YXRlEisKBmhlYWx0aBgGIAEoDjIbLnNleWxvLmFnZW50LnYxLkhlYWx0aFN0YXRlEhQKDGltYWdlX2RpZ2VzdBgHIAEoCRIuCgpzdGFydGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1yZXN0YXJ0X2NvdW50GAkgASgNIrMBCgtSb3V0ZVN0YXR1cxIQCghyb3V0ZV9pZBgBIAEoCRIpCgVzdGF0ZRgCIAEoDjIaLnNleWxvLmFnZW50LnYxLlJvdXRlU3RhdGUSDwoHbWVzc2FnZRgDIAEoCRIaChJjZXJ0aWZpY2F0ZV9pc3N1ZXIYBCABKAkSOgoWY2VydGlmaWNhdGVfZXhwaXJlc19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAinwIKCE9wZW5Qb3J0EhEKCWhvc3RfcG9ydBgBIAEoDRIWCg5jb250YWluZXJfcG9ydBgCIAEoDRIuCgpleHBpcmVzX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBILCgN0bHMYBCABKAgSGgoSY2VydGlmaWNhdGVfaXNzdWVyGAUgASgJEjoKFmNlcnRpZmljYXRlX2V4cGlyZXNfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEh8KF2NlcnRpZmljYXRlX3NlbGZfc2lnbmVkGAcgASgIEhkKEWNlcnRpZmljYXRlX2Vycm9yGAggASgJEhcKD2NlcnRpZmljYXRlX3BlbRgJIAEoCSrFAgoMU2VydmljZVBoYXNlEh0KGVNFUlZJQ0VfUEhBU0VfVU5TUEVDSUZJRUQQABIZChVTRVJWSUNFX1BIQVNFX1BFTkRJTkcQARIZChVTRVJWSUNFX1BIQVNFX1BVTExJTkcQAhIaChZTRVJWSUNFX1BIQVNFX1NUQVJUSU5HEAMSGQoVU0VSVklDRV9QSEFTRV9SVU5OSU5HEAQSGwoXU0VSVklDRV9QSEFTRV9ERVBMT1lJTkcQBRIaChZTRVJWSUNFX1BIQVNFX0RFR1JBREVEEAYSHwobU0VSVklDRV9QSEFTRV9DUkFTSF9MT09QSU5HEAcSGQoVU0VSVklDRV9QSEFTRV9TVE9QUEVEEAgSGAoUU0VSVklDRV9QSEFTRV9GQUlMRUQQCRIaChZTRVJWSUNFX1BIQVNFX1NMRUVQSU5HEAoqugEKDUluc3RhbmNlU3RhdGUSHgoaSU5TVEFOQ0VfU1RBVEVfVU5TUEVDSUZJRUQQABIaChZJTlNUQU5DRV9TVEFURV9DUkVBVEVEEAESGgoWSU5TVEFOQ0VfU1RBVEVfUlVOTklORxACEh0KGUlOU1RBTkNFX1NUQVRFX1JFU1RBUlRJTkcQAxIZChVJTlNUQU5DRV9TVEFURV9FWElURUQQBBIXChNJTlNUQU5DRV9TVEFURV9ERUFEEAUqfAoLSGVhbHRoU3RhdGUSHAoYSEVBTFRIX1NUQVRFX1VOU1BFQ0lGSUVEEAASGQoVSEVBTFRIX1NUQVRFX1NUQVJUSU5HEAESGAoUSEVBTFRIX1NUQVRFX0hFQUxUSFkQAhIaChZIRUFMVEhfU1RBVEVfVU5IRUFMVEhZEAMqqAEKClJvdXRlU3RhdGUSGwoXUk9VVEVfU1RBVEVfVU5TUEVDSUZJRUQQABIWChJST1VURV9TVEFURV9BQ1RJVkUQARIjCh9ST1VURV9TVEFURV9DRVJUSUZJQ0FURV9QRU5ESU5HEAISIgoeUk9VVEVfU1RBVEVfQ0VSVElGSUNBVEVfRkFJTEVEEAMSHAoYUk9VVEVfU1RBVEVfRE5TX01JU01BVENIEARCtQEKEmNvbS5zZXlsby5hZ2VudC52MUIKU3RhdGVQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChpzZXlsby9hZ2VudC92MS9zdGF0ZS5wcm90bxIOc2V5bG8uYWdlbnQudjEiGQoXR2V0U3RhdGVTbmFwc2hvdFJlcXVlc3QiSwoYR2V0U3RhdGVTbmFwc2hvdFJlc3BvbnNlEi8KCHNuYXBzaG90GAEgASgLMh0uc2V5bG8uYWdlbnQudjEuU3RhdGVTbmFwc2hvdCJ2Cg1TdGF0ZVNuYXBzaG90Eg0KBWVwb2NoGAEgASgEEgsKA3NlcRgCIAEoBBIYChBhcHBsaWVkX3JldmlzaW9uGAMgASgEEi8KCHNlcnZpY2VzGAQgAygLMh0uc2V5bG8uYWdlbnQudjEuU2VydmljZVN0YXR1cyKjAQoKU3RhdGVEZWx0YRINCgVlcG9jaBgBIAEoBBILCgNzZXEYAiABKAQSOAoPc2VydmljZV91cGRhdGVkGAMgASgLMh0uc2V5bG8uYWdlbnQudjEuU2VydmljZVN0YXR1c0gAEhkKD3NlcnZpY2VfcmVtb3ZlZBgEIAEoCUgAEhoKEGFwcGxpZWRfcmV2aXNpb24YBSABKARIAEIICgZjaGFuZ2UivwMKDVNlcnZpY2VTdGF0dXMSEgoKc2VydmljZV9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEisKBXBoYXNlGAMgASgOMhwuc2V5bG8uYWdlbnQudjEuU2VydmljZVBoYXNlEisKCWluc3RhbmNlcxgEIAMoCzIYLnNleWxvLmFnZW50LnYxLkluc3RhbmNlEg8KB21lc3NhZ2UYBSABKAkSLgoKdXBkYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFAoMY3Jhc2hfc3RyZWFrGAcgASgNEisKBnJvdXRlcxgIIAMoCzIbLnNleWxvLmFnZW50LnYxLlJvdXRlU3RhdHVzEiwKCm9wZW5fcG9ydHMYCSADKAsyGC5zZXlsby5hZ2VudC52MS5PcGVuUG9ydBISCgp0dW5uZWxfdXJsGAogASgJEioKBndlYl91aRgLIAEoCzIaLnNleWxvLmFnZW50LnYxLlRvb2xTdGF0dXMSOgoRcm91dGVfd3JpdGVfZXJyb3IYDCABKAsyHy5zZXlsby5hZ2VudC52MS5Sb3V0ZVdyaXRlRXJyb3IiTQoPUm91dGVXcml0ZUVycm9yEg8KB21lc3NhZ2UYASABKAkSKQoFc2luY2UYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIoEBCgpUb29sU3RhdHVzEg8KB3J1bm5pbmcYASABKAgSLgoKc3RhcnRlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpUCCghJbnN0YW5jZRIUCgxjb250YWluZXJfaWQYASABKAkSFgoOY29udGFpbmVyX25hbWUYAiABKAkSEgoKZ2VuZXJhdGlvbhgDIAEoBBIPCgdyZXBsaWNhGAQgASgNEiwKBXN0YXRlGAUgASgOMh0uc2V5bG8uYWdlbnQudjEuSW5zdGFuY2VTdGF0ZRIrCgZoZWFsdGgYBiABKA4yGy5zZXlsby5hZ2VudC52MS5IZWFsdGhTdGF0ZRIUCgxpbWFnZV9kaWdlc3QYByABKAkSLgoKc3RhcnRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNcmVzdGFydF9jb3VudBgJIAEoDSKzAQoLUm91dGVTdGF0dXMSEAoIcm91dGVfaWQYASABKAkSKQoFc3RhdGUYAiABKA4yGi5zZXlsby5hZ2VudC52MS5Sb3V0ZVN0YXRlEg8KB21lc3NhZ2UYAyABKAkSGgoSY2VydGlmaWNhdGVfaXNzdWVyGAQgASgJEjoKFmNlcnRpZmljYXRlX2V4cGlyZXNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIp8CCghPcGVuUG9ydBIRCglob3N0X3BvcnQYASABKA0SFgoOY29udGFpbmVyX3BvcnQYAiABKA0SLgoKZXhwaXJlc19hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASCwoDdGxzGAQgASgIEhoKEmNlcnRpZmljYXRlX2lzc3VlchgFIAEoCRI6ChZjZXJ0aWZpY2F0ZV9leHBpcmVzX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIfChdjZXJ0aWZpY2F0ZV9zZWxmX3NpZ25lZBgHIAEoCBIZChFjZXJ0aWZpY2F0ZV9lcnJvchgIIAEoCRIXCg9jZXJ0aWZpY2F0ZV9wZW0YCSABKAkqxQIKDFNlcnZpY2VQaGFzZRIdChlTRVJWSUNFX1BIQVNFX1VOU1BFQ0lGSUVEEAASGQoVU0VSVklDRV9QSEFTRV9QRU5ESU5HEAESGQoVU0VSVklDRV9QSEFTRV9QVUxMSU5HEAISGgoWU0VSVklDRV9QSEFTRV9TVEFSVElORxADEhkKFVNFUlZJQ0VfUEhBU0VfUlVOTklORxAEEhsKF1NFUlZJQ0VfUEhBU0VfREVQTE9ZSU5HEAUSGgoWU0VSVklDRV9QSEFTRV9ERUdSQURFRBAGEh8KG1NFUlZJQ0VfUEhBU0VfQ1JBU0hfTE9PUElORxAHEhkKFVNFUlZJQ0VfUEhBU0VfU1RPUFBFRBAIEhgKFFNFUlZJQ0VfUEhBU0VfRkFJTEVEEAkSGgoWU0VSVklDRV9QSEFTRV9TTEVFUElORxAKKroBCg1JbnN0YW5jZVN0YXRlEh4KGklOU1RBTkNFX1NUQVRFX1VOU1BFQ0lGSUVEEAASGgoWSU5TVEFOQ0VfU1RBVEVfQ1JFQVRFRBABEhoKFklOU1RBTkNFX1NUQVRFX1JVTk5JTkcQAhIdChlJTlNUQU5DRV9TVEFURV9SRVNUQVJUSU5HEAMSGQoVSU5TVEFOQ0VfU1RBVEVfRVhJVEVEEAQSFwoTSU5TVEFOQ0VfU1RBVEVfREVBRBAFKnwKC0hlYWx0aFN0YXRlEhwKGEhFQUxUSF9TVEFURV9VTlNQRUNJRklFRBAAEhkKFUhFQUxUSF9TVEFURV9TVEFSVElORxABEhgKFEhFQUxUSF9TVEFURV9IRUFMVEhZEAISGgoWSEVBTFRIX1NUQVRFX1VOSEVBTFRIWRADKqgBCgpSb3V0ZVN0YXRlEhsKF1JPVVRFX1NUQVRFX1VOU1BFQ0lGSUVEEAASFgoSUk9VVEVfU1RBVEVfQUNUSVZFEAESIwofUk9VVEVfU1RBVEVfQ0VSVElGSUNBVEVfUEVORElORxACEiIKHlJPVVRFX1NUQVRFX0NFUlRJRklDQVRFX0ZBSUxFRBADEhwKGFJPVVRFX1NUQVRFX0ROU19NSVNNQVRDSBAEQrUBChJjb20uc2V5bG8uYWdlbnQudjFCClN0YXRlUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message seylo.agent.v1.GetStateSnapshotRequest
@@ -199,6 +199,20 @@ export type ServiceStatus = Message<"seylo.agent.v1.ServiceStatus"> & {
    * @generated from field: seylo.agent.v1.ToolStatus web_ui = 11;
    */
   webUi?: ToolStatus | undefined;
+
+  /**
+   * Set while the agent cannot write the service's route file (Traefik's
+   * dynamic file of its domains): the routes did not build, a host belongs
+   * to another service on the node, or the write failed. The agent tries
+   * again every 10 seconds and clears it once the file is written.
+   * Meanwhile the node serves the routes of the file it last wrote (none
+   * when it never wrote one), so `routes` lists only those, and a domain
+   * added since has no route there. Agents from 0.2.12; older ones only
+   * log it.
+   *
+   * @generated from field: seylo.agent.v1.RouteWriteError route_write_error = 12;
+   */
+  routeWriteError?: RouteWriteError | undefined;
 };
 
 /**
@@ -207,6 +221,35 @@ export type ServiceStatus = Message<"seylo.agent.v1.ServiceStatus"> & {
  */
 export const ServiceStatusSchema: GenMessage<ServiceStatus> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_state, 4);
+
+/**
+ * Why the agent could not write a service's route file
+ * (ServiceStatus.route_write_error).
+ *
+ * @generated from message seylo.agent.v1.RouteWriteError
+ */
+export type RouteWriteError = Message<"seylo.agent.v1.RouteWriteError"> & {
+  /**
+   * The error, one line.
+   *
+   * @generated from field: string message = 1;
+   */
+  message: string;
+
+  /**
+   * The first failed attempt of this run of failures.
+   *
+   * @generated from field: google.protobuf.Timestamp since = 2;
+   */
+  since?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message seylo.agent.v1.RouteWriteError.
+ * Use `create(RouteWriteErrorSchema)` to create a new message.
+ */
+export const RouteWriteErrorSchema: GenMessage<RouteWriteError> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_state, 5);
 
 /**
  * ToolStatus is the actual state of an on-demand helper (database web UI):
@@ -240,7 +283,7 @@ export type ToolStatus = Message<"seylo.agent.v1.ToolStatus"> & {
  * Use `create(ToolStatusSchema)` to create a new message.
  */
 export const ToolStatusSchema: GenMessage<ToolStatus> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_state, 5);
+  messageDesc(file_seylo_agent_v1_state, 6);
 
 /**
  * @generated from message seylo.agent.v1.Instance
@@ -297,7 +340,7 @@ export type Instance = Message<"seylo.agent.v1.Instance"> & {
  * Use `create(InstanceSchema)` to create a new message.
  */
 export const InstanceSchema: GenMessage<Instance> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_state, 6);
+  messageDesc(file_seylo_agent_v1_state, 7);
 
 /**
  * @generated from message seylo.agent.v1.RouteStatus
@@ -344,7 +387,7 @@ export type RouteStatus = Message<"seylo.agent.v1.RouteStatus"> & {
  * Use `create(RouteStatusSchema)` to create a new message.
  */
 export const RouteStatusSchema: GenMessage<RouteStatus> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_state, 7);
+  messageDesc(file_seylo_agent_v1_state, 8);
 
 /**
  * @generated from message seylo.agent.v1.OpenPort
@@ -428,7 +471,7 @@ export type OpenPort = Message<"seylo.agent.v1.OpenPort"> & {
  * Use `create(OpenPortSchema)` to create a new message.
  */
 export const OpenPortSchema: GenMessage<OpenPort> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_state, 8);
+  messageDesc(file_seylo_agent_v1_state, 9);
 
 /**
  * @generated from enum seylo.agent.v1.ServicePhase

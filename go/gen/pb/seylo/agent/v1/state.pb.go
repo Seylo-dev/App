@@ -551,9 +551,18 @@ type ServiceStatus struct {
 	TunnelUrl string `protobuf:"bytes,10,opt,name=tunnel_url,json=tunnelUrl,proto3" json:"tunnel_url,omitempty"`
 	// Database web UI (SERVICE_KIND_DATABASE with tools.web_ui). Unset when
 	// the service has no web UI or the agent is older than this field.
-	WebUi         *ToolStatus `protobuf:"bytes,11,opt,name=web_ui,json=webUi,proto3" json:"web_ui,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WebUi *ToolStatus `protobuf:"bytes,11,opt,name=web_ui,json=webUi,proto3" json:"web_ui,omitempty"`
+	// Set while the agent cannot write the service's route file (Traefik's
+	// dynamic file of its domains): the routes did not build, a host belongs
+	// to another service on the node, or the write failed. The agent tries
+	// again every 10 seconds and clears it once the file is written.
+	// Meanwhile the node serves the routes of the file it last wrote (none
+	// when it never wrote one), so `routes` lists only those, and a domain
+	// added since has no route there. Agents from 0.2.12; older ones only
+	// log it.
+	RouteWriteError *RouteWriteError `protobuf:"bytes,12,opt,name=route_write_error,json=routeWriteError,proto3" json:"route_write_error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ServiceStatus) Reset() {
@@ -663,6 +672,69 @@ func (x *ServiceStatus) GetWebUi() *ToolStatus {
 	return nil
 }
 
+func (x *ServiceStatus) GetRouteWriteError() *RouteWriteError {
+	if x != nil {
+		return x.RouteWriteError
+	}
+	return nil
+}
+
+// Why the agent could not write a service's route file
+// (ServiceStatus.route_write_error).
+type RouteWriteError struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The error, one line.
+	Message string `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	// The first failed attempt of this run of failures.
+	Since         *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=since,proto3" json:"since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RouteWriteError) Reset() {
+	*x = RouteWriteError{}
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RouteWriteError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RouteWriteError) ProtoMessage() {}
+
+func (x *RouteWriteError) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RouteWriteError.ProtoReflect.Descriptor instead.
+func (*RouteWriteError) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RouteWriteError) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *RouteWriteError) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
 // ToolStatus is the actual state of an on-demand helper (database web UI):
 // it starts on the first ticket-authenticated request and stops when idle.
 type ToolStatus struct {
@@ -678,7 +750,7 @@ type ToolStatus struct {
 
 func (x *ToolStatus) Reset() {
 	*x = ToolStatus{}
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -690,7 +762,7 @@ func (x *ToolStatus) String() string {
 func (*ToolStatus) ProtoMessage() {}
 
 func (x *ToolStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -703,7 +775,7 @@ func (x *ToolStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolStatus.ProtoReflect.Descriptor instead.
 func (*ToolStatus) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ToolStatus) GetRunning() bool {
@@ -744,7 +816,7 @@ type Instance struct {
 
 func (x *Instance) Reset() {
 	*x = Instance{}
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -756,7 +828,7 @@ func (x *Instance) String() string {
 func (*Instance) ProtoMessage() {}
 
 func (x *Instance) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -769,7 +841,7 @@ func (x *Instance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Instance.ProtoReflect.Descriptor instead.
 func (*Instance) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Instance) GetContainerId() string {
@@ -856,7 +928,7 @@ type RouteStatus struct {
 
 func (x *RouteStatus) Reset() {
 	*x = RouteStatus{}
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -868,7 +940,7 @@ func (x *RouteStatus) String() string {
 func (*RouteStatus) ProtoMessage() {}
 
 func (x *RouteStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -881,7 +953,7 @@ func (x *RouteStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RouteStatus.ProtoReflect.Descriptor instead.
 func (*RouteStatus) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{7}
+	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RouteStatus) GetRouteId() string {
@@ -957,7 +1029,7 @@ type OpenPort struct {
 
 func (x *OpenPort) Reset() {
 	*x = OpenPort{}
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[8]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -969,7 +1041,7 @@ func (x *OpenPort) String() string {
 func (*OpenPort) ProtoMessage() {}
 
 func (x *OpenPort) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_state_proto_msgTypes[8]
+	mi := &file_seylo_agent_v1_state_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -982,7 +1054,7 @@ func (x *OpenPort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenPort.ProtoReflect.Descriptor instead.
 func (*OpenPort) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{8}
+	return file_seylo_agent_v1_state_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *OpenPort) GetHostPort() uint32 {
@@ -1068,7 +1140,7 @@ const file_seylo_agent_v1_state_proto_rawDesc = "" +
 	"\x0fservice_updated\x18\x03 \x01(\v2\x1d.seylo.agent.v1.ServiceStatusH\x00R\x0eserviceUpdated\x12)\n" +
 	"\x0fservice_removed\x18\x04 \x01(\tH\x00R\x0eserviceRemoved\x12+\n" +
 	"\x10applied_revision\x18\x05 \x01(\x04H\x00R\x0fappliedRevisionB\b\n" +
-	"\x06change\"\xf2\x03\n" +
+	"\x06change\"\xbf\x04\n" +
 	"\rServiceStatus\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x1e\n" +
@@ -1087,7 +1159,11 @@ const file_seylo_agent_v1_state_proto_rawDesc = "" +
 	"\n" +
 	"tunnel_url\x18\n" +
 	" \x01(\tR\ttunnelUrl\x121\n" +
-	"\x06web_ui\x18\v \x01(\v2\x1a.seylo.agent.v1.ToolStatusR\x05webUi\"\xa3\x01\n" +
+	"\x06web_ui\x18\v \x01(\v2\x1a.seylo.agent.v1.ToolStatusR\x05webUi\x12K\n" +
+	"\x11route_write_error\x18\f \x01(\v2\x1f.seylo.agent.v1.RouteWriteErrorR\x0frouteWriteError\"]\n" +
+	"\x0fRouteWriteError\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\x120\n" +
+	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\xa3\x01\n" +
 	"\n" +
 	"ToolStatus\x12\x18\n" +
 	"\arunning\x18\x01 \x01(\bR\arunning\x129\n" +
@@ -1172,7 +1248,7 @@ func file_seylo_agent_v1_state_proto_rawDescGZIP() []byte {
 }
 
 var file_seylo_agent_v1_state_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_seylo_agent_v1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_seylo_agent_v1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_seylo_agent_v1_state_proto_goTypes = []any{
 	(ServicePhase)(0),                // 0: seylo.agent.v1.ServicePhase
 	(InstanceState)(0),               // 1: seylo.agent.v1.InstanceState
@@ -1183,36 +1259,39 @@ var file_seylo_agent_v1_state_proto_goTypes = []any{
 	(*StateSnapshot)(nil),            // 6: seylo.agent.v1.StateSnapshot
 	(*StateDelta)(nil),               // 7: seylo.agent.v1.StateDelta
 	(*ServiceStatus)(nil),            // 8: seylo.agent.v1.ServiceStatus
-	(*ToolStatus)(nil),               // 9: seylo.agent.v1.ToolStatus
-	(*Instance)(nil),                 // 10: seylo.agent.v1.Instance
-	(*RouteStatus)(nil),              // 11: seylo.agent.v1.RouteStatus
-	(*OpenPort)(nil),                 // 12: seylo.agent.v1.OpenPort
-	(*timestamppb.Timestamp)(nil),    // 13: google.protobuf.Timestamp
+	(*RouteWriteError)(nil),          // 9: seylo.agent.v1.RouteWriteError
+	(*ToolStatus)(nil),               // 10: seylo.agent.v1.ToolStatus
+	(*Instance)(nil),                 // 11: seylo.agent.v1.Instance
+	(*RouteStatus)(nil),              // 12: seylo.agent.v1.RouteStatus
+	(*OpenPort)(nil),                 // 13: seylo.agent.v1.OpenPort
+	(*timestamppb.Timestamp)(nil),    // 14: google.protobuf.Timestamp
 }
 var file_seylo_agent_v1_state_proto_depIdxs = []int32{
 	6,  // 0: seylo.agent.v1.GetStateSnapshotResponse.snapshot:type_name -> seylo.agent.v1.StateSnapshot
 	8,  // 1: seylo.agent.v1.StateSnapshot.services:type_name -> seylo.agent.v1.ServiceStatus
 	8,  // 2: seylo.agent.v1.StateDelta.service_updated:type_name -> seylo.agent.v1.ServiceStatus
 	0,  // 3: seylo.agent.v1.ServiceStatus.phase:type_name -> seylo.agent.v1.ServicePhase
-	10, // 4: seylo.agent.v1.ServiceStatus.instances:type_name -> seylo.agent.v1.Instance
-	13, // 5: seylo.agent.v1.ServiceStatus.updated_at:type_name -> google.protobuf.Timestamp
-	11, // 6: seylo.agent.v1.ServiceStatus.routes:type_name -> seylo.agent.v1.RouteStatus
-	12, // 7: seylo.agent.v1.ServiceStatus.open_ports:type_name -> seylo.agent.v1.OpenPort
-	9,  // 8: seylo.agent.v1.ServiceStatus.web_ui:type_name -> seylo.agent.v1.ToolStatus
-	13, // 9: seylo.agent.v1.ToolStatus.started_at:type_name -> google.protobuf.Timestamp
-	13, // 10: seylo.agent.v1.ToolStatus.last_active_at:type_name -> google.protobuf.Timestamp
-	1,  // 11: seylo.agent.v1.Instance.state:type_name -> seylo.agent.v1.InstanceState
-	2,  // 12: seylo.agent.v1.Instance.health:type_name -> seylo.agent.v1.HealthState
-	13, // 13: seylo.agent.v1.Instance.started_at:type_name -> google.protobuf.Timestamp
-	3,  // 14: seylo.agent.v1.RouteStatus.state:type_name -> seylo.agent.v1.RouteState
-	13, // 15: seylo.agent.v1.RouteStatus.certificate_expires_at:type_name -> google.protobuf.Timestamp
-	13, // 16: seylo.agent.v1.OpenPort.expires_at:type_name -> google.protobuf.Timestamp
-	13, // 17: seylo.agent.v1.OpenPort.certificate_expires_at:type_name -> google.protobuf.Timestamp
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	11, // 4: seylo.agent.v1.ServiceStatus.instances:type_name -> seylo.agent.v1.Instance
+	14, // 5: seylo.agent.v1.ServiceStatus.updated_at:type_name -> google.protobuf.Timestamp
+	12, // 6: seylo.agent.v1.ServiceStatus.routes:type_name -> seylo.agent.v1.RouteStatus
+	13, // 7: seylo.agent.v1.ServiceStatus.open_ports:type_name -> seylo.agent.v1.OpenPort
+	10, // 8: seylo.agent.v1.ServiceStatus.web_ui:type_name -> seylo.agent.v1.ToolStatus
+	9,  // 9: seylo.agent.v1.ServiceStatus.route_write_error:type_name -> seylo.agent.v1.RouteWriteError
+	14, // 10: seylo.agent.v1.RouteWriteError.since:type_name -> google.protobuf.Timestamp
+	14, // 11: seylo.agent.v1.ToolStatus.started_at:type_name -> google.protobuf.Timestamp
+	14, // 12: seylo.agent.v1.ToolStatus.last_active_at:type_name -> google.protobuf.Timestamp
+	1,  // 13: seylo.agent.v1.Instance.state:type_name -> seylo.agent.v1.InstanceState
+	2,  // 14: seylo.agent.v1.Instance.health:type_name -> seylo.agent.v1.HealthState
+	14, // 15: seylo.agent.v1.Instance.started_at:type_name -> google.protobuf.Timestamp
+	3,  // 16: seylo.agent.v1.RouteStatus.state:type_name -> seylo.agent.v1.RouteState
+	14, // 17: seylo.agent.v1.RouteStatus.certificate_expires_at:type_name -> google.protobuf.Timestamp
+	14, // 18: seylo.agent.v1.OpenPort.expires_at:type_name -> google.protobuf.Timestamp
+	14, // 19: seylo.agent.v1.OpenPort.certificate_expires_at:type_name -> google.protobuf.Timestamp
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_state_proto_init() }
@@ -1231,7 +1310,7 @@ func file_seylo_agent_v1_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_state_proto_rawDesc), len(file_seylo_agent_v1_state_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

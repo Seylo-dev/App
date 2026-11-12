@@ -137,6 +137,9 @@ type fakeRouter struct {
 	applies   int
 	removed   map[string]bool
 	verifyErr error
+	// applyErr fails every Apply (a route that does not build, a host of
+	// another service, a write error) and keeps the last applied routes.
+	applyErr error
 }
 
 func newFakeRouter() *fakeRouter {
@@ -151,6 +154,9 @@ func (r *fakeRouter) Apply(_ context.Context, s *agentv1.ServiceSpec, ups []prox
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.applies++
+	if r.applyErr != nil {
+		return r.applyErr
+	}
 	r.upstreams[s.GetId()] = ups
 	delete(r.removed, s.GetId())
 	return nil
@@ -168,6 +174,12 @@ func (r *fakeRouter) Remove(_ context.Context, id string) error {
 	return nil
 }
 func (r *fakeRouter) Status(context.Context, string) ([]*agentv1.RouteStatus, error) { return nil, nil }
+
+func (r *fakeRouter) failApply(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.applyErr = err
+}
 
 func (r *fakeRouter) get(id string) []proxy.Upstream {
 	r.mu.Lock()

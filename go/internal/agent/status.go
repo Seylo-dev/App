@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,12 +161,35 @@ func (b *localBackend) Status(ctx context.Context) (localapi.NodeStatus, error) 
 	for _, svc := range snap.GetServices() {
 		phases[svc.GetServiceId()] = svc.GetPhase()
 	}
+	names := map[string]string{}
 	for _, spec := range desired.GetServices() {
+		names[spec.GetId()] = spec.GetName()
 		out.Services = append(out.Services, localapi.ServiceSummary{
 			ID: spec.GetId(), Name: spec.GetName(), Project: spec.GetProjectId(), Phase: phaseName(phases[spec.GetId()]),
 		})
 	}
+	out.RouteErrors = routeErrors(snap.GetServices(), names)
 	return out, nil
+}
+
+// routeErrors lists the services whose route file reconcile cannot write,
+// oldest failure first, named as the desired state names them (by id
+// when it does not).
+func routeErrors(statuses []*agentv1.ServiceStatus, names map[string]string) []localapi.ErrorEntry {
+	var out []localapi.ErrorEntry
+	for _, svc := range statuses {
+		e := svc.GetRouteWriteError()
+		if e.GetMessage() == "" {
+			continue
+		}
+		name := names[svc.GetServiceId()]
+		if name == "" {
+			name = svc.GetServiceId()
+		}
+		out = append(out, localapi.ErrorEntry{At: e.GetSince().AsTime(), Source: "routes of " + name, Message: conn.PrintableLine(e.GetMessage())})
+	}
+	slices.SortStableFunc(out, func(a, b localapi.ErrorEntry) int { return a.At.Compare(b.At) })
+	return out
 }
 
 // phaseName turns SERVICE_PHASE_CRASH_LOOPING into "crash looping".

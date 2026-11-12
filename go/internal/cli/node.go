@@ -160,10 +160,14 @@ func printNodeStatus(d *deps, s localapi.NodeStatus) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	if n := len(s.RecentErrors); n > 0 {
+	if n := len(s.RecentErrors); n > 0 || len(s.RouteErrors) > 0 {
 		fmt.Fprintln(d.out, "\nRecent errors:")
 		for _, e := range s.RecentErrors[max(0, n-5):] {
 			fmt.Fprintf(d.out, "  %s  %s: %s\n", e.At.Local().Format("15:04:05"), e.Source, e.Message)
+		}
+		// Still failing, whenever they started: retried every 10 seconds.
+		for _, e := range s.RouteErrors {
+			fmt.Fprintf(d.out, "  %s  %s: %s (still failing)\n", e.At.Local().Format("15:04:05"), e.Source, e.Message)
 		}
 	}
 	return nil

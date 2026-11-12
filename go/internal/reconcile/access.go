@@ -117,8 +117,10 @@ func (w *worker) syncRoutes(ctx context.Context, spec *agentv1.ServiceSpec, live
 		return nil
 	}
 	if err := rt.Apply(ctx, spec, ups); err != nil {
+		w.noteRouteWrite(ctx, err)
 		return err
 	}
+	w.noteRouteWrite(ctx, nil)
 	w.lastSync.route = key
 	return nil
 }
@@ -140,6 +142,32 @@ func databaseRouteInputs(spec *agentv1.ServiceSpec) string {
 		host = strings.ToLower(exp.GetTlsHostname())
 	}
 	return fmt.Sprintf("tls=%s ui=%t", host, db.GetTools().GetWebUi())
+}
+
+// maxRouteError caps ServiceStatus.route_write_error's message.
+const maxRouteError = 500
+
+// noteRouteWrite keeps how the last write of the route file went, for the
+// service's status: the panel shows it on the service's domains, which
+// have no route on this node meanwhile, and `seylo status` lists it under
+// Recent errors. A write stopped by a cancelled context (a superseded
+// deploy, the agent stopping) says nothing about the file.
+func (w *worker) noteRouteWrite(ctx context.Context, err error) {
+	if err == nil {
+		w.routeErr, w.routeErrSince = "", time.Time{}
+		return
+	}
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	msg := strings.Join(strings.Fields(err.Error()), " ")
+	if r := []rune(msg); len(r) > maxRouteError {
+		msg = string(r[:maxRouteError-1]) + "…"
+	}
+	if w.routeErr == "" {
+		w.routeErrSince = w.r.o.Now()
+	}
+	w.routeErr = msg
 }
 
 func (w *worker) syncTunnel(ctx context.Context, spec *agentv1.ServiceSpec, live []liveInstance) {
@@ -355,6 +383,9 @@ func (w *worker) buildStatus(ctx context.Context, spec *agentv1.ServiceSpec) *ag
 	}
 	if fn := w.r.webUI.Load(); fn != nil && spec.GetDatabase().GetTools().GetWebUi() {
 		st.WebUi = (*fn)(w.id)
+	}
+	if w.routeErr != "" {
+		st.RouteWriteError = &agentv1.RouteWriteError{Message: w.routeErr, Since: timestamppb.New(w.routeErrSince)}
 	}
 	list, err := w.instances(ctx)
 	if err != nil {

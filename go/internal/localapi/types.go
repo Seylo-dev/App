@@ -20,6 +20,11 @@ type NodeStatus struct {
 	AppliedRevision uint64 `json:"appliedRevision"`
 	// RecentErrors are the last connection and outbox errors, newest last.
 	RecentErrors []ErrorEntry `json:"recentErrors"`
+	// RouteErrors are the services whose route file the agent cannot write
+	// now (ServiceStatus.route_write_error), oldest first: At is the first
+	// failure, Source "routes of <service>". Their domains have no route on
+	// this node until it is written (added in 0.2.12).
+	RouteErrors []ErrorEntry `json:"routeErrors,omitempty"`
 	// Busy names the node operation in progress ("agent update", "panel
 	// update", "Docker update", "reboot"), or "" (added in 0.2.1: an older
 	// agent leaves it empty).

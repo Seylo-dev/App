@@ -15,6 +15,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/state"
 	"github.com/seylo-dev/app/go/internal/update"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // panelStatusBackend is a local backend whose desired state holds the
@@ -203,5 +204,38 @@ func TestStatusKeepsErrorsOnOneLine(t *testing.T) {
 	}
 	if len(recent) != 1 || recent[0].Message != want {
 		t.Fatalf("recent errors = %+v", recent)
+	}
+}
+
+// A route file reconcile cannot write used to show only in the agent's
+// journal: seylo status lists it under Recent errors, named by the
+// service, oldest first, for as long as it fails.
+func TestStatusListsRouteWriteErrors(t *testing.T) {
+	b, _ := panelStatusBackend(t)
+	b.conn.status = &statusTracker{}
+	since := time.Date(2026, 11, 12, 9, 30, 0, 0, time.UTC)
+	b.deps.State.SetService(&agentv1.ServiceStatus{
+		ServiceId: docker.PanelServiceID,
+		RouteWriteError: &agentv1.RouteWriteError{
+			Message: "invalid route: the host belongs to another service: shop.example.com", Since: timestamppb.New(since),
+		},
+	})
+	b.deps.State.SetService(&agentv1.ServiceStatus{
+		ServiceId:       "gone",
+		RouteWriteError: &agentv1.RouteWriteError{Message: "writing\nthe file", Since: timestamppb.New(since.Add(-time.Hour))},
+	})
+	b.deps.State.SetService(&agentv1.ServiceStatus{ServiceId: "fine"})
+	s, err := b.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []localapi.ErrorEntry{
+		{At: since.Add(-time.Hour), Source: "routes of gone", Message: "writing the file"},
+		{At: since, Source: "routes of " + PanelServiceName, Message: "invalid route: the host belongs to another service: shop.example.com"},
+	}
+	if !slices.EqualFunc(s.RouteErrors, want, func(a, b localapi.ErrorEntry) bool {
+		return a.At.Equal(b.At) && a.Source == b.Source && a.Message == b.Message
+	}) {
+		t.Fatalf("route errors = %+v", s.RouteErrors)
 	}
 }

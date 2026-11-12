@@ -59,6 +59,24 @@ message ServiceStatus {
   // Database web UI (SERVICE_KIND_DATABASE with tools.web_ui). Unset when
   // the service has no web UI or the agent is older than this field.
   ToolStatus web_ui = 11;
+  // Set while the agent cannot write the service's route file (Traefik's
+  // dynamic file of its domains): the routes did not build, a host belongs
+  // to another service on the node, or the write failed. The agent tries
+  // again every 10 seconds and clears it once the file is written.
+  // Meanwhile the node serves the routes of the file it last wrote (none
+  // when it never wrote one), so `routes` lists only those, and a domain
+  // added since has no route there. Agents from 0.2.12; older ones only
+  // log it.
+  RouteWriteError route_write_error = 12;
+}
+
+// Why the agent could not write a service's route file
+// (ServiceStatus.route_write_error).
+message RouteWriteError {
+  // The error, one line.
+  string message = 1;
+  // The first failed attempt of this run of failures.
+  google.protobuf.Timestamp since = 2;
 }
 
 // ToolStatus is the actual state of an on-demand helper (database web UI):
