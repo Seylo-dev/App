@@ -23,7 +23,7 @@ packages/brand/           generated brand constants for TypeScript (@seylo/brand
 packages/proto/           generated protocol + frame codec for TypeScript (@seylo/proto)
 packages/ops/             operation registry: contracts, generators, typed client (@seylo/ops)
 packages/ui/              UI kit (shadcn-style components) and design tokens (@seylo/ui)
-packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, literal host names (`hostMentions`), which variables are secrets (`classifySecret`, `publicPrefixes`) (@seylo/env-analyzer)
+packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, hardcoded service addresses (`hardcoded-reference`), literal host names (`hostMentions`), which variables are secrets (`classifySecret`, `publicPrefixes`), one-variable edits (`setEnvVariable`) (@seylo/env-analyzer)
 packages/zip/             streaming zip writer (store, deflate, data descriptors, zip64) and a strict zip reader that runs in browsers (@seylo/zip/write, @seylo/zip/read)
 installer/                install.sh.tmpl + generated brand.env and install.sh (scripts/render-installer.sh)
 openapi.json              generated from the op registry (scripts/gen-openapi.ts)
@@ -2322,7 +2322,9 @@ never type the ids by hand.
 - Env references (`modules/env/ops.ts` `checkEnvReferences`): a `${{svc.VAR}}`
   the caller may not read (env.view on the target, databases.credentials for
   database credentials; addresses are fine) is refused with FORBIDDEN
-  `reference` on every path that writes a .env: `env.set`, compose
+  `reference` on every path that writes a .env: `env.set`,
+  `env.setVariable` (only the line it writes: the file's other lines were
+  written by whoever wrote them), compose
   preview/create/update (each member's `environment:`, the stack's own
   members count as the writer's) and `templates.create` (the template's own
   services count). A push to a stack's repo has no person to check, so it
@@ -4336,6 +4338,53 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   secrets; addresses are open). Shared variables reach every service of the
   project, so anyone who can run code in one service of a project can read
   them: a per-service grant is not a boundary for shared variables.
+- One variable at a time (added in 0.2.14): `env.setVariable` (`env.edit`
+  on the service) and `env.setSharedVariable` (`env.edit` on the project)
+  take `{key, value: string | null, expectedUpdatedAt?}` and change the
+  saved text with `@seylo/env-analyzer` `setEnvVariable`, inside the write
+  transaction, so they need no `expectedUpdatedAt` to keep someone else's
+  save. They exist because model callers get env.get's values redacted and
+  `env.set` replaces the whole text. A known key keeps its line: the last
+  line with the key (the one that wins) gets the new value in its quote
+  style when the value reads back the same in it (else double quotes,
+  which also hold newlines as `\n`), with its `export`, trailing comment
+  and the comment lines above it; earlier duplicates stay. A new key is
+  appended as `KEY=value`. `value: null` removes every line with the key
+  and a `# @public`/`# @secret` line right above one (it would apply to the
+  next line otherwise); no such key is NOT_FOUND (`details.field: key`).
+  The key follows the parser's name rule (schema pattern, BAD_REQUEST); a
+  value no quoting writes back as given (a broken `${{`) is BAD_REQUEST
+  `field: value`, its message naming the key only. The edited text gets
+  `env.set`'s syntax check, and `env.setVariable` returns `env.set`'s
+  output for the whole file; shared values refuse references like
+  `env.setShared`, and `env.setSharedVariable` returns its output. Both are
+  `mcp: true` mutations (no approval) with `sensitive.input: ["value"]`, so
+  the audit log and transcripts show the key, never the value (a removal
+  shows `[redacted]` too).
+- `hardcoded-reference` (`env-analyzer/src/hardcoded.ts`), severity
+  `info`: a value whose whole text is a target's (or the service's own,
+  `self.builtins`) `URL`, `DOMAIN`, `INTERNAL_URL`, `INTERNAL_HOST`,
+  `EXPOSED_URL` or `EXPOSED_HOST`, or which starts with one of the URLs
+  followed by `/`, `?` or `#` (`&` after a URL with a query). Scheme and
+  host compare case-insensitively, user info and path exactly, and a
+  trailing slash is ignored: the fix replaces the matched text, so the
+  resolved value stays the same (`https://api.example.com/` becomes
+  `${{api.URL}}/`; single quotes become double ones, since they take no
+  references). Skipped: lines with syntax problems, text inside references,
+  empty values and built-ins, own variables of a target (`scope: plain`)
+  and shared variables, `localhost` and loopback addresses, a host that is
+  an IP or a number, a bare IP URL without port or user, a host name
+  without a dot unless the key names a host (`..._HOST`, `_HOSTNAME`,
+  `_ADDR`, `_SERVER`, ...), a value two services share, and an internal
+  address of a service on another node (the cross-node error covers it).
+  Keys starting with `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `REACT_APP_`,
+  `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_` or `VUE_APP_` run in a browser:
+  an internal match there suggests the public variable (`EXPOSED_*`, else
+  `URL`/`DOMAIN`; `params.reason` `public`, or `noPublic` when the target
+  has none), and the detail says a server-side variable can use
+  `INTERNAL_URL` when both services share a node (`params.internalReference`).
+  Message, detail, params and fix name the key and the reference only,
+  never the value: values can be secrets and MCP hands diagnostics to models.
 - Edge tickets (`modules/databases/edge-ticket.ts`; the agent's
   `edge.TicketVerifier` must accept exactly this): token
   `<payload>.<signature>`, both base64url without padding; payload is the
@@ -5439,7 +5488,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `editor/env-editor.tsx` (.env editor with env-analyzer markers, hovers,
   completions, a Secret chip after each variable builds and crash reports
   treat as a secret and Public after a framework-public or `# @public` one
-  that looks secret, with why on hover), `env/references-panel.tsx` (the References panel: first the
+  that looks secret, with why on hover, and quick fixes from
+  `editor/env-model.ts` `quickFixActions`: errors' fixes first, and a
+  `hardcoded-reference` hint and its fix keep the info severity, a blue
+  underline outside the problem count), `env/references-panel.tsx` (the References panel: first the
   edited service with `env.references` `self.builtins` only, each inserting
   `${{<its name>.VAR}}`, never its own .env keys, and no such group when
   `self.builtins` is empty or missing; then `targets`), `terminal/xterm-view.tsx` +
