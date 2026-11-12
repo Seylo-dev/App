@@ -105,15 +105,28 @@ because `health` is the per-service probe package.
 Container DNS check (`docker.dns`, since 0.2.12;
 `go/internal/nodecheck/dockerdns.go`): Docker gives containers DNS
 servers they can use. A "dns" setting (daemon.json or `dockerd --dns`)
-replaces the host's servers for every container, and Docker hardly checks
-it: Docker 29 starts with an empty `""` entry in daemon.json (`dockerd
---validate` accepts it too) and writes `nameserver invalid IP` for it
-(reproduced on Docker 29.5 in the test VM; a real Pelican/Wings node's
-containers got the same two lines and `# Overrides: [nameservers]`, from a
-setting nobody read there); Docker 28 refuses to start the container. The
-build worker then has no server and BuildKit falls back to `[::1]:53`, and
-apps' outside lookups through Docker's embedded DNS fail the same way.
-Reads, most reliable first:
+replaces the host's servers for every container. Two things give
+containers `nameserver invalid IP` lines with `# Overrides: [nameservers]`:
+
+- a reload on Docker 29.0 to 29.2 (`systemctl reload docker`, or a
+  SIGHUP) with a setting that is fine: since 29.0 (moby#50600) its entries
+  are `netip.Addr` values, the reload deep-copies the daemon's config with
+  copystructure, which zeroes them, and a zero `netip.Addr` prints
+  `invalid IP` (moby#52060, fixed in Docker 29.3.0; 28 and 29.3+ are not
+  affected). Every container created after the reload gets one `invalid
+  IP` per entry until `systemctl restart docker` reads the setting again,
+  and keeps it until it is restarted itself. A node's builds all failed
+  this way: `"dns": ["8.8.8.8", "1.1.1.1"]` and `"live-restore": true` in
+  daemon.json, then a reload to turn live-restore on, two `invalid IP`
+  lines in every new container, and a restart fixed it;
+- entries that are not addresses: Docker 29 starts with an empty `""`
+  entry in daemon.json (`dockerd --validate` accepts it too) and writes
+  `nameserver invalid IP` for it (reproduced on Docker 29.5 in the test
+  VM); Docker 28 refuses to start the container.
+
+The build worker then has no server and BuildKit falls back to
+`[::1]:53`, and apps' outside lookups through Docker's embedded DNS fail
+the same way. Reads, most reliable first:
 
 - a test container on the default bridge, `docker run --rm --name
   seylo-dnscheck-<8 hex> --pull never --network bridge --label
@@ -147,7 +160,7 @@ Reads, most reliable first:
   share both comes first, then the lowest pid), else `systemctl show
   --property=ExecStart docker.service`; and that daemon.json (default
   `/etc/docker/daemon.json`) for `"dns"` and `"ipv6"`. `GET /info` has no
-  DNS field.
+  DNS field; its `ServerVersion` says whether the reload bug applies.
 
 An entry counts when it is an IP address that is neither loopback nor
 unspecified (no ports, no host names, no `""`). Fail: no usable server (the
@@ -162,8 +175,9 @@ where they are and says builds cannot pull images and apps cannot look up
 outside names; the hint says to put IP addresses in the file (`"dns":
 ["1.1.1.1", "8.8.4.4"]`) or remove the key (or fix the `--dns` flags with
 `systemctl edit docker`), check it with `dockerd --validate --config-file
-<file>`, restart Docker with `systemctl restart docker`, what that restart
-stops (from Docker's live-restore: everything, Wings' game servers
+<file>` (or, when the setting read now is fine, that it already gives
+those servers), restart Docker with `systemctl restart docker`, what that
+restart stops (from Docker's live-restore: everything, Wings' game servers
 included when Wings is detected, unless live-restore is turned on first
 with a reload), that a container which keeps running through the restart
 keeps its old servers until it is restarted itself (an app with Restart on
@@ -173,6 +187,30 @@ build workers to `docker restart` (keeps the cache) or
 containers that kept the old servers it names them: build workers as
 above, apps with the panel's Restart (in place, no deploy), others with
 `docker restart`. The check never changes daemon.json or restarts Docker.
+
+The reload case: on Docker 29.0 to 29.2, when the test container's
+servers come from the setting and are all `invalid IP`, and the setting
+read now has as many entries, all usable addresses, the detail says the
+test container gets them although the file (or the `--dns` flags) gives
+those servers, because that Docker loses its "dns" setting when it is
+reloaded (moby#52060, fixed in 29.3.0). The hint says to restart Docker,
+not reload it (`systemctl restart docker` reads the setting again), what
+the restart stops, our containers created since that kept `invalid IP`
+and how to restart them, and that Docker 29.3.0 or later makes reloads
+safe; never to put IP addresses in the file. When only a container of
+ours shows it (the test container is fine again), the detail adds where
+`invalid IP` comes from and the hint, after the containers' restarts, says
+to restart Docker rather than reload it from then on. When the counts
+differ the detail does not say the setting is "as it was when Docker
+started" but "as Docker holds it now" with the reload note; when only
+some entries are `invalid IP` no reload explains it and the text stays.
+Every hint that suggests `systemctl reload docker` to turn live-restore
+on (this check's, and the Docker live-restore check's) adds, on Docker
+29.0 to 29.2 with a "dns" setting in daemon.json or on dockerd's command
+line, `systemctl restart docker` right after it, since containers created
+between the two get `invalid IP`; with live-restore on by then the
+restart keeps containers running. Docker 28, 29.3 and later, and nodes
+without a "dns" setting keep the plain reload advice.
 The panel and the web app show its title, detail and hint like every other
 check's. VM tests: `TestRealContainerDNS` (the test container on the VM's
 Docker, dockerd found through its pid file, no `seylo.dnscheck` container
@@ -182,7 +220,8 @@ left; a build worker with the real node's resolv.conf, and a
 gives it fresh servers) and build's `TestFailedLookupPointsAtContainerDNS`
 (real BuildKit lookup output gets the log line); a broken "dns" on the
 VM's own Docker and a live-restore restart are not tested there, since
-both need a Docker restart.
+both need a Docker restart, nor the reload case (it needs Docker 29.0 to
+29.2 and a reload of the VM's Docker).
 
 Find every unfinished feature with:
 

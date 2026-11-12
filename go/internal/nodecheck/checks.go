@@ -304,7 +304,10 @@ func dockerResult(info *DockerInfo) *agentv1.NodeCheckResult {
 
 // liveRestore warns when a dockerd restart (a Docker update, unattended
 // upgrades) would stop every container: ours run with Docker's restart
-// policy off, so they stay down until the agent starts them again.
+// policy off, so they stay down until the agent starts them again. The
+// reload that turns it on empties a "dns" setting on Docker 29.0 to 29.2
+// (moby#52060, see dockerdns.go), so there the hint adds the restart
+// right after it, which live-restore then lets containers run through.
 func (e *Env) liveRestore(ctx context.Context) *agentv1.NodeCheckResult {
 	info, err := e.Docker.Info(ctx)
 	if err != nil {
@@ -317,7 +320,15 @@ func (e *Env) liveRestore(ctx context.Context) *agentv1.NodeCheckResult {
 	if wi := e.wingsInfo(ctx); wi != nil {
 		detail += "; with it on, Wings' game servers keep running too"
 	}
-	return warn(detail, `Add "live-restore": true to /etc/docker/daemon.json and run `+"`systemctl reload docker`"+` (restarts nothing).`)
+	hint := `Add "live-restore": true to /etc/docker/daemon.json and run ` + "`systemctl reload docker`" + ` (restarts nothing).`
+	if dnsReloadBug(info.ServerVersion) {
+		if d := e.daemonDNS(ctx); len(d.Sources) > 0 {
+			hint = fmt.Sprintf(`Add "live-restore": true to %s, run `+"`systemctl reload docker`"+` (restarts nothing) and `+"`systemctl restart docker`"+
+				` right after it: Docker %s empties its "dns" setting (%s) when it is reloaded, so containers created after the reload get "nameserver invalid IP" until Docker restarts (moby#52060, fixed in Docker %s). `+
+				`With live-restore on by then, the restart keeps containers running.`, d.File, info.ServerVersion, d.String(), dnsReloadFixed)
+		}
+	}
+	return warn(detail, hint)
 }
 
 // buildx checks for the buildx plugin on a node that builds: every build

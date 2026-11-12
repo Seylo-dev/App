@@ -30,14 +30,25 @@ import (
 // setting it copies the host's servers (systemd-resolved's real ones when
 // the host has 127.0.0.53, Google's when only loopback ones are left); a
 // "dns" setting (daemon.json or dockerd --dns) replaces them for every
-// container. Docker does not check the entries well: Docker 29 starts
-// with an empty "" entry in daemon.json (dockerd --validate accepts it
-// too) and writes "nameserver invalid IP" for it (Docker 29.5 in the test
-// VM; the real node's containers got the same two lines, from a setting
-// nobody read there); Docker 28 refuses to start the container ("bad
-// nameserver address <nil>"). A container on the default bridge, where
-// the build worker runs, then has no server, and BuildKit (Go) falls back
-// to [::1]:53:
+// container. Two things leave containers with "nameserver invalid IP"
+// lines and "# Overrides: [nameservers]":
+//
+//   - a reload on Docker 29.0 to 29.2 (systemctl reload docker, or a
+//     SIGHUP), with a setting that is fine: since 29.0 its entries are
+//     netip.Addr values, and the reload deep-copies the daemon's config
+//     with copystructure, which zeroes them; a zero netip.Addr prints
+//     "invalid IP" (moby#52060, fixed in Docker 29.3.0). Every container
+//     created after the reload gets one "invalid IP" per entry until a
+//     full restart reads the setting again, and keeps it until it is
+//     restarted itself. That is how a node's builds all failed: valid
+//     servers in daemon.json, and a reload to turn on live-restore.
+//   - entries that are not addresses: Docker 29 starts with an empty ""
+//     entry in daemon.json (dockerd --validate accepts it too) and writes
+//     "nameserver invalid IP" for it (Docker 29.5 in the test VM); Docker
+//     28 refuses to start the container ("bad nameserver address <nil>").
+//
+// A container on the default bridge, where the build worker runs, then
+// has no server, and BuildKit (Go) falls back to [::1]:53:
 // "lookup registry-1.docker.io on [::1]:53: ... connection refused". Apps
 // on their project networks ask Docker's embedded DNS, which forwards to
 // the same servers, so their outside lookups fail too.
@@ -63,11 +74,15 @@ import (
 //     (its pid file, docker.service's MainPID, else a dockerd in this PID
 //     and user namespace, else docker.service's ExecStart) for --dns and
 //     --config-file, and daemon.json at that path (an edit there applies
-//     at Docker's next restart). GET /info has no DNS field.
+//     at Docker's next restart). GET /info has no DNS field; its
+//     ServerVersion says whether a reload can explain "invalid IP" for a
+//     setting that is fine now.
 //
 // It never changes daemon.json or restarts Docker: a restart stops every
 // container on the server unless live-restore is on, Wings' game servers
-// too, so the fix hint says how and leaves it to the person.
+// too, so the fix hint says how and leaves it to the person. On Docker
+// 29.0 to 29.2 with a "dns" setting it never suggests a reload without
+// the restart right after it.
 
 // containerDNSTitle is the check's title. The build log names it after a
 // failed name lookup (build.DNSHint).
@@ -177,6 +192,36 @@ const embeddedDNS = "127.0.0.11"
 // invalidIP is how Docker writes a server that is no address (netip's
 // zero Addr).
 const invalidIP = "invalid IP"
+
+// dnsReloadFixed is the first Docker release whose reload keeps the "dns"
+// setting (moby#52060).
+const dnsReloadFixed = "29.3.0"
+
+// dnsReloadBug reports whether Docker version v loses its "dns" setting
+// when it is reloaded: from 29.0.0 (moby#50600 made the entries netip.Addr
+// values) up to, not including, 29.3.0 (moby#52060).
+func dnsReloadBug(v string) bool {
+	major, minor, ok := parseDockerVersion(v)
+	return ok && major == 29 && minor < 3
+}
+
+// settingServers are the servers a container got from Docker's "dns"
+// setting: its nameserver lines, or on a user-defined network the ones
+// the embedded DNS forwards to (Docker's ExtServers note).
+func (rc resolvConf) settingServers() []string {
+	if len(rc.Servers) == 1 && rc.Servers[0] == embeddedDNS {
+		return rc.ExtServers
+	}
+	return rc.Servers
+}
+
+// allInvalidIP: the container's servers come from Docker's "dns" setting
+// (the Overrides note) and every one is "invalid IP", which is what
+// Docker 29.0 to 29.2 gives a container created after a reload.
+func (rc resolvConf) allInvalidIP() bool {
+	servers := rc.settingServers()
+	return rc.Override && len(servers) > 0 && !slices.ContainsFunc(servers, func(s string) bool { return s != invalidIP })
+}
 
 // lookupsWork reports whether a container with this file has a server
 // for outside names; known is false when the file does not say (the
@@ -382,6 +427,23 @@ func (d daemonDNS) cause() string {
 		return d.String() + " (" + why + ")"
 	}
 	return d.String()
+}
+
+// kinds says whether dockerd's --dns flags and daemon.json set "dns".
+func (d daemonDNS) kinds() (flags, file bool) {
+	return slices.ContainsFunc(d.Sources, func(s dnsSource) bool { return s.Flags }),
+		slices.ContainsFunc(d.Sources, func(s dnsSource) bool { return !s.Flags })
+}
+
+// rereads says where a restarted dockerd reads the setting again from.
+func (d daemonDNS) rereads() string {
+	switch flags, file := d.kinds(); {
+	case flags && file:
+		return "reads " + d.File + " and dockerd's --dns flags again"
+	case flags:
+		return "starts dockerd with its --dns flags again"
+	}
+	return "reads " + d.File + " again"
 }
 
 func (e *Env) daemonDNS(ctx context.Context) daemonDNS {
@@ -798,7 +860,9 @@ type dnsFindings struct {
 	// LiveRestore is Docker's live-restore, nil when Docker is not
 	// reachable.
 	LiveRestore *bool
-	Wings       bool
+	// Version is Docker's ServerVersion, "" when Docker is not reachable.
+	Version string
+	Wings   bool
 	// BuildsConfig is the builds' DOCKER_CONFIG, where the builders are.
 	BuildsConfig string
 }
@@ -817,8 +881,51 @@ func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
 	}
 	if info != nil {
 		f.LiveRestore = &info.LiveRestoreEnabled
+		f.Version = info.ServerVersion
 	}
 	return f.result()
+}
+
+// reloadRisk: there is a "dns" setting and a reload on this Docker
+// empties it (moby#52060), so a reload needs a restart right after it.
+func (f dnsFindings) reloadRisk() bool {
+	return dnsReloadBug(f.Version) && len(f.Config.Sources) > 0
+}
+
+// reloadMayExplain: a reload on this Docker gives a container what rc
+// has, "invalid IP" for every server of the "dns" setting.
+func (f dnsFindings) reloadMayExplain(rc resolvConf) bool {
+	return dnsReloadBug(f.Version) && rc.allInvalidIP()
+}
+
+// reloadLost: rc's "invalid IP" servers are the "dns" setting read now
+// after a reload emptied it: one for each entry, and every entry a usable
+// address, so the setting itself does not explain them.
+func (f dnsFindings) reloadLost(rc resolvConf) bool {
+	entries := f.Config.entries()
+	return f.reloadMayExplain(rc) && len(entries) == len(rc.settingServers()) &&
+		!slices.ContainsFunc(entries, func(e dnsEntry) bool { return e.Kind != nsUsable })
+}
+
+// staleReloadLost: a container of ours without a server has "invalid IP"
+// that a reload explains.
+func (f dnsFindings) staleReloadLost() bool {
+	return slices.ContainsFunc(f.Containers, func(c ownContainer) bool { return c.stale() && f.reloadLost(c.RC) })
+}
+
+// reloadText says what a reload does on this Docker, for a detail.
+func (f dnsFindings) reloadText() string {
+	return fmt.Sprintf(`Docker %s loses its "dns" setting when it is reloaded (systemctl reload docker, or a SIGHUP; moby#52060, fixed in Docker %s)`, f.Version, dnsReloadFixed)
+}
+
+// staleReloadText says where our containers' "invalid IP" can come from.
+func (f dnsFindings) staleReloadText() string {
+	return `a container created after a reload gets "invalid IP" for each of ` + serversText(f.Config.servers()) + " (" + f.Config.place() + "): " + f.reloadText()
+}
+
+// reloadSafe is the last sentence of a hint about a reload.
+func reloadSafe() string {
+	return "Updating Docker to " + dnsReloadFixed + " or later makes reloads safe."
 }
 
 // workers are the build workers among the containers; stale only those
@@ -863,12 +970,23 @@ func (f dnsFindings) result() *agentv1.NodeCheckResult {
 	cfg := f.Config
 	if rc := f.Probe.RC; rc != nil {
 		what := fmt.Sprintf("a test container on Docker's default bridge (%s) gets %s", f.Probe.Image, serversText(rc.Servers))
+		if f.reloadLost(*rc) {
+			detail := "containers get no DNS server they can use: " + what + ", although " + cfg.place() + " gives " + serversText(cfg.servers()) +
+				": " + f.reloadText() + "; " + dnsEffect
+			if stale := f.staleText(); stale != "" {
+				detail += "; " + stale
+			}
+			return fail(detail, f.reloadFix())
+		}
 		// The setting as read now is what containers get, or it changed
-		// after Docker started and applies at its next restart.
+		// after Docker started and applies at its next restart, or a
+		// reload emptied it.
 		current := rc.Override && len(cfg.Sources) > 0 && sameServers(rc.Servers, cfg.servers())
 		switch {
 		case current:
 			what += ", from " + cfg.cause()
+		case rc.Override && len(cfg.Sources) > 0 && f.reloadMayExplain(*rc):
+			what += fmt.Sprintf(`, from Docker's "dns" setting as Docker holds it now (Docker %s empties it when it is reloaded, moby#52060)`, f.Version)
 		case rc.Override && len(cfg.Sources) > 0:
 			what += `, from Docker's "dns" setting as it was when Docker started`
 		case rc.Override:
@@ -897,6 +1015,12 @@ func (f dnsFindings) result() *agentv1.NodeCheckResult {
 			return warn(what+"; containers use the servers that work, but the others should be fixed or removed", f.fix())
 		}
 		if stale := f.staleText(); stale != "" {
+			if f.staleReloadLost() {
+				// The test container shows Docker holds the setting again.
+				return fail(what+", but "+stale+"; "+f.staleReloadText(), f.staleFix()+fmt.Sprintf(
+					" Restart Docker rather than reload it: on Docker %s a reload empties the \"dns\" setting for every new container until the next restart (moby#52060). %s",
+					f.Version, reloadSafe()))
+			}
 			return fail(what+", but "+stale, f.staleFix())
 		}
 		if why := cfg.why(); pending != "" && why != "" {
@@ -959,26 +1083,54 @@ func (f dnsFindings) result() *agentv1.NodeCheckResult {
 	}
 	given := "Docker gives containers " + serversText(cfg.servers()) + " (" + cfg.place() + ")"
 	if stale := f.staleText(); stale != "" {
+		if f.staleReloadLost() {
+			// Without a test container, whether Docker holds the setting
+			// now is not known.
+			return fail(given+", but "+stale+"; "+f.staleReloadText()+"; no test container ran, so whether new containers get \"invalid IP\" too is not known"+suffix,
+				f.staleFix()+" If Docker was reloaded since it last started, restart it, do not reload it: `systemctl restart docker` "+cfg.rereads()+". "+
+					f.restartText()+reloadSafe())
+		}
 		return fail(given+", but "+stale, f.staleFix())
 	}
 	return pass("%s%s", given, suffix)
 }
 
 // fix is the hint for a "dns" setting that gives containers no usable
-// server: the setting, Docker's restart and what it stops, the containers
-// that keep the old servers.
+// server: the setting (or that it is fine already, when Docker runs with
+// another), Docker's restart and what it stops, the containers that keep
+// the old servers.
 func (f dnsFindings) fix() string {
 	cfg := f.Config
 	var b strings.Builder
-	flags := slices.ContainsFunc(cfg.Sources, func(s dnsSource) bool { return s.Flags })
-	file := slices.ContainsFunc(cfg.Sources, func(s dnsSource) bool { return !s.Flags })
-	if flags {
-		b.WriteString("Remove the --dns flags from dockerd's command line or give them IP addresses (`systemctl cat docker` shows where they are set, `systemctl edit docker` overrides ExecStart), then run `systemctl daemon-reload`. ")
-	}
-	if file || !flags {
-		fmt.Fprintf(&b, `Put IP addresses in %s ("dns": ["1.1.1.1", "8.8.4.4"]) or remove its "dns" key so containers get the host's servers, and check the file with `+"`dockerd --validate --config-file %s`. ", cfg.File, cfg.File)
+	flags, file := cfg.kinds()
+	switch {
+	case len(cfg.Sources) > 0 && judgeServers(cfg.servers(), cfg.IPv6) == dnsOK:
+		// The setting read now is fine: Docker runs with another one.
+		fmt.Fprintf(&b, "%s already gives %s. ", cfg.place(), serversText(cfg.servers()))
+	default:
+		if flags {
+			b.WriteString("Remove the --dns flags from dockerd's command line or give them IP addresses (`systemctl cat docker` shows where they are set, `systemctl edit docker` overrides ExecStart), then run `systemctl daemon-reload`. ")
+		}
+		if file || !flags {
+			fmt.Fprintf(&b, `Put IP addresses in %s ("dns": ["1.1.1.1", "8.8.4.4"]) or remove its "dns" key so containers get the host's servers, and check the file with `+"`dockerd --validate --config-file %s`. ", cfg.File, cfg.File)
+		}
 	}
 	b.WriteString("Docker reads its settings only when it starts: restart it with `systemctl restart docker`. ")
+	b.WriteString(f.restartText())
+	workers := f.workers(false)
+	if len(workers) == 0 {
+		b.WriteString("The next build starts its build worker with the new servers.")
+		return b.String()
+	}
+	b.WriteString(plural(len(workers), "A build worker that still runs afterwards keeps the old servers: ", "Build workers that still run afterwards keep the old servers: "))
+	b.WriteString(f.workerCommands(workers))
+	return b.String()
+}
+
+// restartText says what `systemctl restart docker` stops, from Docker's
+// live-restore, how to keep containers running through it, and that a
+// container which does keeps its old servers.
+func (f dnsFindings) restartText() string {
 	games, gamesToo := "", ""
 	if f.Wings {
 		games = ", Wings' game servers included"
@@ -991,21 +1143,32 @@ func (f dnsFindings) fix() string {
 	kept := "A container that keeps running through the restart keeps its old servers until it is restarted itself (an app with Restart on its page in the panel" + gamesToo + "); this check names ours that still have them. "
 	switch {
 	case f.LiveRestore == nil:
-		b.WriteString(`A Docker restart stops every container on this server` + games + `, unless "live-restore": true is set. ` + kept)
+		return `A Docker restart stops every container on this server` + games + `, unless "live-restore": true is set. ` + kept
 	case *f.LiveRestore:
-		b.WriteString("Live-restore is on, so containers keep running through the restart. " + kept)
-	default:
-		b.WriteString("Live-restore is off, so the restart stops every container on this server" + games)
-		fmt.Fprintf(&b, `: to keep them running, first add "live-restore": true to %s and run `+"`systemctl reload docker`"+` (restarts nothing). `, cfg.File)
-		b.WriteString(kept)
+		return "Live-restore is on, so containers keep running through the restart. " + kept
 	}
-	workers := f.workers(false)
-	if len(workers) == 0 {
-		b.WriteString("The next build starts its build worker with the new servers.")
-		return b.String()
+	s := "Live-restore is off, so the restart stops every container on this server" + games +
+		`: to keep them running, first add "live-restore": true to ` + f.Config.File + " and run `systemctl reload docker` (restarts nothing)"
+	if f.reloadRisk() {
+		// The restart reads the setting again; containers created between
+		// the two get "invalid IP".
+		s += fmt.Sprintf(", then `systemctl restart docker` right after it: on Docker %s a reload also empties the \"dns\" setting, so containers created after it get \"nameserver invalid IP\" until Docker restarts (moby#52060)", f.Version)
 	}
-	b.WriteString(plural(len(workers), "A build worker that still runs afterwards keeps the old servers: ", "Build workers that still run afterwards keep the old servers: "))
-	b.WriteString(f.workerCommands(workers))
+	return s + ". " + kept
+}
+
+// reloadFix is the hint when a reload emptied Docker's "dns" setting
+// (moby#52060): restart Docker, not reload it, what the restart stops,
+// our containers created since that keep "invalid IP", and the release
+// that fixes it. The setting itself is fine.
+func (f dnsFindings) reloadFix() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Restart Docker, do not reload it: `systemctl restart docker` %s, while a reload on Docker %s empties the \"dns\" setting again. ", f.Config.rereads(), f.Version)
+	b.WriteString(f.restartText())
+	if stale := f.staleFix(); stale != "" {
+		b.WriteString(stale + " ")
+	}
+	b.WriteString(reloadSafe())
 	return b.String()
 }
 

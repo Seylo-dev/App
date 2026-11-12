@@ -514,6 +514,47 @@ func TestLiveRestore(t *testing.T) {
 	}
 }
 
+// The reload that turns live-restore on empties a "dns" setting on Docker
+// 29.0 to 29.2 (moby#52060): there, with a setting in daemon.json or on
+// dockerd's command line, the hint adds the restart right after it.
+func TestLiveRestoreDNSReload(t *testing.T) {
+	plain := `Add "live-restore": true to /etc/docker/daemon.json and run ` + "`systemctl reload docker`" + ` (restarts nothing).`
+	withRestart := func(file, version, setting string) string {
+		return `Add "live-restore": true to ` + file + ", run `systemctl reload docker` (restarts nothing) and `systemctl restart docker` right after it: Docker " + version +
+			` empties its "dns" setting (` + setting + `) when it is reloaded, so containers created after the reload get "nameserver invalid IP" until Docker restarts (moby#52060, fixed in Docker 29.3.0). ` +
+			"With live-restore on by then, the restart keeps containers running."
+	}
+	const valid = `{"dns": ["8.8.8.8", "1.1.1.1"]}`
+	for _, tc := range []struct {
+		name, version, daemonJSON, dockerd string
+		// want is the hint, given daemon.json's path.
+		want func(file string) string
+	}{
+		{"29.1.3, daemon.json", "29.1.3", valid, "/usr/bin/dockerd -H fd://", func(file string) string {
+			return withRestart(file, "29.1.3", `"dns": [8.8.8.8, 1.1.1.1] in `+file)
+		}},
+		{"29.2.1, --dns flags", "29.2.1", "", "/usr/bin/dockerd -H fd:// --dns 8.8.8.8 --dns=1.1.1.1", func(file string) string {
+			return withRestart(file, "29.2.1", "--dns 8.8.8.8 --dns 1.1.1.1 on dockerd's command line (pid 812)")
+		}},
+		{"29.1.3, no dns setting", "29.1.3", `{"log-driver": "json-file"}`, "/usr/bin/dockerd -H fd://", func(string) string { return plain }},
+		{"29.1.3, an empty dns list", "29.1.3", `{"dns": []}`, "/usr/bin/dockerd -H fd://", func(string) string { return plain }},
+		{"29.3.0, daemon.json", "29.3.0", valid, "/usr/bin/dockerd -H fd://", func(string) string { return plain }},
+		{"28.5.2, daemon.json", "28.5.2", valid, "/usr/bin/dockerd -H fd://", func(string) string { return plain }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _, etc := dnsEnv(t, dnsCase{daemonJSON: tc.daemonJSON, dockerd: tc.dockerd, live: ptr(false), version: tc.version})
+			r := env.liveRestore(context.Background())
+			if want := tc.want(filepath.Join(etc, "docker", "daemon.json")); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || r.GetFixHint() != want {
+				t.Errorf("%v\n got: %s\nwant: %s", r.GetStatus(), r.GetFixHint(), want)
+			}
+		})
+	}
+	env, _, _ := dnsEnv(t, dnsCase{daemonJSON: valid, dockerd: "/usr/bin/dockerd", live: ptr(true), version: "29.1.3"})
+	if r := env.liveRestore(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || r.GetFixHint() != "" {
+		t.Errorf("on = %v", r)
+	}
+}
+
 // TestFirewallGatePorts: the portgate binds in the agent, so a host
 // firewall applies to its IP:port listeners; the check names every port
 // without an allow rule and the command that opens it.
