@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -237,6 +238,10 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 				reason = cause.Error()
 			} else if hctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 				reason = fmt.Sprintf("not healthy after %s: %s", timeout, err)
+				var nl *health.NotListeningError
+				if errors.As(err, &nl) {
+					reason += ". " + notListeningHint(spec, nl.Port)
+				}
 			}
 			hcancel()
 			lines := dockerTail(ctx, w.r.o.Docker, c.ID, failureLines)
@@ -313,6 +318,32 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	log.Info("deploy succeeded")
 	w.systemLine(gen, "generation %d is healthy and serving", gen)
 	w.reportDeploy(ctx, gen, agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED, "")
+}
+
+// notListeningHint follows the error of a deploy whose default health
+// check (no check of its own: TCP on the first port) was refused until the
+// health timeout, so nothing in the container listens on port. New app
+// services get port 80, and a background worker never listens on one: it
+// is told where that port goes away in the web app (an app's Ports on its
+// Advanced tab, a compose member's ports in the stack's compose file) or
+// where a check that fits goes. One whose domains send traffic to the
+// port must listen there.
+func notListeningHint(spec *agentv1.ServiceSpec, port uint32) string {
+	// A route without a target port goes to the first port, the one checked.
+	routed := slices.ContainsFunc(spec.GetRouting().GetRoutes(), func(r *agentv1.Route) bool {
+		return r.GetTargetPort() == port || r.GetTargetPort() == 0
+	})
+	listen := fmt.Sprintf("it must listen on port %d on all addresses (0.0.0.0), not only on 127.0.0.1", port)
+	member := spec.GetKind() == agentv1.ServiceKind_SERVICE_KIND_COMPOSE_MEMBER
+	switch {
+	case routed && member:
+		return fmt.Sprintf("Nothing in the container listens on port %d, where its domains send traffic: %s, or the stack's compose file (its Compose file tab) and the domains must name the port it does listen on.", port, listen)
+	case routed:
+		return fmt.Sprintf("Nothing in the container listens on port %d, where its domains send traffic: %s, or Ports in the Container section of the service's Advanced tab and the domains must name the port it does listen on.", port, listen)
+	case member:
+		return fmt.Sprintf("Nothing in the container listens on port %d. If this service does not serve on a port (a background worker), remove its ports and expose entries from the stack's compose file on the stack's Compose file tab (no domain uses them), or give it a healthcheck there that fits it. If it does serve, %s.", port, listen)
+	}
+	return fmt.Sprintf("Nothing in the container listens on port %d. If this service does not serve on a port (a background worker), remove the port under Ports in the Container section of the service's Advanced tab (no domain uses it), or set a check that fits it under Health check and deploys on the same tab. If it does serve, %s.", port, listen)
 }
 
 // nextSuffix marks containers of a side-by-side deploy until they serve.

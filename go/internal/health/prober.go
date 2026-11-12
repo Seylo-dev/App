@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"syscall"
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -31,6 +32,9 @@ type Result struct {
 	// Final: the failure is Docker's verdict, the image's retries already
 	// counted. A Watch takes it at once.
 	Final bool
+	// refused: a TCP check's connection was refused (nothing listens on
+	// the port).
+	refused bool
 }
 
 // Prober runs health checks.
@@ -44,7 +48,8 @@ type Prober interface {
 	Probe(ctx context.Context, target Target, check *agentv1.HealthCheck, ports []*agentv1.PortSpec) Result
 	// WaitHealthy probes until a probe passes, or ctx ends (the caller sets
 	// the deploy health timeout on ctx). The error carries the last
-	// failure's output.
+	// failure's output; it is a *NotListeningError when the default check
+	// was refused on every try until ctx's deadline.
 	WaitHealthy(ctx context.Context, target Target, check *agentv1.HealthCheck, ports []*agentv1.PortSpec) error
 }
 
@@ -72,6 +77,21 @@ const (
 // ErrNeverHealthy is returned by WaitHealthy when ctx ended first.
 var ErrNeverHealthy = errors.New("health check never passed")
 
+// NotListeningError is WaitHealthy's error (it wraps ErrNeverHealthy) when
+// the default check, TCP on the first port of a service without a health
+// check of its own, had its connection refused on every try until ctx's
+// deadline: nothing in the container listens on Port. A background worker
+// with the port new app services get (80) fails its deploy this way.
+type NotListeningError struct {
+	Port uint32
+	// Last is the last refused probe's output.
+	Last string
+}
+
+func (e *NotListeningError) Error() string { return ErrNeverHealthy.Error() + ": " + e.Last }
+
+func (e *NotListeningError) Unwrap() error { return ErrNeverHealthy }
+
 // NewProber returns a Prober. exec may be nil when command probes are not
 // needed (they then fail with a clear message).
 func NewProber(exec Execer) *Probes {
@@ -84,6 +104,9 @@ type Probes struct {
 	// PollEvery bounds the wait between probes in WaitHealthy, so a deploy
 	// notices health within a second even with a long interval.
 	PollEvery time.Duration
+	// dial opens TCP checks' connections; nil is a net.Dialer (tests set a
+	// fake).
+	dial func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 var _ Prober = (*Probes)(nil)
@@ -135,27 +158,41 @@ func (p *Probes) Probe(ctx context.Context, target Target, check *agentv1.Health
 		if port == 0 {
 			port = FirstTCPPort(ports)
 		}
-		return tcp(ctx, target, port)
+		return p.tcp(ctx, target, port)
 	default:
 		port := FirstTCPPort(ports)
 		if port == 0 {
 			return Result{Healthy: true}
 		}
-		return tcp(ctx, target, port)
+		return p.tcp(ctx, target, port)
 	}
 }
 
-func tcp(ctx context.Context, target Target, port uint32) Result {
+// defaultPort is the port of the default check (no probe set: TCP on the
+// first TCP port), 0 for a check of the service's own or one without
+// ports.
+func defaultPort(check *agentv1.HealthCheck, ports []*agentv1.PortSpec) uint32 {
+	if check.GetProbe() != nil {
+		return 0
+	}
+	return FirstTCPPort(ports)
+}
+
+func (p *Probes) tcp(ctx context.Context, target Target, port uint32) Result {
 	if port == 0 {
 		return Result{Output: "tcp check: no port to check"}
 	}
 	if target.Address == "" {
 		return Result{Output: "tcp check: the container has no address yet"}
 	}
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(target.Address, strconv.Itoa(int(port))))
+	dial := p.dial
+	if dial == nil {
+		var d net.Dialer
+		dial = d.DialContext
+	}
+	conn, err := dial(ctx, "tcp", net.JoinHostPort(target.Address, strconv.Itoa(int(port))))
 	if err != nil {
-		return Result{Output: truncate(fmt.Sprintf("tcp check on port %d: %v", port, err))}
+		return Result{Output: truncate(fmt.Sprintf("tcp check on port %d: %v", port, err)), refused: errors.Is(err, syscall.ECONNREFUSED)}
 	}
 	_ = conn.Close()
 	return Result{Healthy: true}
@@ -232,14 +269,27 @@ func (p *Probes) WaitHealthy(ctx context.Context, target Target, check *agentv1.
 		every = time.Second
 	}
 	last := ""
+	// Whether the default check was refused on every try that ran to its
+	// end (one that ctx's end cut short says nothing).
+	port := defaultPort(check, ports)
+	refusedAll, lastRefused := port != 0, ""
 	for {
 		r := p.Probe(ctx, target, check, ports)
 		if r.Healthy {
 			return nil
 		}
 		last = r.Output
+		if ctx.Err() == nil {
+			refusedAll = refusedAll && r.refused
+			if r.refused {
+				lastRefused = r.Output
+			}
+		}
 		select {
 		case <-ctx.Done():
+			if refusedAll && lastRefused != "" && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return &NotListeningError{Port: port, Last: lastRefused}
+			}
 			if last == "" {
 				return ErrNeverHealthy
 			}

@@ -74,7 +74,7 @@ packages use. "Built" means implemented and tested.
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
 | `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`); a route file it cannot write goes in the service's status (`ServiceStatus.route_write_error`, message and since when, cleared by the next write that works or once the wanted routes are the ones on file again or need no file, since 0.2.13; before, only a "writing routes" warning every 10 s in the journal) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
-| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.14) | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
+| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.14); `WaitHealthy` returns a `*NotListeningError` (wraps `ErrNeverHealthy`) when the default check was refused all along until the deadline, since 0.2.14 | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; an ACME route with `acme_challenge_on_https` (the panel's domains whose DNS does not point straight at the node, the panel's own domain, every tool host) answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.13; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https, the challenge path over https kept for the app on a domain without `acme_challenge_on_https`, and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with a redirect to https for every path and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareHTTPSRedirect`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
@@ -1132,6 +1132,30 @@ local API, join and resume. The areas:
   containers the rollout created are removed and the old ones it stopped
   start again, so an unverified generation is never adopted as serving,
   never replaces the old one and is never reported SUCCEEDED.
+- A deploy that is not healthy within its health timeout fails with "not
+  healthy after <timeout>: <the last check's error>". Since 0.2.14 (the
+  agent's text; the panel shows it as it comes, also in the alert), when
+  the check was the default one (no probe set: TCP on the first TCP port)
+  and every try that ran to its end had its connection refused
+  (`health.NotListeningError`: ECONNREFUSED, the deadline reached, not a
+  cancel), the error is followed by a hint (`reconcile.notListeningHint`):
+  "Nothing in the container listens on port <port>." and, when no route
+  targets that port (a route without a target port counts as the first
+  port), "If this service does not serve on a port (a background worker),
+  remove the port under Ports in the Container section of the service's
+  Advanced tab (no domain uses it), or set a check that fits it under
+  Health check and deploys on the same tab. If it does serve, it must
+  listen on port <port> on all addresses (0.0.0.0), not only on
+  127.0.0.1." A compose member is sent to its stack's compose file instead
+  (its ports and expose entries, or a healthcheck there, on the stack's
+  Compose file tab); a service whose domains send traffic to the port is
+  told the app must listen there (or the port on the Advanced tab and the
+  domains must name the one it does listen on). New app services get port
+  80, so a worker that never listens failed after the whole 5 minutes with
+  only the dial error. A timeout, a refusal followed by another error, an
+  HTTP or command check, or a TCP check of the service's own keeps the
+  plain error. Defaults and the check itself are unchanged. VM test:
+  reconcile's `TestITWorkerNotListening` (busybox `sleep` with port 80).
 - A service moved to another project (`services.moveProject`) arrives as a
   spec whose `project_id` changed. When that is the only change
   (`SpecHash` with the old project equals the container's), reconcile

@@ -70,19 +70,6 @@ func newDNSTestService(t *testing.T, fr *fakeRunner, rep *reports, dns *fakeWork
 // service's).
 var svc1Builder = (Sizing{Cores: 2, MemoryGB: 4}).BuilderName("svc1")
 
-// buildLog runs req to its end and returns its result and log.
-func buildLog(t *testing.T, svc *Service, rep *reports, req *agentv1.BuildRequest) (*agentv1.BuildProgress, string) {
-	t.Helper()
-	job, err := svc.Start(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := finalOf(t, rep)
-	var log strings.Builder
-	_ = job.Watch(context.Background(), func(r *agentv1.BuildResponse) error { log.Write(r.GetLog()); return nil })
-	return p, log.String()
-}
-
 func count(cmds []string, prefix string) int {
 	n := 0
 	for _, c := range cmds {

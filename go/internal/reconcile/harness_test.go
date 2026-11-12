@@ -2,6 +2,8 @@ package reconcile
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"os"
@@ -92,12 +94,26 @@ type fakeProber struct {
 	eng *dockertest.Fake
 	mu  sync.Mutex
 	bad map[string]bool
+	// refused are bad images whose default check is refused all along:
+	// WaitHealthy then fails like the real one, with a
+	// *health.NotListeningError.
+	refused map[string]bool
 }
 
 func (p *fakeProber) setBad(image string, bad bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.bad[image] = bad
+}
+
+func (p *fakeProber) setRefused(image string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bad[image] = true
+	if p.refused == nil {
+		p.refused = map[string]bool{}
+	}
+	p.refused[image] = true
 }
 
 func (p *fakeProber) Probe(ctx context.Context, t health.Target, _ *agentv1.HealthCheck, _ []*agentv1.PortSpec) health.Result {
@@ -124,6 +140,13 @@ func (p *fakeProber) WaitHealthy(ctx context.Context, t health.Target, c *agentv
 		}
 		select {
 		case <-ctx.Done():
+			p.mu.Lock()
+			eng, _ := p.eng.Get(t.ContainerID)
+			refused := p.refused[eng.Spec.Image]
+			p.mu.Unlock()
+			if port := health.FirstTCPPort(ports); refused && c.GetProbe() == nil && port > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return &health.NotListeningError{Port: port, Last: fmt.Sprintf("tcp check on port %d: dial tcp 172.29.0.9:%d: connect: connection refused", port, port)}
+			}
 			return health.ErrNeverHealthy
 		case <-time.After(5 * time.Millisecond):
 		}

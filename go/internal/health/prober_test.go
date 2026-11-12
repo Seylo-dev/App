@@ -6,8 +6,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -176,5 +179,106 @@ func TestWatch(t *testing.T) {
 	w.Observe(fail, start.Add(14*time.Second))
 	if w.State() != agentv1.HealthState_HEALTH_STATE_HEALTHY || w.LastOutput != "down" {
 		t.Fatal("one failure after healthy keeps it healthy")
+	}
+}
+
+// closedPort is a 127.0.0.1 port nothing listens on: a dial is refused.
+func closedPort(t *testing.T) (string, uint32) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, port := hostPort(t, ln.Addr().String())
+	_ = ln.Close()
+	return host, port
+}
+
+// A background worker with the port new app services get: the default
+// check (no health check of its own, TCP on the first port) is refused on
+// every try until the health timeout. WaitHealthy says so with a
+// *NotListeningError, which the deploy turns into its hint; any other way
+// of failing keeps the plain error.
+func TestWaitHealthyNotListening(t *testing.T) {
+	ctx := func(d time.Duration) context.Context {
+		c, cancel := context.WithTimeout(context.Background(), d)
+		t.Cleanup(cancel)
+		return c
+	}
+	p := NewProber(nil)
+	p.PollEvery = 20 * time.Millisecond
+
+	host, port := closedPort(t)
+	tg := Target{Address: host}
+	err := p.WaitHealthy(ctx(150*time.Millisecond), tg, nil, tcpPorts(port))
+	var nl *NotListeningError
+	if !errors.As(err, &nl) || nl.Port != port || !errors.Is(err, ErrNeverHealthy) ||
+		!strings.Contains(err.Error(), "health check never passed: tcp check on port "+strconv.Itoa(int(port))+": dial tcp") ||
+		!strings.HasSuffix(err.Error(), "connect: connection refused") {
+		t.Fatalf("refused all along: %#v %v", err, err)
+	}
+	// A health check that sets only timings keeps the default probe.
+	timings := &agentv1.HealthCheck{Timeout: durationpb.New(time.Second)}
+	if err := p.WaitHealthy(ctx(150*time.Millisecond), tg, timings, tcpPorts(port)); !errors.As(err, &nl) {
+		t.Fatalf("default probe with timings: %v", err)
+	}
+
+	// Refused at first, then the app listens: healthy, no error at all.
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		if l, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(int(port)))); err == nil {
+			t.Cleanup(func() { _ = l.Close() })
+		}
+	}()
+	if err := p.WaitHealthy(ctx(3*time.Second), tg, nil, tcpPorts(port)); err != nil {
+		t.Fatalf("refused, then listening: %v", err)
+	}
+
+	host, port = closedPort(t)
+	tg = Target{Address: host}
+	plain := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, ErrNeverHealthy) || errors.As(err, &nl) {
+			t.Errorf("%s: %#v %v, want a plain ErrNeverHealthy", name, err, err)
+		}
+	}
+	// A TCP check of the service's own: it chose the port.
+	own := &agentv1.HealthCheck{Probe: &agentv1.HealthCheck_Tcp{Tcp: &agentv1.TcpProbe{}}}
+	plain("own tcp check", p.WaitHealthy(ctx(150*time.Millisecond), tg, own, tcpPorts(port)))
+	// HTTP and command checks.
+	httpCheck := &agentv1.HealthCheck{Probe: &agentv1.HealthCheck_Http{Http: &agentv1.HttpProbe{Path: "/"}}}
+	plain("http check", p.WaitHealthy(ctx(150*time.Millisecond), tg, httpCheck, tcpPorts(port)))
+	cmd := &agentv1.HealthCheck{Probe: &agentv1.HealthCheck_Command{Command: &agentv1.CommandProbe{Command: []string{"true"}}}}
+	plain("command check", p.WaitHealthy(ctx(150*time.Millisecond), Target{ContainerID: "c1"}, cmd, tcpPorts(port)))
+	// Cancelled (a newer deploy, the agent stopping), not timed out.
+	cctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	plain("cancelled", p.WaitHealthy(cctx, tg, nil, tcpPorts(port)))
+
+	// Dials that time out (a firewall dropping packets, a wedged app): all
+	// along, or after some refusals.
+	timedOut := NewProber(nil)
+	timedOut.PollEvery = 10 * time.Millisecond
+	var calls, refuseFirst atomic.Int32
+	timedOut.dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		if calls.Add(1) <= refuseFirst.Load() {
+			return nil, &net.OpError{Op: "dial", Net: network, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+		}
+		<-ctx.Done()
+		return nil, &net.OpError{Op: "dial", Net: network, Err: os.ErrDeadlineExceeded}
+	}
+	short := &agentv1.HealthCheck{Timeout: durationpb.New(20 * time.Millisecond)}
+	plain("timeouts", timedOut.WaitHealthy(ctx(200*time.Millisecond), Target{Address: "10.0.0.9"}, short, tcpPorts(80)))
+	calls.Store(0)
+	refuseFirst.Store(3)
+	plain("refused, then timeouts", timedOut.WaitHealthy(ctx(300*time.Millisecond), Target{Address: "10.0.0.9"}, short, tcpPorts(80)))
+	if calls.Load() <= 3 {
+		t.Fatalf("only %d dials", calls.Load())
+	}
+	// The fake's refusals alone read like the real ones.
+	calls.Store(0)
+	refuseFirst.Store(1 << 30)
+	if err := timedOut.WaitHealthy(ctx(100*time.Millisecond), Target{Address: "10.0.0.9"}, short, tcpPorts(80)); !errors.As(err, &nl) || nl.Port != 80 {
+		t.Fatalf("the fake refusing all along: %v", err)
 	}
 }

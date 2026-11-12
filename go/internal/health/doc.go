@@ -9,7 +9,9 @@
 // Interfaces used by other packages:
 //
 //   - Prober: reconcile probes new generations during deploys and watches
-//     running instances. Probes (NewProber) is the implementation.
+//     running instances. Probes (NewProber) is the implementation; its
+//     WaitHealthy returns a *NotListeningError when the default check was
+//     refused all along, which the deploy error follows with a hint.
 //   - Watch: turns probe results of a running instance into a HealthState
 //     (start period, failure threshold).
 package health

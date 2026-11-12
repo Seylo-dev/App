@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -305,6 +306,34 @@ func TestITRolloutUnhealthyRollback(t *testing.T) {
 	}
 	if got := get(t, e.ip(name4, "p")); got != "v1" {
 		t.Fatalf("rollback serves %q", got)
+	}
+}
+
+// A background worker with the port new app services get (80), no domain
+// and no health check of its own: the real default check is refused on
+// the container's address until the health timeout, and the deploy error
+// says nothing listens there and where the port goes away.
+func TestITWorkerNotListening(t *testing.T) {
+	e := newIT(t)
+	id := e.id("worker")
+	s := &agentv1.ServiceSpec{
+		Id: id, ProjectId: e.prefix + "p", Name: "worker", Generation: 1,
+		Kind:  agentv1.ServiceKind_SERVICE_KIND_APP,
+		Image: &agentv1.ImageRef{Reference: itImage},
+		Container: &agentv1.ContainerConfig{
+			Command:         []string{"sh", "-c", "echo working the queue; exec sleep 300"},
+			StopGracePeriod: durationpb.New(time.Second),
+		},
+		Ports:  []*agentv1.PortSpec{{ContainerPort: 80, Protocol: agentv1.PortProtocol_PORT_PROTOCOL_TCP}},
+		Deploy: &agentv1.DeployStrategy{HealthTimeout: durationpb.New(3 * time.Second)},
+	}
+	e.apply(1, s)
+	p := e.result(id, 1)
+	t.Logf("%v: %s", p.GetStage(), p.GetMessage())
+	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED ||
+		!regexp.MustCompile(`^not healthy after 3s: health check never passed: tcp check on port 80: dial tcp [0-9.]+:80: connect: connection refused\. Nothing in the container listens on port 80\. If this service does not serve on a port \(a background worker\), remove the port under Ports in the Container section of the service's Advanced tab`).MatchString(p.GetMessage()) ||
+		!strings.Contains(p.GetMessage(), "working the queue") {
+		t.Fatalf("gen 1: %v %q", p.GetStage(), p.GetMessage())
 	}
 }
 
