@@ -11694,7 +11694,7 @@
       "post": {
         "operationId": "backups.restore",
         "summary": "Restore a backup",
-        "description": "Restores a successful backup over the service's current data (database or volume). What the backup holds is replaced and cannot be recovered unless backed up first: everything for a whole-server backup; only its databases, or only its tables or collections, for a backup of chosen ones (other databases, tables and users stay). backupFirst backs up the same selection first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
+        "description": "Restores a successful backup over the service's current data (database or volume). What the backup holds is replaced and cannot be recovered unless backed up first: everything for a whole-server backup; only its databases, or only its tables or collections, for a backup of chosen ones (other databases, tables and users stay). backupFirst backs up the same selection first; when none of it is on the server any more (a dropped database or table to bring back) there is nothing to keep, so the restore goes on without it and says so in its warnings. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
         "tags": [
           "backups"
         ],

@@ -158,7 +158,11 @@ export const Run = Type.Object({
   scope: Type.Union([BackupScope, Type.Null()]),
   /** What the backup holds per database (restores: their backup's); tables come from backups.runContents. Null for volumes, nodes older than 0.2.15 and runs before it. */
   contents: Type.Union([BackupContents, Type.Null()]),
-  /** Chosen databases or tables that were skipped because they no longer existed, or why the contents could not be measured. */
+  /**
+   * Backups of chosen databases or tables: the names skipped because they no longer existed. Backups of everything: why
+   * the contents could not be measured (the backup itself is complete). Restores: notes, such as that nothing was backed
+   * up first because none of what the backup holds was on the server any more.
+   */
   warnings: Type.Array(Type.String()),
 });
 
@@ -397,7 +401,7 @@ export const restore = defineOp({
   kind: "destructive",
   summary: "Restore a backup",
   description:
-    "Restores a successful backup over the service's current data (database or volume). What the backup holds is replaced and cannot be recovered unless backed up first: everything for a whole-server backup; only its databases, or only its tables or collections, for a backup of chosen ones (other databases, tables and users stay). backupFirst backs up the same selection first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
+    "Restores a successful backup over the service's current data (database or volume). What the backup holds is replaced and cannot be recovered unless backed up first: everything for a whole-server backup; only its databases, or only its tables or collections, for a backup of chosen ones (other databases, tables and users stay). backupFirst backs up the same selection first; when none of it is on the server any more (a dropped database or table to bring back) there is nothing to keep, so the restore goes on without it and says so in its warnings. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
   input: Type.Object({
     serviceId: Id,
     runId: Id,

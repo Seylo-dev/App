@@ -533,6 +533,47 @@ async function waitForRun(db: PanelDb, runId: string, timeoutMs: number): Promis
   }
 }
 
+/** Why a restore of a backup of chosen names ran without the backup before it. */
+export const nothingToBackUpNote = "Nothing was backed up first: none of what this backup holds is on the server any more.";
+
+/**
+ * Whether none of a held selection is on the server now (the database or
+ * the tables were dropped: what a restore brings back), listed through
+ * the node. False whenever that is not certain (the listing failed, more
+ * tables than it lists): the backup before the restore then runs and the
+ * agent decides.
+ */
+export async function heldIsGone(
+  deps: Pick<Deps, "agents" | "logger">,
+  nodeId: string,
+  serviceId: string,
+  held: BackupSelection,
+): Promise<boolean> {
+  const only = held.databases.length === 1 ? held.databases[0] : undefined;
+  const tables = only?.tables?.length ? only.tables : null;
+  let listed: ContentsMessage | undefined;
+  try {
+    const res = await deps.agents.call(
+      nodeId,
+      "inspectDatabase",
+      { serviceId, database: tables ? (only?.name ?? "") : "" },
+      { timeoutMs: 90_000 },
+    );
+    listed = res.contents;
+  } catch (error) {
+    deps.logger.warn({ serviceId, err: error }, "listing a database before a restore failed; backing up first");
+    return false;
+  }
+  if (!listed) return false;
+  const names = new Map(listed.databases.map((d) => [d.name, d]));
+  if (!tables) return held.databases.every((d) => !names.has(d.name));
+  const database = names.get(only?.name ?? "");
+  if (!database) return true;
+  if (database.tablesTruncated) return false;
+  const there = new Set(database.tables.map((t) => `${t.schema}\u0000${t.name}`));
+  return tables.every((t) => !there.has(`${t.schema ?? ""}\u0000${t.name}`));
+}
+
 /** The restore job: optional safety backup first, then RestoreBackup on the node. */
 export async function runRestore(
   deps: Pick<Deps, "db" | "secrets" | "agents" | "live" | "logger">,
@@ -540,8 +581,14 @@ export async function runRestore(
 ): Promise<void> {
   const restore = deps.db.select().from(backupRuns).where(eq(backupRuns.id, payload.restoreRunId)).get();
   if (restore?.status !== "running") return;
+  // Notes on the restore's row (the backup before it was skipped).
+  let warnings: string[] | null = null;
   const fail = (message: string) => {
-    deps.db.update(backupRuns).set({ status: "failed", error: message, finishedAt: new Date() }).where(eq(backupRuns.id, restore.id)).run();
+    deps.db
+      .update(backupRuns)
+      .set({ status: "failed", error: message, finishedAt: new Date(), warnings })
+      .where(eq(backupRuns.id, restore.id))
+      .run();
     invalidateService(deps, restore.serviceId, [backupOps.listRuns.id]);
   };
   const source = restore.sourceRunId ? deps.db.select().from(backupRuns).where(eq(backupRuns.id, restore.sourceRunId)).get() : undefined;
@@ -562,7 +609,14 @@ export async function runRestore(
     }
   }
 
-  if (payload.backupFirst) {
+  // The way out when the backup before the restore keeps failing.
+  const untick = 'To restore without it, untick "Back up the current data first".';
+  const sentence = (s: string) => s.trim().replace(/[.\s]*$/, ".");
+  if (payload.backupFirst && held && (await heldIsGone(deps, node.id, restore.serviceId, held))) {
+    // Bringing back a dropped database or table: there is nothing to keep,
+    // and the agent would fail a backup of names that are all gone.
+    warnings = [nothingToBackUpNote];
+  } else if (payload.backupFirst) {
     try {
       // The same selection: a copy of what is about to be replaced.
       const safety = await startBackup(deps, {
@@ -576,9 +630,14 @@ export async function runRestore(
         selection: held,
       });
       const done = await waitForRun(deps.db, safety.id, restoreTimeoutMs);
-      if (done?.status !== "succeeded") return fail("The backup before the restore did not succeed, so nothing was restored.");
+      if (done?.status !== "succeeded") {
+        const why = done?.status === "failed" ? (done.error ?? "it failed") : "it did not finish within 6 hours";
+        return fail(`The backup before the restore did not succeed, so nothing was restored: ${sentence(why)} ${untick}`);
+      }
     } catch (error) {
-      return fail(`The backup before the restore could not start: ${error instanceof Error ? error.message : "unknown error"}`);
+      return fail(
+        `The backup before the restore could not start, so nothing was restored: ${sentence(error instanceof Error ? error.message : "unknown error")} ${untick}`,
+      );
     }
   }
 
@@ -596,7 +655,7 @@ export async function runRestore(
     );
     deps.db
       .update(backupRuns)
-      .set({ status: "succeeded", sizeBytes: Number(res.restoredBytes), finishedAt: new Date(), objectKey: source.objectKey })
+      .set({ status: "succeeded", sizeBytes: Number(res.restoredBytes), finishedAt: new Date(), objectKey: source.objectKey, warnings })
       .where(eq(backupRuns.id, restore.id))
       .run();
     invalidateService(deps, restore.serviceId, [backupOps.listRuns.id]);

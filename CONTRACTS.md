@@ -5244,7 +5244,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   name, size and approximate rows as the engine reports them, table
   count, the biggest 500 tables per database and 2000 per result); for a
   backup of everything a failed measurement is a warning, never a failed
-  backup. The panel stores them (`backup_runs.contents`, `warnings`;
+  backup, so a backup's warnings are skipped names when it has a
+  selection and why it was not measured when it has none (the web shows
+  "N skipped" and "Contents not measured"). MySQL listings turn off the
+  information_schema size cache inside a `/*!80003 ... */` comment, so
+  MySQL 5.7 images list too. The panel stores them (`backup_runs.contents`, `warnings`;
   restores copy their source's) and derives `scope` (everything,
   databases, tables; null for volumes); `listRuns` carries the
   per-database summary, `backups.runContents` the tables. Several
@@ -5257,7 +5261,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (created when missing), MySQL the dump as is (a dump of some tables
   starts with its own `CREATE DATABASE IF NOT EXISTS` and `USE`), MongoDB
   `mongorestore --drop --nsInclude` of those namespaces; "Back up the
-  current data first" backs up the same selection. Such a restore (or any
+  current data first" backs up the same selection, unless the node's
+  listing (`InspectDatabase`) shows none of it is on the server any more
+  (a dropped database or table to bring back: the agent would fail such a
+  backup), then the restore goes on without it and its row's `warnings`
+  says so; a listing that fails or is truncated runs the backup first,
+  and when that fails the restore's error carries its error and says to
+  untick the box. Such a restore (or any
   `.bundle`) on an agent without `backup.select.v1` fails before the call.
   Backups of everything and every backup made before 0.2.15 (null
   contents, shown as "Everything on this server") restore exactly as

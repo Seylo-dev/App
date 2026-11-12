@@ -9,7 +9,7 @@ import { approvals, auditLog, backupDestinations, backupPolicies, backupRuns, gr
 import { setModelProvider } from "../src/modules/ai/client";
 import { backupFileName } from "../src/modules/backups/ops";
 import { presign } from "../src/modules/backups/presign";
-import { ownObjectKey } from "../src/modules/backups/runs";
+import { nothingToBackUpNote, ownObjectKey } from "../src/modules/backups/runs";
 import { runDueBackups } from "../src/modules/backups/schedule";
 import { expiredObjects } from "../src/modules/backups/signing";
 import { storageConfig } from "../src/modules/backups/storage";
@@ -1439,6 +1439,130 @@ describe("chosen databases", () => {
     expect(agent.calls.filter((c) => c.method === "restoreBackup")).toEqual([]);
     agent.disconnect();
   });
+
+  test("restoring a dropped database or table backs nothing up first; a failed backup first says why and what to do", async () => {
+    const { node, dbId, destinationId } = await setup();
+    const runRequests: (Subject & { runId: string })[] = [];
+    const restores: Subject[] = [];
+    const asked: { database: string }[] = [];
+    let listing: () => unknown = () => ({});
+    const agent = fakeAgent(
+      panel,
+      node.id,
+      {
+        runBackup: (req) => void runRequests.push(req as never),
+        restoreBackup: (req) => {
+          restores.push(req as never);
+          return { restoredBytes: 5n };
+        },
+        inspectDatabase: (req) => {
+          asked.push(req);
+          return listing() as never;
+        },
+      },
+      [],
+      [signed],
+    );
+    const backupOf = async (selection: unknown, contents: unknown) => {
+      const policy = await callOp(
+        panel,
+        backupOps.createPolicy,
+        { serviceId: dbId, target: "database", destinationId, schedule: "0 3 * * *", selection } as never,
+        { cookie },
+      );
+      const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: policy.body.id }, { cookie });
+      measuredResult(node.id, run.body.id, { success: true, sizeBytes: 10n, objectKey: keyFor(run.body.id), contents });
+      return run.body.id as string;
+    };
+    /** Restores runId with "Back up the current data first"; answer: the backup before it, when one starts. */
+    const restoreWithBackupFirst = async (runId: string, answer?: (runId: string) => void) => {
+      const before = runRequests.length;
+      const restore = await callOp(panel, backupOps.restore, { serviceId: dbId, runId, confirmName: "db", backupFirst: true }, { cookie });
+      const job = panel.runner.runDue(panel.deps);
+      if (answer) {
+        for (let i = 0; i < 200 && runRequests.length === before; i++) await Bun.sleep(10);
+        answer(runRequests[before]?.runId as string);
+      }
+      await job;
+      return {
+        row: panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, restore.body.id)).get(),
+        backedUpFirst: runRequests.length > before,
+      };
+    };
+    const shop = { database: "shop", tables: shopContents.databases[0]?.tables.map(({ schema, name }) => ({ schema, name })) };
+
+    // Both tables of a backup of some tables were dropped: nothing to keep, the restore goes on.
+    const tablesRun = await backupOf({ databases: [{ name: "shop", tables: [{ name: "orders" }, { name: "items" }] }] }, shopContents);
+    listing = () => ({
+      contents: { databases: [{ name: "shop", tableCount: 1, tables: [{ schema: "public", name: "customers", sizeBytes: 8192n }] }] },
+    });
+    let result = await restoreWithBackupFirst(tablesRun);
+    expect(asked.at(-1)?.database).toBe("shop");
+    expect(result.backedUpFirst).toBe(false);
+    expect(result.row).toMatchObject({ status: "succeeded", warnings: [nothingToBackUpNote] });
+    expect(restores.at(-1)?.subject.what.value).toMatchObject({ database: "shop", selections: [shop] });
+    // The whole database was dropped.
+    listing = () => ({ contents: { databases: [] } });
+    result = await restoreWithBackupFirst(tablesRun);
+    expect(result).toMatchObject({ backedUpFirst: false, row: { status: "succeeded", warnings: [nothingToBackUpNote] } });
+
+    // Chosen databases, all dropped (the main database is still there).
+    const databasesRun = await backupOf(
+      { databases: [{ name: "shop" }, { name: "crm" }] },
+      {
+        wholeServer: false,
+        databases: [
+          { name: "shop", sizeBytes: 1n, approxRows: 1n, tableCount: 1 },
+          { name: "crm", sizeBytes: 1n, approxRows: 1n, tableCount: 1 },
+        ],
+      },
+    );
+    listing = () => ({ contents: { databases: [{ name: "app", sizeBytes: 1n, tableCount: 0 }] } });
+    result = await restoreWithBackupFirst(databasesRun);
+    expect(asked.at(-1)?.database).toBe("");
+    expect(result).toMatchObject({ backedUpFirst: false, row: { status: "succeeded", warnings: [nothingToBackUpNote] } });
+    expect(restores.at(-1)?.subject.what.value).toMatchObject({ database: "", selections: [{ database: "shop" }, { database: "crm" }] });
+    // One of them is still there: it is backed up first.
+    listing = () => ({ contents: { databases: [{ name: "crm", sizeBytes: 1n, tableCount: 1 }] } });
+    result = await restoreWithBackupFirst(databasesRun, (id) =>
+      measuredResult(node.id, id, {
+        success: true,
+        sizeBytes: 3n,
+        objectKey: keyFor(id),
+        warnings: ['The database "shop" no longer exists, so it was skipped.'],
+      }),
+    );
+    expect(result).toMatchObject({ backedUpFirst: true, row: { status: "succeeded", warnings: null } });
+
+    // More tables than listed: not certain, so the backup first runs and the agent decides.
+    listing = () => ({ contents: { databases: [{ name: "shop", tableCount: 9000, tablesTruncated: true, tables: [] }] } });
+    result = await restoreWithBackupFirst(tablesRun, (id) =>
+      measuredResult(node.id, id, { success: true, sizeBytes: 3n, objectKey: keyFor(id), contents: shopContents }),
+    );
+    expect(result).toMatchObject({ backedUpFirst: true, row: { status: "succeeded", warnings: null } });
+
+    // The listing failed, then the backup first failed too: the restore says why and how to go on without it.
+    listing = () => {
+      throw new OpError("UNAVAILABLE", "listing the databases took longer than 1m0s");
+    };
+    result = await restoreWithBackupFirst(tablesRun, (id) =>
+      measuredResult(node.id, id, { success: false, error: 'none of the chosen tables exist any more in "shop": "public.orders"' }),
+    );
+    expect(result.backedUpFirst).toBe(true);
+    expect(result.row?.status).toBe("failed");
+    expect(result.row?.error).toBe(
+      'The backup before the restore did not succeed, so nothing was restored: none of the chosen tables exist any more in "shop": "public.orders". To restore without it, untick "Back up the current data first".',
+    );
+    // A backup of everything is backed up first as before, without a listing.
+    const everything = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    backupResult(node.id, everything.body.id);
+    const listed = asked.length;
+    result = await restoreWithBackupFirst(everything.body.id, (id) => backupResult(node.id, id));
+    expect(result).toMatchObject({ backedUpFirst: true, row: { status: "succeeded", warnings: null } });
+    expect(asked.length).toBe(listed);
+    agent.disconnect();
+    // Each backup first is polled every 2 seconds (waitForRun).
+  }, 30_000);
 
   test("listDatabases answers with a state the dialog shows", async () => {
     const { node, dbId } = await setup();
