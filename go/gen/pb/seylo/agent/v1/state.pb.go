@@ -933,11 +933,26 @@ type OpenPort struct {
 	// "database.exposure.v2" refuse their clients that do not ask for TLS.
 	Tls bool `protobuf:"varint,4,opt,name=tls,proto3" json:"tls,omitempty"`
 	// Certificate the port serves when tls is set: same rules as
-	// RouteStatus.certificate_*.
+	// RouteStatus.certificate_*. Agents from 0.2.12 also fill these for an
+	// exposed Postgres or MySQL: the certificate the agent installs in the
+	// database (dbtools.ExposedTLS). MariaDB serves its own, so its port
+	// reports none.
 	CertificateIssuer    string                 `protobuf:"bytes,5,opt,name=certificate_issuer,json=certificateIssuer,proto3" json:"certificate_issuer,omitempty"`
 	CertificateExpiresAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=certificate_expires_at,json=certificateExpiresAt,proto3" json:"certificate_expires_at,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// The certificate is the agent's self-signed fallback, not an ACME one:
+	// the exposure has no tls_hostname, or the edge has no certificate for
+	// it (yet). Agents from 0.2.12.
+	CertificateSelfSigned bool `protobuf:"varint,7,opt,name=certificate_self_signed,json=certificateSelfSigned,proto3" json:"certificate_self_signed,omitempty"`
+	// With certificate_self_signed and a tls_hostname: the edge's last ACME
+	// error for that host, as Traefik logged it (the CA's message, for
+	// example that it could not reach port 80); empty while none is known.
+	CertificateError string `protobuf:"bytes,8,opt,name=certificate_error,json=certificateError,proto3" json:"certificate_error,omitempty"`
+	// With certificate_self_signed: the certificate in PEM. It is public
+	// (every client sees it in the handshake), and a client can trust it by
+	// this file.
+	CertificatePem string `protobuf:"bytes,9,opt,name=certificate_pem,json=certificatePem,proto3" json:"certificate_pem,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *OpenPort) Reset() {
@@ -1012,6 +1027,27 @@ func (x *OpenPort) GetCertificateExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *OpenPort) GetCertificateSelfSigned() bool {
+	if x != nil {
+		return x.CertificateSelfSigned
+	}
+	return false
+}
+
+func (x *OpenPort) GetCertificateError() string {
+	if x != nil {
+		return x.CertificateError
+	}
+	return ""
+}
+
+func (x *OpenPort) GetCertificatePem() string {
+	if x != nil {
+		return x.CertificatePem
+	}
+	return ""
+}
+
 var File_seylo_agent_v1_state_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_state_proto_rawDesc = "" +
@@ -1076,7 +1112,7 @@ const file_seylo_agent_v1_state_proto_rawDesc = "" +
 	"\x05state\x18\x02 \x01(\x0e2\x1a.seylo.agent.v1.RouteStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12-\n" +
 	"\x12certificate_issuer\x18\x04 \x01(\tR\x11certificateIssuer\x12P\n" +
-	"\x16certificate_expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\"\x9c\x02\n" +
+	"\x16certificate_expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\"\xaa\x03\n" +
 	"\bOpenPort\x12\x1b\n" +
 	"\thost_port\x18\x01 \x01(\rR\bhostPort\x12%\n" +
 	"\x0econtainer_port\x18\x02 \x01(\rR\rcontainerPort\x129\n" +
@@ -1084,7 +1120,10 @@ const file_seylo_agent_v1_state_proto_rawDesc = "" +
 	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x10\n" +
 	"\x03tls\x18\x04 \x01(\bR\x03tls\x12-\n" +
 	"\x12certificate_issuer\x18\x05 \x01(\tR\x11certificateIssuer\x12P\n" +
-	"\x16certificate_expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt*\xc5\x02\n" +
+	"\x16certificate_expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\x126\n" +
+	"\x17certificate_self_signed\x18\a \x01(\bR\x15certificateSelfSigned\x12+\n" +
+	"\x11certificate_error\x18\b \x01(\tR\x10certificateError\x12'\n" +
+	"\x0fcertificate_pem\x18\t \x01(\tR\x0ecertificatePem*\xc5\x02\n" +
 	"\fServicePhase\x12\x1d\n" +
 	"\x19SERVICE_PHASE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SERVICE_PHASE_PENDING\x10\x01\x12\x19\n" +

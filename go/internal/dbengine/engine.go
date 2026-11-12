@@ -86,3 +86,12 @@ func RedisCLI(e agentv1.DatabaseEngine) string {
 func TLSAtGate(e agentv1.DatabaseEngine) bool {
 	return e == agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO || e == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE || RedisLike(e)
 }
+
+// AgentCertificate reports the engines whose exposed port serves the
+// agent's certificate (ACME for tls_hostname, else its self-signed
+// fallback, dbtools.Certificate): the TLSAtGate ones, and Postgres and
+// MySQL, where dbtools.ExposedTLS installs it. MariaDB serves the one it
+// makes itself.
+func AgentCertificate(e agentv1.DatabaseEngine) bool {
+	return TLSAtGate(e) || e == agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES || e == agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL
+}

@@ -45,7 +45,12 @@ type Config struct {
 	// self-signed one. Called per handshake, so renewals apply at once;
 	// nil refuses such listeners.
 	Certificate func(serviceID, host string) (certPEM, keyPEM []byte, err error)
-	Logger      *slog.Logger
+	// CertificateFailure returns the edge's last ACME error for a TLS host
+	// name (proxy.CertFailures.Failure): Ports reports it with a
+	// self-signed certificate, which is why the port serves one. Nil
+	// reports none.
+	CertificateFailure func(host string) (string, bool)
+	Logger             *slog.Logger
 	// Now is the clock (tests).
 	Now func() time.Time
 
@@ -250,7 +255,8 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			ID: "database", ServiceID: id, HostPort: db.GetExposure().GetHostPort(), ContainerPort: port,
 			AllowedSourceCIDRs: db.GetExposure().GetAllowedSourceCidrs(),
 			TerminateTLS:       dbengine.TLSAtGate(db.GetEngine()), TLSHost: db.GetExposure().GetTlsHostname(),
-			RequireTLS: tlsCheckFor(db.GetEngine()),
+			AgentCertificate: dbengine.AgentCertificate(db.GetEngine()),
+			RequireTLS:       tlsCheckFor(db.GetEngine()),
 		})
 	}
 	return out, errs
@@ -956,11 +962,9 @@ func (m *Manager) Ports(serviceID string) []*agentv1.OpenPort {
 		if a.want.Timed && !a.want.ExpiresAt.IsZero() {
 			p.ExpiresAt = timestamppb.New(a.want.ExpiresAt)
 		}
-		if a.want.TerminateTLS {
-			p.Tls = true
-			if issuer, notAfter, ok := m.certInfo(a.svc, a.want.TLSHost); ok {
-				p.CertificateIssuer, p.CertificateExpiresAt = issuer, timestamppb.New(notAfter)
-			}
+		p.Tls = a.want.TerminateTLS
+		if a.want.TerminateTLS || a.want.AgentCertificate {
+			m.reportCertificate(p, a.svc, a.want.TLSHost)
 		}
 		out = append(out, p)
 	}

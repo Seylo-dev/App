@@ -178,10 +178,15 @@ func provideNetwork(d *Deps) error {
 		PortsFile: filepath.Join(d.Layout.NetworkDir(), "portgate.json"),
 		// Exposed Mongo and Redis: the gate terminates TLS with the
 		// database's certificate (ACME for tls_hostname, else self-signed).
+		// For Postgres and MySQL it reports the same one, which
+		// dbtools.ExposedTLS installs in the database.
 		Certificate: func(serviceID, host string) ([]byte, []byte, error) {
 			return dbtools.Certificate(p.router.Certificate, filepath.Join(d.Layout.StateDir(), "db-tls"), serviceID, host)
 		},
-		Logger: log,
+		// Why an exposed database is still on the self-signed one: the
+		// ACME error Traefik logged for its TLS host name.
+		CertificateFailure: p.certs.Failure,
+		Logger:             log,
 	})
 
 	var detect func(context.Context) (bool, error)

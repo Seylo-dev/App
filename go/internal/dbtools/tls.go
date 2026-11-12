@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/seylo-dev/app/go/internal/datadir"
@@ -35,9 +36,16 @@ func (m tlsMaterial) fingerprint() string {
 	return hex.EncodeToString(h[:8])
 }
 
+// fallbackMu keeps one reader or writer of the self-signed files at a
+// time: the portgate asks for them on every handshake and ExposedTLS on
+// every pass, and two writers could leave one's key next to the other's
+// certificate.
+var fallbackMu sync.Mutex
+
 // certFor picks the ACME certificate for host when there is one, else a
 // self-signed one kept in dir/<serviceID>.{crt,key} so clients that pin it
-// keep working across agent restarts.
+// keep working across agent restarts. A kept one from before 0.2.12
+// (oldFallback) is made again once, as its own root.
 func certFor(acme CertSource, dir, serviceID, host string) (tlsMaterial, error) {
 	if host != "" && acme != nil {
 		if c, k, err := acme(host); err == nil && len(c) > 0 && len(k) > 0 {
@@ -47,10 +55,12 @@ func certFor(acme CertSource, dir, serviceID, host string) (tlsMaterial, error) 
 	if _, err := datadir.New("/").ServiceDir(serviceID); err != nil {
 		return tlsMaterial{}, err
 	}
+	fallbackMu.Lock()
+	defer fallbackMu.Unlock()
 	certPath, keyPath := filepath.Join(dir, serviceID+".crt"), filepath.Join(dir, serviceID+".key")
 	c, cerr := os.ReadFile(certPath)
 	k, kerr := os.ReadFile(keyPath)
-	if cerr == nil && kerr == nil {
+	if cerr == nil && kerr == nil && !oldFallback(c) {
 		return tlsMaterial{certPEM: c, keyPEM: k, selfSigned: true}, nil
 	}
 	if !errors.Is(cerr, os.ErrNotExist) && cerr != nil {
@@ -63,13 +73,44 @@ func certFor(acme CertSource, dir, serviceID, host string) (tlsMaterial, error) 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return tlsMaterial{}, err
 	}
-	if err := os.WriteFile(keyPath, k, 0o600); err != nil {
+	// The key first: a stop between the two leaves a missing or old
+	// certificate, which is made again next time.
+	if err := writeFile(keyPath, k, 0o600); err != nil {
 		return tlsMaterial{}, err
 	}
-	if err := os.WriteFile(certPath, c, 0o644); err != nil {
+	if err := writeFile(certPath, c, 0o644); err != nil {
 		return tlsMaterial{}, err
 	}
 	return tlsMaterial{certPEM: c, keyPEM: k, selfSigned: true}, nil
+}
+
+// writeFile replaces path in one rename.
+func writeFile(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// oldFallback reports a kept self-signed certificate from agents before
+// 0.2.12: a leaf without keyCertSign. BoringSSL (Bun) and OpenSSL 1.1 do
+// not take it as self-signed, so their clients (node-postgres on Bun)
+// refused it with "unable to verify the first certificate" instead of
+// "self-signed certificate"; OpenSSL 3 called it self-signed already.
+func oldFallback(certPEM []byte) bool {
+	b, _ := pem.Decode(certPEM)
+	if b == nil || b.Type != "CERTIFICATE" {
+		return false
+	}
+	c, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return false
+	}
+	return c.KeyUsage&x509.KeyUsageCertSign == 0
 }
 
 // Certificate returns the certificate an exposed database serves: the ACME
@@ -84,7 +125,11 @@ func Certificate(acme CertSource, dir, serviceID, host string) (certPEM, keyPEM 
 	return m.certPEM, m.keyPEM, nil
 }
 
-// selfSigned makes a 10-year ECDSA P-256 certificate for host.
+// selfSigned makes a 10-year ECDSA P-256 certificate for host that is its
+// own root (CA, keyCertSign, path length 0), as `openssl req -x509` makes
+// them: every TLS library (OpenSSL 1.1 and 3, BoringSSL in Bun, Go) calls
+// it a self-signed certificate, and a client can trust it by its file
+// (sslrootcert, ssl-ca, tlsCAFile).
 func selfSigned(host string) (certPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -103,8 +148,13 @@ func selfSigned(host string) (certPEM, keyPEM []byte, err error) {
 		Subject:      pkix.Name{CommonName: cn},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().AddDate(10, 0, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		// Its own issuer: BoringSSL and OpenSSL 1.1 take a certificate as
+		// self-signed only when it may sign certificates.
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLenZero:        true,
 	}
 	if host != "" {
 		tmpl.DNSNames = []string{host}

@@ -156,7 +156,22 @@ message OpenPort {
   // "database.exposure.v2" refuse their clients that do not ask for TLS.
   bool tls = 4;
   // Certificate the port serves when tls is set: same rules as
-  // RouteStatus.certificate_*.
+  // RouteStatus.certificate_*. Agents from 0.2.12 also fill these for an
+  // exposed Postgres or MySQL: the certificate the agent installs in the
+  // database (dbtools.ExposedTLS). MariaDB serves its own, so its port
+  // reports none.
   string certificate_issuer = 5;
   google.protobuf.Timestamp certificate_expires_at = 6;
+  // The certificate is the agent's self-signed fallback, not an ACME one:
+  // the exposure has no tls_hostname, or the edge has no certificate for
+  // it (yet). Agents from 0.2.12.
+  bool certificate_self_signed = 7;
+  // With certificate_self_signed and a tls_hostname: the edge's last ACME
+  // error for that host, as Traefik logged it (the CA's message, for
+  // example that it could not reach port 80); empty while none is known.
+  string certificate_error = 8;
+  // With certificate_self_signed: the certificate in PEM. It is public
+  // (every client sees it in the handshake), and a client can trust it by
+  // this file.
+  string certificate_pem = 9;
 }

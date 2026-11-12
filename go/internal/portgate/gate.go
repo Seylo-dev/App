@@ -45,6 +45,11 @@ type Listener struct {
 	// first byte). TLSHost names the certificate (Config.Certificate).
 	TerminateTLS bool
 	TLSHost      string
+	// AgentCertificate: the port serves the agent's certificate for
+	// TLSHost (Config.Certificate), terminated here or installed in the
+	// database by dbtools.ExposedTLS (exposed Postgres and MySQL), so
+	// Ports reports it. MariaDB serves its own.
+	AgentCertificate bool
 	// RequireTLS checks the first bytes of each connection to a database
 	// that negotiates TLS inside its protocol (exposed Postgres, MySQL and
 	// MariaDB) and refuses a client that does not ask for TLS, with the
