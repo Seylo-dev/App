@@ -16,7 +16,7 @@ export default {
   conflictBody: "Saving now would overwrite their change. Load their version, then make your edit again.",
   loadTheirs: "Load their version",
   appliedTitle: "Saved, not applied yet",
-  appliedBody: "Running instances still use the old values. Restart to apply them, or deploy.",
+  appliedBody: "Running instances still use the old values until the next deploy. A restart keeps the values of the last deploy.",
   moveStarted: "Moving the service. Follow it on the Deployments tab.",
   refs: {
     title: "References",

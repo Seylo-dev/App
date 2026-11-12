@@ -56,7 +56,7 @@ export default {
     title: "Shared environment",
     description:
       // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{project.NAME}} is the reference syntax people type
-      "Variables every service in this project can use as ${{project.NAME}}. Services get new values on their next deploy or restart.",
+      "Variables every service in this project can use as ${{project.NAME}}. Services get new values on their next deploy.",
     saved: "Shared environment saved.",
     savedAffected: {
       one: "Saved. {count} service still runs with the old values until it restarts.",

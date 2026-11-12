@@ -163,7 +163,7 @@ export const set = defineOp({
   kind: "mutation",
   summary: "Save a service's environment",
   description:
-    "Replaces the service's whole .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy or restart. To change one variable and keep the others as they are, use env.setVariable.",
+    "Replaces the service's whole .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy (a restart keeps the values of the last deploy); restartNeeded says the service runs with older values. To change one variable and keep the others as they are, use env.setVariable.",
   input: Type.Object({
     serviceId: Id,
     text: EnvText,
@@ -188,7 +188,7 @@ export const setVariable = defineOp({
   summary: "Set one variable of a service's environment",
   description:
     // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
-    "Sets one variable and keeps the rest of the .env text as it is, so a caller that cannot read the other values (model callers get env.get redacted) changes only this line. An existing key keeps its line: the value of the last line with that key (the one that wins) is replaced, in its quote style when the value fits it, with its export, its trailing comment and the comment lines above it (# @public stays). A new key is appended as KEY=value. value null removes every line with the key (NOT_FOUND when there is none). Give the value unquoted; ${{target.VARIABLE}} references are allowed, and a value with spaces or a newline is written in double quotes. Same checks as env.set, and refused when the text would grow past 262144 characters; the diagnostics of the whole file come back (hardcoded-reference: a value that spells out a service's URL, with a fix to its reference). The new value applies on the next deploy or restart.",
+    "Sets one variable and keeps the rest of the .env text as it is, so a caller that cannot read the other values (model callers get env.get redacted) changes only this line. An existing key keeps its line: the value of the last line with that key (the one that wins) is replaced, in its quote style when the value fits it, with its export, its trailing comment and the comment lines above it (# @public stays). A new key is appended as KEY=value. value null removes every line with the key (NOT_FOUND when there is none). Give the value unquoted; ${{target.VARIABLE}} references are allowed, and a value with spaces or a newline is written in double quotes. Same checks as env.set, and refused when the text would grow past 262144 characters; the diagnostics of the whole file come back (hardcoded-reference: a value that spells out a service's URL, with a fix to its reference). The new value applies on the next deploy, not on a restart.",
   input: Type.Object({
     serviceId: Id,
     key: EnvKey,
@@ -259,7 +259,7 @@ export const setShared = defineOp({
   kind: "mutation",
   summary: "Save a project's shared variables",
   description:
-    "Replaces the project's shared variables (.env text). Shared variables cannot reference services. Services that use them get the new values on their next deploy or restart.",
+    "Replaces the project's shared variables (.env text). Shared variables cannot reference services. Services that use them get the new values on their next deploy, not on a restart.",
   input: Type.Object({
     projectId: Id,
     text: EnvText,
@@ -282,7 +282,7 @@ export const setSharedVariable = defineOp({
   kind: "mutation",
   summary: "Set one of a project's shared variables",
   description:
-    "Sets one shared variable and keeps the others as they are, like env.setVariable for a service: the last line with the key gets the new value (its quoting, comments and # @public kept), a new key is appended, value null removes every line with the key (NOT_FOUND when there is none). Refused when the text would grow past 262144 characters. Shared variables cannot reference services. Services that use them get the new value on their next deploy or restart.",
+    "Sets one shared variable and keeps the others as they are, like env.setVariable for a service: the last line with the key gets the new value (its quoting, comments and # @public kept), a new key is appended, value null removes every line with the key (NOT_FOUND when there is none). Refused when the text would grow past 262144 characters. Shared variables cannot reference services. Services that use them get the new value on their next deploy, not on a restart.",
   input: Type.Object({
     projectId: Id,
     key: EnvKey,

@@ -1,6 +1,7 @@
 // The Environment tab (Environment.dc.html): the .env editor with live
 // diagnostics, the References panel, save with Cmd/Ctrl+S, and after a save
-// that running instances do not have yet, a prompt to restart or deploy.
+// that running instances do not have yet, a prompt to deploy (a restart
+// keeps the values of the last deploy).
 
 import { type AnalyzeContext, analyzeEnv, type Diagnostic } from "@seylo/env-analyzer";
 import { deployments, env, OpError, type OpOutput, services } from "@seylo/ops";
@@ -76,13 +77,6 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
       else fail(error);
     },
   });
-  const restart = useOpMutation(services.restart, {
-    onSuccess: () => {
-      setRestartNeeded(false);
-      toast.success(t("service.header.restarted"));
-    },
-    onError: fail,
-  });
   // One deploy at a time: the Deploy below waits for one in progress.
   const deploying = useActiveDeploy(service.id) !== null;
   const deploy = useOpMutation(deployments.deploy, {
@@ -156,20 +150,15 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
           tone="info"
           title={t("serviceEnv.appliedTitle")}
           action={
-            <>
-              <Button size="sm" onClick={() => restart.mutate({ serviceId: service.id })} disabled={restart.isPending}>
-                {t("service.header.restart")}
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => deploy.mutate({ serviceId: service.id })}
-                disabled={deploy.isPending || deploying}
-                title={deploying ? t("service.header.deployBusyHint") : undefined}
-              >
-                {t(deploying ? "service.header.deployBusy" : "service.header.deploy")}
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => deploy.mutate({ serviceId: service.id })}
+              disabled={deploy.isPending || deploying}
+              title={deploying ? t("service.header.deployBusyHint") : undefined}
+            >
+              {t(deploying ? "service.header.deployBusy" : "service.header.deploy")}
+            </Button>
           }
         >
           {t("serviceEnv.appliedBody")}

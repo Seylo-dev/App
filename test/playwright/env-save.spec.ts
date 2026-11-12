@@ -51,6 +51,28 @@ test.describe("environment saves", () => {
     await expect(page.getByRole("button", { name: /^Save/ })).toBeEnabled();
   });
 
+  test("a save the running instances do not have yet offers a deploy, not a restart", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "env.set": () => ({ updatedAt: new Date().toISOString(), diagnostics: [], restartNeeded: true }),
+      },
+    });
+    await page.goto(`/p/${ids.acme}/s/${svc.worker}/environment`);
+    const editor = page.locator(".monaco-editor").first();
+    await expect(editor).toBeVisible({ timeout: 15_000 });
+    await editor.click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type("THIRD=3");
+    await page.keyboard.press("Control+s");
+    await expect(page.getByText("Saved.")).toBeVisible();
+
+    // A restart starts the same containers again, with the values of the last deploy: only a deploy applies the save.
+    const note = page.getByText("Saved, not applied yet").locator("xpath=ancestor::*[.//button][1]");
+    await expect(note).toContainText("until the next deploy");
+    await expect(note.getByRole("button", { name: "Deploy" })).toBeVisible();
+    await expect(note.getByRole("button", { name: "Restart" })).toHaveCount(0);
+  });
+
   test("text typed during a shared env save is kept", async ({ page }) => {
     const sent: string[] = [];
     await installDemo(page, {
