@@ -1,6 +1,7 @@
 // Pick a GitLab, Gitea/Forgejo or Bitbucket repository and branch through
 // one of the panel's connections (Settings > Git providers), and see the
-// repository webhook the panel created for it.
+// repository webhook the panel created for it. The repository search opens
+// on the service's repository, selected in the list.
 
 import { gitProviders, type OpOutput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -23,6 +24,7 @@ import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
+import { useRepoSearch, useSelectedInView } from "./repo-search";
 
 export type ProviderKind = "gitlab" | "gitea" | "bitbucket";
 
@@ -196,19 +198,24 @@ function RepoPicker({
   value: string | null;
   onChange: (repo: string, defaultBranch: string | null) => void;
 }) {
-  const [query, setQuery] = useState("");
+  // The box opens on the form's repository (the service's own), a search only once something is typed.
+  const box = useRepoSearch(value);
   const [page, setPage] = useState(1);
-  const deferred = useDeferredValue(query.trim());
+  const deferred = useDeferredValue(box.text);
   const repos = useOp(gitProviders.repos, { projectId, providerId, query: deferred || undefined, page }, { retry: retryOp });
+  // The form's repository, not on the list's first page: first, selected.
+  const pinned =
+    !box.edited && page === 1 && value !== null && repos.isSuccess && !repos.data.repos.some((r) => r.fullName === value) ? value : null;
+  const listRef = useSelectedInView(!box.edited && repos.isSuccess);
   return (
     <Field label={t("serviceSource.provider.repository")}>
       <div className="relative">
         <IconSearch size={15} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" aria-hidden="true" />
         <Input
           className="pl-9"
-          value={query}
+          {...box.input}
           onChange={(e) => {
-            setQuery(e.target.value);
+            box.input.onChange(e);
             setPage(1);
           }}
           placeholder={t("serviceSource.provider.searchRepos")}
@@ -216,6 +223,7 @@ function RepoPicker({
         />
       </div>
       <div
+        ref={listRef}
         role="listbox"
         aria-label={t("serviceSource.provider.repository")}
         aria-busy={repos.isPending}
@@ -225,40 +233,21 @@ function RepoPicker({
           <RepoRowsSkeleton bare />
         ) : repos.isError ? (
           <OpErrorNote error={repos.error} compact />
-        ) : repos.data.repos.length === 0 ? (
+        ) : repos.data.repos.length === 0 && !pinned ? (
           <p className="m-0 p-3 text-[12.5px] text-muted-foreground">{t("serviceSource.provider.noRepos")}</p>
         ) : (
           <>
+            {pinned && <RepoOption name={pinned} isPrivate={false} empty={false} updatedAt={null} selected onPick={() => {}} />}
             {repos.data.repos.map((r: Repo) => (
-              <button
+              <RepoOption
                 key={r.fullName}
-                type="button"
-                role="option"
-                aria-selected={value === r.fullName}
-                onClick={() => onChange(r.fullName, r.defaultBranch)}
-                // The chosen one: the accent fill and a check, as in the New app picker.
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200",
-                  value === r.fullName ? "bg-accent" : "hover:bg-card",
-                )}
-              >
-                <span className="truncate font-mono text-[12.5px]">{r.fullName}</span>
-                {r.private && (
-                  <Chip tone="gray" className="py-0">
-                    <IconLock size={11} />
-                    {t("serviceSource.provider.private")}
-                  </Chip>
-                )}
-                {r.defaultBranch === null && (
-                  <Chip tone="amber" className="py-0">
-                    {t("serviceSource.provider.empty")}
-                  </Chip>
-                )}
-                <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                  {r.updatedAt && <span className="text-xs whitespace-nowrap text-muted-foreground">{formatRelative(r.updatedAt)}</span>}
-                  {value === r.fullName && <IconCheck size={15} stroke={2} className="text-primary" aria-hidden="true" />}
-                </span>
-              </button>
+                name={r.fullName}
+                isPrivate={r.private}
+                empty={r.defaultBranch === null}
+                updatedAt={r.updatedAt}
+                selected={value === r.fullName}
+                onPick={() => onChange(r.fullName, r.defaultBranch)}
+              />
             ))}
             {(repos.data.hasMore || page > 1) && (
               <div className="m-1 flex gap-1">
@@ -278,6 +267,54 @@ function RepoPicker({
         )}
       </div>
     </Field>
+  );
+}
+
+/** One repository of the list. The chosen one: the accent fill and a check, as in the New app picker. */
+function RepoOption({
+  name,
+  isPrivate,
+  empty,
+  updatedAt,
+  selected,
+  onPick,
+}: {
+  name: string;
+  isPrivate: boolean;
+  /** No branch yet. */
+  empty: boolean;
+  updatedAt: string | null;
+  selected: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={onPick}
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200",
+        selected ? "bg-accent" : "hover:bg-card",
+      )}
+    >
+      <span className="truncate font-mono text-[12.5px]">{name}</span>
+      {isPrivate && (
+        <Chip tone="gray" className="py-0">
+          <IconLock size={11} />
+          {t("serviceSource.provider.private")}
+        </Chip>
+      )}
+      {empty && (
+        <Chip tone="amber" className="py-0">
+          {t("serviceSource.provider.empty")}
+        </Chip>
+      )}
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        {updatedAt && <span className="text-xs whitespace-nowrap text-muted-foreground">{formatRelative(updatedAt)}</span>}
+        {selected && <IconCheck size={15} stroke={2} className="text-primary" aria-hidden="true" />}
+      </span>
+    </button>
   );
 }
 

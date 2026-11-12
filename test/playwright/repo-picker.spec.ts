@@ -7,15 +7,18 @@
 // steps while nothing is connected, the loading, error and unchecked
 // states, a project change, a member who may not connect, the list's size
 // at a short window and on a phone, and the keyboard. Git repository: a
-// plain URL field, with no picker and no owner/repo shorthand. The ops are
-// answered by the demo and recorded, so the test checks what gets created.
+// plain URL field, with no picker and no owner/repo shorthand. The Source
+// tab's pickers (GitHub and a GitLab connection) open on the service's
+// repository, selected and scrolled into view, and a new search starts with
+// the first key. The ops are answered by the demo and recorded, so the test
+// checks what gets created.
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { ids, viewer } from "./demo/fixtures";
-import { githubAccount, installation, withAccount } from "./demo/repos";
+import { githubAccount, gitlabConnection, installation, withAccount } from "./demo/repos";
 import { installDemo } from "./demo/routes";
-import { ids as svc } from "./demo/service";
+import { handlers as serviceHandlers, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
@@ -716,5 +719,154 @@ test("a repository with a Dockerfile at its root starts on the Dockerfile builde
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect.poll(() => calls("services.create").length).toBe(1);
   expect(calls("services.create")[0]?.build).toEqual({ builder: "dockerfile", dockerfilePath: "docker/web.Dockerfile" });
+});
+
+/** acme's installation with 20 repositories, the service's acme/shop-api 15th (out of view in the list), searched by name. */
+const longList = {
+  "github.repos": (input: Input) => {
+    const names = Array.from({ length: 20 }, (_, i) =>
+      i === 14 ? "acme/shop-api" : i === 16 ? "acme/storefront" : i === 18 ? "acme/docs" : `acme/service-${String(i + 1).padStart(2, "0")}`,
+    );
+    const query = String(input.query ?? "").toLowerCase();
+    const repos = (input.installationId === installation.id ? names : [])
+      .filter((name) => !query || name.includes(query))
+      .map((fullName, i) => ({
+        fullName,
+        private: true,
+        defaultBranch: fullName === "acme/storefront" ? "trunk" : "main",
+        pushedAt: new Date(Date.now() - i * 3_600_000).toISOString(),
+      }));
+    return { repos, hasMore: false };
+  },
+};
+
+test("the Source tab's GitHub picker opens on the service's repository, selected and in view; one key starts a new search", async ({
+  page,
+}) => {
+  const errors = trackErrors(page);
+  const calls = watchOps(page);
+  await installDemo(page, { overrides: longList });
+  // The api service is connected to acme/shop-api at main through acme's installation (demo/service.ts).
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/source`);
+  const search = page.getByRole("textbox", { name: "Search repositories" });
+  const list = page.getByRole("listbox", { name: "Repository" });
+  const current = list.getByRole("option", { name: /acme\/shop-api/ });
+  await expect(search).toHaveValue("acme/shop-api");
+  // Not a search: the whole list, the service's repository selected and scrolled to inside it (the page stays put).
+  await expect(list.getByRole("option")).toHaveCount(20);
+  await expect(current).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  // The list on screen (that scrolls the page, not the list): the row shows in it.
+  await list.scrollIntoViewIfNeeded();
+  await expect(current).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main");
+  // Opening it changed nothing: Connected, nothing looked up by name, no search sent.
+  await expect(page.getByRole("button", { name: "Connected", exact: true })).toBeDisabled();
+  await expect(list.getByText("Use this repository")).toHaveCount(0);
+  expect(calls("github.repos").every((input) => input.query === undefined)).toBe(true);
+  await shot(page, "source-tab-opens-on-repo");
+
+  // Enter on the text it opened with picks nothing (the branch stays).
+  await search.press("Enter");
+  await expect(page.getByRole("button", { name: "Connected", exact: true })).toBeDisabled();
+  await search.blur();
+
+  // A click into it selects the text, so the first key replaces it with a new search.
+  await search.click();
+  expect(await search.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, "acme/shop-api".length]);
+  await page.keyboard.type("store");
+  await expect(search).toHaveValue("store");
+  await expect(list.getByRole("option")).toHaveCount(1);
+  await expect(list.getByRole("option", { name: /acme\/storefront/ })).toBeVisible();
+  expect(calls("github.repos").some((input) => input.query === "store")).toBe(true);
+
+  // Cleared, the whole list again with the service's repository still picked; picking another changes the form only.
+  await search.fill("");
+  await expect(list.getByRole("option")).toHaveCount(20);
+  await expect(current).toHaveAttribute("aria-selected", "true");
+  await list.getByRole("option", { name: /acme\/storefront/ }).click();
+  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("trunk");
+  await expect(page.getByRole("button", { name: "Connect repository" })).toBeEnabled();
+  await expect(search).toHaveValue("");
+  expect(calls("github.connectRepo")).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("the Source tab's GitLab picker opens on the service's repository too, and Tab into it selects the text", async ({ page }) => {
+  const errors = trackErrors(page);
+  const calls = watchOps(page);
+  await installDemo(page, {
+    overrides: {
+      "services.get": (input: Input) => ({
+        ...(serviceHandlers["services.get"]?.(input) as object),
+        source: { type: "gitlab", label: "acme/platform/shop", branch: "main", builder: "railpack" },
+        sourceConfig: {
+          type: "provider",
+          providerId: gitlabConnection.id,
+          provider: "gitlab",
+          repo: "acme/platform/shop",
+          branch: "main",
+          deployOnPush: true,
+        },
+      }),
+      "gitProviders.webhook": () => ({
+        configured: true,
+        kind: "gitlab",
+        repo: "acme/platform/shop",
+        url: "https://panel.example.com/api/hooks/gitlab/hk00000000000001",
+        created: true,
+        error: null,
+        insecure: false,
+        lastDeliveryAt: null,
+        createdAt: new Date().toISOString(),
+      }),
+    },
+  });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/source`);
+  await expect(page.getByRole("radio", { name: /GitLab/ })).toHaveAttribute("aria-checked", "true");
+  const search = page.getByRole("textbox", { name: "Search repositories" });
+  const list = page.getByRole("listbox", { name: "Repository" });
+  await expect(search).toHaveValue("acme/platform/shop");
+  // GitLab searches names, not full paths: the text it opens with is no search, so both repositories show.
+  await expect(list.getByRole("option")).toHaveCount(2);
+  await expect(list.getByRole("option", { name: /acme\/platform\/shop/ })).toHaveAttribute("aria-selected", "true");
+  await expect(list.getByRole("option", { name: /acme\/site/ })).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("combobox", { name: "Branch" })).toHaveText("main");
+  await expect(page.getByRole("button", { name: "Connected", exact: true })).toBeDisabled();
+  expect(calls("gitProviders.repos").every((input) => input.query === undefined)).toBe(true);
+  await shot(page, "source-tab-gitlab-opens-on-repo");
+
+  // From the Connection field, Tab reaches the search box with its text selected.
+  await page.getByRole("combobox", { name: "Connection" }).focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(search).toBeFocused();
+  expect(await search.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, "acme/platform/shop".length]);
+  await page.keyboard.type("site");
+  await expect(search).toHaveValue("site");
+  await expect(list.getByRole("option")).toHaveCount(1);
+  expect(calls("gitProviders.repos").some((input) => input.query === "site")).toBe(true);
+  expect(calls("gitProviders.connectRepo")).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("a service without a repository source, and a new one, open the picker empty", async ({ page }) => {
+  const errors = trackErrors(page);
+  await installDemo(page);
+  // private-api deploys from a plain git URL: its GitHub picker has nothing to open on.
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}/source`);
+  await page.getByRole("radio", { name: /^GitHub/ }).click();
+  const list = page.getByRole("listbox", { name: "Repository" });
+  await expect(list.getByRole("option", { name: /acme\/shop-api/ })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Search repositories" })).toHaveValue("");
+  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
+
+  const dialog = await openGithubTab(page);
+  await expect(dialog.locator("#ns-github")).toHaveValue("");
+  await dialog.getByRole("button", { name: "Browse" }).click();
+  await expect(popover(page).getByRole("option", { name: /acme\/shop-api/ })).toBeVisible();
+  await expect(popover(page).getByRole("textbox", { name: "Search repositories" })).toHaveValue("");
+  expect(errors).toEqual([]);
 });
 

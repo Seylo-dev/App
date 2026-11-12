@@ -5,7 +5,9 @@ import { OpClientProvider, opQueryKey } from "@seylo/ops/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { t } from "../../../i18n/t";
-import { BranchSelect } from "./provider-form";
+import { renderStatic } from "../../../test/render";
+import type { ServiceDetail } from "../use-service";
+import { BranchSelect, ProviderForm } from "./provider-form";
 
 const input = { projectId: "prj1prj1prj1prj1", providerId: "gpr1gpr1gpr1gpr1", repo: "acme/shop" };
 
@@ -58,4 +60,50 @@ test("a loaded branch list shows no error, and an empty one says there are no br
   expect(loaded).not.toContain('role="alert"');
   expect(loaded).not.toContain(html(failed.message));
   expect(render({ branches: [] }, null)).toContain(html(t("serviceSource.provider.noBranches")));
+});
+
+const gitlab = { id: "gpr1gpr1gpr1gpr1", kind: "gitlab", name: "Company GitLab", host: "gitlab.com", workspace: null };
+const withSource = (repo: string | null) =>
+  ({
+    id: "svc-1",
+    projectId: "prj1prj1prj1prj1",
+    sourceConfig: repo
+      ? { type: "provider", providerId: gitlab.id, provider: "gitlab", repo, branch: "main", deployOnPush: true }
+      : { type: "none" },
+  }) as unknown as ServiceDetail;
+const row = (fullName: string) => ({ fullName, private: false, defaultBranch: "main", updatedAt: null });
+
+/** ProviderForm with the connection and the first page of repositories (no search) in the cache. */
+function renderForm(service: ServiceDetail, repos: string[]) {
+  return renderStatic(
+    () => <ProviderForm service={service} kind="gitlab" />,
+    [
+      [gitProviders.list, {}, { items: [gitlab], hidden: false }],
+      [gitProviders.repos, { projectId: service.projectId, providerId: gitlab.id, page: 1 }, { repos: repos.map(row), hasMore: false }],
+    ],
+  );
+}
+
+const searchBox = (out: string) =>
+  new RegExp(`<input[^>]*aria-label="${t("serviceSource.provider.searchRepos")}"[^>]*>`).exec(out)?.[0] ?? "";
+const options = (out: string) =>
+  [...out.matchAll(/<button[^>]*role="option" aria-selected="(true|false)"[^>]*>.*?<span[^>]*>([^<]+)<\/span>/g)].map(
+    (m) => `${m[2]}${m[1] === "true" ? " (selected)" : ""}`,
+  );
+
+test("the provider picker opens on the service's repository, selected in the full list", async () => {
+  const out = await renderForm(withSource("acme/platform/shop"), ["acme/site", "acme/platform/shop"]);
+  expect(searchBox(out)).toContain('value="acme/platform/shop"');
+  // The text is no search: GitLab would not find a full path, so the list stays whole.
+  expect(options(out)).toEqual(["acme/site", "acme/platform/shop (selected)"]);
+  expect(out).toContain(t("serviceSource.provider.isConnected"));
+
+  // Not on the first page: first, selected.
+  expect(options(await renderForm(withSource("acme/old"), ["acme/site"]))).toEqual(["acme/old (selected)", "acme/site"]);
+});
+
+test("a service with no provider source opens the picker empty", async () => {
+  const out = await renderForm(withSource(null), ["acme/site", "acme/platform/shop"]);
+  expect(searchBox(out)).toContain('value=""');
+  expect(options(out)).toEqual(["acme/site", "acme/platform/shop"]);
 });

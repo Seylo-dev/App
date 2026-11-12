@@ -2,6 +2,7 @@
 // connected GitHub account (Settings > GitHub, a device login or a token).
 // The repository field searches the list, or takes a GitHub link or
 // owner/repo, which is looked up by name and offered on top of the list.
+// It opens on the service's repository, selected in the list.
 
 import { github, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -26,6 +27,7 @@ import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
+import { useRepoSearch, useSelectedInView } from "./repo-search";
 
 /** What github.repos, github.branches and github.connectRepo take to read through the App or the account. */
 export type GithubVia = { installationId: string; accountId?: undefined } | { accountId: string; installationId?: undefined };
@@ -253,8 +255,9 @@ function RepoPicker({
   /** The repository and its branch: a link's tree/<branch>, else the default one (null when it has none yet). */
   onChange: (repo: string, branch: string | null) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const text = query.trim();
+  // The box opens on the form's repository (the service's own), a search only once something is typed.
+  const box = useRepoSearch(value);
+  const text = box.text;
   const typed = useMemo(() => githubParse(text), [text]);
   const named = typed.ok ? typed.repo : null;
   // A link or owner/repo searches for that repository; anything else searches as typed.
@@ -283,6 +286,9 @@ function RepoPicker({
   };
   // The typed repository moves to the top once it is found; until then (or if reading it fails) a listed one stays in the list.
   const rest = (repos.data?.repos ?? []).filter((r) => !found || !same(r.fullName, typedName));
+  // The form's repository, not on the list's first page (an organization's, or past the most recently pushed): first, selected.
+  const pinned = !box.edited && value !== null && repos.isSuccess && !rest.some((r) => same(r.fullName, value)) ? value : null;
+  const listRef = useSelectedInView(!box.edited && repos.isSuccess);
   // Nothing to show under a typed repository that is still being read or cannot be: no empty gray box.
   const emptyUnderTyped = named !== null && !found && repos.isSuccess && rest.length === 0;
   // "acme/shop" typed to filter the list (acme/shop-api, acme/shop-worker) is a search, not a missing repository.
@@ -291,6 +297,8 @@ function RepoPicker({
     // Enter in the search box picks, it never connects: the typed repository once found, or the only match.
     if (e.key !== "Enter") return;
     e.preventDefault();
+    // The repository the box opened on is no search: Enter there picks nothing (it would reset the branch).
+    if (!box.edited) return;
     if (found) pickTyped();
     else if ((!named || failed || elsewhere) && rest.length === 1 && rest[0]) onChange(rest[0].fullName, rest[0].defaultBranch);
   };
@@ -301,8 +309,7 @@ function RepoPicker({
         <IconSearch size={15} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" aria-hidden="true" />
         <Input
           className="pl-9"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          {...box.input}
           onKeyDown={onKeyDown}
           placeholder={t("serviceSource.github.searchPlaceholder")}
           aria-label={t("serviceSource.github.searchRepos")}
@@ -338,6 +345,7 @@ function RepoPicker({
       )}
       {!emptyUnderTyped && (
         <div
+          ref={listRef}
           role="listbox"
           aria-label={t("serviceSource.github.repository")}
           className="flex max-h-64 flex-col overflow-y-auto rounded-control bg-raised p-1"
@@ -351,13 +359,14 @@ function RepoPicker({
               trailing={t("serviceSource.github.typedUse")}
             />
           )}
+          {pinned && <RepoOption name={pinned} isPrivate={false} selected onPick={() => {}} />}
           {repos.isPending ? (
             <RepoRowsSkeleton bare />
           ) : repos.isError ? (
             <OpErrorNote error={repos.error} compact />
           ) : rest.length === 0 ? (
-            // A typed repository has its own row: "No repositories match" under it would read as "not found".
-            named ? null : (
+            // A typed (or the form's own) repository has its own row: "No repositories match" under it would read as "not found".
+            named || pinned ? null : (
               <p className="m-0 p-3 text-[12.5px] text-muted-foreground">
                 {t(via.accountId ? "serviceSource.github.noReposAccount" : "serviceSource.github.noRepos")}
               </p>
@@ -369,7 +378,7 @@ function RepoPicker({
                 name={r.fullName}
                 isPrivate={r.private}
                 pushedAt={r.pushedAt}
-                selected={value === r.fullName}
+                selected={same(value, r.fullName)}
                 onPick={() => onChange(r.fullName, r.defaultBranch)}
               />
             ))

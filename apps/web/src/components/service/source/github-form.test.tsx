@@ -17,13 +17,15 @@ const service = {
   sourceConfig: { type: "github", installationId: "inst-1", repo: "acme/shop", branch: "main", deployOnPush: true },
 } as unknown as ServiceDetail;
 
-async function render(installations: unknown) {
+async function render(installations: unknown, options: { of?: ServiceDetail; repos?: unknown } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } } });
   queryClient.setQueryData(opQueryKey(github.installations, {}), installations);
+  // github.repos with no search, as the list asks for it when the picker opens.
+  if (options.repos) queryClient.setQueryData(opQueryKey(github.repos, { projectId: "prj-1", installationId: "inst-1" }), options.repos);
   // No request leaves the test: the answer is in the cache already.
   const client = { call: () => new Promise(() => {}) } as unknown as OpClient;
   const router = createRouter({
-    routeTree: createRootRoute({ component: () => <GithubForm service={service} /> }),
+    routeTree: createRootRoute({ component: () => <GithubForm service={options.of ?? service} /> }),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
@@ -70,6 +72,55 @@ test("the connected repository, unchanged, shows Connected instead of a Connect 
   expect(html).toContain(t("serviceSource.github.isConnected"));
   expect(html).not.toContain(`>${t("serviceSource.github.connect")}<`);
   expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+});
+
+const acme = { id: "inst-1", accountLogin: "acme", accountType: "Organization", suspended: false };
+const repo = (fullName: string) => ({ fullName, private: false, defaultBranch: "main", pushedAt: null });
+/** The search box (its value) and the options with whether each is selected, from the markup. */
+const searchBox = (html: string) =>
+  new RegExp(`<input[^>]*aria-label="${t("serviceSource.github.searchRepos")}"[^>]*>`).exec(html)?.[0] ?? "";
+const options = (html: string) =>
+  [...html.matchAll(/<button[^>]*role="option" aria-selected="(true|false)"[^>]*>.*?<span[^>]*>([^<]+)<\/span>/g)].map(
+    (m) => `${m[2]}${m[1] === "true" ? " (selected)" : ""}`,
+  );
+
+test("the picker opens on the service's repository: in the search box, selected in the full list, no lookup", async () => {
+  const html = await render(
+    { installations: [acme], installUrl: null, hidden: false },
+    { repos: { repos: [repo("acme/api"), repo("acme/shop"), repo("acme/shop-worker")], hasMore: false } },
+  );
+  expect(searchBox(html)).toContain('value="acme/shop"');
+  // Not a search: every repository, the service's one selected; not looked up by name ("Use this repository").
+  expect(options(html)).toEqual(["acme/api", "acme/shop (selected)", "acme/shop-worker"]);
+  expect(html).not.toContain(t("serviceSource.github.typedUse"));
+  expect(html).not.toContain(t("serviceSource.github.typedChecking", { repo: "acme/shop" }));
+  // Opening it changes nothing: still Connected.
+  expect(html).toContain(t("serviceSource.github.isConnected"));
+});
+
+test("the service's repository missing from the list's first page shows first, selected", async () => {
+  const html = await render(
+    { installations: [acme], installUrl: null, hidden: false },
+    { repos: { repos: [repo("acme/api"), repo("acme/docs")], hasMore: true } },
+  );
+  expect(options(html)).toEqual(["acme/shop (selected)", "acme/api", "acme/docs"]);
+  // An empty first page: the service's repository alone, not "no repositories".
+  const empty = await render({ installations: [acme], installUrl: null, hidden: false }, { repos: { repos: [], hasMore: false } });
+  expect(options(empty)).toEqual(["acme/shop (selected)"]);
+  expect(empty).not.toContain(escaped(t("serviceSource.github.noRepos")));
+});
+
+test("a service with no GitHub source opens the picker empty, nothing selected", async () => {
+  const git = {
+    ...service,
+    sourceConfig: { type: "git", url: "https://git.example.com/a/b.git", branch: "main" },
+  } as unknown as ServiceDetail;
+  const html = await render(
+    { installations: [acme], installUrl: null, hidden: false },
+    { of: git, repos: { repos: [repo("acme/api"), repo("acme/shop")], hasMore: false } },
+  );
+  expect(searchBox(html)).toContain('value=""');
+  expect(options(html)).toEqual(["acme/api", "acme/shop"]);
 });
 
 const branchInput = { projectId: "prj1prj1prj1prj1", installationId: "ghi1ghi1ghi1ghi1", repo: "acme/shop" };
