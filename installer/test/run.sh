@@ -131,6 +131,10 @@ cat >"$shims/systemctl" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$SHIM_LOG.systemctl"
 if [ "$1" = cat ] && [ "$2" = docker.service ] && [ -n "${FAKE_NO_DOCKER_UNIT:-}" ]; then exit 1; fi
+# FAKE_DOCKERD_ARGS: the command line docker.service starts dockerd with.
+if [ "$1" = show ] && [ "$2" = --property=ExecStart ] && [ -n "${FAKE_DOCKERD_ARGS:-}" ]; then
+  echo "ExecStart={ path=/usr/bin/dockerd ; argv[]=$FAKE_DOCKERD_ARGS ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+fi
 exit 0
 EOF
 cat >"$shims/ss" <<'EOF'
@@ -240,7 +244,7 @@ run_installer() {
   OUT=$(env -i PATH="$path" HOME="$T" TMPDIR="$T" FAKE_RELEASE="$REL" SHIM_LOG="$T/log" \
     FAKE_LIVE_RESTORE="${FAKE_LIVE_RESTORE:-}" FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT:-}" FAKE_SWARM="${FAKE_SWARM:-}" \
     FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" FAKE_DOCKER_DOWN="${FAKE_DOCKER_DOWN:-}" \
-    FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" FAKE_PANEL_VERSION="${FAKE_PANEL_VERSION:-}" \
+    FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_DOCKERD_ARGS="${FAKE_DOCKERD_ARGS:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" FAKE_PANEL_VERSION="${FAKE_PANEL_VERSION:-}" \
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     FAKE_STATUS="${FAKE_STATUS:-}" FAKE_STATUS_EXIT="${FAKE_STATUS_EXIT:-}" INSTALLER_TEST_JOIN_WAIT="${INSTALLER_TEST_JOIN_WAIT:-}" \
@@ -452,6 +456,56 @@ expect_ok "live-restore: Wings nodes are left alone" "Wings runs on this server"
 FAKE_DOCKERD_INVALID=1 run_installer minisign "$INSTALLER" --version "$V"
 expect_ok "live-restore: a config dockerd refuses is not written" "Docker refuses"
 [ ! -e "$R/etc/docker/daemon.json" ] && pass "live-restore: nothing written when dockerd refuses it" || flunk "live-restore: wrote a refused config"
+
+# Docker 29.0 to 29.2 empties its "dns" setting when it is reloaded
+# (moby#52060): new containers get "nameserver invalid IP" until dockerd
+# restarts. There, with a "dns" setting, the reload that turns live-restore
+# on is followed by a restart, which live-restore lets containers run
+# through; everywhere else the reload stays alone.
+restarted_after_reload() { # the trace has the restart, after the reload
+  printf '%s\n' "$OUT" | awk '/^\+ systemctl reload docker$/ { r = NR } /^\+ systemctl restart docker$/ { if (r) ok = 1 } END { exit !ok }'
+}
+reload_bug="empties its \"dns\" setting"
+seed=$T/seed-dns
+mkdir -p "$seed/etc/docker"
+# The file before the reload: a fine "dns" setting, live-restore not yet applied.
+printf '{\n  "dns": ["8.8.8.8", "1.1.1.1"],\n  "live-restore": true\n}\n' >"$seed/etc/docker/daemon.json"
+PRESEED=$seed FAKE_DOCKER_VERSION=29.1.3 run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "live-restore on Docker 29.1.3 with \"dns\" in daemon.json: restart after the reload" \
+  "Restarting Docker: Docker 29.1.3 $reload_bug (\"dns\" in $R/etc/docker/daemon.json) when it is reloaded, so containers created after the reload get \"nameserver invalid IP\" until Docker restarts (moby#52060, fixed in Docker 29.3.0). With live-restore on, containers keep running"
+restarted_after_reload && pass "live-restore on Docker 29.1.3: systemctl restart docker follows the reload" ||
+  flunk "live-restore on Docker 29.1.3: no restart after the reload" "$OUT"
+FAKE_DOCKERD_ARGS="/usr/bin/dockerd -H fd:// --dns 8.8.8.8 --dns=1.1.1.1" FAKE_DOCKER_VERSION=29.2.1 run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "live-restore on Docker 29.2.1 with --dns flags: restart after the reload" "Docker 29.2.1 $reload_bug (--dns on dockerd's command line)"
+restarted_after_reload && pass "live-restore on Docker 29.2.1 with --dns: systemctl restart docker follows the reload" ||
+  flunk "live-restore on Docker 29.2.1 with --dns: no restart after the reload" "$OUT"
+for case in "29.3.0|$seed||\"dns\" in daemon.json" "28.5.2|$seed||\"dns\" in daemon.json" "29.1.3|||no dns setting" \
+  "29.1.3||/usr/bin/dockerd -H fd:// --dns-search example.com --dns-opt ndots:1|only --dns-search and --dns-opt"; do
+  IFS='|' read -r v pre args what <<<"$case"
+  PRESEED=$pre FAKE_DOCKERD_ARGS=$args FAKE_DOCKER_VERSION=$v run_installer minisign "$INSTALLER" --version "$V"
+  name="live-restore on Docker $v, $what"
+  expect_ok "$name: the reload alone" "+ systemctl reload docker"
+  ! has "restart docker" && ! has "moby#52060" && pass "$name: no restart" || flunk "$name: restarted Docker" "$OUT"
+done
+seed=$T/seed-dns-empty
+mkdir -p "$seed/etc/docker"
+printf '{ "dns": [], "live-restore": true }\n' >"$seed/etc/docker/daemon.json"
+PRESEED=$seed FAKE_DOCKER_VERSION=29.1.3 run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "live-restore on Docker 29.1.3 with an empty dns list: the reload alone" "+ systemctl reload docker"
+! has "restart docker" && pass "live-restore on Docker 29.1.3 with \"dns\": []: no restart" || flunk "live-restore with \"dns\": []: restarted Docker" "$OUT"
+# A Wings node is left alone, and the advice it gets has the restart too.
+seed=$T/seed-wings-dns
+mkdir -p "$seed/etc/pelican" "$seed/etc/docker"
+: >"$seed/etc/pelican/config.yml"
+printf '{ "dns": ["8.8.8.8", "1.1.1.1"] }\n' >"$seed/etc/docker/daemon.json"
+PRESEED=$seed FAKE_DOCKER_VERSION=29.1.3 run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "live-restore advice on a Wings node with Docker 29.1.3 and a \"dns\" setting" \
+  "Consider live-restore: add \"live-restore\": true to /etc/docker/daemon.json and run systemctl reload docker, so services keep running while Docker restarts; then run systemctl restart docker right after the reload: Docker 29.1.3 $reload_bug"
+! has "+ systemctl reload docker" && ! has "+ systemctl restart docker" && pass "live-restore: a Wings node's Docker is neither reloaded nor restarted" ||
+  flunk "live-restore: reloaded or restarted a Wings node's Docker" "$OUT"
+PRESEED=$seed FAKE_DOCKER_VERSION=29.3.0 run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "live-restore advice on a Wings node with Docker 29.3.0: the reload alone" "Consider live-restore"
+! has "moby#52060" && pass "live-restore advice on Docker 29.3.0: no restart note" || flunk "live-restore advice on Docker 29.3.0 has the restart note" "$OUT"
 
 # ---- ports 80/443 and the panel port
 FAKE_SS_80=nginx run_installer minisign "$INSTALLER" --version "$V"

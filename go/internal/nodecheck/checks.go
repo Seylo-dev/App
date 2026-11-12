@@ -320,15 +320,37 @@ func (e *Env) liveRestore(ctx context.Context) *agentv1.NodeCheckResult {
 	if wi := e.wingsInfo(ctx); wi != nil {
 		detail += "; with it on, Wings' game servers keep running too"
 	}
-	hint := `Add "live-restore": true to /etc/docker/daemon.json and run ` + "`systemctl reload docker`" + ` (restarts nothing).`
-	if dnsReloadBug(info.ServerVersion) {
+	return warn(detail, e.liveRestoreSteps(ctx, info.ServerVersion))
+}
+
+// liveRestoreSteps says how to turn live-restore on, starting with "Add":
+// the key in daemon.json and a reload, which restarts nothing; on Docker
+// version 29.0 to 29.2 with a "dns" setting (daemon.json or dockerd's
+// --dns) also a restart right after the reload, since that reload empties
+// the setting for every new container until Docker restarts (moby#52060).
+func (e *Env) liveRestoreSteps(ctx context.Context, version string) string {
+	if dnsReloadBug(version) {
 		if d := e.daemonDNS(ctx); len(d.Sources) > 0 {
-			hint = fmt.Sprintf(`Add "live-restore": true to %s, run `+"`systemctl reload docker`"+` (restarts nothing) and `+"`systemctl restart docker`"+
+			return fmt.Sprintf(`Add "live-restore": true to %s, run `+"`systemctl reload docker`"+` (restarts nothing) and `+"`systemctl restart docker`"+
 				` right after it: Docker %s empties its "dns" setting (%s) when it is reloaded, so containers created after the reload get "nameserver invalid IP" until Docker restarts (moby#52060, fixed in Docker %s). `+
-				`With live-restore on by then, the restart keeps containers running.`, d.File, info.ServerVersion, d.String(), dnsReloadFixed)
+				`With live-restore on by then, the restart keeps containers running.`, d.File, version, d.String(), dnsReloadFixed)
 		}
 	}
-	return warn(detail, hint)
+	return `Add "live-restore": true to /etc/docker/daemon.json and run ` + "`systemctl reload docker`" + ` (restarts nothing).`
+}
+
+// LiveRestoreSteps is the Docker live-restore check's advice for turning
+// live-restore on, for the Docker that answers on env's socket, so advice
+// outside the checks (the Docker update's warning) gets the restart after
+// the reload where the check's does. A Docker that does not answer gets
+// the plain reload.
+func LiveRestoreSteps(ctx context.Context, env Env) string {
+	env.defaults()
+	version := ""
+	if info, err := env.Docker.Info(ctx); err == nil {
+		version = info.ServerVersion
+	}
+	return env.liveRestoreSteps(ctx, version)
 }
 
 // buildx checks for the buildx plugin on a node that builds: every build

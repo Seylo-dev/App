@@ -1018,7 +1018,7 @@ func (f dnsFindings) result() *agentv1.NodeCheckResult {
 			if f.staleReloadLost() {
 				// The test container shows Docker holds the setting again.
 				return fail(what+", but "+stale+"; "+f.staleReloadText(), f.staleFix()+fmt.Sprintf(
-					" Restart Docker rather than reload it: on Docker %s a reload empties the \"dns\" setting for every new container until the next restart (moby#52060). %s",
+					" Docker holds the \"dns\" setting again, so it needs no restart now. From now on restart Docker instead of reloading it: on Docker %s a reload empties the \"dns\" setting for every new container until the next restart (moby#52060). %s",
 					f.Version, reloadSafe()))
 			}
 			return fail(what+", but "+stale, f.staleFix())

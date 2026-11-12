@@ -45,6 +45,13 @@ type DockerOptions struct {
 	// LiveRestore reports whether dockerd keeps containers running while
 	// it restarts; nil or an error means unknown (no warning).
 	LiveRestore func(ctx context.Context) (bool, error)
+	// LiveRestoreSteps says how to turn live-restore on, for the warning
+	// when it is off (a sentence starting with "Add"); nil or "" gives
+	// the plain reload. The agent's is the node check's
+	// (nodecheck.LiveRestoreSteps): on Docker 29.0 to 29.2 with a "dns"
+	// setting it adds a restart right after the reload, which there
+	// empties the setting for new containers (moby#52060).
+	LiveRestoreSteps func(ctx context.Context) string
 	// Checked receives every finding about the installed and the newest
 	// Docker Engine: RunChecks' own checks, dry runs, refusals because
 	// Docker did not come from a package manager, and finished upgrades.
@@ -56,11 +63,22 @@ type DockerOptions struct {
 	Schedule DockerCheckSchedule
 }
 
+// plainLiveRestoreSteps turns live-restore on where a reload is safe.
+const plainLiveRestoreSteps = "Add \"live-restore\": true to /etc/docker/daemon.json and run `systemctl reload docker` (restarts nothing)."
+
 // liveRestoreWarning is UpdateDockerResponse.warning when live-restore is
 // off: our containers run with Docker's restart policy off, so a dockerd
 // restart stops them until the agent starts them again.
-const liveRestoreWarning = "Docker's live-restore is off: every service and the panel on this node stop while Docker restarts, " +
-	"until the agent starts them again. Turn it on first: add \"live-restore\": true to /etc/docker/daemon.json and run `systemctl reload docker` (restarts nothing)."
+func (d *DockerUpdater) liveRestoreWarning(ctx context.Context) string {
+	steps := plainLiveRestoreSteps
+	if d.opts.LiveRestoreSteps != nil {
+		if s := d.opts.LiveRestoreSteps(ctx); s != "" {
+			steps = s
+		}
+	}
+	return "Docker's live-restore is off: every service and the panel on this node stop while Docker restarts, " +
+		"until the agent starts them again. Turn it on first. " + steps
+}
 
 // DockerUpdater upgrades Docker Engine with the package manager, and looks
 // for a newer one by itself (RunChecks, docker_check.go).
@@ -134,7 +152,7 @@ func (d *DockerUpdater) Update(ctx context.Context, req *agentv1.UpdateDockerReq
 	res := &agentv1.UpdateDockerResponse{FromVersion: plan.from, ToVersion: plan.to}
 	if d.opts.LiveRestore != nil && plan.to != plan.from {
 		if on, err := d.opts.LiveRestore(ctx); err == nil && !on {
-			res.Warning = liveRestoreWarning
+			res.Warning = d.liveRestoreWarning(ctx)
 		}
 	}
 	if req.GetDryRun() {

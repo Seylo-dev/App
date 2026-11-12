@@ -544,14 +544,24 @@ func TestLiveRestoreDNSReload(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env, _, etc := dnsEnv(t, dnsCase{daemonJSON: tc.daemonJSON, dockerd: tc.dockerd, live: ptr(false), version: tc.version})
 			r := env.liveRestore(context.Background())
-			if want := tc.want(filepath.Join(etc, "docker", "daemon.json")); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || r.GetFixHint() != want {
+			want := tc.want(filepath.Join(etc, "docker", "daemon.json"))
+			if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || r.GetFixHint() != want {
 				t.Errorf("%v\n got: %s\nwant: %s", r.GetStatus(), r.GetFixHint(), want)
+			}
+			// The Docker update's warning gives the same steps.
+			if got := LiveRestoreSteps(context.Background(), *env); got != want {
+				t.Errorf("LiveRestoreSteps\n got: %s\nwant: %s", got, want)
 			}
 		})
 	}
 	env, _, _ := dnsEnv(t, dnsCase{daemonJSON: valid, dockerd: "/usr/bin/dockerd", live: ptr(true), version: "29.1.3"})
 	if r := env.liveRestore(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || r.GetFixHint() != "" {
 		t.Errorf("on = %v", r)
+	}
+	// A Docker that does not answer has no version to judge: the plain reload.
+	env.Docker = fakeDocker{err: errors.New("no socket")}
+	if got := LiveRestoreSteps(context.Background(), *env); got != plain {
+		t.Errorf("LiveRestoreSteps without Docker = %s", got)
 	}
 }
 

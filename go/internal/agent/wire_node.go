@@ -127,6 +127,11 @@ func provideNode(d *Deps) error {
 				}
 				return info.LiveRestoreEnabled, nil
 			},
+			// The node check's steps: the reload gets a restart after it
+			// where it empties Docker's "dns" setting (moby#52060).
+			LiveRestoreSteps: func(ctx context.Context) string {
+				return nodecheck.LiveRestoreSteps(ctx, nodecheck.Env{})
+			},
 			// What the Docker version check, dry runs and upgrades found
 			// goes to the panel in the node facts.
 			Checked: func(info *agentv1.DockerUpdateInfo) {

@@ -600,16 +600,54 @@ print(json.dumps(d, indent=2))' "$1" >"$2" 2>/dev/null
 	fi
 }
 
+# dns_reload_bug <version>: Docker 29.0.0 up to 29.3.0 empties its "dns"
+# setting when it is reloaded (systemctl reload docker, a SIGHUP): every
+# container created after the reload gets "nameserver invalid IP" until
+# dockerd restarts (moby#52060, fixed in Docker 29.3.0; the same range as
+# go/internal/nodecheck's dnsReloadBug).
+dns_reload_bug() {
+	case $1 in
+	29.[012] | 29.[012][.-]*) return 0 ;;
+	esac
+	return 1
+}
+
+# docker_dns <daemon.json>: where Docker's "dns" setting is ("" when there
+# is none): the file's "dns" key with entries, or --dns on the command line
+# systemd starts dockerd with.
+docker_dns() {
+	where=
+	if [ -s "$1" ] && grep -q '"dns"[[:space:]]*:' "$1" && ! grep -q '"dns"[[:space:]]*:[[:space:]]*\[[[:space:]]*\]' "$1"; then
+		where="\"dns\" in $1"
+	fi
+	if command -v systemctl >/dev/null 2>&1 &&
+		systemctl show --property=ExecStart docker.service 2>/dev/null | grep -q -- '[[:space:]]--dns[=[:space:]]'; then
+		where="${where:+$where and }--dns on dockerd's command line"
+	fi
+	printf '%s' "$where"
+}
+
 # ensure_live_restore turns on Docker's live-restore, so restarting dockerd
 # (Update Docker from the panel, unattended-upgrades) leaves containers
 # running. The agent starts every container with Docker's restart policy
 # off (it owns the crash policy), so without it each dockerd restart stops
 # every service and the panel until the agent notices. Applied with a
-# reload, which restarts nothing. An explicit "live-restore": false, swarm
-# mode and Wings nodes (whose game servers Wings manages) are left alone.
+# reload, which restarts nothing. On Docker 29.0 to 29.2 with a "dns"
+# setting that reload empties the setting for new containers (moby#52060),
+# so there Docker is restarted right after it, once it reports live-restore
+# on, which keeps containers running through the restart. An explicit
+# "live-restore": false, swarm mode and Wings nodes (whose game servers
+# Wings manages) are left alone.
 ensure_live_restore() {
 	[ "$(docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null || true)" != true ] || return 0
+	conf=$ROOT/etc/docker/daemon.json
+	engine_version=${docker_version:-$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)}
+	dns=
+	! dns_reload_bug "$engine_version" || dns=$(docker_dns "$conf")
+	# bug: what a reload does to the "dns" setting on this Docker.
+	bug="Docker $engine_version empties its \"dns\" setting ($dns) when it is reloaded, so containers created after the reload get \"nameserver invalid IP\" until Docker restarts (moby#52060, fixed in Docker 29.3.0)"
 	manual="add \"live-restore\": true to /etc/docker/daemon.json and run systemctl reload docker, so services keep running while Docker restarts"
+	[ -z "$dns" ] || manual="$manual; then run systemctl restart docker right after the reload: $bug"
 	if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)" = active ]; then
 		warn "Docker is in swarm mode, which does not allow live-restore: services stop while Docker restarts"
 		return 0
@@ -618,7 +656,6 @@ ensure_live_restore() {
 		warn "Wings runs on this server, so its Docker settings are left alone. Consider live-restore: $manual"
 		return 0
 	fi
-	conf=$ROOT/etc/docker/daemon.json
 	work_dir
 	new=$WORK/daemon.json
 	if [ -s "$conf" ]; then
@@ -652,12 +689,39 @@ ensure_live_restore() {
 		warn "systemctl reload docker failed; live-restore applies at Docker's next restart"
 		return 0
 	}
+	if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ]; then
+		live=
+		for _ in 1 2 3 4 5; do
+			if [ "$(docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null || true)" = true ]; then
+				live=1
+				break
+			fi
+			sleep 1
+		done
+		if [ -z "$live" ]; then
+			# A restart now would stop every container.
+			if [ -n "$dns" ]; then
+				warn "Docker did not report live-restore after the reload; check journalctl -u docker. $bug: run systemctl restart docker once live-restore is on, or at a time when every container may stop"
+			else
+				warn "Docker did not report live-restore after the reload; check journalctl -u docker"
+			fi
+			return 0
+		fi
+	fi
+	[ -n "$dns" ] || return 0
+	say "Restarting Docker: $bug. With live-restore on, containers keep running"
+	run systemctl restart docker || {
+		warn "systemctl restart docker failed: $bug. Run systemctl restart docker"
+		return 0
+	}
 	[ -z "$DRY_RUN" ] && [ -z "$ROOT" ] || return 0
-	for _ in 1 2 3 4 5; do
-		[ "$(docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null || true)" != true ] || return 0
+	i=0
+	while [ "$i" -lt 60 ]; do
+		docker_ok && return 0
 		sleep 1
+		i=$((i + 1))
 	done
-	warn "Docker did not report live-restore after the reload; check journalctl -u docker"
+	die "Docker did not answer within a minute of its restart. See why with systemctl status docker and journalctl -u docker, then run this installer again"
 }
 
 ensure_docker() {

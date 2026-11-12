@@ -200,17 +200,20 @@ and how to restart them, and that Docker 29.3.0 or later makes reloads
 safe; never to put IP addresses in the file. When only a container of
 ours shows it (the test container is fine again), the detail adds where
 `invalid IP` comes from and the hint, after the containers' restarts, says
-to restart Docker rather than reload it from then on. When the counts
+Docker holds the setting again and needs no restart now, and to restart
+Docker instead of reloading it from then on. When the counts
 differ the detail does not say the setting is "as it was when Docker
 started" but "as Docker holds it now" with the reload note; when only
 some entries are `invalid IP` no reload explains it and the text stays.
 Every hint that suggests `systemctl reload docker` to turn live-restore
-on (this check's, and the Docker live-restore check's) adds, on Docker
-29.0 to 29.2 with a "dns" setting in daemon.json or on dockerd's command
-line, `systemctl restart docker` right after it, since containers created
-between the two get `invalid IP`; with live-restore on by then the
-restart keeps containers running. Docker 28, 29.3 and later, and nodes
-without a "dns" setting keep the plain reload advice.
+on (this check's, the Docker live-restore check's, the Docker update's
+warning and the installer's, which also runs that restart itself, see
+"Docker preflight") adds, on Docker 29.0 to 29.2 with a "dns" setting in
+daemon.json or on dockerd's command line, `systemctl restart docker`
+right after it, since containers created between the two get `invalid
+IP`; with live-restore on by then the restart keeps containers running.
+Docker 28, 29.3 and later, and nodes without a "dns" setting keep the
+plain reload advice.
 The panel and the web app show its title, detail and hint like every other
 check's. VM tests: `TestRealContainerDNS` (the test container on the VM's
 Docker, dockerd found through its pid file, no `seylo.dnscheck` container
@@ -3065,7 +3068,10 @@ mirror does not serve (the e2e runs on the stable channel).
 
 Docker update (`UpdateDocker`): reports `from`/`to` from apt or dnf/yum at
 once, plus `warning` when Docker's live-restore is off (every service and
-the panel stop while dockerd restarts); unless `dry_run` it upgrades the installed Docker packages in the
+the panel stop while dockerd restarts), with how to turn it on from
+`nodecheck.LiveRestoreSteps`, the Docker live-restore check's hint (since
+0.2.12: on Docker 29.0 to 29.2 with a "dns" setting it adds `systemctl
+restart docker` right after the reload, moby#52060); unless `dry_run` it upgrades the installed Docker packages in the
 background and reports a durable `UpdateResult` (target DOCKER). Reboot
 waits `delay` (default 5s) and refuses while an update runs (ABORTED).
 Errors map to statuses: busy ABORTED, up to date ALREADY_EXISTS, bad
@@ -3193,8 +3199,18 @@ on Docker's live-restore (merges `"live-restore": true` into
 `daemon.json.before-<slug>`, checks it with `dockerd --validate` and runs
 `systemctl reload docker`, which restarts nothing), because the agent runs
 containers with Docker's restart policy off and a dockerd restart would
-otherwise stop every service and the panel. It leaves an explicit
-`"live-restore": false`, swarm mode and Wings nodes alone (with a warning).
+otherwise stop every service and the panel. On Docker 29.0 to 29.2 with a
+"dns" setting (a `"dns"` key with entries in daemon.json, or `--dns` in
+`systemctl show --property=ExecStart docker.service`) that reload empties
+the setting for every new container (moby#52060, see "Container DNS
+check"), so since 0.2.12 the installer runs `systemctl restart docker`
+right after it, once Docker reports live-restore on (containers keep
+running through it), and waits up to a minute for Docker to answer; when
+live-restore does not show up it restarts nothing and warns that new
+containers get `nameserver invalid IP` until Docker restarts. It leaves an
+explicit `"live-restore": false`, swarm mode and Wings nodes alone (with a
+warning, whose advice adds the restart after the reload in the same
+case).
 
 Download checks: before anything else the installer downloads
 `manifest.json` + `manifest.json.minisig` of the release (`latest/` for

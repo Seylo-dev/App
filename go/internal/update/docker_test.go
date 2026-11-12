@@ -123,11 +123,22 @@ func TestDockerUpdateApt(t *testing.T) {
 	if err != nil || res.GetFromVersion() != "27.3.1" || res.GetToVersion() != "28.0.1" || res.GetWarning() != "" {
 		t.Fatalf("dry run = %v, %v", res, err)
 	}
-	// With live-restore off the answer warns that services stop.
+	// With live-restore off the answer warns that services stop, and says
+	// how to turn it on: a reload where nothing else is known.
+	const off = "Docker's live-restore is off: every service and the panel on this node stop while Docker restarts, until the agent starts them again. Turn it on first. "
 	d.opts.LiveRestore = func(context.Context) (bool, error) { return false, nil }
-	if res, err := d.Update(context.Background(), &agentv1.UpdateDockerRequest{DryRun: true}); err != nil || !strings.Contains(res.GetWarning(), "live-restore is off") {
+	if res, err := d.Update(context.Background(), &agentv1.UpdateDockerRequest{DryRun: true}); err != nil ||
+		res.GetWarning() != off+"Add \"live-restore\": true to /etc/docker/daemon.json and run `systemctl reload docker` (restarts nothing)." {
 		t.Fatalf("dry run without live-restore = %v, %v", res, err)
 	}
+	// The agent's steps (nodecheck.LiveRestoreSteps) add the restart after
+	// the reload on Docker 29.0 to 29.2 with a "dns" setting (moby#52060).
+	steps := "Add \"live-restore\": true to /etc/docker/daemon.json, run `systemctl reload docker` (restarts nothing) and `systemctl restart docker` right after it: Docker 29.1.3 empties its \"dns\" setting"
+	d.opts.LiveRestoreSteps = func(context.Context) string { return steps }
+	if res, err := d.Update(context.Background(), &agentv1.UpdateDockerRequest{DryRun: true}); err != nil || res.GetWarning() != off+steps {
+		t.Fatalf("dry run without live-restore, the agent's steps = %v, %v", res, err)
+	}
+	d.opts.LiveRestoreSteps = nil
 	d.opts.LiveRestore = func(context.Context) (bool, error) { return true, nil }
 	if res, _ := d.Update(context.Background(), &agentv1.UpdateDockerRequest{DryRun: true}); res.GetWarning() != "" {
 		t.Fatalf("warning with live-restore on: %v", res)

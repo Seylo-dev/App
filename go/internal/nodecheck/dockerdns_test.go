@@ -1003,8 +1003,8 @@ func TestContainerDNSReload(t *testing.T) {
 			detail: []string{`gets 8.8.8.8, 1.1.1.1, from "dns": [8.8.8.8, 1.1.1.1] in {file}, but the build worker ` + worker + ` still has no DNS server it can use, from before, so builds there cannot pull images; ` +
 				`a container created after a reload gets "invalid IP" for each of 8.8.8.8, 1.1.1.1 ("dns" in {file}): ` + fmt.Sprintf(reloaded, "29.1.3")},
 			hint: []string{"A build worker keeps the DNS servers it started with", "`docker restart " + worker + "`",
-				` Restart Docker rather than reload it: on Docker 29.1.3 a reload empties the "dns" setting for every new container until the next restart (moby#52060). Updating Docker to 29.3.0 or later makes reloads safe.`},
-			notHints: []string{"Put IP addresses", "`systemctl restart docker`"},
+				` Docker holds the "dns" setting again, so it needs no restart now. From now on restart Docker instead of reloading it: on Docker 29.1.3 a reload empties the "dns" setting for every new container until the next restart (moby#52060). Updating Docker to 29.3.0 or later makes reloads safe.`},
+			notHints: []string{"Put IP addresses", "`systemctl restart docker`", "Restart Docker rather", "Restart Docker, do not reload it"},
 		},
 		{
 			name: "29.3.0, a stale worker",
@@ -1020,9 +1020,10 @@ func TestContainerDNSReload(t *testing.T) {
 			name: "29.2.1, a stale app on its project network",
 			dnsCase: dnsCase{daemonJSON: valid, dockerd: dockerd, node: dnsNode{images: images, resolv: good},
 				containers: []dnsContainer{{name: "seylo-web-3", resolv: projectResolvConf("[invalid IP invalid IP]", true)}}, live: ptr(true), version: "29.2.1"},
-			want:   fl,
-			detail: []string{"but the container seylo-web-3 still has no DNS server it can use", `a container created after a reload gets "invalid IP" for each of 8.8.8.8, 1.1.1.1`},
-			hint:   []string{"Restart on the app's page in the panel for seylo-web-3", "Restart Docker rather than reload it: on Docker 29.2.1"},
+			want:     fl,
+			detail:   []string{"but the container seylo-web-3 still has no DNS server it can use", `a container created after a reload gets "invalid IP" for each of 8.8.8.8, 1.1.1.1`},
+			hint:     []string{"Restart on the app's page in the panel for seylo-web-3", "it needs no restart now. From now on restart Docker instead of reloading it: on Docker 29.2.1"},
+			notHints: []string{"Restart Docker rather", "`systemctl restart docker`"},
 		},
 		{
 			name: "29.1.3, a stale worker, no test container",
