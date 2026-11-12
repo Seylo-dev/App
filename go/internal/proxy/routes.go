@@ -328,7 +328,10 @@ func (b *builder) build() error {
 		if host := b.toolHost(); host != "" {
 			// The host the panel's tool links point at: <slug>-box-<id> or
 			// <slug>-db-<id> under the node's wildcard domain.
-			tool := &agentv1.Route{Id: toolRouteID, Hosts: []string{host}, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true}
+			// Nothing behind the tool host answers ACME challenges itself, and
+			// the node's wildcard record may be behind Cloudflare's proxy.
+			tool := &agentv1.Route{Id: toolRouteID, Hosts: []string{host}, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true,
+				AcmeChallengeOnHttps: true}
 			if err := b.addRoute(tool, m, false); err != nil {
 				return err
 			}
@@ -634,7 +637,7 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	if b.in.Edge != "" && r.GetId() != toolRouteID {
 		b.addOrigin(r.GetId(), ruleText, tls)
 	}
-	if https == agentv1.HttpsMode_HTTPS_MODE_ACME {
+	if https == agentv1.HttpsMode_HTTPS_MODE_ACME && r.GetAcmeChallengeOnHttps() {
 		b.addAcmeChallenge(r.GetId(), ruleText)
 	}
 
@@ -717,20 +720,28 @@ func (b *builder) addOrigin(routeID, ruleText string, tls *routerTLS) {
 
 // addAcmeChallenge answers Let's Encrypt's HTTP-01 challenge for an ACME
 // route's hosts on websecure as well, with Traefik's own handler
-// (AcmeChallengeService, the one its router on web uses). Let's Encrypt
+// (AcmeChallengeService, the one its router on web uses), for a route with
+// Route.acme_challenge_on_https (the panel sets it unless the domain's DNS
+// points straight at the node; the tool host always has it). Let's Encrypt
 // asks http://<host>/.well-known/acme-challenge/<token> and follows a
 // redirect to https without checking the certificate there. Behind
-// Cloudflare's proxy with Always Use HTTPS that is where it ends up:
-// Cloudflare answers 301, and with SSL/TLS Full sends the https request to
-// port 443, where without this router the app (or Traefik's 404) answered
-// and the certificate was never issued. The router has the default
-// certificate and no resolver (it asks the CA for nothing), no middlewares
-// (an allowlist or a password would refuse the CA), and sits above every
-// other router of the hosts. Held routes (Route.acme_hold) get it too, so
-// the first order after the release finds it in place. The handler answers
-// only the tokens of a challenge in progress (404 otherwise). Routes of the
-// service on the same hosts share the router of the first; the LB file
-// keeps none.
+// Cloudflare's proxy with a redirect to https that takes every path (a
+// Redirect Rule or Page Rule; Always Use HTTPS itself leaves this path
+// alone, and a node's own redirect never sees it on web) that is where it
+// ends up: Cloudflare answers 301, and with SSL/TLS Full sends the https
+// request to port 443, where without this router the app (or Traefik's
+// 404) answered and the certificate was never issued, nor renewed. The
+// router has the default certificate and no resolver (it asks the CA for
+// nothing), no middlewares (an allowlist or a password would refuse the
+// CA), and sits above every other router of the hosts. Held routes (Route.acme_hold) get
+// it too, so the first order after the release finds it in place. The
+// handler answers only the tokens of a challenge in progress (404
+// otherwise, it never falls through), which is why it is not on routes
+// whose DNS goes straight to the node: there the CA's request reaches
+// Traefik's router on web, and an app that answers challenges itself over
+// https (a central responder other servers redirect to) keeps the path.
+// Routes of the service on the same hosts share the router of the first
+// with the field; the LB file keeps none.
 func (b *builder) addAcmeChallenge(routeID, ruleText string) {
 	ruleText = fmt.Sprintf("%s && PathPrefix(`%s`)", hostsOnly(ruleText), AcmeChallengePath)
 	if b.findRouter(EntryPointSecure, priorityAcmeChallenge, ruleText) != nil {

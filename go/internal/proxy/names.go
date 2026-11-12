@@ -45,8 +45,11 @@ const (
 	OriginPath = "/.well-known/" + brand.Slug + "-origin/"
 	// AcmeChallengePath + "<token>" is Let's Encrypt's HTTP-01 challenge.
 	// Traefik answers it on the challenge's entry point (web) by itself;
-	// route files send it to AcmeChallengeService on websecure too, for a
-	// CA that followed a redirect to https (Cloudflare's Always Use HTTPS).
+	// route files with Route.acme_challenge_on_https send it to
+	// AcmeChallengeService on websecure too, for a CA that followed a
+	// redirect to https in front of the node (a Cloudflare Redirect Rule or
+	// Page Rule for every path; Cloudflare's Always Use HTTPS itself leaves
+	// this path alone).
 	AcmeChallengePath = "/.well-known/acme-challenge/"
 )
 

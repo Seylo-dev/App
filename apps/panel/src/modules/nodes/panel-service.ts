@@ -374,6 +374,8 @@ export const panelContributor: DesiredContributor = {
               targetPort: panelContainerPort,
               https: HttpsMode.ACME,
               redirectToHttps: true,
+              // The panel answers no ACME challenge itself, and its domain may be behind Cloudflare's proxy.
+              acmeChallengeOnHttps: true,
             }),
           ]
         : [],

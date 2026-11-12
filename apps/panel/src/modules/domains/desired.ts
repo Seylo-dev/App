@@ -21,7 +21,7 @@ import { portExposures } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { effectivePage, globalMaintenanceState, servicePageRow } from "../maintenance/page";
 import { effectiveToken, tunnelActive, tunnelRow } from "../tunnels/logic";
-import { acmeHeld } from "./acme-hold";
+import { acmeChallengeOnHttps, acmeHeld } from "./acme-hold";
 import { serviceNodes } from "./lookup";
 import { type DomainRow, serviceDomains } from "./rows";
 
@@ -71,17 +71,20 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
   // Let's Encrypt waits for DNS (acme-hold.ts): the node asks the CA nothing and serves plain HTTP without the redirect,
   // and HTTPS with Traefik's default certificate, so the origin check reaches it on 443 too (Route.acme_hold).
   const held = acmeHeld(row);
+  // A custom certificate that cannot be opened falls back to ACME rather than breaking the route.
+  const https = row.https === "custom" && !certificate ? HttpsMode.ACME : httpsModes[row.https];
   return {
     id: row.id,
     hosts: [row.host],
     pathPrefix: row.pathPrefix === "/" ? "" : row.pathPrefix,
     stripPrefix: row.stripPrefix,
     targetPort: row.targetPort,
-    // A custom certificate that cannot be opened falls back to ACME rather than breaking the route.
-    https: row.https === "custom" && !certificate ? HttpsMode.ACME : httpsModes[row.https],
+    https,
     certificate,
     // An agent from before 0.2.8 ignores it and asks Let's Encrypt at once, as before the hold.
     acmeHold: held,
+    // Let's Encrypt's challenge on 443 too, unless DNS goes straight to the node (acme-hold.ts); ignored before 0.2.12.
+    acmeChallengeOnHttps: https === HttpsMode.ACME && acmeChallengeOnHttps(row),
     redirectToHttps: !held && row.https !== "off" && row.redirectToHttps,
     redirects,
     basicAuth: m.basicAuth?.users.length

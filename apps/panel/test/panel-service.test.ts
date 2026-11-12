@@ -92,10 +92,19 @@ test("the panel node gets the reserved rows and a spec the agent adopts as is", 
   expect(spec?.ports).toMatchObject([{ containerPort: 3000, public: { hostPort: 8443, mode: PublicPortMode.FORWARD } }]);
   expect(spec?.routing?.routes).toEqual([]);
 
-  // With a panel domain, the domain routes to the panel.
+  // With a panel domain, the domain routes to the panel. It answers Let's Encrypt's challenge on 443 too
+  // (0.2.12): the panel's domain may be behind Cloudflare's proxy with a redirect to https for every path,
+  // and the panel answers no challenge itself.
   setSetting(panel.deps.db, "panelDomain", "panel.example.com");
   expect(compile(nodeId)?.routing?.routes).toMatchObject([
-    { id: panelServiceId, hosts: ["panel.example.com"], targetPort: 3000, https: HttpsMode.ACME, redirectToHttps: true },
+    {
+      id: panelServiceId,
+      hosts: ["panel.example.com"],
+      targetPort: 3000,
+      https: HttpsMode.ACME,
+      redirectToHttps: true,
+      acmeChallengeOnHttps: true,
+    },
   ]);
 });
 

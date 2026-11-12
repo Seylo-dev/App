@@ -174,9 +174,25 @@ type Route struct {
 	// node when Cloudflare's proxy connects to it on 443 (Always Use HTTPS,
 	// SSL/TLS Full). redirect_to_https is ignored. false asks the CA at once;
 	// an agent from before 0.2.8 ignores it and does the same.
-	AcmeHold      bool `protobuf:"varint,13,opt,name=acme_hold,json=acmeHold,proto3" json:"acme_hold,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AcmeHold bool `protobuf:"varint,13,opt,name=acme_hold,json=acmeHold,proto3" json:"acme_hold,omitempty"`
+	// With HTTPS_MODE_ACME: answer Let's Encrypt's HTTP-01 challenge
+	// (/.well-known/acme-challenge/) on HTTPS too, with Traefik's own
+	// handler, since 0.2.12. Traefik answers it on plain HTTP by itself, which
+	// is enough when the host's DNS points straight at the node. In front of
+	// the node, a redirect to https that takes every path (a Cloudflare
+	// Redirect Rule or Page Rule; Cloudflare's Always Use HTTPS itself leaves
+	// the challenge path alone) sends the CA's http:// request to https and,
+	// with SSL/TLS Full, to port 443; the CA follows the redirect without
+	// checking the certificate. While
+	// set, https requests for that path never reach the app: Traefik answers
+	// the tokens of its own orders and 404 for the rest. The panel sets it
+	// unless the domain's last DNS check saw it point straight at the node
+	// (apps/panel/src/modules/domains/acme-hold.ts acmeChallengeOnHttps), so
+	// an app there keeps the path on 443. false, or an agent from before
+	// 0.2.12, answers the challenge on plain HTTP only, as before.
+	AcmeChallengeOnHttps bool `protobuf:"varint,14,opt,name=acme_challenge_on_https,json=acmeChallengeOnHttps,proto3" json:"acme_challenge_on_https,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Route) Reset() {
@@ -296,6 +312,13 @@ func (x *Route) GetRateLimit() *RateLimit {
 func (x *Route) GetAcmeHold() bool {
 	if x != nil {
 		return x.AcmeHold
+	}
+	return false
+}
+
+func (x *Route) GetAcmeChallengeOnHttps() bool {
+	if x != nil {
+		return x.AcmeChallengeOnHttps
 	}
 	return false
 }
@@ -690,7 +713,7 @@ const file_seylo_agent_v1_routing_proto_rawDesc = "" +
 	"\x06routes\x18\x01 \x03(\v2\x15.seylo.agent.v1.RouteR\x06routes\x12=\n" +
 	"\vmaintenance\x18\x02 \x01(\v2\x1b.seylo.agent.v1.MaintenanceR\vmaintenance\x12;\n" +
 	"\vstatus_page\x18\x03 \x01(\v2\x1a.seylo.agent.v1.StatusPageR\n" +
-	"statusPage\"\xa9\x04\n" +
+	"statusPage\"\xe0\x04\n" +
 	"\x05Route\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05hosts\x18\x02 \x03(\tR\x05hosts\x12\x1f\n" +
@@ -709,7 +732,8 @@ const file_seylo_agent_v1_routing_proto_rawDesc = "" +
 	"\x14allowed_source_cidrs\x18\v \x03(\tR\x12allowedSourceCidrs\x128\n" +
 	"\n" +
 	"rate_limit\x18\f \x01(\v2\x19.seylo.agent.v1.RateLimitR\trateLimit\x12\x1b\n" +
-	"\tacme_hold\x18\r \x01(\bR\bacmeHold\"A\n" +
+	"\tacme_hold\x18\r \x01(\bR\bacmeHold\x125\n" +
+	"\x17acme_challenge_on_https\x18\x0e \x01(\bR\x14acmeChallengeOnHttps\"A\n" +
 	"\vCertificate\x12\x19\n" +
 	"\bcert_pem\x18\x01 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x02 \x01(\tR\x06keyPem\"L\n" +

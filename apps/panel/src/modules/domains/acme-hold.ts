@@ -80,6 +80,23 @@ export function acmeHeld(row: HoldFacts): boolean {
   }
 }
 
+/**
+ * Whether the domain's route answers Let's Encrypt's HTTP-01 challenge on
+ * HTTPS too (Route.acme_challenge_on_https, 0.2.12): unless its last DNS
+ * check saw it point straight at the node. In front of the node, a redirect
+ * to https that takes every path (a Cloudflare Redirect Rule or Page Rule;
+ * Always Use HTTPS itself leaves the challenge path alone) sends the CA's
+ * http:// request to https and, with SSL/TLS Full, to port 443, where only
+ * the app answered, so neither the first certificate nor a renewal came.
+ * Straight to the node it reaches port 80, where Traefik answers it, and
+ * the app keeps /.well-known/acme-challenge/ over https (Traefik's handler
+ * answers only its own tokens and never falls through). Automatic domains
+ * are on the node's wildcard record, which is never checked: always.
+ */
+export function acmeChallengeOnHttps(row: Pick<DomainRow, "auto" | "dnsStatus">): boolean {
+  return row.auto || row.dnsStatus !== "ok";
+}
+
 /** Whether a check's DNS answer leaves the row as it was: unknown for a held domain (see the top of this file). */
 export function keepsLastAnswer(row: HoldFacts, dnsStatus: DnsStatus): boolean {
   return dnsStatus === "unknown" && acmeHeld(row);
@@ -103,9 +120,10 @@ export function releases(row: Pick<DomainRow, "forward">, answer: CheckAnswer): 
 /**
  * After a check stored its DNS and origin answer on the row: releases the
  * domain when the answer proves it, and sends the service's desired state
- * again when that changed whether it is held. `before` is the row as it was
- * before the check. Returns whether it is held now and whether this check
- * released it.
+ * again when that changed whether it is held, or for an ACME domain whether
+ * its route answers the challenge on HTTPS (acmeChallengeOnHttps). `before`
+ * is the row as it was before the check. Returns whether it is held now and
+ * whether this check released it.
  */
 export function settleHold(
   deps: Pick<Deps, "db" | "agents" | "live">,
@@ -123,6 +141,8 @@ export function settleHold(
   if (held !== wasHeld) {
     deps.agents.desired.markDirty({ serviceId: row.serviceId });
     invalidateService(deps, row.serviceId, [domainOps.list.id]);
+  } else if (row.https === "acme" && acmeChallengeOnHttps(before) !== acmeChallengeOnHttps(row)) {
+    deps.agents.desired.markDirty({ serviceId: row.serviceId });
   }
   return { held, released: wasHeld && !held };
 }

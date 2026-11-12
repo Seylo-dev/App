@@ -23,12 +23,17 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 )
 
-// TestIntegrationBehindCloudflareAlwaysHTTPS: domains behind Cloudflare's
-// proxy with Always Use HTTPS and SSL/TLS Full. A stand-in for Cloudflare
-// sits in front of the node: a Traefik that answers every http:// request
-// with a redirect to https, and sends https on to the node's Traefik over
-// TLS (port 443) without checking its certificate, with the visitor's host
-// as SNI and Host, as Cloudflare does with Full.
+// TestIntegrationBehindCloudflareHTTPSRedirect: domains behind Cloudflare's
+// proxy with a redirect to https and SSL/TLS Full. A stand-in for
+// Cloudflare sits in front of the node: a Traefik that answers every
+// http:// request with a redirect to https, and sends https on to the
+// node's Traefik over TLS (port 443) without checking its certificate,
+// with the visitor's host as SNI and Host, as Cloudflare does with Full.
+// Always Use HTTPS redirects the app and the origin path like that, but
+// leaves /.well-known/acme-challenge/ alone (seen on a live domain,
+// 2026-11-12: that path reached the node's port 80 unredirected); a
+// Redirect Rule or Page Rule for every path redirects it too, which is
+// what the stand-in does.
 //
 // A held domain (Route.acme_hold) is served on 443 with Traefik's default
 // certificate, so the app and the panel's origin path answer through the
@@ -36,11 +41,14 @@ import (
 // validates HTTP-01 for real through the stand-in: its http:// request is
 // redirected to https and reaches the node's websecure, where the route
 // file's challenge router hands it to Traefik's own handler. Without that
-// router the app answered there and the order failed. Both modes: the
-// agent's own Traefik, and the route files next to the Wings fork.
+// router the app answered there and the order failed. The router comes
+// with Route.acme_challenge_on_https, which the panel sets for such
+// domains; a domain without it (DNS straight to the node) keeps the path
+// over https for the app. Both modes: the agent's own Traefik, and the
+// route files next to the Wings fork.
 //
-//	scripts/dev/vm-gotest.sh ./internal/proxy -run TestIntegrationBehindCloudflareAlwaysHTTPS -v
-func TestIntegrationBehindCloudflareAlwaysHTTPS(t *testing.T) {
+//	scripts/dev/vm-gotest.sh ./internal/proxy -run TestIntegrationBehindCloudflareHTTPSRedirect -v
+func TestIntegrationBehindCloudflareHTTPSRedirect(t *testing.T) {
 	for _, shared := range []bool{false, true} {
 		name := "own Traefik"
 		if shared {
@@ -71,23 +79,41 @@ func behindCloudflare(t *testing.T, shared bool) {
 	visitor := cf.visitor()
 
 	// Held: nothing asks the CA, and https through Cloudflare reaches the app.
-	held := &agentv1.Route{Id: "r1", Hosts: []string{"held.it.test"}, TargetPort: 80, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true, AcmeHold: true}
-	e.apply(app("sheld", held), e.whoami("held1"))
+	// The panel sends a proxied domain with acme_challenge_on_https.
+	held := &agentv1.Route{Id: "r1", Hosts: []string{"held.it.test"}, TargetPort: 80, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true,
+		AcmeHold: true, AcmeChallengeOnHttps: true}
+	// A domain whose DNS points straight at the node goes without it.
+	direct := &agentv1.Route{Id: "r2", Hosts: []string{"direct.it.test"}, TargetPort: 80, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true,
+		AcmeHold: true}
+	e.apply(app("sheld", held, direct), e.whoami("held1"))
 	// Cloudflare itself, with Full: TLS to the node, any certificate.
-	tr := &http.Transport{TLSClientConfig: &tls.Config{ServerName: "held.it.test", InsecureSkipVerify: true}}
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("https://127.0.0.1:%d/", e.tlsPort), nil)
-	req.Host = "held.it.test"
-	resp, err := (&http.Client{Transport: tr, Timeout: 5 * time.Second}).Do(req)
-	if err != nil {
-		t.Fatal(err)
+	toNode := func(host, path string) (*http.Response, string) {
+		t.Helper()
+		tr := &http.Transport{TLSClientConfig: &tls.Config{ServerName: host, InsecureSkipVerify: true}}
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("https://127.0.0.1:%d%s", e.tlsPort, path), nil)
+		req.Host = host
+		resp, err := (&http.Client{Transport: tr, Timeout: 5 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp, string(body)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "Name: held1") {
+	resp, body := toNode("held.it.test", "/")
+	if resp.StatusCode != 200 || !strings.Contains(body, "Name: held1") {
 		t.Fatalf("https to the node on a held domain: %d %q", resp.StatusCode, body)
 	}
 	if cn := resp.TLS.PeerCertificates[0].Subject.CommonName; cn != "TRAEFIK DEFAULT CERT" {
 		t.Fatalf("a held domain served %q, not Traefik's default certificate", cn)
+	}
+	// Over https the challenge path is Traefik's on the proxied domain (no order: its 404)
+	// and stays the app's on the direct one.
+	if resp, body := toNode("held.it.test", AcmeChallengePath+"no-such-token"); resp.StatusCode != 404 || strings.Contains(body, "Name: held1") {
+		t.Fatalf("challenge path over https on a proxied domain: %d %q", resp.StatusCode, body)
+	}
+	if resp, body := toNode("direct.it.test", AcmeChallengePath+"no-such-token"); resp.StatusCode != 200 || !strings.Contains(body, "Name: held1") {
+		t.Fatalf("challenge path over https on a direct domain: %d %q", resp.StatusCode, body)
 	}
 	// A visitor through Cloudflare: http:// is redirected, https gets the app.
 	if code, body := visitor.get(t, "http://held.it.test/"); code != 200 || !strings.Contains(body, "Name: held1") {
@@ -103,7 +129,8 @@ func behindCloudflare(t *testing.T, shared bool) {
 	}
 
 	// Released: Let's Encrypt's HTTP-01 over the redirect to https validates.
-	e.apply(app("scf", &agentv1.Route{Id: "r1", Hosts: []string{"cf.it.test"}, TargetPort: 80, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true}), e.whoami("cf1"))
+	e.apply(app("scf", &agentv1.Route{Id: "r1", Hosts: []string{"cf.it.test"}, TargetPort: 80, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true,
+		AcmeChallengeOnHttps: true}), e.whoami("cf1"))
 	deadline := time.Now().Add(90 * time.Second)
 	for {
 		// Traefik asks right after loading the router or on a TLS request for the host.
@@ -149,8 +176,8 @@ type cloudflare struct {
 }
 
 // startCloudflare runs the stand-in for Cloudflare's proxy in front of the
-// node's Traefik for hosts: Always Use HTTPS (every http:// request gets a
-// redirect to https) and SSL/TLS Full (https goes on to the node's port 443,
+// node's Traefik for hosts: a redirect to https for every path (every
+// http:// request gets one, as with a Redirect Rule) and SSL/TLS Full (https goes on to the node's port 443,
 // any certificate, the host as SNI and Host). Pebble resolves the hosts to
 // it on a network of their own, as Let's Encrypt resolves a proxied record
 // to Cloudflare; its ports 80 and 443 are published for visitors.
@@ -265,7 +292,7 @@ func (v cfVisitor) get(t *testing.T, url string) (int, string) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.Request.URL.Scheme != "https" {
-		t.Fatalf("%s: answered over %s, without Always Use HTTPS' redirect", url, resp.Request.URL.Scheme)
+		t.Fatalf("%s: answered over %s, without the redirect to https", url, resp.Request.URL.Scheme)
 	}
 	return resp.StatusCode, string(body)
 }

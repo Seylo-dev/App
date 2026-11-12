@@ -43,6 +43,13 @@ func route(id string, hosts ...string) *agentv1.Route {
 	return &agentv1.Route{Id: id, Hosts: hosts, TargetPort: 3000, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true}
 }
 
+// onHTTPS sets Route.acme_challenge_on_https, as the panel does for a domain
+// whose DNS does not point straight at the node (behind Cloudflare's proxy).
+func onHTTPS(r *agentv1.Route) *agentv1.Route {
+	r.AcmeChallengeOnHttps = true
+	return r
+}
+
 func app(id string, routes ...*agentv1.Route) *agentv1.ServiceSpec {
 	return &agentv1.ServiceSpec{Id: id, ProjectId: "p1", Name: "web", Kind: agentv1.ServiceKind_SERVICE_KIND_APP, Generation: 7, Routing: &agentv1.Routing{Routes: routes}}
 }
@@ -61,7 +68,7 @@ func TestBuildGolden(t *testing.T) {
 		in   BuildInput
 	}{
 		{"basic", BuildInput{
-			Service:     app("svc1", route("r1", "app.example.com", "WWW.Example.com.")),
+			Service:     app("svc1", onHTTPS(route("r1", "app.example.com", "WWW.Example.com."))),
 			Upstreams:   ups("http://seylo-svc1-7:3000", "http://seylo-svc1-7-1:3000"),
 			Edge:        testEdge,
 			ProbeSecret: "s3cret",
@@ -77,7 +84,7 @@ func TestBuildGolden(t *testing.T) {
 		}},
 		{"middlewares", BuildInput{
 			Service: app("svc3", &agentv1.Route{
-				Id: "r1", Hosts: []string{"secure.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true,
+				Id: "r1", Hosts: []string{"secure.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true, AcmeChallengeOnHttps: true,
 				BasicAuth:          &agentv1.BasicAuth{Users: []*agentv1.BasicAuthUser{{Username: "ops", PasswordHash: "$2y$10$abcdefghijklmnopqrstuuJ0bZ5wKkC7b0z1oQbqk3yQ9x8l6YH6a"}}},
 				AllowedSourceCidrs: []string{"10.0.0.0/8", "203.0.113.7/32"},
 				RateLimit:          &agentv1.RateLimit{Average: 50, Burst: 100, Period: durationpb.New(time.Minute)},
@@ -541,7 +548,8 @@ func TestBuildOriginRouters(t *testing.T) {
 // the host (Traefik's 404), so behind Always Use HTTPS the check read
 // "elsewhere" and the hold never ended.
 func TestBuildHeldAcmeRoute(t *testing.T) {
-	held := route("r1", "shop.example.com")
+	// Behind Cloudflare's proxy, as the panel sends it.
+	held := onHTTPS(route("r1", "shop.example.com"))
 	held.AcmeHold = true
 	built, err := Build(BuildInput{Service: app("svc1", held), Upstreams: ups("http://seylo-svc1-7:3000"), Edge: testEdge, ProbeSecret: "s"})
 	if err != nil {
@@ -594,17 +602,23 @@ func TestBuildHeldAcmeRoute(t *testing.T) {
 	}
 }
 
-// Every ACME route, held or not, answers Let's Encrypt's HTTP-01 challenge
-// on websecure too, with Traefik's own handler: behind Cloudflare's proxy
-// with Always Use HTTPS, Let's Encrypt's http:// request is redirected to
-// https, and with SSL/TLS Full Cloudflare sends it to port 443. Before,
-// only Traefik's router on web answered the challenge, so there the app
-// (or Traefik's 404) answered and the first certificate never came. The
-// router has the default certificate and no resolver, no middlewares (an
-// allowlist or a password would refuse the CA), sits above every other
-// router of the hosts but the origin ones (another path), in every mode,
-// and is shared by the routes of a host. Custom certificates, HTTPS off
-// and the LB file get none.
+// An ACME route with Route.acme_challenge_on_https (the panel's domains
+// whose DNS does not point straight at the node), held or not, answers
+// Let's Encrypt's HTTP-01 challenge on websecure too, with Traefik's own
+// handler: behind Cloudflare's proxy with a redirect to https for every
+// path (a Redirect Rule or Page Rule; Always Use HTTPS itself leaves the
+// challenge path alone), Let's Encrypt's http:// request is redirected to
+// https, and with SSL/TLS Full Cloudflare sends it to port 443. Before, only Traefik's router on web
+// answered the challenge, so there the app (or Traefik's 404) answered and
+// the first certificate never came. The router has the default
+// certificate and no resolver, no middlewares (an allowlist or a password
+// would refuse the CA), sits above every other router of the hosts but the
+// origin ones (another path), in every mode, and is shared by the routes
+// of a host. Without the field (DNS straight to the node, or a panel from
+// before 0.2.12) the app keeps the path on 443: Traefik's handler answers
+// only its own tokens and never falls through, so an app that answers
+// challenges itself over https would lose them. Custom certificates, HTTPS
+// off and the LB file get none; the tool host always has it.
 func TestBuildAcmeChallengeRouters(t *testing.T) {
 	decode := func(in BuildInput) dynamicConfig {
 		t.Helper()
@@ -627,20 +641,23 @@ func TestBuildAcmeChallengeRouters(t *testing.T) {
 		}
 		return out
 	}
-	guarded := route("r1", "app.example.com", "www.example.com")
+	guarded := onHTTPS(route("r1", "app.example.com", "www.example.com"))
 	guarded.AllowedSourceCidrs = []string{"10.0.0.0/8"}
 	guarded.BasicAuth = &agentv1.BasicAuth{Users: []*agentv1.BasicAuthUser{{Username: "u", PasswordHash: "$2y$05$abcdefghijklmnopqrstuuxN0J7Zqf6g2b2b6ZJ1Q2YjY1Jj1Jj1W"}}}
 	// Another path of the same hosts shares r1's router.
-	api := route("r5", "app.example.com", "www.example.com")
+	api := onHTTPS(route("r5", "app.example.com", "www.example.com"))
 	api.PathPrefix = "/api"
-	custom := &agentv1.Route{Id: "r2", Hosts: []string{"corp.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE,
+	// The field means nothing without ACME.
+	custom := &agentv1.Route{Id: "r2", Hosts: []string{"corp.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE, AcmeChallengeOnHttps: true,
 		Certificate: &agentv1.Certificate{CertPem: "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n", KeyPem: "-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----\n"}}
-	plain := &agentv1.Route{Id: "r3", Hosts: []string{"plain.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_OFF}
-	held := route("r4", "shop.example.com")
+	plain := &agentv1.Route{Id: "r3", Hosts: []string{"plain.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_OFF, AcmeChallengeOnHttps: true}
+	held := onHTTPS(route("r4", "shop.example.com"))
 	held.AcmeHold = true
 	// Unset means ACME.
-	unset := &agentv1.Route{Id: "r6", Hosts: []string{"blog.example.com"}}
-	spec := app("svc1", guarded, api, custom, plain, held, unset)
+	unset := &agentv1.Route{Id: "r6", Hosts: []string{"blog.example.com"}, AcmeChallengeOnHttps: true}
+	// DNS straight to the node: Traefik's router on web answers the CA, and the app keeps the path on 443.
+	direct := route("r7", "direct.example.com")
+	spec := app("svc1", guarded, api, custom, plain, held, unset, direct)
 	running := BuildInput{Service: spec, Upstreams: ups("http://seylo-svc1-7:3000", "http://seylo-svc1-7-1:3000"), Edge: testEdge, ProbeSecret: "s",
 		CertRetries: map[string]string{"r1": "c1"}}
 	wantRules := map[string]string{
@@ -674,10 +691,17 @@ func TestBuildAcmeChallengeRouters(t *testing.T) {
 				t.Errorf("%s: %s: %+v tls %+v", name, n, r, r.TLS)
 			}
 		}
+		// https://direct.example.com/.well-known/acme-challenge/x goes where the rest of the host goes.
+		for n, r := range cfg.HTTP.Routers {
+			if strings.Contains(r.Rule, "direct.example.com") && slices.Contains(r.EntryPoints, EntryPointSecure) &&
+				(r.Service == AcmeChallengeService || strings.Contains(r.Rule, AcmeChallengePath)) {
+				t.Errorf("%s: %s takes the challenge path from the app on a direct domain: %+v", name, n, r)
+			}
+		}
 	}
 
 	// The panel's own routes are raised as owned; the challenge router stays above them.
-	panel := app("panel1", route("r1", "panel.example.com"))
+	panel := app("panel1", onHTTPS(route("r1", "panel.example.com")))
 	panel.Protected = true
 	cfg := decode(BuildInput{Service: panel, Upstreams: ups("http://seylo-panel1-1:5755"), Edge: testEdge})
 	ch := cfg.HTTP.Routers["seylo-panel1-r-r1-acme-challenge"]

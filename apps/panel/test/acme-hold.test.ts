@@ -139,11 +139,12 @@ describe("a domain whose DNS does not reach the node yet", () => {
     expect(released?.certificate.status).toBe("pending");
     expect(released?.certificate.waitingForDns).toBeUndefined();
 
-    // Released for good: a record that moves away later does not take HTTPS back.
+    // Released for good: a record that moves away later does not take HTTPS back. The route answers
+    // Let's Encrypt's challenge on 443 now, since the record no longer goes straight to the node.
     setDnsLookups(dns({ "shop.example.com": ["198.51.100.1"] }));
     expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.status).toBe("wrongTarget");
-    expect(s.dirty()).toEqual([]);
-    expect(s.route(domainId)).toMatchObject(acme);
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: true });
   });
 
   test("behind Cloudflare's proxy: held while the origin check is unknown or elsewhere, released by the node's proof", async () => {
@@ -310,6 +311,66 @@ describe("what never waits", () => {
       .where(eq(domains.id, domainId))
       .run();
     expect(s.route(domainId)).toMatchObject(acme);
+  });
+});
+
+/**
+ * Let's Encrypt's challenge on 443 (Route.acme_challenge_on_https, 0.2.12):
+ * behind Cloudflare's proxy with a redirect to https for every path (a
+ * Redirect Rule or Page Rule) the CA's http:// request is redirected to
+ * https and reaches the node on 443, so the route answers it there too, for
+ * the first certificate and every renewal. A domain whose
+ * record points straight at the node does not need it (the CA reaches port
+ * 80, where Traefik answers), and its app keeps the path over https:
+ * Traefik's handler answers only its own tokens and never falls through,
+ * so an app answering challenges itself there would lose them. Before,
+ * every ACME route took the path on 443.
+ */
+describe("Let's Encrypt's challenge on 443", () => {
+  test("unless the record points straight at the node, held or released", async () => {
+    const s = setup();
+    setDnsLookups(dns({ "ok.example.com": [nodeIp], "cf.example.com": ["104.16.1.1"] }));
+    // Straight to the node.
+    const direct = await s.add("ok.example.com");
+    expect(s.route(direct.domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: false });
+    // Behind the proxy, held and then released by the node's proof: the renewals need it as much.
+    const proxied = await s.add("cf.example.com");
+    expect(s.route(proxied.domainId)).toMatchObject({ ...held, acmeChallengeOnHttps: true });
+    setOriginFetch(proof(s.key.privateKey));
+    expect((await callOp(panel, domainOps.checkDns, proxied.ref, { cookie })).body.origin).toBe("node");
+    expect(s.route(proxied.domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: true });
+    // No record yet, and a lookup that failed: nothing says the record goes straight to the node.
+    expect(s.route((await s.add("new.example.com")).domainId)).toMatchObject({ acmeChallengeOnHttps: true });
+    setDnsLookups({ ...dns({}), resolve4: () => Promise.reject(new Error("timeout")) });
+    expect(s.route((await s.add("down.example.com")).domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: true });
+    // Automatic domains are on the node's wildcard record, which nothing checks.
+    const auto = await callOp(panel, domainOps.addAuto, { serviceId: s.service.id }, { cookie });
+    expect(s.route(auto.body.id)).toMatchObject({ ...acme, acmeChallengeOnHttps: true });
+    // Without Let's Encrypt there is no challenge.
+    const off = await s.add("plain.example.com", { https: "off" });
+    expect(s.route(off.domainId)).toMatchObject({ https: HttpsMode.OFF, acmeChallengeOnHttps: false });
+  });
+
+  test("a check that moves the record behind the proxy or back sends the route again", async () => {
+    const s = setup();
+    setDnsLookups(dns({ "shop.example.com": [nodeIp] }));
+    const { domainId, ref } = await s.add("shop.example.com");
+    expect(s.route(domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: false });
+    s.dirty();
+    // Nothing changed: nothing is sent.
+    await callOp(panel, domainOps.checkDns, ref, { cookie });
+    expect(s.dirty()).toEqual([]);
+    // The owner turned on Cloudflare's proxy for the record (released already, so no hold).
+    setDnsLookups(dns({ "shop.example.com": ["104.16.1.1"] }));
+    setOriginFetch(proof(s.key.privateKey));
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.status).toBe("proxied");
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: true });
+    // And off again.
+    setDnsLookups(dns({ "shop.example.com": [nodeIp] }));
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.status).toBe("ok");
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject({ ...acme, acmeChallengeOnHttps: false });
   });
 });
 
