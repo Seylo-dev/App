@@ -8,14 +8,13 @@
 import {
   type AnalyzeContext,
   builtinVariablesFor,
+  classifySecret,
   isSecretEntry,
-  looksSecret,
   type NodeRef,
   type ParsedEnv,
   parseEnv,
   type ReferenceTarget,
   type ReferenceVariable,
-  secretOverride,
   sharedTarget,
   substituteReferences,
 } from "@seylo/env-analyzer";
@@ -48,9 +47,10 @@ export interface EnvGraph {
   resolveService(serviceId: string): { values: Map<string, string>; unresolved: { key: string; target: string; variable: string }[] };
   sharedValues(): Map<string, string>;
   /**
-   * Whether target.variable holds a secret (env-analyzer isSecretEntry: its
-   * "# @public"/"# @secret" comment, its name, its value, or a reference to a
-   * secret such as a database password); unknown variables are not.
+   * Whether target.variable holds a secret (env-analyzer classifySecret: its
+   * "# @public"/"# @secret" comment, a framework public prefix such as
+   * NEXT_PUBLIC_ (public), its name, its value, a reference to a secret such
+   * as a database password, or its resolved value); unknown variables are not.
    */
   isSecret(target: string, variable: string): boolean;
 }
@@ -191,14 +191,12 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
     const entry = service.parsed.entries.findLast((e) => e.key === variable);
     if (!entry) return false;
     secretMemo.set(id, "visiting");
-    // A "# @public"/"# @secret" comment decides; otherwise the resolved value counts too
-    // (a reference to a plain variable that holds a token).
-    const override = secretOverride(service.parsed, entry);
-    const result =
-      override !== null
-        ? override === "secret"
-        : isSecretEntry(service.parsed, entry, (ref) => isSecret(ref.target, ref.variable)) ||
-          looksSecret(ownValue(service, variable) ?? "");
+    // A "# @public"/"# @secret" comment or a framework public prefix decides; otherwise the
+    // resolved value counts too (a reference to a plain variable that holds a token).
+    const result = classifySecret(service.parsed, entry, {
+      referenceIsSecret: (ref) => isSecret(ref.target, ref.variable),
+      resolvedValue: () => ownValue(service, variable),
+    }).secret;
     secretMemo.set(id, result);
     return result;
   };
@@ -258,6 +256,8 @@ export function contextFor(graph: EnvGraph, serviceId: string, options: ContextO
         value: canSee(service, entry.key) ? graph.value(service.row.name, entry.key) : null,
         scope: "plain",
         sensitive: true,
+        // What builds and crash reports do with it, so the editor can say whether a reference carries a secret.
+        secret: graph.isSecret(service.row.name, entry.key),
         description: "variable of this service",
         dependsOn: entry.references.map((r) => ({ target: r.target, variable: r.variable })),
       });
@@ -288,6 +288,7 @@ export function contextFor(graph: EnvGraph, serviceId: string, options: ContextO
         value: canSee("shared", name) ? (values.get(name) ?? null) : null,
         scope: "plain" as const,
         sensitive: true,
+        secret: graph.isSecret(sharedTarget, name),
         description: "shared variable",
       })),
     });

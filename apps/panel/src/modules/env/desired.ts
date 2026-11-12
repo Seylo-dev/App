@@ -79,11 +79,13 @@ export function receivesShared(kind: string): boolean {
 
 /**
  * The service's variables with a real secret flag (EnvGraph.isSecret: the
- * variable's "# @public"/"# @secret" comment, else its name, value, resolved
- * value or a reference to a secret). Secret values never reach a
- * Nixpacks build (it bakes variables into the image) and agents strip them
- * from crash reports and troubleshoot uploads; Railpack and Dockerfile
- * builds mount every variable as a BuildKit secret either way.
+ * variable's "# @public"/"# @secret" comment, else a framework public prefix
+ * such as NEXT_PUBLIC_ (public), else its name, value, resolved value or a
+ * reference to a secret). Secret values never reach a Nixpacks build (it
+ * bakes variables into the image), are no Dockerfile build arg (ARG NAME)
+ * and agents strip them from crash reports and troubleshoot uploads;
+ * Railpack and Dockerfile builds mount every variable as a BuildKit secret
+ * either way.
  */
 export function resolveServiceEnv(deps: Pick<Deps, "db" | "secrets">, serviceId: string, graph?: EnvGraph): EnvVar[] {
   const service = getService(deps.db, serviceId);

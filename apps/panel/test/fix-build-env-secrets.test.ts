@@ -67,4 +67,20 @@ test("public variables reach the build, secrets and references to secrets do not
     NEXT_PUBLIC_ANON_KEY: false,
     TITLE: true,
   });
+
+  // The editor's context carries the same decision for what the service can reference, so its
+  // Secret chips agree with the build: other services' own variables and the shared ones.
+  const refs = await callOp(panel, envOps.references, { serviceId: web.id }, { cookie });
+  expect(refs.status).toBe(200);
+  const secretOf = (target: string) =>
+    Object.fromEntries(
+      (refs.body.targets.find((t: { name: string }) => t.name === target)?.variables ?? []).map((v: { name: string; secret?: boolean }) => [
+        v.name,
+        v.secret,
+      ]),
+    );
+  expect(secretOf("api")).toMatchObject({ SIGNING_TOKEN: true, PUBLIC_NAME: false, BUILD_ID: true });
+  // Built-in variables leave it out: sensitive says it.
+  expect(secretOf("api").URL).toBeUndefined();
+  expect(secretOf("project")).toEqual({ MODE: false, SHARED_SECRET: true });
 });

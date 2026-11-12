@@ -170,9 +170,9 @@ export default {
     queued: { one: "{count} build queued", other: "{count} builds queued" },
     nextDeploy: "Applies on the next deploy.",
     envNixpacks:
-      "Nixpacks writes the variables it builds with into the image, so variables that look secret (names with KEY, TOKEN, SECRET or PASS, database credentials, URLs with a password, long random values) are left out of the build. The service still gets them when it runs. Put # @public on the line above a variable in Environment to give it to the build, or use Railpack, which mounts every variable as a build secret.",
+      "Nixpacks writes the variables it builds with into the image, so variables that look secret (names with KEY, TOKEN, SECRET or PASS, database credentials, URLs with a password, long random values) are left out of the build. The service still gets them when it runs. Names with a framework's public prefix (NEXT_PUBLIC_, VITE_, PUBLIC_, ...) are not secret: every browser gets them. Put # @public on the line above a variable in Environment to give it to the build, or use Railpack, which mounts every variable as a build secret.",
     envSecrets:
-      "Every variable is a build secret (RUN --mount=type=secret,id=NAME), so none ends up in the image. Variables that are not secret are also build args (ARG NAME); mark one # @secret in Environment to keep it out of them.",
+      "Every variable is a build secret (RUN --mount=type=secret,id=NAME), so none ends up in the image. Variables that are not secret, names with a framework's public prefix (NEXT_PUBLIC_, VITE_, PUBLIC_, ...) among them, are also build args (ARG NAME); mark one # @secret in Environment to keep it out of them, or # @public to make one an arg.",
   },
   trigger: {
     title: "Deploy trigger",

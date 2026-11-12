@@ -136,6 +136,12 @@ export interface ReferenceVariable {
   scope: VariableScope;
   /** The value is a secret: UIs mask it until asked. */
   sensitive: boolean;
+  /**
+   * Builds and crash reports treat it as a secret (the panel's decision:
+   * classifySecret with its references followed). Left out, sensitive
+   * stands in for it.
+   */
+  secret?: boolean;
   /** Short English hint, for example "public URL". */
   description: string;
   /**

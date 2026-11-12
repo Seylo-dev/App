@@ -66,6 +66,18 @@ describe("env prefill", () => {
     expect(env).toBe('GITEA_CUSTOM=/data/gitea\nAPP_TITLE="My app here"\n\n# Fill these in.\nSECRET_KEY=\nDB_PASSWORD=\n');
   });
 
+  test("a framework-public name keeps the image's value: every browser gets it anyway", () => {
+    const env = prefillEnv(
+      [
+        { name: "NEXT_PUBLIC_MAPS_KEY", value: "pk_demo" },
+        { name: "VITE_API_TOKEN", value: "public-demo" },
+        { name: "MAPS_KEY", value: "pk_demo" },
+      ],
+      "Fill these in.",
+    );
+    expect(env).toBe("NEXT_PUBLIC_MAPS_KEY=pk_demo\nVITE_API_TOKEN=public-demo\n\n# Fill these in.\nMAPS_KEY=\n");
+  });
+
   test("preset values lead and win over the image's", () => {
     const env = prefillEnv(
       [

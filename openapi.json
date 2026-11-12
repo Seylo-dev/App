@@ -34164,6 +34164,9 @@
                               "sensitive": {
                                 "type": "boolean"
                               },
+                              "secret": {
+                                "type": "boolean"
+                              },
                               "description": {
                                 "type": "string"
                               },
@@ -34315,6 +34318,9 @@
                                   ]
                                 },
                                 "sensitive": {
+                                  "type": "boolean"
+                                },
+                                "secret": {
                                   "type": "boolean"
                                 },
                                 "description": {

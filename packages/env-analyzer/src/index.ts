@@ -20,6 +20,19 @@ export {
   referenceCompletions,
   resolveEnv,
 } from "./resolve";
-export { isSecretEntry, isSecretName, looksSecret, type SecretOverride, secretOverride } from "./secrets";
+export {
+  type ClassifyOptions,
+  classifyEntries,
+  classifySecret,
+  isSecretEntry,
+  isSecretName,
+  looksSecret,
+  publicPrefixes,
+  publicPrefixOf,
+  type SecretOverride,
+  type SecretReason,
+  type SecretVerdict,
+  secretOverride,
+} from "./secrets";
 export { LineIndex, rangeContains } from "./source";
 export type * from "./types";

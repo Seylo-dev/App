@@ -75,6 +75,12 @@ export const ReferenceVariable = Type.Object({
   scope: VariableScope,
   /** The value is a secret: UIs mask it until asked. */
   sensitive: Type.Boolean(),
+  /**
+   * Builds and crash reports treat it as a secret (a Dockerfile build gets it only as a BuildKit secret, not as ARG):
+   * its "# @public"/"# @secret" comment, a framework public prefix such as NEXT_PUBLIC_ (public), its name, value or
+   * references. Left out on built-in variables, where sensitive says it.
+   */
+  secret: Type.Optional(Type.Boolean()),
   description: Type.String(),
   /** References written in this variable's own value, for cycle detection. Built-in variables leave it out. */
   dependsOn: Type.Optional(Type.Array(Type.Object({ target: Type.String(), variable: Type.String() }))),
