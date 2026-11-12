@@ -93,13 +93,9 @@ export function CloneDialog({
     onSuccess: (res) => {
       onOpenChange(false);
       invalidate(services.list);
-      toast.success(t("serviceCopy.clone.created", { name: res.service.name }), {
-        action: {
-          label: t("serviceCopy.clone.view"),
-          onClick: () =>
-            void navigate({ to: "/p/$projectId/s/$serviceId", params: { projectId: res.service.projectId, serviceId: res.service.id } }),
-        },
-      });
+      // Straight to the clone: it is what you work on next (start it, check its settings).
+      void navigate({ to: "/p/$projectId/s/$serviceId", params: { projectId: res.service.projectId, serviceId: res.service.id } });
+      toast.success(t("serviceCopy.clone.created", { name: res.service.name }));
     },
   });
 

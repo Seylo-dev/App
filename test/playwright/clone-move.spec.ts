@@ -76,6 +76,8 @@ test.describe("clone and move", () => {
     await dialog.getByRole("button", { name: "Clone", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByText("api-staging created")).toBeVisible();
+    // The clone's own page opens: it is what you work on next.
+    await expect(page).toHaveURL(new RegExp(`/p/${ids.acme}/s/svcapicopy00000a`));
     expect(sent).toEqual([
       {
         serviceId: ids.api,

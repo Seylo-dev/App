@@ -47,7 +47,6 @@ export default {
     notCopied: "Not copied: domains, deploy history, cron jobs, backups, alerts and exposed ports.",
     submit: "Clone",
     created: "{name} created. It is stopped until you start it.",
-    view: "Open",
   },
   move: {
     title: "Move {name} to another project",
