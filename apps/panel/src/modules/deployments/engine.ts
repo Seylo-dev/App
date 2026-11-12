@@ -74,8 +74,10 @@ export const buildTimeoutMs = 90 * 60_000;
 export const queuedBuildTimeoutMs = 4 * buildTimeoutMs;
 /** Extra time on top of the health timeout for pulling and switching. */
 const rolloutGraceMs = 5 * 60_000;
-/** Progress lines a build remembers as logged (builds.progress_logged); an agent sends about five. */
+/** Progress lines a build remembers as logged (builds.progress_logged); an agent sends about five per run. */
 const maxProgressLogged = 64;
+/** Longest run id kept in a progress key (an agent's is 16 hex digits). */
+const maxRunIdLength = 64;
 
 export interface Engine {
   /** Advances a deployment as far as it can go now. Never throws. */
@@ -425,7 +427,7 @@ async function readBuildStream(
  * Applies a BuildProgress (from the stream, an event or the durable report)
  * to the build row, the deployment's steps and its log. Idempotent: a final
  * state is never overwritten, and a progress line already in the log (the
- * same stage and message of the build) is not logged again.
+ * same stage and message of the same run of the build) is not logged again.
  */
 export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string, progress: BuildProgress): string | null {
   const { db } = s.deps;
@@ -507,8 +509,11 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
     .where(eq(deployments.id, d.id))
     .run();
   // The agent sends every stage on the build's stream and as an event, and a re-attached stream replays them
-  // from the start: each line is logged once, whichever comes first, also after a panel restart.
-  const key = `${progress.stage}:${progress.message.slice(0, maxLineLength)}`;
+  // from the start: each line is logged once, whichever comes first, also after a panel restart. Once per run:
+  // an agent that restarted runs the build again from the start under the same id, with another run id.
+  // Agents before 0.2.15 send none: once per build.
+  const line = `${progress.stage}:${progress.message.slice(0, maxLineLength)}`;
+  const key = progress.runId ? `${progress.runId.slice(0, maxRunIdLength)}:${line}` : line;
   if (progress.message && progress.stage !== BuildStage.SUCCEEDED && !build.progressLogged.includes(key)) {
     db.transaction((tx) => {
       tx.update(builds)

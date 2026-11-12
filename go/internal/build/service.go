@@ -278,7 +278,7 @@ func (s *Service) run(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
 	started := time.Now()
 	log := s.log.With("build_id", j.ID, "service_id", j.ServiceID)
 	step := func(stage agentv1.BuildStage, msg string) {
-		p := &agentv1.BuildProgress{BuildId: j.ID, Stage: stage, Message: msg}
+		p := &agentv1.BuildProgress{BuildId: j.ID, RunId: j.RunID, Stage: stage, Message: msg}
 		j.progress(p)
 		if s.opts.Emit != nil {
 			s.opts.Emit(&agentv1.Event{Payload: &agentv1.Event_BuildProgress{BuildProgress: p}})
@@ -287,7 +287,7 @@ func (s *Service) run(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
 
 	digest, err := s.execute(ctx, j, req, step)
 
-	final := &agentv1.BuildProgress{BuildId: j.ID, Duration: durationpb.New(time.Since(started).Round(time.Millisecond))}
+	final := &agentv1.BuildProgress{BuildId: j.ID, RunId: j.RunID, Duration: durationpb.New(time.Since(started).Round(time.Millisecond))}
 	switch {
 	case err == nil:
 		final.Stage = agentv1.BuildStage_BUILD_STAGE_SUCCEEDED

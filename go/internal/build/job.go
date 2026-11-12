@@ -2,6 +2,8 @@ package build
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"sync"
 	"time"
 
@@ -24,6 +26,12 @@ const tailKeep = 64 << 10
 type Job struct {
 	ID        string
 	ServiceID string
+	// RunID tells this run of the build from another one under the same ID
+	// (jobs live in memory, so after an agent restart a Build call for the
+	// build starts it over): every BuildProgress of the job carries it, on
+	// the stream, as an event and in the durable report, so the panel logs
+	// a stage's message once per run (BuildProgress.run_id).
+	RunID string
 
 	cancel context.CancelFunc
 
@@ -48,7 +56,12 @@ type Job struct {
 }
 
 func newJob(id, serviceID string, cancel context.CancelFunc) *Job {
-	return &Job{ID: id, ServiceID: serviceID, cancel: cancel, changed: make(chan struct{}), done: make(chan struct{})}
+	run := make([]byte, 8)
+	_, _ = rand.Read(run) // never fails (crypto/rand)
+	return &Job{
+		ID: id, ServiceID: serviceID, RunID: hex.EncodeToString(run),
+		cancel: cancel, changed: make(chan struct{}), done: make(chan struct{}),
+	}
 }
 
 // Done is closed when the build reached a final stage.

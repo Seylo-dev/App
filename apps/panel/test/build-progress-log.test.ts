@@ -5,7 +5,10 @@
 // panel restart) replays the stages from the start. The panel logs a
 // stage's message the first time it arrives, whichever way, and keeps
 // what it logged on the build row (builds.progress_logged), so a restart
-// does not log them again. Before 0.2.15 every one was logged twice in a row.
+// does not log them again. Once per run of the build (BuildProgress.run_id):
+// an agent that restarted runs the build again from the start under the
+// same id, and those stages are logged again. Before 0.2.15 every one was
+// logged twice in a row.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -79,10 +82,12 @@ async function stopPanel() {
 /** The panel stops and starts again on the same database; the node keeps the build and replays it from the start. */
 async function restartPanel() {
   const script = fleet.buildScript;
+  const runs = fleet.runs;
   await stopPanel();
   panel = testPanel({ panelPath: join(dir, "panel.db"), masterKey, dataDir: dir });
   fleet = new FakeFleet(panel);
   fleet.buildScript = script;
+  for (const [buildId, run] of runs) fleet.runs.set(buildId, run);
   for (const id of [target, ra]) fleet.online.add(id);
 }
 
@@ -141,12 +146,22 @@ async function tick() {
   await fleet.settle();
 }
 
+/** A BuildProgress event of the build's current run on the agent, like the agent's. */
 const progressEvent = (buildId: string, stage: BuildStage, extra: Record<string, unknown> = {}) =>
-  fleet.emit(ra, { case: "buildProgress", value: create(BuildProgressSchema, { buildId, stage, ...extra }) });
+  fleet.emit(ra, {
+    case: "buildProgress",
+    value: create(BuildProgressSchema, { buildId, runId: fleet.runIdOf(buildId), stage, ...extra }),
+  });
 
-for (const order of ["after", "before"] as const) {
-  test(`each progress line is logged once when its event comes ${order} the stream's copy`, async () => {
-    fleet.buildScript = agentLike(order);
+for (const [order, agent] of [
+  ["after", "0.2.15"],
+  ["before", "0.2.15"],
+  ["after", "0.2.14"],
+  ["before", "0.2.14"],
+] as const) {
+  test(`each progress line is logged once when its event comes ${order} the stream's copy (agent ${agent})`, async () => {
+    // Agents before 0.2.15 send no run id: once per build.
+    fleet.buildScript = agentLike(order, agent === "0.2.14" ? { noRunId: true } : {});
     const web = await app("web");
     const { deploymentId, buildId } = await deploy(web);
     expect(await progressIn(web, deploymentId)).toEqual([queuedLine]);
@@ -186,6 +201,49 @@ test("a re-attached stream replays the stages without logging them again, also a
   expect(await progressIn(web, deploymentId)).toEqual(progressLines);
   const log = (await logOf(web, deploymentId)).map((l) => l.text);
   expect(log.filter((t) => t === "Following the build again after a panel restart.")).toHaveLength(2);
+});
+
+test("a build its agent starts over (the agent restarted) logs its stages again, each once per run", async () => {
+  const web = await app("web");
+  const { deploymentId, buildId } = await deploy(web);
+  fleet.grantSlot(buildId);
+  await fleet.settle();
+  const firstRun = [queuedLine, "Fetching the source", "Building with Dockerfile"];
+  expect(await progressIn(web, deploymentId)).toEqual(firstRun);
+  const firstRunId = fleet.runIdOf(buildId);
+
+  // The build node's agent restarts mid-build: the stream drops, and once the node is back the runner follows the
+  // build again. The agent no longer has it (it keeps builds in memory) and runs it again from the start, as
+  // another run that waits for a slot and sends its stages on the stream and as events again.
+  fleet.online.delete(ra);
+  for (const drop of fleet.drops.splice(0)) drop();
+  await fleet.settle();
+  fleet.restartAgent(ra);
+  fleet.online.add(ra);
+  await tick();
+  expect(fleet.calls.filter((c) => c.method === "build")).toHaveLength(2);
+  expect(await progressIn(web, deploymentId)).toEqual([...firstRun, queuedLine]);
+
+  // The panel restarts while the second run waits: its replay and a late event of the first run log nothing.
+  await restartPanel();
+  await tick();
+  expect(fleet.calls.filter((c) => c.method === "build")).toHaveLength(1);
+  progressEvent(buildId, BuildStage.BUILDING, { message: "Building with Dockerfile", runId: firstRunId });
+  await fleet.settle();
+  expect(await progressIn(web, deploymentId)).toEqual([...firstRun, queuedLine]);
+
+  await startAndEnd(buildId);
+  expect(await progressIn(web, deploymentId)).toEqual([...firstRun, ...progressLines]);
+  expect(panel.deps.db.select().from(builds).where(eq(builds.id, buildId)).get()?.status).toBe("succeeded");
+});
+
+test("a run id the agent sends is cut to 64 characters in the logged keys", async () => {
+  const web = await app("web");
+  const { buildId } = await deploy(web);
+  progressEvent(buildId, BuildStage.QUEUED, { message: "Waiting for 2 build(s) on this node", runId: "r".repeat(10_000) });
+  await fleet.settle();
+  const logged = panel.deps.db.select().from(builds).where(eq(builds.id, buildId)).get()?.progressLogged ?? [];
+  expect(logged.at(-1)).toBe(`${"r".repeat(64)}:${BuildStage.QUEUED}:Waiting for 2 build(s) on this node`);
 });
 
 test("a stage only the stream brings, or only an event, is logged", async () => {

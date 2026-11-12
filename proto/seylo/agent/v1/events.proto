@@ -144,6 +144,14 @@ message BuildProgress {
   // when the stream with BuildSourceInfo was lost. Agents before 0.2.14
   // leave it empty.
   string commit = 6; // added in 0.2.14
+  // The agent's run of the build: random, the same on the build's stream,
+  // its events, its durable report and a stream opened again (a replay),
+  // and a new one when the agent starts the build over under the same
+  // build_id (it keeps builds in memory, so after an agent restart a Build
+  // call for it runs it from the start). The panel logs each stage's
+  // message once per run. Empty from agents before this field. added in
+  // 0.2.15 (build logs)
+  string run_id = 7;
 }
 
 enum BuildStage {

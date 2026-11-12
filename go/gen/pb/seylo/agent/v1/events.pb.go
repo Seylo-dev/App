@@ -1107,7 +1107,15 @@ type BuildProgress struct {
 	// commit built (BuildSourceInfo.commit), so the durable result names it
 	// when the stream with BuildSourceInfo was lost. Agents before 0.2.14
 	// leave it empty.
-	Commit        string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"` // added in 0.2.14
+	Commit string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"` // added in 0.2.14
+	// The agent's run of the build: random, the same on the build's stream,
+	// its events, its durable report and a stream opened again (a replay),
+	// and a new one when the agent starts the build over under the same
+	// build_id (it keeps builds in memory, so after an agent restart a Build
+	// call for it runs it from the start). The panel logs each stage's
+	// message once per run. Empty from agents before this field. added in
+	// 0.2.15 (build logs)
+	RunId         string `protobuf:"bytes,7,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1180,6 +1188,13 @@ func (x *BuildProgress) GetDuration() *durationpb.Duration {
 func (x *BuildProgress) GetCommit() string {
 	if x != nil {
 		return x.Commit
+	}
+	return ""
+}
+
+func (x *BuildProgress) GetRunId() string {
+	if x != nil {
+		return x.RunId
 	}
 	return ""
 }
@@ -1745,14 +1760,15 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\x05stage\x18\x03 \x01(\x0e2\x1b.seylo.agent.v1.DeployStageR\x05stage\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12N\n" +
 	"\x12image_health_check\x18\x05 \x01(\v2 .seylo.agent.v1.ImageHealthCheckR\x10imageHealthCheck\x12@\n" +
-	"\x0ehealth_timeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rhealthTimeout\"\xe8\x01\n" +
+	"\x0ehealth_timeout\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rhealthTimeout\"\xff\x01\n" +
 	"\rBuildProgress\x12\x19\n" +
 	"\bbuild_id\x18\x01 \x01(\tR\abuildId\x120\n" +
 	"\x05stage\x18\x02 \x01(\x0e2\x1a.seylo.agent.v1.BuildStageR\x05stage\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12!\n" +
 	"\fimage_digest\x18\x04 \x01(\tR\vimageDigest\x125\n" +
 	"\bduration\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\bduration\x12\x16\n" +
-	"\x06commit\x18\x06 \x01(\tR\x06commit\"\xe4\x01\n" +
+	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x15\n" +
+	"\x06run_id\x18\a \x01(\tR\x05runId\"\xe4\x01\n" +
 	"\rHealthChanged\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12!\n" +

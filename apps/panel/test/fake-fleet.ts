@@ -58,6 +58,8 @@ export type BuildScript = (build: FakeBuild) => {
    * Left out: the stream only.
    */
   events?: "before" | "after";
+  /** Like agents before 0.2.15: progress without a run id. */
+  noRunId?: boolean;
 };
 
 const allCapabilities = new Set([
@@ -111,6 +113,12 @@ export class FakeFleet {
   private readonly granted = new Set<string>();
   /** Per build, how many of its stream's messages happened (were sent as events too, with events set). */
   private readonly happened = new Map<string, number>();
+  /**
+   * Per build, how many times its agent started it over (restartAgent): its
+   * progress carries the run id of that run, like the agent's
+   * BuildProgress.run_id. A panel restart keeps them (the node's agent runs on).
+   */
+  readonly runs = new Map<string, number>();
   /** Uploaded archives whose UploadBuildContext answers only once released, by upload id. */
   private readonly uploadGates = new Map<string, { gate: Promise<void>; open: () => void }>();
   readonly hub: AgentHub;
@@ -187,6 +195,24 @@ export class FakeFleet {
     for (const id of [...this.uploadGates.keys()]) this.releaseUpload(id);
   }
 
+  /**
+   * The node's agent restarted: it keeps builds in memory only, so it forgot
+   * the ones it had, and a Build call for one starts it over, as a new run
+   * (another run id) that waits for a slot and sends its stages again.
+   */
+  restartAgent(nodeId: string): void {
+    for (const buildId of new Set(this.builds.filter((b) => b.nodeId === nodeId).map((b) => b.request.buildId))) {
+      this.granted.delete(buildId);
+      this.happened.delete(buildId);
+      this.runs.set(buildId, (this.runs.get(buildId) ?? 0) + 1);
+    }
+  }
+
+  /** The run id the build's progress carries now (its current run on the agent). */
+  runIdOf(buildId: string): string {
+    return `run-${buildId}-${this.runs.get(buildId) ?? 0}`;
+  }
+
   /** A held build (result "held") ends. */
   endBuild(buildId: string, result: "succeeded" | "failed" = "succeeded"): void {
     for (const end of this.endGates.get(buildId) ?? []) end(result);
@@ -197,11 +223,12 @@ export class FakeFleet {
     this.builds.push(build);
     const script = this.buildScript(build);
     const buildId = build.request.buildId;
+    const runId = script.noRunId ? "" : this.runIdOf(buildId);
     const progress = (stage: BuildStage, extra: Record<string, unknown> = {}) =>
       ({
         output: {
           case: "progress",
-          value: create(BuildProgressSchema, { buildId, stage, message: script.stageMessages?.[stage] ?? "", ...extra }),
+          value: create(BuildProgressSchema, { buildId, runId, stage, message: script.stageMessages?.[stage] ?? "", ...extra }),
         },
       }) as const;
     const messages: unknown[] = [progress(BuildStage.FETCHING_SOURCE)];

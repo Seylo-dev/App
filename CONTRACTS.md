@@ -4582,11 +4582,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   0s). Progress lines (since 0.2.15): the agent sends every stage on the
   build's stream and also as an event (a final one as its durable
   report), and a re-attached stream replays them, so `recordBuildProgress`
-  logs a stage's message once per build, the first time it arrives either
-  way, and keeps the `<stage>:<message>` keys it logged in
-  `builds.progress_logged` (migration 0019, at most 64), so a panel
-  restart does not log them again; the same message from another build or
-  in another stage is a new line. DeployProgress has one path per stage
+  logs a stage's message once per run of the build, the first time it
+  arrives either way, and keeps the `<run id>:<stage>:<message>` keys it
+  logged in `builds.progress_logged` (migration 0019, at most 64, the run
+  id cut to 64 characters), so a panel restart does not log them again;
+  the same message from another build, another run or in another stage is
+  a new line. The run id is `BuildProgress.run_id` (agent `build.Job`
+  `RunID`, random per job): the same on the stream, the events, the
+  durable report and a replay, and a new one when the agent runs the build
+  again from the start under the same build id (it keeps jobs in memory,
+  so after an agent restart a re-attach's Build call starts the build
+  over), whose stages are logged again. Agents before 0.2.15 send none:
+  the key is `<stage>:<message>`, once per build, so such a run's stages
+  are not logged again. DeployProgress has one path per stage
   (progress as events, finals as durable reports, deduped by outbox id),
   so its `<node>: <message>` lines are logged as they come. Timeouts (`engine.ts`
   `buildTimeout`): a running build fails 90 minutes after its start; a

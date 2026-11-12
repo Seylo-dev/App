@@ -406,6 +406,71 @@ func TestServiceWaitingBuildSendsOnlyQueuedUntilItsSlot(t *testing.T) {
 	}
 }
 
+// runIDsOf lists the run ids of the progress emitted for one build.
+func (r *reports) runIDsOf(buildID string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var ids []string
+	for _, e := range r.events {
+		if p := e.GetBuildProgress(); p.GetBuildId() == buildID {
+			ids = append(ids, p.GetRunId())
+		}
+	}
+	return ids
+}
+
+// The panel logs a stage's message once per run of a build
+// (apps/panel deployments/engine.ts recordBuildProgress): every progress of
+// one run carries the same run id on the stream, as an event, in the
+// durable report and in a replay, and the same build id started again by
+// an agent that restarted (it forgot the job) is a new run.
+func TestServiceRunIDTellsRunsApart(t *testing.T) {
+	runOf := func(svc *Service, rep *reports) (job *Job, events, stream []string, final string) {
+		t.Helper()
+		job, err := svc.Start(inlineRequest("r1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		final = finalOf(t, rep).GetRunId()
+		// A Build call for a build the agent has (a re-attach) replays the same job.
+		again, err := svc.Start(inlineRequest("r1"))
+		if err != nil || again != job {
+			t.Fatalf("re-attach: %v, same job %v", err, again == job)
+		}
+		if err := again.Watch(context.Background(), func(r *agentv1.BuildResponse) error {
+			if p := r.GetProgress(); p != nil {
+				stream = append(stream, p.GetRunId())
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return job, rep.runIDsOf("r1"), stream, final
+	}
+
+	rep := newReports()
+	job, events, stream, final := runOf(newTestService(t, &fakeRunner{}, rep), rep)
+	if job.RunID == "" {
+		t.Fatal("the job has no run id")
+	}
+	// QUEUED, FETCHING_SOURCE, BUILDING and PUSHING as events; the same and the final on the stream.
+	if len(events) != 4 || len(stream) != 5 {
+		t.Fatalf("events %v, stream %v", events, stream)
+	}
+	for _, id := range append(append(events, stream...), final) {
+		if id != job.RunID {
+			t.Fatalf("run ids: events %v, stream %v, final %q; want %q everywhere", events, stream, final, job.RunID)
+		}
+	}
+
+	// The agent restarted: the same build id runs again from the start, as another run.
+	rep2 := newReports()
+	again, _, _, final2 := runOf(newTestService(t, &fakeRunner{}, rep2), rep2)
+	if again.RunID == "" || again.RunID == job.RunID || final2 != again.RunID {
+		t.Fatalf("second run %q (final %q), first %q", again.RunID, final2, job.RunID)
+	}
+}
+
 func TestServiceRejectsInvalid(t *testing.T) {
 	rep := newReports()
 	svc := newTestService(t, &fakeRunner{}, rep)
