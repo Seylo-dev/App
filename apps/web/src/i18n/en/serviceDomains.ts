@@ -108,6 +108,7 @@ export default {
     path: "Path",
     pathHint: "Only requests under this path reach the service. / is the whole domain.",
     port: "Container port",
+    portSuggestions: "Show the service's ports",
     https: "HTTPS",
     strip: "Strip the path before forwarding",
     makePrimary: "Make it the primary domain",

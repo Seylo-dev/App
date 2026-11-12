@@ -59,6 +59,36 @@ test("the first domain of a portless app: port 80 by default, and primary ticked
     .toEqual([expect.objectContaining({ serviceId: svc.worker, host: "jobs.example.com", targetPort: 80, primary: true })]);
 });
 
+test("the container port takes any port typed in, and lists the service's own", async ({ page }) => {
+  const calls = watchOps(page);
+  // The api declares port 3000; it may listen on another one too.
+  await installDemo(page, { overrides: { "domains.add": added } });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
+  await page.getByRole("button", { name: "Add domain" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Add a domain" });
+  const port = dialog.getByLabel("Container port");
+  await expect(port).toHaveValue("3000");
+  // Typed: digits only, any port.
+  await port.fill("");
+  await port.pressSequentially("81x81");
+  await expect(port).toHaveValue("8181");
+  // Picked from the list: the service's ports.
+  await dialog.getByRole("button", { name: "Show the service's ports" }).click();
+  const list = page.getByRole("listbox", { name: "Container port" });
+  await expect(list.getByRole("option")).toHaveText(["3000"]);
+  await list.getByRole("option", { name: "3000" }).click();
+  await expect(port).toHaveValue("3000");
+  // Typed again and sent as typed.
+  await port.fill("8181");
+  await dialog.getByLabel("Domain", { exact: true }).fill("alt.example.com");
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/custom-port.png` });
+  await dialog.getByRole("button", { name: "Add domain" }).click();
+  await expect
+    .poll(() => calls("domains.add"))
+    .toEqual([expect.objectContaining({ serviceId: svc.api, host: "alt.example.com", targetPort: 8181 })]);
+});
+
 test("with a primary domain already, the box is a free choice and starts off", async ({ page }) => {
   await installDemo(page);
   await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);

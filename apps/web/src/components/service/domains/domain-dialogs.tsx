@@ -9,13 +9,15 @@ import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@seylo/ui/components/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { Switch } from "@seylo/ui/components/switch";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
-import { IconPlus, IconTrash } from "@tabler/icons-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { cn } from "@seylo/ui/lib/utils";
+import { IconCheck, IconChevronDown, IconPlus, IconTrash } from "@tabler/icons-react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
 import { CheckLabel, Field, parseIntOrNull, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
@@ -85,36 +87,87 @@ function PortSelect({
 }: {
   service: ServiceDetail;
   value: number | null;
-  onChange: (port: number) => void;
+  onChange: (port: number | null) => void;
   id: string;
   /** What an empty field means: the service's port in Add domain, the domain's current one in Routing. */
   placeholder: number;
 }) {
+  // Any port can be typed (an app may listen on one it does not declare); the service's own ports are offered.
   const ports = service.ports.filter((p) => p.protocol === "tcp").map((p) => p.containerPort);
-  if (ports.length === 0)
-    return (
-      <Input
-        id={id}
-        inputMode="numeric"
-        value={value || ""}
-        onChange={(e) => onChange(Number(e.target.value) || 0)}
-        placeholder={String(placeholder)}
-      />
-    );
+  const [open, setOpen] = useState(false);
+  const current = value ?? placeholder;
   return (
-    <Select value={String(value ?? ports[0])} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger id={id} className="font-mono">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {ports.map((p) => (
-          <SelectItem key={p} value={String(p)} className="font-mono">
-            {p}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Popover open={open && ports.length > 0} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className="relative">
+          <Input
+            id={id}
+            inputMode="numeric"
+            autoComplete="off"
+            className={cn("font-mono", ports.length > 0 && "pr-9")}
+            value={value === null ? "" : String(value)}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, "").slice(0, 5);
+              onChange(digits === "" ? null : Number(digits));
+            }}
+            placeholder={String(placeholder)}
+          />
+          {ports.length > 0 && (
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("serviceDomains.form.portSuggestions")}
+                className="absolute top-1/2 right-[3px] flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-muted-foreground transition-interactive duration-200 hover:bg-muted hover:text-foreground"
+              >
+                <IconChevronDown size={14} stroke={2} aria-hidden="true" />
+              </button>
+            </PopoverTrigger>
+          )}
+        </div>
+      </PopoverAnchor>
+      <PopoverContent align="end" collisionPadding={16} className="w-44 p-1.5">
+        <div role="listbox" aria-label={t("serviceDomains.form.port")} onKeyDown={moveInList}>
+          {ports.map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="option"
+              aria-selected={p === current}
+              onClick={() => {
+                onChange(p);
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent px-2.5 py-2 text-left transition-interactive duration-200 hover:bg-accent focus-visible:bg-accent",
+                p === current && "bg-accent",
+              )}
+            >
+              <span className="font-mono text-[12.5px] text-foreground">{p}</span>
+              {p === current && <IconCheck size={15} stroke={2} className="ml-auto shrink-0 text-primary" aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
+}
+
+/** Arrow keys, Home and End move between a list's options. */
+function moveInList(event: KeyboardEvent<HTMLElement>) {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
+  if (items.length === 0) return;
+  event.preventDefault();
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? Math.min(at + 1, items.length - 1)
+          : Math.max(at - 1, 0);
+  items[next]?.focus();
 }
 
 function HttpsSelect({ value, onChange }: { value: HttpsMode; onChange: (v: HttpsMode) => void }) {
