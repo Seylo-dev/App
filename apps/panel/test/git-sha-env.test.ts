@@ -8,7 +8,9 @@
 // recreated for it.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { create } from "@bufbuild/protobuf";
 import { deployments as deploymentOps, projects, services as serviceOps } from "@seylo/ops";
+import { BuildProgressSchema, BuildStage } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { deployments, services } from "../src/db/schema";
 import { compileMemo } from "../src/desired/contributors";
@@ -29,6 +31,7 @@ let fleet: FakeFleet;
 let cookie: string;
 let projectId: string;
 let nodeA: string;
+let builder: string;
 
 beforeEach(async () => {
   // gitea.lan is internal: the panel never lists its refs itself, so a deploy of the branch
@@ -40,7 +43,7 @@ beforeEach(async () => {
   panel = testPanel();
   fleet = new FakeFleet(panel);
   nodeA = fleet.addNode("node-a");
-  fleet.addNode("builder", { canBuild: true, panelNode: true });
+  builder = fleet.addNode("builder", { canBuild: true, panelNode: true });
   ({ cookie } = await createUser(panel, "owner"));
   projectId = (await callOp(panel, projects.create, { name: "respo" }, { cookie })).body.id;
 });
@@ -136,6 +139,35 @@ describe("GIT_SHA for deployments built from a repository", () => {
     nodeChecksOut(shaA);
     await deployLive(id, { commitSha: shaA.slice(0, 7) });
     expect(containerEnv(id).GIT_SHA).toBe(shaA);
+  });
+
+  test("a build whose stream was lost before the node named the commit gets it from the durable result", async () => {
+    // Before: only BuildSourceInfo on the live stream carried it; a node that reconnected (or a panel
+    // restart whose replay dropped the start of a long log) left the containers without GIT_SHA.
+    const id = await createApp("api", gitSource);
+    fleet.buildScript = () => ({ result: "hang" });
+    const res = await callOp(panel, deploymentOps.deploy, { serviceId: id }, { cookie });
+    expect(res.status).toBe(200);
+    await fleet.settle();
+    for (const drop of fleet.drops.splice(0)) drop();
+    await fleet.settle();
+    const buildId = fleet.builds[0]?.request.buildId as string;
+    fleet.emit(builder, {
+      case: "buildProgress",
+      value: create(BuildProgressSchema, {
+        buildId,
+        stage: BuildStage.SUCCEEDED,
+        imageDigest: `sha256:${"d".repeat(64)}`,
+        commit: shaA,
+      }),
+    });
+    await fleet.settle();
+    for (const drop of fleet.drops.splice(0)) drop();
+    await goLive(id, res.body.id);
+    expect(containerEnv(id).GIT_SHA).toBe(shaA);
+    expect(
+      (await callOp(panel, deploymentOps.get, { serviceId: id, deploymentId: res.body.id }, { cookie })).body.deployment.commit.sha,
+    ).toBe(shaA);
   });
 
   test("a GIT_SHA of the service's own wins, also an empty one, and so does the project's shared one", async () => {

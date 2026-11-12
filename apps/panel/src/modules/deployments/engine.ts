@@ -420,6 +420,7 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
         detail: `${labelOf(build.builder)} on ${nodeNameOf(s, nodeId)}${took}`,
       });
       patch.imageDigest = progress.imageDigest || null;
+      Object.assign(patch, recordResultCommit(s, d, progress.commit));
       db.update(builds).set({ status: "succeeded", finishedAt: new Date() }).where(eq(builds.id, build.id)).run();
       break;
     }
@@ -455,6 +456,19 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
   }
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   return d.id;
+}
+
+/**
+ * The commit a successful build result names (BuildProgress.commit, agents
+ * from 0.2.14), for when BuildSourceInfo was lost with the stream: a node
+ * that reconnected, or a panel restart whose replay dropped the start of a
+ * long log. Seals GIT_SHA while the deployment still builds, and returns
+ * the deployment's commit when it has none yet.
+ */
+function recordResultCommit(s: Pick<EngineState, "deps">, d: DeploymentRow, commit: string): Partial<typeof deployments.$inferInsert> {
+  if (!commit) return {};
+  recordBuiltCommit(s.deps, d.id, commit);
+  return d.commitSha ? {} : { commitSha: commit };
 }
 
 function labelOf(builder: string): string {

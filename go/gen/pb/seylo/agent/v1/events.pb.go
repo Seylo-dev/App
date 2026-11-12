@@ -1080,7 +1080,12 @@ type BuildProgress struct {
 	// Set with BUILD_STAGE_SUCCEEDED.
 	ImageDigest string `protobuf:"bytes,4,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
 	// Set on final stages.
-	Duration      *durationpb.Duration `protobuf:"bytes,5,opt,name=duration,proto3" json:"duration,omitempty"`
+	Duration *durationpb.Duration `protobuf:"bytes,5,opt,name=duration,proto3" json:"duration,omitempty"`
+	// Set with BUILD_STAGE_SUCCEEDED for a git source: the full id of the
+	// commit built (BuildSourceInfo.commit), so the durable result names it
+	// when the stream with BuildSourceInfo was lost. Agents before 0.2.14
+	// leave it empty.
+	Commit        string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"` // added in 0.2.14
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1148,6 +1153,13 @@ func (x *BuildProgress) GetDuration() *durationpb.Duration {
 		return x.Duration
 	}
 	return nil
+}
+
+func (x *BuildProgress) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
 }
 
 type HealthChanged struct {
@@ -1695,13 +1707,14 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"generation\x18\x02 \x01(\x04R\n" +
 	"generation\x121\n" +
 	"\x05stage\x18\x03 \x01(\x0e2\x1b.seylo.agent.v1.DeployStageR\x05stage\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"\xd0\x01\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"\xe8\x01\n" +
 	"\rBuildProgress\x12\x19\n" +
 	"\bbuild_id\x18\x01 \x01(\tR\abuildId\x120\n" +
 	"\x05stage\x18\x02 \x01(\x0e2\x1a.seylo.agent.v1.BuildStageR\x05stage\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12!\n" +
 	"\fimage_digest\x18\x04 \x01(\tR\vimageDigest\x125\n" +
-	"\bduration\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xe4\x01\n" +
+	"\bduration\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\bduration\x12\x16\n" +
+	"\x06commit\x18\x06 \x01(\tR\x06commit\"\xe4\x01\n" +
 	"\rHealthChanged\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12!\n" +

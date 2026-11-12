@@ -271,6 +271,8 @@ func (s *Service) run(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
 		final.Stage = agentv1.BuildStage_BUILD_STAGE_SUCCEEDED
 		final.ImageDigest = digest
 		final.Message = "Pushed " + req.GetImageReference() + "@" + digest
+		// The panel's GIT_SHA for the containers, also when it missed BuildSourceInfo.
+		final.Commit = j.builtCommit()
 	case errors.Is(err, context.Canceled):
 		final.Stage = agentv1.BuildStage_BUILD_STAGE_CANCELLED
 		final.Message = "The build was cancelled"

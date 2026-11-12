@@ -72,9 +72,11 @@ export function builtCommit(deps: Pick<Deps, "secrets">, envSealed: string | nul
  * build checks out is known in full: from the panel's own lookup (GitHub,
  * a provider connection, a branch the panel could list) and from the
  * node's BuildSourceInfo, which every agent sends for git sources (also
- * 0.2.11 to 0.2.13, which pass no GIT_SHA to the build itself). Only while
- * it builds: once a deployment rolls out its env is what its containers
- * run, and a late report must not change it.
+ * 0.2.11 to 0.2.13, which pass no GIT_SHA to the build itself), and from
+ * the successful build result (BuildProgress.commit, agents from 0.2.14)
+ * when the stream with BuildSourceInfo was lost. Only while it builds:
+ * once a deployment rolls out its env is what its containers run, and a
+ * late report must not change it.
  */
 export function recordBuiltCommit(deps: Pick<Deps, "db" | "secrets">, deploymentId: string, commit: string): void {
   if (!fullCommitRe.test(commit)) return;

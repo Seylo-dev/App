@@ -130,6 +130,11 @@ message BuildProgress {
   string image_digest = 4;
   // Set on final stages.
   google.protobuf.Duration duration = 5;
+  // Set with BUILD_STAGE_SUCCEEDED for a git source: the full id of the
+  // commit built (BuildSourceInfo.commit), so the durable result names it
+  // when the stream with BuildSourceInfo was lost. Agents before 0.2.14
+  // leave it empty.
+  string commit = 6; // added in 0.2.14
 }
 
 enum BuildStage {

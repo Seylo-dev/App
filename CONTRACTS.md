@@ -488,6 +488,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (`modules/metrics/node-live.ts`, below). Older agents ignore them and
   send full node samples (the same fields) until the panel cancels, which
   every renewal does, so they keep working.
+- `BuildProgress.commit` (added in 0.2.14, no new capability): on the
+  `SUCCEEDED` result of a build from git, the full commit the agent
+  checked out (the one `BuildSourceInfo.commit` reports), on the stream
+  and in the durable `ReportEvent`, for GIT_SHA when the stream with
+  `BuildSourceInfo` was lost (GIT_SHA below). Empty for other sources and
+  from older agents, which the panel handles as before.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -2512,17 +2518,25 @@ never type the ids by hand.
   deployment is `building`, once the commit is known in full: from its own
   lookup (a GitHub or provider commit, a branch head it listed) when the
   build request names a full commit, else from the node's
-  `BuildSourceInfo` (every agent version sends it for git sources). Never
-  after the deployment left `building`: a late or replayed report does not
-  change what a rolled-out deployment runs. The service's own or shared
+  `BuildSourceInfo` (every agent version sends it for git sources), and
+  from agents 0.2.14 on also from `BuildProgress.commit` on the
+  `SUCCEEDED` result (the stream's last message and the durable
+  `ReportEvent`), so a build whose stream was lost before
+  `BuildSourceInfo` (a node that reconnected, a panel restart whose replay
+  dropped the start of a long log) still gets it, and the deployment's
+  commit too when it had none (`recordResultCommit`). With an agent
+  before 0.2.14 such a build runs without GIT_SHA. Never after the
+  deployment left `building`: a late or replayed report does not change
+  what a rolled-out deployment runs. The service's own or shared
   `GIT_SHA` in the sealed env wins. A rollback seals the service's env now
   plus the `builtCommit` GIT_SHA of the deployment it runs again, and so
   does a move to another project, whose env is sealed afresh in the new
   project, with the live deployment it switches
   (`deployments.project_move.fromDeploymentId`, `reusedImageOf`); through
   a chain of rollbacks and moves when one's own GIT_SHA won. A move
-  between nodes keeps the live env; a restart changes nothing. Deployments sealed before 0.2.14 have
-  none, so running apps are not recreated when the panel updates: GIT_SHA
+  between nodes keeps the live env; a restart changes nothing.
+  Deployments sealed before 0.2.14 have none, so running apps are not
+  recreated when the panel updates: GIT_SHA
   comes with each service's next deploy (and a rollback to such a
   deployment runs without it, as before). The References panel of the
   Environment tab says so for repository sources.

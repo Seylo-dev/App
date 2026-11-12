@@ -313,6 +313,36 @@ func TestGitSHAIsTheCheckedOutCommit(t *testing.T) {
 	}
 }
 
+// The durable result of a build from git names the commit it built, in
+// full, so the panel gives the containers GIT_SHA also when the stream
+// with BuildSourceInfo was lost (a node that reconnected, a panel restart
+// whose replay dropped the start of a long log). Uploads and inline
+// Dockerfiles name none.
+func TestFinalProgressNamesTheCommit(t *testing.T) {
+	url, first, head := twoCommitGitServer(t)
+	for _, c := range []struct{ name, commit, want string }{
+		{"branch head", "", head},
+		{"short commit id", first[:10], first},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := runGitSHABuild(t, gitRequest(url, agentv1.Builder_BUILDER_DOCKERFILE, c.commit))
+			if got := run.final.GetCommit(); got != c.want {
+				t.Fatalf("final progress commit = %q, want %s", got, c.want)
+			}
+		})
+	}
+	t.Run("inline", func(t *testing.T) {
+		rep := newReports()
+		svc := newTestService(t, &fakeRunner{}, rep)
+		if _, err := svc.Start(inlineRequest("inline1")); err != nil {
+			t.Fatal(err)
+		}
+		if final := finalOf(t, rep); final.GetStage() != agentv1.BuildStage_BUILD_STAGE_SUCCEEDED || final.GetCommit() != "" {
+			t.Fatalf("inline build final = %v", final)
+		}
+	})
+}
+
 // A GIT_SHA of the service's own or the project's shared variables (the
 // panel sends both in env) wins, also an empty one; the agent adds none.
 func TestOwnGitSHAWins(t *testing.T) {
