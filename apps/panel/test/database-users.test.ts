@@ -9,7 +9,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { databases as dbOps, env as envOps } from "@seylo/ops";
 import { and, eq, ne } from "drizzle-orm";
-import { apiKeys, auditLog, deployments, nodes, serviceDatabases, serviceSecrets } from "../src/db/schema";
+import { callTimedOut } from "../src/agent-hub/calls";
+import { apiKeys, auditLog, deployments, nodes, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
 import { enginesCapability } from "../src/modules/databases/engines";
 import { resolveServiceEnv } from "../src/modules/env/desired";
 import { hashToken, prefixedToken } from "../src/security/tokens";
@@ -486,7 +487,232 @@ describe("the main user's name", () => {
   });
 });
 
+describe("the main user when a step fails or gets no answer", () => {
+  /** The proof of a sign-in as a new main user (proofExec), per engine. */
+  const isProof = (c: Call) =>
+    c.command.join(" ").includes("SELECT current_user") ||
+    c.command.join(" ").includes("CURRENT_USER()") ||
+    c.stdin.includes("connectionStatus");
+
+  test("switch: removing MySQL's root@% is refused while objects run as it, as a delete is", async () => {
+    const { node, serviceId } = await createDb("mysql");
+    const rows = () => mysqlRows().replace('"db": null, "definers": 0}', '"db": null, "definers": 2}');
+    const { changes, agent } = engineAgent(node.id, rows);
+    const list = await callOp(panel, dbOps.users, { serviceId }, { cookie });
+    expect(list.body.users[0]).toMatchObject({ name: "root", host: "%", main: true, definerObjects: 2 });
+    const refused = await callOp(panel, dbOps.switchMainUser, { serviceId, name: "boss", oldUser: "delete" }, { cookie });
+    expect(refused.body.error.details).toMatchObject({ reason: "definerObjects", count: "2" });
+    expect(changes()).toHaveLength(0);
+    expect(storedAdmin(serviceId)).toBe("root");
+    const accepted = await callOp(
+      panel,
+      dbOps.switchMainUser,
+      { serviceId, name: "boss", oldUser: "delete", acceptOrphanDefiners: true },
+      { cookie },
+    );
+    expect(accepted.status).toBe(200);
+    expect(changes().at(-1)?.stdin).toContain("DROP USER IF EXISTS 'root'@'%';");
+    agent.disconnect();
+  });
+
+  test("switch: stored once the new main user signed in; root's password without an answer is a warning", async () => {
+    const { node, serviceId } = await createDb("mysql");
+    const { changes, agent } = engineAgent(
+      node.id,
+      () => mysqlRows(),
+      (c) => {
+        if (c.stdin.includes("ALTER USER IF EXISTS 'root'@'localhost'")) throw callTimedOut(node.id, "exec");
+        return {};
+      },
+    );
+    const res = await callOp(
+      panel,
+      dbOps.switchMainUser,
+      { serviceId, name: "boss", password: "BossPassword123", oldUser: "delete" },
+      { cookie },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toContain("did not answer while Seylo gave root the same password and removed 'root'@'%'");
+    expect(res.body.warning).toContain("Set boss's password again on the Users tab");
+    // boss signed in before root's step: Seylo signs in as boss whatever root's step did.
+    expect(changes().map((c) => (isProof(c) ? "proof" : /CREATE USER|ALTER USER IF EXISTS/.exec(c.stdin)?.[0]))).toEqual([
+      "CREATE USER",
+      "proof",
+      "ALTER USER IF EXISTS",
+    ]);
+    expect(storedAdmin(serviceId)).toBe("boss");
+    expect(await storedPassword(serviceId)).toBe("BossPassword123");
+    agent.disconnect();
+  });
+
+  test("switch: a proof without an answer removes the user made for it; nothing is stored", async () => {
+    const { node, serviceId } = await createDb("postgres");
+    const { changes, agent } = engineAgent(
+      node.id,
+      () => pgRows(),
+      (c) => {
+        if (isProof(c)) throw callTimedOut(node.id, "exec");
+        return {};
+      },
+    );
+    const res = await callOp(panel, dbOps.switchMainUser, { serviceId, name: "boss" }, { cookie });
+    expect(res.status).toBe(503);
+    expect(res.body.error.details.reason).toBe("noAnswer");
+    expect(res.body.error.message).toContain("postgres is still the main user");
+    expect(res.body.error.message).toContain("The boss it made for the switch is removed again.");
+    expect(changes().at(-1)?.stdin).toContain('DROP ROLE "boss";');
+    expect(storedAdmin(serviceId)).toBe("postgres");
+    expect(await storedPassword(serviceId)).toBe("StoredPassword01");
+    agent.disconnect();
+  });
+
+  test("switch to an existing user: never a locked one; full rights only after it signed in; a failed proof says its password changed", async () => {
+    const { node, serviceId } = await createDb("postgres");
+    const expired =
+      '{"kind" : "user", "name" : "bob", "bootstrap" : false, "super" : false, "createrole" : false, "createdb" : false, "expired" : true, "password" : "scram", "memberOf" : [], "owns" : 0}';
+    let proof = 10;
+    const { changes, agent } = engineAgent(
+      node.id,
+      () => `${pgRows()}\n${expired}`,
+      (c) => (isProof(c) ? { exitCode: proof, stderr: 'FATAL:  password authentication failed for user "app"' } : {}),
+    );
+    const list = await callOp(panel, dbOps.users, { serviceId }, { cookie });
+    const bob = (list.body.users as { name: string; why: string | null }[]).find((u) => u.name === "bob");
+    expect(bob).toMatchObject({ locked: true, can: { makeMain: false } });
+    expect(bob?.why).toContain("cannot sign in now");
+    const locked = await callOp(panel, dbOps.switchMainUser, { serviceId, name: "bob", existing: true, grantAdmin: true }, { cookie });
+    expect(locked.body.error.details.reason).toBe("locked");
+    expect(changes()).toHaveLength(0);
+
+    const failed = await callOp(panel, dbOps.switchMainUser, { serviceId, name: "app", existing: true, grantAdmin: true }, { cookie });
+    expect(failed.body.error.details.reason).toBe("signInFailed");
+    expect(failed.body.error.message).toContain("postgres is still the main user");
+    expect(failed.body.error.message).toContain("app's password changed for the switch");
+    // Only its password changed: no rights were added before the proof.
+    expect(changes().map((c) => (isProof(c) ? "proof" : c.stdin.split("\n")[1]?.replace(/'SCRAM.*'/, "<verifier>")))).toEqual([
+      'ALTER ROLE "app" LOGIN PASSWORD <verifier>;',
+      "proof",
+    ]);
+    expect(storedAdmin(serviceId)).toBe("postgres");
+
+    proof = 0;
+    const ok = await callOp(panel, dbOps.switchMainUser, { serviceId, name: "app", existing: true, grantAdmin: true }, { cookie });
+    expect(ok.status).toBe(200);
+    expect(
+      changes()
+        .slice(2)
+        .map((c) => (isProof(c) ? "proof" : c.stdin.split("\n")[1]?.replace(/'SCRAM.*'/, "<verifier>"))),
+    ).toEqual(['ALTER ROLE "app" LOGIN PASSWORD <verifier>;', "proof", 'ALTER ROLE "app" SUPERUSER CREATEDB CREATEROLE;']);
+    expect(storedAdmin(serviceId)).toBe("app");
+    agent.disconnect();
+  });
+
+  test("a Postgres main rename without an answer: stored when Seylo signs in with the new name, else nothing", async () => {
+    const { node, serviceId } = await createDb("postgres");
+    let renamed = 0;
+    const { changes, agent } = engineAgent(
+      node.id,
+      () => pgRows(),
+      (c) => {
+        if (c.stdin.includes("RENAME TO")) throw callTimedOut(node.id, "exec");
+        return isProof(c) ? { exitCode: renamed } : {};
+      },
+    );
+    renamed = 10;
+    const lost = await callOp(panel, dbOps.renameUser, { serviceId, user: { name: "postgres" }, name: "boss", deploy: false }, { cookie });
+    expect(lost.status).toBe(503);
+    expect(lost.body.error.details.reason).toBe("noAnswer");
+    expect(storedAdmin(serviceId)).toBe("postgres");
+    renamed = 0;
+    const res = await callOp(panel, dbOps.renameUser, { serviceId, user: { name: "postgres" }, name: "boss", deploy: false }, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toContain("did not answer the rename, but boss signs in");
+    const proof = changes().at(-1);
+    expect(proof?.command).toContain("--username=boss");
+    // The rename keeps a SCRAM password: the stored one.
+    expect(proof?.stdin).toBe("StoredPassword01\n");
+    expect(storedAdmin(serviceId)).toBe("boss");
+    agent.disconnect();
+  });
+
+  test("a MySQL main rename with a password is stored before root gets it; root's step without an answer is a warning", async () => {
+    const { node, serviceId } = await createDb("mysql", { user: "shop" });
+    const rows = () =>
+      `${mysqlRows()}\n{"user": "shop", "host": "%", "locked": 0, "global": "select,insert,update,delete,create,drop,alter,index,createRoutine,event,grant,super,createUser", "db": null, "definers": 0}`;
+    const { agent } = engineAgent(node.id, rows, (c) => {
+      if (c.stdin.includes("ALTER USER IF EXISTS 'root'@'%'")) throw callTimedOut(node.id, "exec");
+      return {};
+    });
+    const res = await callOp(
+      panel,
+      dbOps.renameUser,
+      { serviceId, user: { name: "shop", host: "%" }, name: "boss", password: "BossPassword123" },
+      { cookie },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toContain("did not answer while Seylo gave root the new password too");
+    expect(storedAdmin(serviceId)).toBe("boss");
+    expect(await storedPassword(serviceId)).toBe("BossPassword123");
+    agent.disconnect();
+  });
+
+  test("a main password change without an answer is stored only when the new password signs in", async () => {
+    const { node, serviceId } = await createDb("mongo");
+    let works = 10;
+    const { agent } = engineAgent(
+      node.id,
+      () => mongoRows(),
+      (c) => {
+        if (c.stdin.includes("changeUserPassword")) throw callTimedOut(node.id, "exec");
+        return isProof(c) && c.stdin.includes('"NewPassword0001"') ? { exitCode: works } : {};
+      },
+    );
+    const lost = await callOp(panel, dbOps.resetPassword, { serviceId, user: "internal", password: "NewPassword0001" }, { cookie });
+    expect(lost.status).toBe(503);
+    expect(lost.body.error.details.reason).toBe("noAnswer");
+    expect(await storedPassword(serviceId)).toBe("StoredPassword01");
+    works = 0;
+    const res = await callOp(panel, dbOps.resetPassword, { serviceId, user: "internal", password: "NewPassword0001" }, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toContain("did not answer the password change, but root signs in with the new password");
+    expect(await storedPassword(serviceId)).toBe("NewPassword0001");
+    agent.disconnect();
+  });
+
+  test("a stopped ClickHouse keeps its password and name and stays stopped: no deploy starts it", async () => {
+    const { serviceId } = await createDb("clickhouse", { user: "ch_admin" });
+    panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, serviceId)).run();
+    const list = await callOp(panel, dbOps.users, { serviceId }, { cookie });
+    expect(list.body).toMatchObject({ signIn: "offline", users: [{ name: "ch_admin", can: { passwordChange: false, rename: false } }] });
+    expect(list.body.message).toContain("stopped");
+    const reset = await callOp(panel, dbOps.resetPassword, { serviceId, user: "internal", password: "FreshPassword123" }, { cookie });
+    expect(reset.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "notRunning" } });
+    const rename = await callOp(panel, dbOps.renameUser, { serviceId, user: { name: "ch_admin" }, name: "boss" }, { cookie });
+    expect(rename.body.error.details.reason).toBe("notRunning");
+    expect(queued(serviceId)).toHaveLength(0);
+    expect(await storedPassword(serviceId)).toBe("StoredPassword01");
+    expect(storedAdmin(serviceId)).toBe("ch_admin");
+    expect(panel.deps.db.select({ stopped: services.stopped }).from(services).where(eq(services.id, serviceId)).get()?.stopped).toBe(true);
+  });
+});
+
 describe("deleting users", () => {
+  test("a Postgres delete that fails part way says the user may no longer sign in and its objects may have moved", async () => {
+    const { node, serviceId } = await createDb("postgres");
+    const { agent } = engineAgent(
+      node.id,
+      () => pgRows(3),
+      (c) =>
+        c.stdin.includes("DROP ROLE") ? { exitCode: 3, stderr: 'FATAL:  database "shop_db" is not currently accepting connections' } : {},
+    );
+    const res = await callOp(panel, dbOps.deleteUser, { serviceId, user: { name: "app" }, reassignOwned: true }, { cookie });
+    expect(res.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "execFailed" } });
+    expect(res.body.error.message).toContain("did not finish deleting app. It may no longer sign in");
+    expect(res.body.error.message).toContain("some of what it owned may already belong to postgres");
+    expect(res.body.error.message).not.toContain("nothing changed");
+    agent.disconnect();
+  });
+
   test("never the main user or root@localhost; Postgres owners only with reassignOwned, in every database", async () => {
     const { node, serviceId } = await createDb("postgres");
     const { changes, agent } = engineAgent(node.id, () => pgRows(3));

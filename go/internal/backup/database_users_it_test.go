@@ -290,7 +290,26 @@ func runUsersScenario(r *rig, e *itest.Env, sc usersScenario) {
 		// A backup that names writer2 as the owner of w.
 		subject := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: sc.Database}}}
 		before := r.backup(e, subject, "users-owner-"+sc.Engine, 0, false)
+		// writer2 is still signed in: the delete ends its session and waits for it to be gone before
+		// it moves anything, so nothing the session makes lands between REASSIGN and DROP OWNED.
+		session := make(chan int, 1)
+		go func() {
+			_, code := as(v["writer2"], writer2Password, "select pg_sleep(120)")
+			session <- code
+		}()
+		e.Eventually("writer2 signed in", time.Minute, func() bool {
+			out, code := as(v["main"], v["initial"], "select count(*) from pg_stat_activity where usename = 'writer2'")
+			return code == 0 && out == "1"
+		})
 		must("deleteWriter2")
+		select {
+		case code := <-session:
+			if code == 0 {
+				t.Fatal("writer2's session finished as if nothing happened")
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("writer2's session outlived its delete")
+		}
 		refused("a deleted owner", v["writer2"], writer2Password, q.readOwn)
 		works("its table stays", v["main"], v["initial"], q.readOwn, "w")
 		works("and belongs to the main user", v["main"], v["initial"], "select tableowner from pg_tables where tablename = 'w'", v["main"])

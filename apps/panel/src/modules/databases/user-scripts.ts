@@ -542,12 +542,26 @@ export function renameUserExec(
 }
 
 /**
- * A delete. Postgres: in every database that takes connections, what the
- * user owns goes to the main user and DROP OWNED then removes only its
- * grants (no data: nothing is left that it owns); its sessions end; the
- * role goes. MySQL and MariaDB: DROP USER, then its sessions end (when no
- * other account has its name). Accounts own no data there, nor do MongoDB
- * and ClickHouse users.
+ * Waits up to 5 seconds for the sessions of the user in the setting
+ * seylo.target to end (pg_terminate_backend only signals them), else
+ * fails: a session still alive could make a table after the REASSIGN that
+ * DROP OWNED would then drop with its rows. The name comes from the
+ * setting, so nothing of it is inside the dollar quotes.
+ * pg_stat_clear_snapshot makes each look read pg_stat_activity again.
+ */
+const postgresSessionsGone =
+  "DO $$BEGIN FOR i IN 1..100 LOOP PERFORM pg_stat_clear_snapshot(); EXIT WHEN NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = current_setting('seylo.target')); PERFORM pg_sleep(0.05); END LOOP; IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = current_setting('seylo.target')) THEN RAISE EXCEPTION 'sessions of the user did not end'; END IF; END$$;";
+
+/**
+ * A delete. Postgres: the user can no longer sign in and its sessions
+ * end first, so nothing it does lands between the steps that follow;
+ * then in every database that takes connections what it owns goes to the
+ * main user and DROP OWNED removes only its grants (no data: nothing is
+ * left that it owns); the role goes. Outside a transaction (\connect),
+ * so a failure part way leaves it without sign-in and maybe some of what
+ * it owned already moved. MySQL and MariaDB: DROP USER, then its sessions
+ * end (when no other account has its name). Accounts own no data there,
+ * nor do MongoDB and ClickHouse users.
  */
 export function deleteUserExec(
   engine: SqlEngine,
@@ -566,8 +580,11 @@ export function deleteUserExec(
       return postgresExec(
         admin,
         [
-          ...each,
+          `ALTER ROLE ${n} NOLOGIN;`,
+          `SET seylo.target = ${pgLiteral(target.name)};`,
           `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = ${pgLiteral(target.name)};`,
+          postgresSessionsGone,
+          ...each,
           `DROP ROLE ${n};`,
         ].join("\n"),
         false,
@@ -589,13 +606,15 @@ export function deleteUserExec(
 
 /**
  * The first step of a switch of the main user: a new user with full
- * rights, or an existing one with a new password (and full rights with
- * grantAdmin). The proof (proofExec) and root's password (MySQL) follow.
+ * rights, or an existing one with a new password and nothing else. The
+ * proof (proofExec) follows, then for an existing user without full
+ * rights grantAdminExec (so a failed proof leaves no rights behind), then
+ * root's password (MySQL).
  */
 export function switchPrepareExec(
   engine: "postgres" | "mysql" | "mariadb" | "mongo",
   admin: Admin,
-  to: { name: string; password: string; existing: boolean; grantAdmin: boolean },
+  to: { name: string; password: string; existing: boolean },
   options: ScriptOptions = {},
 ): Exec {
   switch (engine) {
@@ -603,26 +622,41 @@ export function switchPrepareExec(
       const n = pgIdent(to.name);
       const verifier = pgLiteral(scramVerifier(to.password, options.salt));
       const sql = to.existing
-        ? [`ALTER ROLE ${n} LOGIN PASSWORD ${verifier};`, ...(to.grantAdmin ? [`ALTER ROLE ${n} SUPERUSER CREATEDB CREATEROLE;`] : [])]
-        : [`CREATE ROLE ${n} LOGIN SUPERUSER CREATEDB CREATEROLE PASSWORD ${verifier};`];
-      return postgresExec(admin, sql.join("\n"), true);
+        ? `ALTER ROLE ${n} LOGIN PASSWORD ${verifier};`
+        : `CREATE ROLE ${n} LOGIN SUPERUSER CREATEDB CREATEROLE PASSWORD ${verifier};`;
+      return postgresExec(admin, sql, true);
     }
     case "mysql":
     case "mariadb": {
       const account = mysqlAccount(to.name, "%");
       const sql = to.existing
         ? [`ALTER USER ${account} IDENTIFIED BY ${mysqlString(to.password)};`]
-        : [`CREATE USER ${account} IDENTIFIED BY ${mysqlString(to.password)};`];
-      if (!to.existing || to.grantAdmin) sql.push(...mysqlGrants(account, "serverAdmin", admin.database));
+        : [`CREATE USER ${account} IDENTIFIED BY ${mysqlString(to.password)};`, ...mysqlGrants(account, "serverAdmin", admin.database)];
       return mysqlRootExec(engine, admin, sql.join(" "));
     }
     case "mongo": {
       const roles = JSON.stringify(mongoRoles("serverAdmin", admin.database));
       const body = to.existing
-        ? `admin.changeUserPassword(${js(to.name)}, ${js(to.password)});${to.grantAdmin ? ` admin.grantRolesToUser(${js(to.name)}, ${roles});` : ""} print("ready");`
+        ? `admin.changeUserPassword(${js(to.name)}, ${js(to.password)}); print("ready");`
         : `admin.createUser({ user: ${js(to.name)}, pwd: ${js(to.password)}, roles: ${roles} }); print("ready");`;
       return mongoExec(admin, body);
     }
+  }
+}
+
+/** Full rights for an existing user that becomes the main one (switchMainUser grantAdmin), once it proved it signs in. */
+export function grantAdminExec(engine: "postgres" | "mysql" | "mariadb" | "mongo", admin: Admin, name: string): Exec {
+  switch (engine) {
+    case "postgres":
+      return postgresExec(admin, postgresGrants(name, "serverAdmin", admin.database).join("\n"), true);
+    case "mysql":
+    case "mariadb":
+      return mysqlRootExec(engine, admin, mysqlGrants(mysqlAccount(name, "%"), "serverAdmin", admin.database).join(" "));
+    case "mongo":
+      return mongoExec(
+        admin,
+        `admin.grantRolesToUser(${js(name)}, ${JSON.stringify(mongoRoles("serverAdmin", admin.database))}); print("granted");`,
+      );
   }
 }
 

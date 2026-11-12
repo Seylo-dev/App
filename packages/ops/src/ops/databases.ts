@@ -422,7 +422,7 @@ export const resetPassword = defineOp({
   kind: "destructive",
   summary: "Reset a database password",
   description:
-    "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them. MySQL and MariaDB give root the same password as the admin, also an admin other than root (MYSQL_ROOT_PASSWORD, MARIADB_ROOT_PASSWORD); warning says when root kept an older password because it could not sign in to change it.",
+    "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them (Redis, Valkey and KeyDB too, which would start with the old one again); a stopped database is refused (notRunning). MySQL and MariaDB give root the same password as the admin, also an admin other than root (MYSQL_ROOT_PASSWORD, MARIADB_ROOT_PASSWORD); warning says when root kept an older password because it could not sign in to change it.",
   input: Type.Object({
     serviceId: Id,
     /** Both mean the database's one user; "exposed" is kept for older callers. */
@@ -602,7 +602,7 @@ export const setUserPassword = defineOp({
   kind: "destructive",
   summary: "Set a database user's password",
   description:
-    "Sets a new password for one user of the database (generated when left out). Anything signed in with the old password stops connecting. For the main user it is databases.resetPassword: Seylo stores it, the services that reference it get it on their next deploy (affectedServiceIds), and ClickHouse, Dragonfly, Redis, Valkey and KeyDB restart with it (deploymentId). known: true only stores a main user's password that already works (when the stored one stopped signing in), after a sign-in test, without changing the database.",
+    "Sets a new password for one user of the database (generated when left out). Anything signed in with the old password stops connecting. For the main user it is databases.resetPassword: Seylo stores it, the services that reference it get it on their next deploy (affectedServiceIds), and ClickHouse, Dragonfly, Redis, Valkey and KeyDB restart with it (deploymentId); a stopped database is refused (notRunning), since that deploy would start it. known: true only stores a main user's password that already works (when the stored one stopped signing in), after a sign-in test, without changing the database.",
   input: Type.Object({
     serviceId: Id,
     user: DatabaseUserRef,
@@ -621,7 +621,7 @@ export const renameUser = defineOp({
   kind: "destructive",
   summary: "Rename a database user",
   description:
-    "Gives a user a new name (MySQL and MariaDB: and host). Clients signed in with the old name stop connecting. Postgres keeps ownership and grants; an md5 password is cleared by Postgres, so it needs password. MySQL and MariaDB refuse while views, routines, triggers or events run as the user (definerObjects), unless acceptOrphanDefiners. MongoDB has no rename: a new user with the same roles and the given password replaces the old one. The main user: Postgres renames it in place and restarts the database (deploy: false leaves that for later, with failed sign-ins in its log until then), MySQL and MariaDB rename an admin other than root in place, ClickHouse restarts with the new name; MySQL's root and MongoDB refuse with useSwitchMainUser (databases.switchMainUser). Seylo stores the new name: services that reference the database get it on their next deploy (affectedServiceIds).",
+    "Gives a user a new name (MySQL and MariaDB: and host). Clients signed in with the old name stop connecting. Postgres keeps ownership and grants; an md5 password is cleared by Postgres, so it needs password. MySQL and MariaDB refuse while views, routines, triggers or events run as the user (definerObjects), unless acceptOrphanDefiners. MongoDB has no rename: a new user with the same roles and the given password replaces the old one. The main user: Postgres renames it in place and restarts the database (deploy: false leaves that for later, with failed sign-ins in its log until then), MySQL and MariaDB rename an admin other than root in place, ClickHouse restarts with the new name (not while it is stopped: notRunning); MySQL's root and MongoDB refuse with useSwitchMainUser (databases.switchMainUser). Seylo stores the new name: services that reference the database get it on their next deploy (affectedServiceIds).",
   input: Type.Object({
     serviceId: Id,
     user: DatabaseUserRef,
@@ -673,7 +673,7 @@ export const switchMainUser = defineOp({
   kind: "destructive",
   summary: "Use another user as a database's main user",
   description:
-    "Makes another user the one Seylo signs in with (the shell, the web UI, backups, the env references and the URLs): a new one with full rights, or an existing one (existing: true), which gets a new password since Seylo does not know its own, and full rights with grantAdmin when it lacks them (else notAdmin). Seylo signs in as it before storing anything; a new user is removed again when that fails. oldUser keep (default) leaves the old main user as it is; delete removes it (MySQL and MariaDB root: only root@%, root@localhost stays for the image). MySQL and MariaDB give root the new main user's password, as they always have the main user's. Services that reference the database get the new name and password on their next deploy (affectedServiceIds). Not on ClickHouse, Redis, Valkey, KeyDB or Dragonfly (notOffered).",
+    "Makes another user the one Seylo signs in with (the shell, the web UI, backups, the env references and the URLs): a new one with full rights, or an existing one (existing: true), which gets a new password since Seylo does not know its own, and full rights with grantAdmin when it lacks them (else notAdmin); a locked one is refused (locked). Seylo signs in as it before storing anything or giving it rights; a new user is removed again when that fails, and an existing one keeps the new password, which the error says. oldUser keep (default) leaves the old main user as it is; delete removes it (MySQL and MariaDB root: only root@%, root@localhost stays for the image), which MySQL and MariaDB refuse while views, routines, triggers or events run as it (definerObjects) unless acceptOrphanDefiners. MySQL and MariaDB give root the new main user's password, as they always have the main user's. Services that reference the database get the new name and password on their next deploy (affectedServiceIds). Not on ClickHouse, Redis, Valkey, KeyDB or Dragonfly (notOffered).",
   input: Type.Object({
     serviceId: Id,
     name: Identifier,
@@ -681,6 +681,8 @@ export const switchMainUser = defineOp({
     password: Type.Optional(UserPassword),
     grantAdmin: Type.Optional(Type.Boolean()),
     oldUser: Type.Optional(Type.Union([Type.Literal("keep"), Type.Literal("delete")])),
+    /** MySQL and MariaDB with oldUser delete: remove it although objects run as it (DEFINER). */
+    acceptOrphanDefiners: Type.Optional(Type.Boolean()),
   }),
   output: Type.Object({ user: Type.String(), password: Type.String(), ...UserChangeOutput }),
   sensitive: { input: ["password"], output: ["password"] },

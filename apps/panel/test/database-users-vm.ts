@@ -189,7 +189,7 @@ export function vmScenario(engine: VmEngine): VmScenario {
     steps.push(
       step(
         "switchPrepare",
-        switchPrepareExec(engine, after, { name: v.newMain, password: v.newMainPassword, existing: false, grantAdmin: false }, options),
+        switchPrepareExec(engine, after, { name: v.newMain, password: v.newMainPassword, existing: false }, options),
       ),
     );
     steps.push(step("switchProof", proofExec(engine, boss)));

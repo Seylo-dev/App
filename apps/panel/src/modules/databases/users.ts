@@ -28,6 +28,7 @@ import {
   deleteUserExec,
   type EngineUser,
   type Exec,
+  grantAdminExec,
   isSqlEngine,
   type Listing,
   listExec,
@@ -103,7 +104,12 @@ interface ExecResult {
   code: number;
   stdout: string;
   stderr: string;
+  /** runExecOrLost: no answer came back (the node went away, the panel's timeout); the database may have run it anyway. */
+  lost?: boolean;
 }
+
+/** runExecOrLost's code for a call without an answer. */
+const lostCode = -1;
 
 async function runExec(ctx: OpContext, info: DatabaseInfo, exec: Exec): Promise<ExecResult> {
   if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
@@ -115,6 +121,25 @@ async function runExec(ctx: OpContext, info: DatabaseInfo, exec: Exec): Promise<
   );
   return { code: result.exitCode, stdout: new TextDecoder().decode(result.stdout), stderr: new TextDecoder().decode(result.stderr) };
 }
+
+/**
+ * runExec for the steps of a main user change, where what Seylo stores
+ * must follow what the database did: a call that fails (the node went
+ * away, the 75 s timeout) comes back as lostCode instead of throwing, so
+ * the handler can find out whether it ran and clean up. Only the error's
+ * code is logged.
+ */
+async function runExecOrLost(ctx: OpContext, info: DatabaseInfo, exec: Exec): Promise<ExecResult> {
+  try {
+    return await runExec(ctx, info, exec);
+  } catch (error) {
+    ctx.logger.warn({ serviceId: info.service.id, code: error instanceof OpError ? error.code : "unknown" }, "database step got no answer");
+    return { code: lostCode, stdout: "", stderr: "", lost: true };
+  }
+}
+
+/** Who did not answer, for the message of a lost step. */
+const away = (info: DatabaseInfo) => info.node?.name ?? "The node";
 
 /** The engine's last line of output, without secrets, for the message of a failure. */
 function said(info: DatabaseInfo, result: ExecResult, secrets: readonly string[]): string {
@@ -163,6 +188,17 @@ function notReady(ctx: OpContext, info: DatabaseInfo, deploys = true): { reason:
       message: "A deploy of this database is running. Wait for it to finish, then change its users.",
     };
   return null;
+}
+
+/**
+ * The main user's password or name of a stopped database. Engines that
+ * change it in the running database cannot; those that take it from
+ * their environment would need a deploy, which starts the database, and
+ * storing it alone would not do: services.start brings the container
+ * back with the environment of its last deploy, the old password.
+ */
+function stoppedRefusal(what: "password" | "name"): OpError {
+  return new OpError("CONFLICT", `The database is stopped. Start it, then change the main user's ${what}.`, { reason: "notRunning" });
 }
 
 function assertReady(ctx: OpContext, info: DatabaseInfo, deploys = true): void {
@@ -250,6 +286,7 @@ const isMainRef = (info: DatabaseInfo, ref: UserRef) =>
 
 const mainWhy = "Seylo signs in with this one. Make another user the main one first.";
 const shellWhy = "Its name has characters Seylo does not act on. Manage this one from the shell.";
+const lockedWhy = "It cannot sign in now (a locked account or an expired password), so it cannot be the main user.";
 
 /** A listed user with what the tab may do with it. */
 function decorate(info: DatabaseInfo, u: EngineUser, all: readonly EngineUser[], rootOutOfStep: boolean): DatabaseUser {
@@ -296,6 +333,11 @@ function decorate(info: DatabaseInfo, u: EngineUser, all: readonly EngineUser[],
     }
   }
   if (engine === "clickhouse" && !main) can.makeMain = false;
+  // The switch gives it a new password and signs in as it: a locked account or an expired Postgres role never would.
+  if (u.locked && can.makeMain) {
+    can.makeMain = false;
+    why ??= lockedWhy;
+  }
   return {
     name: u.name,
     host: u.host,
@@ -315,8 +357,8 @@ function decorate(info: DatabaseInfo, u: EngineUser, all: readonly EngineUser[],
 
 /** The main user from what Seylo stores, while the engine cannot be asked. */
 function storedMainUser(info: DatabaseInfo, reason: string, features: ReturnType<typeof engineFeatures>): DatabaseUser {
-  // Restart-type changes need no running database: the new env is the change.
-  const restart = info.engine.passwordChange === "restart";
+  // Restart-type changes need no running database, the new env is the change, but not while it is stopped (stoppedRefusal).
+  const restart = info.engine.passwordChange === "restart" && !info.service.stopped;
   return {
     name: info.admin.user,
     host: isMysql(info) ? "%" : null,
@@ -464,6 +506,7 @@ export interface MainPasswordResult {
 export async function changeMainPassword(ctx: OpContext, info: DatabaseInfo, password: string): Promise<MainPasswordResult> {
   const engine = info.row.engine;
   const restarts = info.engine.passwordChange === "restart" || info.engine.redisLike;
+  if (info.service.stopped) throw stoppedRefusal("password");
   if (restarts) assertMayDeploy(ctx, info, "A new password");
   return withUserLock(info.service.id, async () => {
     let warning: string | null = null;
@@ -474,8 +517,21 @@ export async function changeMainPassword(ctx: OpContext, info: DatabaseInfo, pas
     if (exec) {
       if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
       // Change it inside the running database first; only store it once that worked.
-      const result = await runExec(ctx, info, exec);
-      if (result.code !== 0) {
+      const result = await runExecOrLost(ctx, info, exec);
+      if (result.lost) {
+        // It may have changed without the answer; then only the new password signs in, and Seylo must store it.
+        const proof =
+          engine === "postgres" || engine === "mongo" || engine === "mysql" || engine === "mariadb"
+            ? await runExecOrLost(ctx, info, proofExec(engine, { ...admin(info), password }))
+            : null;
+        if (proof?.code !== 0)
+          throw new OpError(
+            "UNAVAILABLE",
+            `${away(info)} did not answer the password change, and Seylo could not sign in with the new password, so it keeps the old one.${info.engine.redisLike ? ` If ${info.engine.label} stops taking it, restart the database: it starts with the stored one.` : " Change it again once the node answers."}`,
+            { reason: "noAnswer" },
+          );
+        warning = `${away(info)} did not answer the password change, but ${info.admin.user} signs in with the new password, so Seylo stored it.${isMysql(info) ? ` If the Users tab says root kept an older password, change it again.` : ""}`;
+      } else if (result.code !== 0) {
         ctx.logger.warn({ serviceId: info.service.id, exitCode: result.code }, "database password change failed");
         if (result.code === signInFailedCode)
           throw new OpError("CONFLICT", `${signInFailedMessage(info)} Nothing changed.`, { reason: "signInFailed" });
@@ -752,6 +808,7 @@ async function renameMainUser(ctx: OpContext, info: DatabaseInfo, input: Static<
       field: "host",
     });
   const restarts = mode === "restart" || (engine === "postgres" && input.deploy !== false);
+  if (info.service.stopped) throw stoppedRefusal("name");
   if (restarts) assertMayDeploy(ctx, info, "A new name");
   if (mode === "restart") {
     // ClickHouse: the new name must not be one of its SQL users. A database that is not running is checked on its next start.
@@ -781,19 +838,46 @@ async function renameMainUser(ctx: OpContext, info: DatabaseInfo, input: Static<
         field: "password",
       });
     const exec = renameUserExec(engine, admin(info), target(found), { name: input.name, host: "%", password });
-    const result = await runExec(ctx, info, exec);
-    mustSucceed(ctx, info, result, "rename the user", [password ?? "", info.admin.password]);
-    let warning: string | null = null;
-    if (password && isMysql(info)) {
-      // Root has the main user's password.
-      const roots = await runExec(ctx, info, mysqlAfterSwitchExec(engine as "mysql" | "mariadb", admin(info), password, null));
-      if (roots.code !== 0) warning = rootUnchangedWarning({ ...info, admin: { ...info.admin, user: input.name } });
+    const result = await runExecOrLost(ctx, info, exec);
+    if (result.lost) {
+      // Renamed without the answer (after Postgres's COMMIT), Seylo would keep signing in as a name the database
+      // no longer has, which nothing on the Users tab could undo. Signing in as the new name tells.
+      const proof = await runExecOrLost(
+        ctx,
+        info,
+        proofExec(engine === "postgres" ? "postgres" : engine === "mariadb" ? "mariadb" : "mysql", {
+          user: input.name,
+          password: password ?? info.admin.password,
+          database: info.admin.database,
+        }),
+      );
+      if (proof.code !== 0)
+        throw new OpError(
+          "UNAVAILABLE",
+          `${away(info)} did not answer the rename, and Seylo could not sign in as ${input.name}, so ${info.admin.user} is still the main user. Open the Users tab again once the node answers: it lists the name the database has.`,
+          { reason: "noAnswer" },
+        );
+    } else {
+      mustSucceed(ctx, info, result, "rename the user", [password ?? "", info.admin.password]);
     }
     const note =
       engine === "postgres"
         ? `Database user change: the main user is now ${input.name}; the database restarts so its environment has the new name.`
         : "";
-    return { ...storeMainUser(ctx, info, input.name, password, restarts, note), warning };
+    // Stored as soon as the database has it, before anything else can fail.
+    const stored = storeMainUser(ctx, info, input.name, password, restarts, note);
+    const warnings: string[] = [];
+    if (result.lost) warnings.push(`${away(info)} did not answer the rename, but ${input.name} signs in, so Seylo stored the new name.`);
+    if (password && isMysql(info)) {
+      // Root has the main user's password.
+      const roots = await runExecOrLost(ctx, info, mysqlAfterSwitchExec(engine as "mysql" | "mariadb", admin(info), password, null));
+      if (roots.lost)
+        warnings.push(
+          `${away(info)} did not answer while Seylo gave root the new password too. Set ${input.name}'s password again on the Users tab: that gives root the same one.`,
+        );
+      else if (roots.code !== 0) warnings.push(rootUnchangedWarning({ ...info, admin: { ...info.admin, user: input.name } }));
+    }
+    return { ...stored, warning: warnings.join(" ") || null };
   });
 }
 
@@ -840,6 +924,15 @@ export const deleteUser = implement(dbOps.deleteUser, async (input, ctx) => {
     const others = listing.users.filter((u) => u.name === found.name && u.host !== found.host).length;
     const exec = deleteUserExec(engine, admin(info), target(found), { databases: listing.databases, killSessions: others === 0 });
     const result = await runExec(ctx, info, exec);
+    if (engine === "postgres" && result.code !== 0 && result.code !== signInFailedCode) {
+      // Not one transaction (it visits every database): the first steps may have run.
+      ctx.logger.warn({ serviceId: info.service.id, exitCode: result.code }, "database delete the user failed");
+      throw new OpError(
+        "CONFLICT",
+        `The database did not finish deleting ${found.name}. It may no longer sign in (Seylo turns that off first)${owns > 0 ? `, and some of what it owned may already belong to ${info.admin.user}` : ""}. Delete it again, or finish in the shell.${said(info, result, [info.admin.password])}`,
+        { reason: "execFailed", exitCode: String(result.code) },
+      );
+    }
     mustSucceed(ctx, info, result, "delete the user", [info.admin.password]);
     invalidateService(ctx, info.service.id, [dbOps.users.id]);
     return { deleted: true as const, reassignedObjects: engine === "postgres" ? owns : 0 };
@@ -849,10 +942,15 @@ export const deleteUser = implement(dbOps.deleteUser, async (input, ctx) => {
 /**
  * Another user as the main one: made (with full rights) or given a new
  * password (Seylo does not know the old one), proved by signing in as it,
- * then stored. A user made here is removed again when the proof fails.
- * MySQL and MariaDB then give root the new password (root always has the
- * main user's) and drop the old main user when asked (root: root@% only).
- * Postgres and MongoDB drop the old one signed in as the new.
+ * given full rights when it lacks them (after the proof, so a failed one
+ * leaves none behind), then stored. A user made here is removed again
+ * when a step fails; an existing one keeps its new password, which the
+ * error says. A locked one is refused first. MySQL and MariaDB then give
+ * root the new password (root always has the main user's) and drop the
+ * old main user when asked (root: root@% only), refused like a delete
+ * while objects run as it (DEFINER); Postgres and MongoDB drop the old
+ * one signed in as the new. A step after the store that fails or gets no
+ * answer is a warning: the new main user signs in either way.
  */
 export const switchMainUser = implement(dbOps.switchMainUser, async (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
@@ -872,14 +970,22 @@ export const switchMainUser = implement(dbOps.switchMainUser, async (input, ctx)
     const listing = await inspect(ctx, info);
     const oldMain = listing.users.find((u) => isMainUser(info, u)) ?? null;
     const ref = refOf(info, { name: input.name, host: "%", authDatabase: "admin" });
-    if (input.existing) {
+    const existing = input.existing === true;
+    let grant = false;
+    if (existing) {
       const found = findUser(info, listing, ref);
+      const user = decorate(info, found, listing.users, false);
+      if (!user.can.makeMain)
+        throw new OpError("CONFLICT", `${user.why ?? `${describe(info, found)} cannot be the main user.`} Nothing changed.`, {
+          reason: found.locked ? "locked" : "systemUser",
+        });
       if (!found.fullRights && !input.grantAdmin)
         throw new OpError(
           "CONFLICT",
           `${describe(info, found)} does not have full rights, which the main user needs for backups, the web UI and the Users tab. Give it full rights with the switch (grantAdmin), or pick another user.`,
           { reason: "notAdmin" },
         );
+      grant = !found.fullRights;
     } else {
       assertFree(info, listing, ref);
     }
@@ -888,45 +994,91 @@ export const switchMainUser = implement(dbOps.switchMainUser, async (input, ctx)
       throw new OpError("BAD_REQUEST", `${info.admin.user} is the database's first user, which Postgres never lets go. Keep it.`, {
         field: "oldUser",
       });
+    // Removing the old main user is a delete: what runs as it (DEFINER) stops working.
+    if (drop && oldMain) assertDefiners(info, oldMain, input.acceptOrphanDefiners);
     const password = input.password ?? generatePassword();
     const secrets = [password, info.admin.password];
-    const to = { name: input.name, password, existing: input.existing === true, grantAdmin: input.grantAdmin === true };
-    mustSucceed(ctx, info, await runExec(ctx, info, switchPrepareExec(engine, admin(info), to)), "set up the user", secrets);
     const next: Admin = { user: input.name, password, database: info.admin.database };
-    const proof = await runExec(ctx, info, proofExec(engine, next));
+    const name = describe(info, ref);
+    const still = `${info.admin.user} is still the main user`;
+    const changed = (sure: boolean) =>
+      sure
+        ? ` ${input.name}'s password changed for the switch, so anything signed in as it with the old one no longer connects: give it a new password on the Users tab.`
+        : ` ${input.name}'s password may have changed for the switch: if anything signed in as it stops connecting, give it a new password on the Users tab.`;
+    /** A user made for the switch goes again; what to say about it. */
+    const removeMade = async (): Promise<string> => {
+      const made = { name: input.name, host: "%", authDatabase: "admin" };
+      const gone = await runExecOrLost(ctx, info, deleteUserExec(engine, admin(info), made, { databases: listing.databases }));
+      return gone.code === 0
+        ? ` The ${input.name} it made for the switch is removed again.`
+        : ` Seylo made ${name} for the switch and could not remove it again: delete it on the Users tab if it is listed.`;
+    };
+    /** A step that failed (refused: "refused to ...") or got no answer while Seylo was doing it. */
+    const failed = (result: ExecResult, doing: string, refused: string, note: string): OpError => {
+      ctx.logger.warn({ serviceId: info.service.id, exitCode: result.code }, "database switch of the main user failed");
+      return result.lost
+        ? new OpError("UNAVAILABLE", `${away(info)} did not answer while Seylo ${doing}, so ${still}.${note}`, { reason: "noAnswer" })
+        : new OpError("CONFLICT", `The database ${refused}, so ${still}.${said(info, result, secrets)}${note}`, {
+            reason: result.code === signInFailedCode ? "signInFailed" : "execFailed",
+            exitCode: String(result.code),
+          });
+    };
+
+    // 1. Made, or a new password. One statement or one transaction, except MySQL's CREATE USER and its GRANT.
+    const prepared = await runExecOrLost(ctx, info, switchPrepareExec(engine, admin(info), { name: input.name, password, existing }));
+    if (prepared.code !== 0) {
+      const partial = prepared.lost || (!existing && isMysql(info) && prepared.code !== signInFailedCode);
+      if (!partial) mustSucceed(ctx, info, prepared, "set up the user", secrets);
+      throw failed(prepared, `set up ${name}`, `refused to set up ${name}`, existing ? changed(false) : await removeMade());
+    }
+    // 2. Signed in as it the way Seylo's tools do, before anything is stored.
+    const proof = await runExecOrLost(ctx, info, proofExec(engine, next));
     if (proof.code !== 0) {
-      ctx.logger.warn({ serviceId: info.service.id, exitCode: proof.code }, "database new main user sign-in failed");
-      // A user made for the switch goes again; an existing one keeps its new password, which nothing uses yet.
-      if (!to.existing) {
-        const made = { name: input.name, host: "%", authDatabase: "admin" };
-        await runExec(ctx, info, deleteUserExec(engine, admin(info), made, { databases: listing.databases })).catch(() => null);
+      const note = existing ? changed(true) : await removeMade();
+      if (!proof.lost) {
+        ctx.logger.warn({ serviceId: info.service.id, exitCode: proof.code }, "database new main user sign-in failed");
+        throw new OpError(
+          "CONFLICT",
+          `Seylo could not sign in as ${name} the way its tools do, so ${still}.${said(info, proof, secrets)}${note}`,
+          { reason: "signInFailed" },
+        );
       }
-      throw new OpError(
-        "CONFLICT",
-        `Seylo could not sign in as ${input.name} the way its tools do, so it stays as it was and ${info.admin.user} is still the main user.${said(info, proof, secrets)}`,
-        { reason: "signInFailed" },
-      );
+      throw failed(proof, `signed in as ${name}`, `refused ${name}`, note);
     }
-    let warning: string | null = null;
-    if (engine === "mysql" || engine === "mariadb") {
-      const old = drop ? { name: info.admin.user, host: "%" } : null;
-      const after = await runExec(ctx, info, mysqlAfterSwitchExec(engine, admin(info), password, old));
-      if (after.code !== 0) {
-        ctx.logger.warn({ serviceId: info.service.id, exitCode: after.code }, "database root password left out of step");
-        warning = `${input.name} is the main user now, but root kept its older password, which Seylo signs in with for its own steps until the next deploy. Set ${input.name}'s password again on the Users tab: that gives root the same one.${drop ? ` ${describe(info, { name: info.admin.user, host: "%" })} was not removed.` : ""}`;
-      }
+    // 3. Full rights for an existing user without them.
+    if (grant) {
+      const granted = await runExecOrLost(ctx, info, grantAdminExec(engine, admin(info), input.name));
+      if (granted.code !== 0)
+        throw failed(
+          granted,
+          `gave ${name} full rights`,
+          `refused to give ${name} full rights`,
+          `${changed(true)}${granted.lost ? " It may have full rights now." : ""}`,
+        );
     }
+    // 4. Stored, before anything else can fail: the new main user signs in.
     ctx.db.transaction((tx) => {
       tx.update(serviceDatabases).set({ adminUser: input.name }).where(eq(serviceDatabases.serviceId, info.service.id)).run();
       writeSecret(tx, ctx.secrets, info.service.id, adminPasswordSecret, password);
     });
     afterChange(ctx, info);
+    // 5. Root's password (MySQL and MariaDB) and the old main user.
+    let warning: string | null = null;
+    const oldAccount = describe(info, { name: info.admin.user, host: "%" });
+    if (engine === "mysql" || engine === "mariadb") {
+      const old = drop ? { name: info.admin.user, host: "%" } : null;
+      const after = await runExecOrLost(ctx, info, mysqlAfterSwitchExec(engine, admin(info), password, old));
+      if (after.lost) {
+        warning = `${input.name} is the main user now, but ${away(info)} did not answer while Seylo gave root the same password${drop ? ` and removed ${oldAccount}` : ""}. Set ${input.name}'s password again on the Users tab: that gives root the same one.${drop ? ` Delete ${oldAccount} there if it is still listed.` : ""}`;
+      } else if (after.code !== 0) {
+        ctx.logger.warn({ serviceId: info.service.id, exitCode: after.code }, "database root password left out of step");
+        warning = `${input.name} is the main user now, but root kept its older password, which Seylo signs in with for its own steps until the next deploy. Set ${input.name}'s password again on the Users tab: that gives root the same one.${drop ? ` ${oldAccount} was not removed.` : ""}`;
+      }
+    }
     if (drop && oldMain && (engine === "postgres" || engine === "mongo")) {
-      const gone = await runExec(ctx, info, deleteUserExec(engine, next, target(oldMain), { databases: listing.databases })).catch(
-        () => null,
-      );
-      if (gone?.code !== 0) {
-        ctx.logger.warn({ serviceId: info.service.id, exitCode: gone?.code ?? -1 }, "database old main user not removed");
+      const gone = await runExecOrLost(ctx, info, deleteUserExec(engine, next, target(oldMain), { databases: listing.databases }));
+      if (gone.code !== 0) {
+        ctx.logger.warn({ serviceId: info.service.id, exitCode: gone.code }, "database old main user not removed");
         warning = `${input.name} is the main user now, but ${info.admin.user} could not be removed. Delete it on the Users tab.`;
       }
     }

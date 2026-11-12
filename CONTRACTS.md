@@ -4194,7 +4194,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   kept the old one), and Redis, Valkey and KeyDB changed theirs with
   `CONFIG SET` only, which a restart undid: these now queue a deploy
   (`deploymentId` in the output; services.deploy, else FORBIDDEN before
-  anything changes).
+  anything changes). A stopped database is refused (`notRunning`): that
+  deploy would start it, and storing the password alone would not do,
+  since `services.start` brings the container back with the sealed env
+  of its last deploy (the old password).
 - Database users (`modules/databases/users.ts`, `user-scripts.ts`,
   0.2.12): the Users tab. Seylo keeps no table of users: `databases.users`
   reads them from the running engine through `Exec` (no agent change)
@@ -4243,27 +4246,47 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   password, then the old one goes; its main user and MySQL's root
   refuse with `useSwitchMainUser`. ClickHouse SQL users `ALTER USER
   RENAME`; its main user is stored and the database restarts (refused
-  when a SQL user has the name). Deletes keep the data: Postgres refuses
+  when a SQL user has the name, or while it is stopped). Deletes keep the data: Postgres refuses
   an owner (`ownsObjects`, details.count) unless `reassignOwned`, then in
   every database that takes connections `REASSIGN OWNED BY` to the main
-  user and `DROP OWNED BY` (grants only by then), ends its sessions and
-  drops the role; never the main user (`mainUser`), Postgres's bootstrap
-  role or MySQL's root@localhost (`systemUser`), MongoDB's last user with
-  root (`lastAdmin`). `databases.switchMainUser` (Postgres, MySQL,
-  MariaDB, MongoDB): a new user with full rights or an existing one with a
-  new password (`grantAdmin` when it lacks them, else `notAdmin`), proved
-  by signing in as it the way the tools do (`proofExec`: Postgres over the
+  user and `DROP OWNED BY` (grants only by then), and drops the role.
+  Before the first REASSIGN the role gets `NOLOGIN`, its sessions are
+  ended and a `DO` block waits up to 5 s for them to be gone
+  (`pg_stat_clear_snapshot` each look, the name through the setting
+  `seylo.target`, never inside the dollar quotes), else the script
+  fails: a session still alive could make a table between REASSIGN and
+  DROP OWNED, which DROP OWNED would drop with its rows. The script is
+  not one transaction (`\connect`), so a failure says the user may no
+  longer sign in and what it owned may already have moved (VM-tested
+  with a live session of the user). Never the main user (`mainUser`),
+  Postgres's bootstrap role or MySQL's root@localhost (`systemUser`),
+  MongoDB's last user with root (`lastAdmin`).
+  `databases.switchMainUser` (Postgres, MySQL, MariaDB, MongoDB): a new
+  user with full rights, or an existing one (never a locked one,
+  `locked`; `can.makeMain` false) with a new password, proved by signing
+  in as it the way the tools do (`proofExec`: Postgres over the
   container's own address, where the image checks passwords; MySQL over
-  TCP; MongoDB `auth`) before anything is stored; a user made for it is
-  dropped again when that fails. MySQL and MariaDB then give root the new
-  password (root always has the main user's, `containerEnv`) and drop the
-  old main user with `oldUser: delete` (root: root@% only). Main user
-  changes store `admin_user`/`admin_password` after the engine took them,
-  mark the service dirty (agent tools follow at once) and list
+  TCP; MongoDB `auth`), then given full rights when it lacks them
+  (`grantAdmin`, else `notAdmin`; `grantAdminExec` runs after the proof,
+  so a failed proof leaves no rights behind) before anything is stored;
+  a user made for it is dropped again when a step fails, and an existing
+  one keeps its new password, which the error says. Then the new main
+  user is stored at once; MySQL and MariaDB give root the new password
+  (root always has the main user's, `containerEnv`) and drop the old main
+  user with `oldUser: delete` (root: root@% only), refused like a delete
+  while objects have it as DEFINER unless `acceptOrphanDefiners`. Main
+  user changes store `admin_user`/`admin_password` after the engine took
+  them, mark the service dirty (agent tools follow at once) and list
   `affectedServiceIds` from env references to `USER`, `PASSWORD` and the
-  URLs (`servicesUsing`). Every change refuses while a deploy of the
-  database runs or it is stopped (`deployRunning`, `notRunning`,
-  `noNode`); all six need `databases.credentials`; the four destructive
+  URLs (`servicesUsing`). An Exec of a main user change that gets no
+  answer (the node went away, the 75 s timeout: `runExecOrLost`) is not
+  taken as a failure: a rename or a password change is stored when Seylo
+  signs in with the new name or password (`proofExec`, a warning says
+  so), else `UNAVAILABLE` `noAnswer` with nothing stored; a step after the
+  store (root's password, the old main user) is a warning; a switch step
+  before it removes a user made for it. Every change refuses while a
+  deploy of the database runs or it is stopped (`deployRunning`,
+  `notRunning`, `noNode`); all six need `databases.credentials`; the four destructive
   ones wait for a person's approval for MCP and AI callers; passwords are
   `sensitive` and nothing an engine prints is logged (exit codes only) or
   shown unscrubbed (`scrub`). Postgres restores run `pg_restore

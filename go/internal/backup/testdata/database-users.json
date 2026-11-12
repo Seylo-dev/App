@@ -143,7 +143,7 @@
             "--username=postgres",
             "--dbname=app"
           ],
-          "stdin": "MainPassword000a\n\\connect 'app'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\n\\connect 'postgres'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\n\\connect 'template1'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\nSELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'reader';\nDROP ROLE \"reader\";\n"
+          "stdin": "MainPassword000a\nALTER ROLE \"reader\" NOLOGIN;\nSET seylo.target = 'reader';\nSELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'reader';\nDO $$BEGIN FOR i IN 1..100 LOOP PERFORM pg_stat_clear_snapshot(); EXIT WHEN NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = current_setting('seylo.target')); PERFORM pg_sleep(0.05); END LOOP; IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = current_setting('seylo.target')) THEN RAISE EXCEPTION 'sessions of the user did not end'; END IF; END$$;\n\\connect 'app'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\n\\connect 'postgres'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\n\\connect 'template1'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\nDROP ROLE \"reader\";\n"
         },
         {
           "name": "deleteWriter2",
@@ -155,7 +155,7 @@
             "--username=postgres",
             "--dbname=app"
           ],
-          "stdin": "MainPassword000a\n\\connect 'app'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\n\\connect 'postgres'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\n\\connect 'template1'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\nSELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'writer2';\nDROP ROLE \"writer2\";\n"
+          "stdin": "MainPassword000a\nALTER ROLE \"writer2\" NOLOGIN;\nSET seylo.target = 'writer2';\nSELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'writer2';\nDO $$BEGIN FOR i IN 1..100 LOOP PERFORM pg_stat_clear_snapshot(); EXIT WHEN NOT EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = current_setting('seylo.target')); PERFORM pg_sleep(0.05); END LOOP; IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = current_setting('seylo.target')) THEN RAISE EXCEPTION 'sessions of the user did not end'; END IF; END$$;\n\\connect 'app'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\n\\connect 'postgres'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\n\\connect 'template1'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\nDROP ROLE \"writer2\";\n"
         },
         {
           "name": "list2",

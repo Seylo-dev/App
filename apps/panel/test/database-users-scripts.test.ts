@@ -20,6 +20,7 @@ import {
   createUserExec,
   deleteUserExec,
   type Exec,
+  grantAdminExec,
   listExec,
   mainPasswordExec,
   manageableName,
@@ -199,19 +200,46 @@ describe("statements", () => {
     expect(other.stdin).not.toContain("SESSION AUTHORIZATION");
   });
 
-  test("a Postgres delete gives what the user owns to the main user in every database first", () => {
+  test("a switch to an existing user changes only its password; full rights are a step of their own", () => {
+    const pg = switchPrepareExec("postgres", admin, { name: "app", password: "NewPassword0002", existing: true });
+    expect(sqlOf(pg)).toMatch(/^ALTER ROLE "app" LOGIN PASSWORD 'SCRAM-SHA-256\$4096:[^\n]*';\n$/);
+    expect(sqlOf(grantAdminExec("postgres", admin, "app"))).toBe('ALTER ROLE "app" SUPERUSER CREATEDB CREATEROLE;\n');
+    const mysql = switchPrepareExec("mysql", admin, { name: "app", password: "NewPassword0002", existing: true });
+    expect(mysql.stdin.split("\n")[1]).toBe("ALTER USER 'app'@'%' IDENTIFIED BY 'NewPassword0002';");
+    expect(grantAdminExec("mariadb", admin, "app").stdin.split("\n")[1]).toBe(
+      "GRANT ALL PRIVILEGES ON *.* TO 'app'@'%' WITH GRANT OPTION;",
+    );
+    // A new user is made with full rights in the one step.
+    expect(switchPrepareExec("mysql", admin, { name: "boss", password: "NewPassword0002", existing: false }).stdin.split("\n")[1]).toBe(
+      "CREATE USER 'boss'@'%' IDENTIFIED BY 'NewPassword0002'; GRANT ALL PRIVILEGES ON *.* TO 'boss'@'%' WITH GRANT OPTION;",
+    );
+  });
+
+  test("a Postgres delete ends the user's sessions for good, then gives what it owns to the main user in every database", () => {
     const exec = deleteUserExec("postgres", admin, { name: "app", host: "%", authDatabase: "admin" }, { databases: ["shop_db", "it's"] });
-    expect(exec.stdin.split("\n").slice(1)).toEqual([
+    const lines = exec.stdin.split("\n").slice(1);
+    // No sign-in and no session left before the first REASSIGN: a table it made between REASSIGN and DROP OWNED would be dropped.
+    expect(lines.slice(0, 3)).toEqual([
+      'ALTER ROLE "app" NOLOGIN;',
+      "SET seylo.target = 'app';",
+      "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'app';",
+    ]);
+    expect(lines[3]).toStartWith("DO $$BEGIN FOR i IN 1..100 LOOP PERFORM pg_stat_clear_snapshot();");
+    expect(lines[3]).toContain("RAISE EXCEPTION 'sessions of the user did not end'");
+    expect(lines.slice(4)).toEqual([
       "\\connect 'shop_db'",
       'REASSIGN OWNED BY "app" TO "shop";',
       'DROP OWNED BY "app";',
       "\\connect 'it''s'",
       'REASSIGN OWNED BY "app" TO "shop";',
       'DROP OWNED BY "app";',
-      "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'app';",
       'DROP ROLE "app";',
       "",
     ]);
+    // The name reaches the wait through the setting, never inside its dollar quotes.
+    const odd = deleteUserExec("postgres", admin, { name: "x$$; DROP TABLE t; --", host: "%", authDatabase: "admin" }).stdin;
+    expect(odd.split("\n")[4]).toBe(lines[3]);
+    expect(odd).toContain("SET seylo.target = 'x$$; DROP TABLE t; --';");
   });
 });
 
@@ -567,13 +595,10 @@ describe("MongoDB's script", () => {
       'shop_db.createUser({"user":"app2","pwd":"NewPassword0002","roles":[{"role":"read","db":"shop_db"}]})',
       'shop_db.dropUser("app")',
     ]);
-    const existing = runMongo(
-      switchPrepareExec("mongo", admin, { name: "app", password: "NewPassword0002", existing: true, grantAdmin: true }),
-      stored,
-    );
-    expect(existing.calls.slice(1)).toEqual([
-      'admin.changeUserPassword("app", "NewPassword0002")',
-      'admin.grantRolesToUser("app", [{"role":"root","db":"admin"}])',
-    ]);
+    // An existing user gets its new password first, and root only once it signed in with it.
+    const existing = runMongo(switchPrepareExec("mongo", admin, { name: "app", password: "NewPassword0002", existing: true }), stored);
+    expect(existing.calls.slice(1)).toEqual(['admin.changeUserPassword("app", "NewPassword0002")']);
+    const granted = runMongo(grantAdminExec("mongo", admin, "app"), stored);
+    expect(granted.calls.slice(1)).toEqual(['admin.grantRolesToUser("app", [{"role":"root","db":"admin"}])']);
   });
 });
