@@ -23,7 +23,15 @@ export default {
   disconnected: "Disconnected.",
   failed: "Could not open the terminal.",
   reconnect: "Reconnect",
+  /** The console after its process exited (a restart, a deploy): it attaches to the new one by itself. */
   reconnecting: "Waiting for the new process…",
+  /** The console lost its connection while the app runs: it tries again by itself (1 s, doubling to 8 s). */
+  retrying: "Disconnected. Connecting again…",
+  /** In place of Disconnected while nothing runs: the console connects by itself once the app starts. */
+  waitNotRunning: "The app is not running. Its console connects when it starts.",
+  waitStarting: "The app is starting. Its console connects when it is up.",
+  /** The service's status is unknown: its node does not answer the panel. */
+  waitUnknown: "The app's node is not answering. Its console connects when it is back.",
   exited: "The process exited with code {code}.",
   search: "Search output",
   searchPlaceholder: "Find (Enter, Shift+Enter)",

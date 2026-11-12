@@ -5569,12 +5569,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the same terminal as a card under Deploys (360 px in every state:
   loading, nothing running, connected, exited; "Open full" to the Console
   tab in the same mode, just its arrow on a phone; no Console quick
-  action next to it). Its first session waits for a running container
-  (`hasRunningInstance`: running, partial, unhealthy, or a deploy on top of
-  a live version; before that a dark card with the switch and "The
-  console opens once the app runs."); once shown the terminal stays until
-  the page is left, so a crash or a restart keeps the output, the exit
-  note and Reconnect and opens no new ticket. It watches the console by
+  action next to it). Its first session waits for a container that runs
+  or starts (`consoleRun` in `terminal/follow.ts`: `hasRunningInstance`,
+  that is running, partial, unhealthy, or a deploy on top of a live
+  version, or starting; a shell only once one runs; before that a dark
+  card with the switch and "The console opens once the app runs."); once
+  shown the terminal stays until the page is left, so a crash or a
+  restart keeps the output and the exit note, and a status change while
+  it is connected opens no new ticket. It watches the console by
   itself (`terminals.watchConsole`: a query for the console's output only,
   the panel drops what is sent on it, not in the audit log, like reading
   logs; same permission as `terminals.console`), so looking at the page is
@@ -5584,8 +5586,35 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   shell" (`TerminalPanel`'s `start`) for a person who may open only the
   shell.
   It never takes focus until clicked and closes its socket when the page
-  is left. Both offer only the modes the person may open
-  (`useTerminalModes`: owners and admins every mode, members what
+  is left. The console (the Console tab in console mode and the Overview
+  card, never a shell: each shell is a new audited process and its exit
+  is someone typing exit, so it stays at Reconnect) follows the service's
+  live status from `services.get` (`TerminalPanel`'s `follow`,
+  `useTerminalSession`; the decisions are the pure `consoleStep` in
+  `terminal/follow.ts`). While a container runs or starts, a session that
+  ended opens again by itself after 1 s, doubling to 8 s, with no time
+  limit while it runs (the waits start over after a session that stayed
+  up 10 s): an exit (restart, deploy), a dropped socket (network, panel
+  restart, agent stream error), a ticket op that answered UNAVAILABLE,
+  INTERNAL or RATE_LIMITED; for a starting app whose ticket names no
+  container (`target.containerId` null, the image still pulling) it opens
+  no socket and tries again after the wait ("The app is starting. Its
+  console connects when it is up."). While nothing runs (stopped,
+  crashed and left by the crash policy, never deployed, a first deploy
+  with nothing live) the overlay says "The app is not running. Its console connects when it
+  starts." (unknown status: the node is not answering) with no Reconnect,
+  asks for no ticket, and connects as soon as the status turns running or
+  starting or the generation or live deployment changes. Entering the
+  page or tab, the browser tab becoming visible again and the `online`
+  event connect a closed console whose service runs. A refusal that will
+  not change by itself stops at Reconnect: any other ticket op error
+  (FORBIDDEN, NOT_FOUND, NOT_IMPLEMENTED, ...) or the socket's 4401; so
+  does the panel's idle close (1000 "idle"), which shows the panel's
+  closed message and is opened again only by one of those nudges or a
+  click. One session at a time: a nudge leaves an open or opening session
+  alone, and leaving the page or switching to Shell cancels a pending
+  retry (the attempt counter). Both offer only the modes the person may
+  open (`useTerminalModes`: owners and admins every mode, members what
   `grants.mine` allows on the service or its project); with none the card
   is hidden and the tab says so. The database shell and the node's host
   shell use the same `TerminalPanel`.
@@ -5953,7 +5982,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the console with that line, no socket while nothing runs, no focus
   taken, the header one row when a shell connects at 1024 px, Open full,
   closed when left, a member's modes and Open shell for shell-only, phone
-  width; a failed clone's title and private repo hint),
+  width; the console connecting by itself after a dropped socket, the
+  Console tab of a stopped app with its note and no ticket until Start,
+  the Overview card after a crash until the status turns running
+  (`demo/routes.ts` `pushLive` sends the panel's invalidation), a starting
+  app attaching once its ticket names a container, an idle
+  close waiting for visibilitychange or online, a refused ticket staying
+  at Reconnect (`terminalSockets[n].drop`); a failed clone's title and
+  private repo hint),
   `repo-picker.spec.ts` (the New app dialog's Repository
   field with `demo/repos.ts`: Browse and pick, owner/repo an installation
   reads or not, pasted URLs and page addresses (a self-managed GitLab's

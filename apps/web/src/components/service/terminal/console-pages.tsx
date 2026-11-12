@@ -6,7 +6,9 @@
 // the open session closes and the other one opens in the same card. The
 // Overview's card watches the console (terminals.watchConsole: output only,
 // not in the audit log) and opens the real console, which is audited, only
-// once someone sends a line.
+// once someone sends a line. The console (not the shell) follows the
+// service's live status: it connects by itself while the app runs and once
+// it starts (follow.ts, use-terminal-session.ts).
 
 import { databases, terminals } from "@seylo/ops";
 import { useOpClient } from "@seylo/ops/react";
@@ -20,6 +22,7 @@ import { t } from "../../../i18n/t";
 import { TerminalSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
 import { pickMode, type TerminalMode, useTerminalModes } from "./access";
+import { consoleRun } from "./follow";
 import { TerminalPanel } from "./terminal-panel";
 
 /**
@@ -136,8 +139,15 @@ export function ServiceTerminal({
     setTyping(true);
   }, []);
   const sent = useCallback(() => setPending(null), []);
+  // What the console follows: what runs now, and the generation and live deploy that a deploy moves on.
+  const run = consoleRun(service);
+  const follow = useMemo(
+    () => (shell ? undefined : { run, key: `${service.generation}:${service.liveDeployment?.id ?? ""}` }),
+    [shell, run, service.generation, service.liveDeployment?.id],
+  );
   return (
     <TerminalPanel
+      follow={follow}
       sessionKey={watching ? "console-watch" : mode}
       onStdin={watching ? startTyping : undefined}
       pendingLine={pending ?? undefined}

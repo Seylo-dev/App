@@ -11,7 +11,7 @@
 // handlers a test passes as overrides); log follow and the terminals answer
 // like an agent.
 
-import type { Page, Route } from "@playwright/test";
+import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { followAssistantTopic, resetAssistantDemo } from "./assistant";
 import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
@@ -199,17 +199,51 @@ const runningTailscale = () => ({
 });
 let tailscaleStatus: Record<string, any> = runningTailscale();
 
+/** How the panel closes a terminal socket without an exit: its close code and reason, and the closed message before it. */
+export interface TerminalDrop {
+  /** Default 1011 "closed": the agent's stream failed (the node went away, the agent reconnected). */
+  code?: number;
+  reason?: string;
+  /** The `closed` control message's reason, for example "The session was idle for too long." */
+  note?: string;
+}
+
 /**
  * Every terminal socket a page opened since installDemo, in order: its kind, whether the page closed it,
- * and an end() that plays the process exiting (an exit message, then the server closing the socket).
+ * an end() that plays the process exiting (an exit message, then the server closing the socket), and a
+ * drop() that plays the panel closing it for another reason (TerminalDrop).
  */
-export const terminalSockets: { kind: "console" | "shell"; closed: boolean; end: (exitCode?: number) => Promise<void> }[] = [];
+export const terminalSockets: {
+  kind: "console" | "shell";
+  closed: boolean;
+  end: (exitCode?: number) => Promise<void>;
+  drop: (how?: TerminalDrop) => Promise<void>;
+}[] = [];
+
+/** The live sockets open now (one per page), for pushLive. */
+const liveSockets = new Set<WebSocketRoute>();
+
+/**
+ * Sends a live event on a topic to every open page, as the panel does when
+ * something changes: { type: "invalidate", ops: ["services.get"] } on
+ * service:<id> refetches that service, so a test can move its status on.
+ */
+export function pushLive(topic: string, event: object): void {
+  for (const ws of liveSockets) {
+    try {
+      ws.send(JSON.stringify({ type: "event", topic, event }));
+    } catch {
+      liveSockets.delete(ws);
+    }
+  }
+}
 
 /** Puts the panel access, Tailscale and git credential demo state back (installDemo runs it for every page). */
 function resetDemoState() {
   panelAccess = openPanelAccess();
   tailscaleStatus = runningTailscale();
   terminalSockets.length = 0;
+  liveSockets.clear();
   resetGitDemo();
   resetAssistantDemo();
 }
@@ -326,7 +360,9 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
       for (const timer of streams.values()) clearInterval(timer);
       streams.clear();
     };
+    liveSockets.add(ws);
     ws.onClose(() => {
+      liveSockets.delete(ws);
       for (const stop of assistantTopics.values()) stop();
       stopAll();
     });
@@ -399,6 +435,10 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
       end: async (exitCode = 0) => {
         ws.send(JSON.stringify({ type: "exit", exitCode }));
         await ws.close({ code: 1000, reason: "the process exited" });
+      },
+      drop: async ({ code = 1011, reason = "closed", note }: TerminalDrop = {}) => {
+        if (note) ws.send(JSON.stringify({ type: "closed", reason: note }));
+        await ws.close({ code, reason });
       },
     };
     terminalSockets.push(entry);

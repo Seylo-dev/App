@@ -35,6 +35,7 @@ import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
 import { latestDeployLimit } from "../tab-prefetch";
 import { pickMode, type TerminalMode, useTerminalModes } from "../terminal/access";
 import { ModeSwitch, ServiceTerminal } from "../terminal/console-pages";
+import { consoleMayAttach, consoleRun } from "../terminal/follow";
 import { TerminalNote } from "../terminal/terminal-panel";
 import { crashPolicyLabel } from "../usage-strip";
 import type { ServiceDetail } from "../use-service";
@@ -206,9 +207,12 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
  * height, with the same Console | Shell switch. It is that height in every
  * state (loading, nothing running yet, connected, exited), so the column
  * never moves when the status changes. The first session waits for a
- * running container; after that the terminal stays until the page is left,
- * so a crash or a restart keeps the last output, the exit note and
- * Reconnect, and opens no new ticket. It watches the console by itself
+ * container that runs or starts (a shell: one that runs); after that the
+ * terminal stays until the page is left, so a crash or a restart keeps the
+ * last output and the exit note, a status change while it is connected
+ * opens no new ticket, and the console connects again by itself while the
+ * app runs and once it starts ("The app is not running." while nothing
+ * does). It watches the console by itself
  * (output only, not in the audit log: looking at the page is no console
  * use) and opens the real console when a line is sent, a shell only when
  * asked (the switch, or Open shell for a person who may open only the
@@ -221,8 +225,10 @@ export function ConsoleCard({ service, height, fullLink = true }: { service: Ser
   // The person used the switch: the mode they picked opens at once, a shell too.
   const [picked, setPicked] = useState(false);
   const [shown, setShown] = useState(false);
-  const running = hasRunningInstance(service);
   const mode = modes ? pickMode(wanted, modes) : null;
+  // The console shows and tries while the app starts too, so a slow start's output is there as it boots;
+  // a shell needs a running container.
+  const running = mode === "shell" ? hasRunningInstance(service) : consoleMayAttach(consoleRun(service));
   if (mode && running && !shown) setShown(true);
   if (modes === null) return <TerminalSkeleton height={height} />;
   if (!mode) return null;

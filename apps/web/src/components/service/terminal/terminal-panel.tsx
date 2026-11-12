@@ -12,7 +12,7 @@ import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { downloadText } from "../deploy-log";
 import { isNotBuilt } from "../op-state";
-import type { SessionState, TicketSource } from "./use-terminal-session";
+import type { ConsoleFollow, SessionState, TicketSource } from "./use-terminal-session";
 import { useTerminalSession } from "./use-terminal-session";
 import { type XtermHandle, XtermView } from "./xterm-view";
 
@@ -40,6 +40,7 @@ export function TerminalPanel({
   onStdin,
   pendingLine,
   onPendingSent,
+  follow,
 }: {
   label: string;
   /** The Console | Shell switch, or a title. */
@@ -77,16 +78,21 @@ export function TerminalPanel({
   /** A stdin line sent once the session is ready, with Enter, as if typed (the line that opened it). */
   pendingLine?: string;
   onPendingSent?: () => void;
+  /**
+   * The console: follows the service's live status, connecting again by
+   * itself while it runs and once it starts (use-terminal-session.ts). Left
+   * out for shells, whose exit is someone typing exit.
+   */
+  follow?: ConsoleFollow;
 }) {
-  // The console follows its process across a restart or deploy; a shell's exit is someone typing exit.
-  const session = useTerminalSession(source, describe, { followExit: stdin });
+  const session = useTerminalSession(source, describe, { follow });
   const view = useRef<XtermHandle | null>(null);
   const [paused, setPaused] = useState(false);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [line, setLine] = useState("");
   const stdinId = useId();
-  const { connect, input, reset } = session;
+  const { begin, input, reset } = session;
 
   // A new session starts with the controls as they are for a new terminal.
   const [shownKey, setShownKey] = useState(sessionKey);
@@ -136,14 +142,15 @@ export function TerminalPanel({
 
   // Connect once the terminal exists (its size goes into the ticket request),
   // and again for each new terminal of a new session; with `start`, only
-  // when its button is clicked. Read from a ref: a change of `start` alone
-  // (it comes with a new session) must not open a second ticket.
+  // when its button is clicked; a console whose service runs nothing waits
+  // for it (begin). Read from a ref: a change of `start` alone (it comes
+  // with a new session) must not open a second ticket.
   const waits = useRef(start !== undefined);
   waits.current = start !== undefined;
   const [views, setViews] = useState(0);
   useEffect(() => {
-    if (views > 0 && !waits.current) void connect();
-  }, [views, connect]);
+    if (views > 0 && !waits.current) begin();
+  }, [views, begin]);
 
   const send = (e: FormEvent) => {
     e.preventDefault();
@@ -283,17 +290,19 @@ export function TerminalPanel({
             </button>
           </div>
         )}
-        {(state.status === "error" || state.status === "closed" || state.status === "connecting") && (
+        {(state.status === "error" || state.status === "closed" || state.status === "connecting" || state.status === "waiting") && (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
             <div className="pointer-events-auto flex max-w-[90%] flex-wrap items-center gap-3 rounded-control bg-terminal-bar px-4 py-2.5 text-[12.5px] text-terminal-foreground shadow-popover">
-              {state.status === "connecting" && <span className="text-terminal-muted">{t("serviceTerminal.connecting")}</span>}
-              {state.status === "closed" && <span>{state.reason}</span>}
+              {state.status === "connecting" &&
+                (state.note ? <span>{state.note}</span> : <span className="text-terminal-muted">{t("serviceTerminal.connecting")}</span>)}
+              {/* A console that connects by itself says why it waits, with no Reconnect: it needs no click. */}
+              {(state.status === "closed" || state.status === "waiting") && <span>{state.reason}</span>}
               {state.status === "error" && (
                 <span>
                   {isNotBuilt(state.error) ? t("service.notBuilt.title") : errorMessage(state.error, t("serviceTerminal.failed"))}
                 </span>
               )}
-              {state.status !== "connecting" && (
+              {(state.status === "closed" || state.status === "error") && (
                 <button
                   type="button"
                   onClick={() => void session.connect()}

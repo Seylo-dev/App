@@ -5,15 +5,19 @@
 // state, its session kept through a restart, watching until a line is
 // sent, no focus taken, Open full,
 // closed when left, only the modes a member may open and a shell only when
-// asked, phone width), and a deploy that failed at Clone: its title and the
-// private repo hint. Screenshots go to $CONSOLE_SHOTS_DIR (default
-// $SHOTS_DIR/console).
+// asked, phone width), the console connecting by itself (after a drop while
+// the app runs, once a stopped or crashed app runs, a starting app once its
+// container is there, on the tab shown again
+// or the network back after an idle close, never after a refusal), and a
+// deploy that failed at Clone: its title and the private repo hint.
+// Screenshots go to $CONSOLE_SHOTS_DIR (default $SHOTS_DIR/console).
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
-import { installDemo, terminalSockets } from "./demo/routes";
-import { servicesById, ids as svc } from "./demo/service";
+import { DemoRefusal } from "./demo/refusal";
+import { installDemo, pushLive, terminalSockets } from "./demo/routes";
+import { handlers as serviceHandlers, servicesById, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 const shots = process.env.CONSOLE_SHOTS_DIR ?? `${process.env.SHOTS_DIR ?? "shots"}/console`;
@@ -21,6 +25,20 @@ const api = `/p/${ids.acme}/s/${svc.api}`;
 const privateApi = `/p/${ids.acme}/s/${svc.privateApi}`;
 const consoleLine = "Listening on http://0.0.0.0:3000";
 const stdinPlaceholder = "Type a command for the app (goes to its stdin)";
+const notRunningNote = "The app is not running. Its console connects when it starts.";
+
+/** services.get with the api's status (and stopped) from `now`, the other services as in the demo. */
+function apiStatus(now: () => { status: string; stopped?: boolean }) {
+  return {
+    "services.get": (input: Record<string, unknown>) => {
+      const service = (servicesById as Record<string, object>)[String(input.serviceId)];
+      return input.serviceId === svc.api ? { ...service, stopped: false, ...now() } : service;
+    },
+  };
+}
+
+/** The panel telling the page the api changed (its status), as it does over the live socket. */
+const apiChanged = () => pushLive(`service:${svc.api}`, { type: "invalidate", ops: ["services.get"] });
 
 /** The terminal ticket ops (terminals.console, terminals.shell) the page asks for from now on. */
 function ticketRequests(page: Page): string[] {
@@ -359,6 +377,165 @@ test.describe("console and shell", () => {
     expect(terminalSockets[1]?.kind).toBe("console");
     await expect(card.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
     expect(tickets).toEqual(["terminals.watchConsole", "terminals.watchConsole"]);
+  });
+
+  test("the Console tab connects again by itself when its socket drops while the app runs", async ({ page }) => {
+    await installDemo(page);
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    // The agent's stream failed (the node went away, the agent reconnected): it used to stop at "Disconnected. Reconnect".
+    await terminalSockets[0]?.drop({ note: "The node went away." });
+    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    // And again for a socket that just closed (a panel restart): still no click, one session at a time.
+    await terminalSockets[1]?.drop({ code: 1001, reason: "" });
+    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(3);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    await expect(terminal.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
+    await expect(terminal.getByText("Disconnected.", { exact: true })).toHaveCount(0);
+    expect(tickets).toEqual(["terminals.console", "terminals.console", "terminals.console"]);
+  });
+
+  test("a stopped app: the Console tab says so, opens nothing, and connects when it is started", async ({ page }) => {
+    let now = { status: "stopped", stopped: true };
+    await installDemo(page, {
+      overrides: {
+        ...apiStatus(() => now),
+        "services.start": () => {
+          now = { status: "running", stopped: false };
+          return {};
+        },
+      },
+    });
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(notRunningNote)).toBeVisible();
+    // A plain note: no Disconnected, no Reconnect, and no ticket the agent could not serve.
+    await expect(terminal.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
+    await expect(terminal.getByText("Disconnected.", { exact: true })).toHaveCount(0);
+    await page.waitForTimeout(1500);
+    expect(tickets).toEqual([]);
+    expect(terminalSockets).toEqual([]);
+    await page.screenshot({ path: `${shots}/console-tab-not-running.png` });
+    // Start: the status turns running and the console connects without a click.
+    await page.locator("main header").first().getByRole("button", { name: "Start", exact: true }).click();
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    await expect(terminal.getByText(notRunningNote)).toHaveCount(0);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    expect(tickets).toEqual(["terminals.console"]);
+  });
+
+  test("the Overview card: after a crash it says the app is not running, and connects once it runs again", async ({ page }) => {
+    let now = { status: "running" };
+    await installDemo(page, { overrides: apiStatus(() => now) });
+    const tickets = ticketRequests(page);
+    await page.goto(api);
+    const card = page.getByRole("region", { name: "Console" });
+    await expect(card.getByText(consoleLine)).toBeVisible();
+    const cardBox = await box(card);
+    // It crashed and the crash policy left it there: the panel says so, the process is gone.
+    now = { status: "crashed" };
+    apiChanged();
+    await expect(page.locator("main header").first().getByText("Crashed", { exact: true })).toBeVisible();
+    await terminalSockets[0]?.end(1);
+    await expect(card.getByText("The process exited with code 1.")).toBeVisible();
+    await expect(card.getByText(notRunningNote)).toBeVisible();
+    await expect(card.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
+    // The output stays, the card keeps its height, and nothing is asked for while nothing runs.
+    await expect(card.getByText(consoleLine)).toBeVisible();
+    expect(await box(card)).toEqual(cardBox);
+    await page.waitForTimeout(2500);
+    expect(terminalSockets).toHaveLength(1);
+    await page.screenshot({ path: `${shots}/overview-console-card-waiting.png` });
+    // Running again (a start from elsewhere, a deploy): it connects by itself.
+    now = { status: "running" };
+    apiChanged();
+    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    await expect(card.getByText(notRunningNote)).toHaveCount(0);
+    expect(tickets).toEqual(["terminals.watchConsole", "terminals.watchConsole"]);
+  });
+
+  test("a starting app: the Overview card tries and attaches once its container is there, before it is healthy", async ({ page }) => {
+    let container: string | null = null;
+    await installDemo(page, {
+      overrides: {
+        ...apiStatus(() => ({ status: "starting" })),
+        // The panel's ticket names the container it found; none while the image is still pulling.
+        "terminals.watchConsole": (input) => {
+          const ticket = serviceHandlers["terminals.watchConsole"]?.(input) as { target: object };
+          return { ...ticket, target: { ...ticket.target, containerId: container } };
+        },
+      },
+    });
+    const tickets = ticketRequests(page);
+    await page.goto(api);
+    const card = page.getByRole("region", { name: "Console" });
+    // The terminal itself (not the "opens once the app runs" card), saying what it waits for.
+    await expect(card.getByText("The app is starting. Its console connects when it is up.")).toBeVisible();
+    await expect(card.getByRole("button", { name: "Search output" })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
+    // It asks again after each wait, but opens no socket the agent could only refuse.
+    await expect.poll(() => tickets.length, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
+    expect(terminalSockets).toEqual([]);
+    // The container is up (its health check still pending): the next try attaches, the status still starting.
+    container = "c0ffee";
+    await expect(card.getByText(consoleLine)).toBeVisible({ timeout: 10_000 });
+    expect(terminalSockets.map((s) => s.kind)).toEqual(["console"]);
+    expect(new Set(tickets)).toEqual(new Set(["terminals.watchConsole"]));
+  });
+
+  test("an idle console waits until the tab is looked at again or the network is back", async ({ page }) => {
+    await installDemo(page);
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    const idle = { code: 1000, reason: "idle", note: "The session was idle for too long." };
+    // The panel's idle timeout: not opened again by itself, which would keep a forgotten tab's session forever.
+    await terminalSockets[0]?.drop(idle);
+    const reconnect = terminal.getByRole("button", { name: "Reconnect" });
+    await expect(reconnect).toBeVisible();
+    // The panel's words, not its close reason.
+    await expect(reconnect.locator("xpath=..")).toContainText("The session was idle for too long.");
+    await page.waitForTimeout(2500);
+    expect(terminalSockets).toHaveLength(1);
+    // The browser tab shown again: it connects.
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => terminalSockets.length, { timeout: 5000 }).toBe(2);
+    await expect(reconnect).toHaveCount(0);
+    // The network back: the same.
+    await terminalSockets[1]?.drop(idle);
+    await expect(reconnect).toBeVisible();
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect.poll(() => terminalSockets.length, { timeout: 5000 }).toBe(3);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    expect(tickets).toEqual(["terminals.console", "terminals.console", "terminals.console"]);
+  });
+
+  test("a refused console ticket stops at Reconnect and is not asked for again by itself", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "terminals.console": () => {
+          throw new DemoRefusal(403, "FORBIDDEN", "You may not open this console.");
+        },
+      },
+    });
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText("You may not open this console.")).toBeVisible();
+    await expect(terminal.getByRole("button", { name: "Reconnect" })).toBeVisible();
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.waitForTimeout(2500);
+    expect(tickets).toEqual(["terminals.console"]);
+    // Reconnect still asks, when clicked.
+    await terminal.getByRole("button", { name: "Reconnect" }).click();
+    await expect.poll(() => tickets.length).toBe(2);
   });
 
   test("a shell that exits stays closed: the person typed exit", async ({ page }) => {
