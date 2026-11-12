@@ -77,14 +77,16 @@ export function ProjectsTree() {
             </LoadingRegion>
           </li>
         )}
-        <SortableGroup ids={shown.map((project) => project.id)} onMove={prefs.setProjectOrder}>
-          {shown.map((project) => (
-            <SortableProject key={project.id} id={project.id}>
-              {(item) => (
-                <ProjectRow project={project} hidden={false} onToggle={prefs.setCollapsed} onHiddenChange={setHidden} sortable={item} />
-              )}
-            </SortableProject>
-          ))}
+        <SortableGroup items={shown} onMove={prefs.setProjectOrder}>
+          {(ordered) =>
+            ordered.map((project) => (
+              <SortableProject key={project.id} id={project.id}>
+                {(item) => (
+                  <ProjectRow project={project} hidden={false} onToggle={prefs.setCollapsed} onHiddenChange={setHidden} sortable={item} />
+                )}
+              </SortableProject>
+            ))
+          }
         </SortableGroup>
         {/* Hidden projects wait at the end, folded; opening the row shows them without unhiding them. */}
         {group.length > 0 && (
@@ -230,39 +232,41 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
   // Compose members are reached through their stack, so only top-level services are listed.
   const rows = list.data?.services.filter((service) => service.parentId === null) ?? [];
   return (
-    <SortableGroup ids={rows.map((service) => service.id)} onMove={(ids) => prefs.setServiceOrder(projectId, ids)} disabled={!sortable}>
-      <ul className="m-0 flex list-none flex-col gap-px p-0">
-        {rows.map((service) => {
-          const status = statusDisplay(service.status, service.buildWaiting);
-          return (
-            <SortableService key={service.id} id={service.id} name={service.name}>
-              <Link
-                to="/p/$projectId/s/$serviceId"
-                params={{ projectId, serviceId: service.id }}
-                className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
-              >
-                {({ isActive }) => (
-                  <>
-                    {/* The same sliding background as the main navigation (sidebar.tsx). */}
-                    {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-                    <StatusDot status={status.dot} />
-                    <span className="truncate">{service.name}</span>
-                    {isBusy(service.status) && (
-                      <span
-                        title={status.label}
-                        className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg"
-                      >
-                        {/* "waiting for a build slot" does not fit next to a name: the badge says "waiting". */}
-                        {service.status === "building" && service.buildWaiting ? t("project.waitingShort") : status.label.toLowerCase()}
-                      </span>
-                    )}
-                  </>
-                )}
-              </Link>
-            </SortableService>
-          );
-        })}
-      </ul>
+    <SortableGroup items={rows} onMove={(ids) => prefs.setServiceOrder(projectId, ids)} disabled={!sortable}>
+      {(ordered) => (
+        <ul className="m-0 flex list-none flex-col gap-px p-0">
+          {ordered.map((service) => {
+            const status = statusDisplay(service.status, service.buildWaiting);
+            return (
+              <SortableService key={service.id} id={service.id} name={service.name}>
+                <Link
+                  to="/p/$projectId/s/$serviceId"
+                  params={{ projectId, serviceId: service.id }}
+                  className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
+                >
+                  {({ isActive }) => (
+                    <>
+                      {/* The same sliding background as the main navigation (sidebar.tsx). */}
+                      {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                      <StatusDot status={status.dot} />
+                      <span className="truncate">{service.name}</span>
+                      {isBusy(service.status) && (
+                        <span
+                          title={status.label}
+                          className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg"
+                        >
+                          {/* "waiting for a build slot" does not fit next to a name: the badge says "waiting". */}
+                          {service.status === "building" && service.buildWaiting ? t("project.waitingShort") : status.label.toLowerCase()}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </Link>
+              </SortableService>
+            );
+          })}
+        </ul>
+      )}
     </SortableGroup>
   );
 }

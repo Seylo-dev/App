@@ -25,12 +25,14 @@ export function ServicesGrid({ projectId, canCreate }: { projectId: string; canC
   return (
     <div aria-busy={list.isPending} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {list.isPending && [0, 1, 2].map((key) => <ServiceCardSkeleton key={key} />)}
-      <SortableGroup ids={rows.map((service) => service.id)} onMove={(ids) => prefs.setServiceOrder(projectId, ids)} layout="grid">
-        {rows.map((service) => (
-          <SortableCard key={service.id} id={service.id} name={service.name}>
-            <ServiceCard service={service} memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0} />
-          </SortableCard>
-        ))}
+      <SortableGroup items={rows} onMove={(ids) => prefs.setServiceOrder(projectId, ids)} layout="grid">
+        {(ordered) =>
+          ordered.map((service) => (
+            <SortableCard key={service.id} id={service.id} name={service.name}>
+              <ServiceCard service={service} memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0} />
+            </SortableCard>
+          ))
+        }
       </SortableGroup>
       {canCreate && !list.isPending && (
         <NewServiceMenu

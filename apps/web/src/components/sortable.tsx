@@ -3,7 +3,8 @@
 // A drag starts after the pointer moves 6 px, so a click still opens the
 // link it lands on, and the click that ends a drag is swallowed. The
 // keyboard works too: focus the item, Space to lift, the arrow keys to
-// move, Space to drop, Escape to cancel.
+// move, Space to drop, Escape to cancel. A group lists its items through
+// children(items), so the dropped order shows in the drop's own frame.
 
 import {
   closestCenter,
@@ -26,7 +27,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconGripVertical } from "@tabler/icons-react";
-import { type CSSProperties, createContext, type ReactNode, useContext } from "react";
+import { type CSSProperties, createContext, type ReactNode, useContext, useState } from "react";
 import { t } from "../i18n/t";
 
 /**
@@ -71,21 +72,57 @@ const verticalOnly: Modifier = ({ transform }) => ({ ...transform, x: 0 });
 /** Whether drag handles are on: false while a list is filtered or still loading. */
 const Enabled = createContext(true);
 
-export function SortableGroup({
-  ids,
+/** The order a drop set, and the order of the list it was made on. */
+type Dropped = { on: string; ids: string[] };
+
+/**
+ * `items` in the order of the last drop, from the drop's own render until
+ * the list itself changes. The list comes from the query cache, which onMove
+ * patches at once but which tells its screens on a timer, after dnd-kit has
+ * drawn the drop. Without this, that first render showed the old order and
+ * started dnd-kit's 200 ms transform transition back to the old place; the
+ * new order a moment later moved the item while the transition still ran,
+ * so it showed a whole drag away from its new place and slid back. Any
+ * change of the list ends the drop's order: the patched list has the same
+ * order, and a failed save puts the old one back.
+ */
+export function droppedOrder<T extends { id: string }>(items: readonly T[], dropped: Dropped | null): readonly T[] {
+  if (!dropped || dropped.on !== orderKey(items)) return items;
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return dropped.ids.map((id) => byId.get(id)).filter((item): item is T => item !== undefined);
+}
+
+/** One string for a list's order. */
+function orderKey(items: readonly { id: string }[]): string {
+  return items.map((item) => item.id).join("\n");
+}
+
+/**
+ * A list that drags into a new order. It renders `children(items)` with the
+ * items in the order on screen, which is the dropped one from the drop on;
+ * the caller lists them in that order (not its own copy of the list).
+ */
+export function SortableGroup<T extends { id: string }>({
+  items,
   onMove,
   layout = "list",
   disabled = false,
   children,
 }: {
-  ids: readonly string[];
+  items: readonly T[];
   /** The whole new order, after a drop that changed it. */
   onMove: (ids: string[]) => void;
   /** "grid" for cards in rows and columns; "list" moves up and down only. */
   layout?: "list" | "grid";
   disabled?: boolean;
-  children: ReactNode;
+  children: (items: readonly T[]) => ReactNode;
 }) {
+  const [dropped, setDropped] = useState<Dropped | null>(null);
+  const key = orderKey(items);
+  // The list changed: it has the dropped order now (or another one), so the drop's own copy goes.
+  if (dropped && dropped.on !== key) setDropped(null);
+  const shown = droppedOrder(items, dropped);
+  const ids = shown.map((item) => item.id);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -97,7 +134,10 @@ export function SortableGroup({
     const from = ids.indexOf(String(active.id));
     const to = ids.indexOf(String(over.id));
     if (from < 0 || to < 0) return;
-    onMove(arrayMove([...ids], from, to));
+    const next = arrayMove(ids, from, to);
+    // dnd-kit calls this in the same batch as its own end of the drag, so the new order is in the drop's render.
+    setDropped({ on: key, ids: next });
+    onMove(next);
   };
   return (
     <Enabled.Provider value={!disabled}>
@@ -114,12 +154,8 @@ export function SortableGroup({
           lastDragEnd = performance.now();
         }}
       >
-        <SortableContext
-          items={[...ids]}
-          strategy={layout === "grid" ? rectSortingStrategy : verticalListSortingStrategy}
-          disabled={disabled}
-        >
-          {children}
+        <SortableContext items={ids} strategy={layout === "grid" ? rectSortingStrategy : verticalListSortingStrategy} disabled={disabled}>
+          {children(shown)}
         </SortableContext>
       </DndContext>
     </Enabled.Provider>

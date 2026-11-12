@@ -50,19 +50,21 @@ export function ProjectSections({
   return (
     <div className="@container flex flex-col gap-6">
       {/* Drag a project by its title row, a service by its card: the same order as the sidebar's. */}
-      <SortableGroup ids={projects.map((project) => project.id)} onMove={prefs.setProjectOrder}>
-        {projects.map((project) => (
-          <ProjectSection
-            key={project.id}
-            project={project}
-            services={services.get(project.id)}
-            hidden={hidden.has(project.id)}
-            memoryTotals={memoryTotals}
-            onToggle={() => onToggle(project)}
-            onHiddenChange={(hide) => onHiddenChange(project, hide)}
-            onServiceOrder={(ids) => prefs.setServiceOrder(project.id, ids)}
-          />
-        ))}
+      <SortableGroup items={projects} onMove={prefs.setProjectOrder}>
+        {(ordered) =>
+          ordered.map((project) => (
+            <ProjectSection
+              key={project.id}
+              project={project}
+              services={services.get(project.id)}
+              hidden={hidden.has(project.id)}
+              memoryTotals={memoryTotals}
+              onToggle={() => onToggle(project)}
+              onHiddenChange={(hide) => onHiddenChange(project, hide)}
+              onServiceOrder={(ids) => prefs.setServiceOrder(project.id, ids)}
+            />
+          ))
+        }
       </SortableGroup>
     </div>
   );
@@ -166,14 +168,16 @@ function ProjectSection({
         </div>
       </div>
       {open && (
-        <SortableGroup ids={cards.map((service) => service.id)} onMove={onServiceOrder} layout="grid">
-          <SectionBody project={project} loaded={services !== undefined}>
-            {cards.map((service) => (
-              <SortableCard key={service.id} id={service.id} name={service.name}>
-                <ServiceCard service={service} memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0} compact />
-              </SortableCard>
-            ))}
-          </SectionBody>
+        <SortableGroup items={cards} onMove={onServiceOrder} layout="grid">
+          {(ordered) => (
+            <SectionBody project={project} loaded={services !== undefined}>
+              {ordered.map((service) => (
+                <SortableCard key={service.id} id={service.id} name={service.name}>
+                  <ServiceCard service={service} memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0} compact />
+                </SortableCard>
+              ))}
+            </SectionBody>
+          )}
         </SortableGroup>
       )}
     </article>

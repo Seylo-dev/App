@@ -7,6 +7,7 @@
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
+import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
 import { dashboardHeading, expect, stateFile, test, withDashboardView } from "./helpers";
 
@@ -14,17 +15,25 @@ test.use({ storageState: stateFile });
 
 type Calls = { op: string; input: Record<string, unknown> }[];
 
-async function open(page: Page, path = "/"): Promise<Calls> {
+/**
+ * The demo, with the reorder ops recorded. `saveMs` holds their answers back
+ * (so one lands while a drop's frames are watched); `refuse` makes them fail.
+ */
+async function open(page: Page, path = "/", { saveMs = 0, refuse = false } = {}): Promise<Calls> {
   const calls: Calls = [];
+  const refusal = () => new DemoRefusal(500, "INTERNAL", "The database is locked.");
   await installDemo(page, {
     nodeLive: "silent",
+    delay: (op) => (op.endsWith(".reorder") ? saveMs : 0),
     overrides: {
       "projects.reorder": (input) => {
         calls.push({ op: "projects.reorder", input });
+        if (refuse) throw refusal();
         return { projectIds: input.projectIds };
       },
       "services.reorder": (input) => {
         calls.push({ op: "services.reorder", input });
+        if (refuse) throw refusal();
         return { projectId: input.projectId, serviceIds: input.serviceIds };
       },
     },
@@ -35,8 +44,8 @@ async function open(page: Page, path = "/"): Promise<Calls> {
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/project-order`;
 
-/** Drags `from` onto `to` with the mouse, in small steps like a person would; `shot` names a screenshot taken mid-drag. */
-async function drag(page: Page, from: Locator, to: Locator, shot?: string) {
+/** Lifts `from` and holds it over `to` with the mouse, in small steps like a person would; the button stays down. */
+async function dragOver(page: Page, from: Locator, to: Locator) {
   const a = await from.boundingBox();
   const b = await to.boundingBox();
   if (!a || !b) throw new Error("nothing to drag");
@@ -45,6 +54,11 @@ async function drag(page: Page, from: Locator, to: Locator, shot?: string) {
   await page.mouse.move(a.x + 20, a.y + a.height / 2 + 8, { steps: 4 });
   await page.mouse.move(b.x + 20, b.y + b.height / 2, { steps: 12 });
   await page.waitForTimeout(250);
+}
+
+/** Drags `from` onto `to` and drops it; `shot` names a screenshot taken mid-drag. */
+async function drag(page: Page, from: Locator, to: Locator, shot?: string) {
+  await dragOver(page, from, to);
   if (shot) {
     mkdirSync(shots, { recursive: true });
     await page.screenshot({ path: `${shots}/${shot}.png` });
@@ -138,4 +152,166 @@ test("the List view drags service rows in the same order", async ({ page }) => {
     .toEqual([ids.api, ids.web]);
   await expect(rows.first()).toContainText("api");
   await expect(dashboardHeading(page)).toBeVisible();
+});
+
+// The drop itself (owner report 2026-11-13: "after dragging an app in the
+// sidebar, it's kinda jumping on drag end, for a sec"). The new order used
+// to reach the list a moment after the drop (the query cache tells its
+// screens on a timer), so dnd-kit first drew the old order and sent every
+// moved item back with its 200 ms transform transition; the reorder then put
+// the item in its new place while that transition still ran, so it showed a
+// whole drag away from there (30 px for a service row, 205 px for an open
+// project) and slid back. These watch the dropped item on every animation
+// frame until 600 ms after the drop, with the save answering 200 ms in: it
+// is never drawn farther from its new place than where it was let go, and
+// ends there.
+
+type Frame = { t: number; x: number; y: number };
+
+/** Records where `item` is drawn on every frame, from now until 600 ms after the next pointerup or Space key (the drop). */
+async function watchDrop(item: Locator): Promise<() => Promise<Frame[]>> {
+  await item.evaluate((node) => {
+    const frames: Frame[] = [];
+    (window as unknown as { dropFrames: Frame[] }).dropFrames = frames;
+    let dropAt = Number.POSITIVE_INFINITY;
+    const onDrop = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== " ") return;
+      dropAt = performance.now();
+      window.removeEventListener("pointerup", onDrop, true);
+      window.removeEventListener("keydown", onDrop, true);
+    };
+    window.addEventListener("pointerup", onDrop, true);
+    window.addEventListener("keydown", onDrop, true);
+    const sample = () => {
+      const now = performance.now();
+      const box = node.getBoundingClientRect();
+      frames.push({ t: now - dropAt, x: box.left, y: box.top });
+      if (now - dropAt < 600) requestAnimationFrame(sample);
+    };
+    // One sample now, so there is one from before the drop however soon it comes.
+    sample();
+  });
+  return async () => {
+    await item.page().waitForFunction(() => ((window as unknown as { dropFrames: Frame[] }).dropFrames.at(-1)?.t ?? 0) >= 600);
+    return item.page().evaluate(() => (window as unknown as { dropFrames: Frame[] }).dropFrames);
+  };
+}
+
+/** The item went from where it was let go straight to `place` (its new place) and stayed there. */
+function expectStraightDrop(frames: Frame[], place: { x: number; y: number }) {
+  const dropped = frames.filter((frame) => frame.t < 0).at(-1);
+  const after = frames.filter((frame) => frame.t >= 0);
+  if (!dropped || after.length < 10) throw new Error(`too few frames around the drop: ${frames.length}`);
+  const away = (frame: Frame) => Math.hypot(frame.x - place.x, frame.y - place.y);
+  const farthest = Math.max(...after.map(away));
+  const trace = after
+    .slice(0, 8)
+    .map((frame) => `${Math.round(frame.t)} ms: ${away(frame).toFixed(1)} px`)
+    .join(", ");
+  expect(
+    farthest,
+    `let go ${away(dropped).toFixed(1)} px from its new place, then drawn up to ${farthest.toFixed(1)} px from it (${trace})`,
+  ).toBeLessThanOrEqual(away(dropped) + 1);
+  expect(away(after.at(-1) as Frame), "where it ends").toBeLessThanOrEqual(1);
+}
+
+async function topLeft(item: Locator): Promise<{ x: number; y: number }> {
+  const box = await item.boundingBox();
+  if (!box) throw new Error("not on screen");
+  return { x: box.x, y: box.y };
+}
+
+test("a service dropped in the sidebar goes straight to its new place", async ({ page }) => {
+  const calls = await open(page, "/", { saveMs: 200 });
+  await expect(dashboardHeading(page)).toBeVisible();
+  const rows = sidebarProjects(page).first().locator("ul > li");
+  await expect(rows.nth(1)).toContainText("api");
+  const api = rows.nth(1);
+  const place = await topLeft(rows.first());
+  const frames = await watchDrop(api);
+  await dragOver(page, api, rows.first());
+  await page.mouse.up();
+  expectStraightDrop(await frames(), place);
+  await expect(rows.first()).toContainText("api");
+  expect(calls.filter((c) => c.op === "services.reorder")).toHaveLength(1);
+});
+
+test("a project dropped in the sidebar goes straight to its new place", async ({ page }) => {
+  const calls = await open(page, "/", { saveMs: 200 });
+  await expect(dashboardHeading(page)).toBeVisible();
+  const list = sidebarProjects(page);
+  await expect(list.nth(1)).toContainText("personal");
+  const personal = list.nth(1);
+  const place = await topLeft(list.first());
+  const frames = await watchDrop(personal);
+  await dragOver(page, personal.locator("> div").first(), list.first().locator("> div").first());
+  await page.mouse.up();
+  expectStraightDrop(await frames(), place);
+  await expect(list.first()).toContainText("personal");
+  expect(calls.filter((c) => c.op === "projects.reorder")).toHaveLength(1);
+});
+
+test("a service moved with the keyboard goes straight to its new place", async ({ page }) => {
+  const calls = await open(page, "/", { saveMs: 200 });
+  await expect(dashboardHeading(page)).toBeVisible();
+  const rows = sidebarProjects(page).first().locator("ul > li");
+  await expect(rows.nth(1)).toContainText("api");
+  const api = rows.nth(1);
+  const place = await topLeft(rows.first());
+  await api.getByRole("button", { name: /^Move api\./ }).focus();
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(150);
+  await page.keyboard.press("ArrowUp");
+  await page.waitForTimeout(300);
+  const frames = await watchDrop(api);
+  await page.keyboard.press("Space");
+  expectStraightDrop(await frames(), place);
+  await expect(rows.first()).toContainText("api");
+  expect(calls.filter((c) => c.op === "services.reorder")).toHaveLength(1);
+});
+
+test("a service card dropped on the dashboard goes straight to its new place", async ({ page }) => {
+  await open(page, "/", { saveMs: 200 });
+  await expect(dashboardHeading(page)).toBeVisible();
+  const cards = page.getByRole("region", { name: "Projects" }).locator("article").first().locator("[data-sortable-card]");
+  await expect(cards.nth(1)).toContainText("api");
+  const api = cards.nth(1);
+  const place = await topLeft(cards.first());
+  const frames = await watchDrop(api);
+  await dragOver(page, api, cards.first());
+  await page.mouse.up();
+  expectStraightDrop(await frames(), place);
+  await expect(cards.first()).toContainText("api");
+});
+
+test("a project dropped on the dashboard goes straight to its new place", async ({ page }) => {
+  await open(page, "/", { saveMs: 200 });
+  await expect(dashboardHeading(page)).toBeVisible();
+  const sections = page.getByRole("region", { name: "Projects" }).locator("article");
+  await expect(sections.nth(1)).toContainText("personal");
+  const personal = sections.nth(1);
+  const place = await topLeft(sections.first());
+  const frames = await watchDrop(personal);
+  await dragOver(page, personal.locator("> div").first(), sections.first().locator("> div").first());
+  await page.mouse.up();
+  expectStraightDrop(await frames(), place);
+  await expect(sections.first()).toContainText("personal");
+});
+
+test("a save that fails puts the order back, with an error toast", async ({ page }) => {
+  const calls = await open(page, "/", { refuse: true });
+  await expect(dashboardHeading(page)).toBeVisible();
+  const rows = sidebarProjects(page).first().locator("ul > li");
+  await expect(rows.nth(1)).toContainText("api");
+  await drag(page, rows.nth(1), rows.first());
+  await expect.poll(() => calls.filter((c) => c.op === "services.reorder").length).toBe(1);
+  await expect(page.getByText("Could not save the sidebar order").first()).toBeVisible();
+  await expect(rows.first()).toContainText("web");
+  await expect(rows.nth(1)).toContainText("api");
+
+  const list = sidebarProjects(page);
+  await drag(page, list.nth(1).locator("> div").first(), list.first().locator("> div").first());
+  await expect.poll(() => calls.filter((c) => c.op === "projects.reorder").length).toBe(1);
+  await expect(list.first()).toContainText("acme-shop");
+  await expect(list.nth(1)).toContainText("personal");
 });

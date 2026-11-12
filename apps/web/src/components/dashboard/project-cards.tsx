@@ -184,18 +184,20 @@ function ProjectList({
   return (
     <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
       {/* Drag a card by its header, a service by its row: the same order as the sidebar's. */}
-      <SortableGroup ids={projects.map((project) => project.id)} onMove={prefs.setProjectOrder} layout="grid">
-        {projects.map((project) => (
-          <ProjectCard
-            key={project.id}
-            project={project}
-            services={services.get(project.id)}
-            hidden={hidden.has(project.id)}
-            onToggle={() => onToggle(project)}
-            onHiddenChange={(hide) => onHiddenChange(project, hide)}
-            onServiceOrder={(ids) => prefs.setServiceOrder(project.id, ids)}
-          />
-        ))}
+      <SortableGroup items={projects} onMove={prefs.setProjectOrder} layout="grid">
+        {(ordered) =>
+          ordered.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              services={services.get(project.id)}
+              hidden={hidden.has(project.id)}
+              onToggle={() => onToggle(project)}
+              onHiddenChange={(hide) => onHiddenChange(project, hide)}
+              onServiceOrder={(ids) => prefs.setServiceOrder(project.id, ids)}
+            />
+          ))
+        }
       </SortableGroup>
     </div>
   );
@@ -279,12 +281,14 @@ function ProjectCard({
               ))}
             </LoadingRegion>
           )}
-          <SortableGroup ids={rows.map((service) => service.id)} onMove={onServiceOrder}>
-            {rows.map((service) => (
-              <SortableRow key={service.id} id={service.id} name={service.name}>
-                <ServiceRow service={service} />
-              </SortableRow>
-            ))}
+          <SortableGroup items={rows} onMove={onServiceOrder}>
+            {(ordered) =>
+              ordered.map((service) => (
+                <SortableRow key={service.id} id={service.id} name={service.name}>
+                  <ServiceRow service={service} />
+                </SortableRow>
+              ))
+            }
           </SortableGroup>
         </div>
       )}
