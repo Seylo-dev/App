@@ -5562,7 +5562,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   data: worker first with its own built-ins and tips, none of its own
   variables, a click inserting `${{worker.DOMAIN}}`; an exposed database's
   internal variables on another node struck through, the Expose link),
-  `console.spec.ts` (the Console | Shell switch in place
+  `env-hint.spec.ts` (a hardcoded service URL is a blue info
+  squiggle outside the problems, and Ctrl+. offers Use `${{api.URL}}`,
+  which keeps the path), `console.spec.ts` (the Console | Shell switch in place
   with `?mode=shell` and the old session closed, one card height for both
   modes at four window sizes with a one-row header, no ring on the
   switch in a dark preset, `/shell` redirecting, the Overview console
