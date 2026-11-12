@@ -35,6 +35,13 @@ import (
 // new container.
 const dockerHealthPoll = 500 * time.Millisecond
 
+// errNewContainerExited is why a rollout fails when one of its new
+// containers stops: from the die event, or from the health wait when it
+// sees the container stopped first.
+func errNewContainerExited(code int) error {
+	return fmt.Errorf("the new container exited with code %d", code)
+}
+
 // imageCheckOf is the image HEALTHCHECK spec is gated on: its image's,
 // when spec asks for the image's check and the image declares one; nil
 // otherwise or when the image cannot be read.
@@ -62,6 +69,12 @@ func (w *worker) probe(ctx context.Context, inst liveInstance, spec *agentv1.Ser
 	if err != nil {
 		return health.Result{Output: "reading the container's health: " + err.Error()}
 	}
+	if !d.Running {
+		// Docker's status of a stopped container is no verdict of the
+		// check (see waitHealthy): a failed probe like a TCP check's on a
+		// dead container, and the die event takes it from there.
+		return health.Result{Output: fmt.Sprintf("the container is not running (exited with code %d)", d.ExitCode)}
+	}
 	if d.Health == nil {
 		return w.r.o.Prober.Probe(ctx, target, nil, spec.GetPorts())
 	}
@@ -71,6 +84,12 @@ func (w *worker) probe(ctx context.Context, inst liveInstance, spec *agentv1.Ser
 // waitHealthy waits until a new instance passes spec's health check, or
 // ctx ends. With the image's check it waits for Docker's verdict: healthy
 // passes, unhealthy fails at once with the latest check's output.
+//
+// Docker's status says nothing once the container stopped: Docker turns it
+// to unhealthy the moment it closes the check's monitor on exit (with no
+// failed check and no output), before it sends the die event. So a stopped
+// container fails the wait with its exit code, the same reason the die
+// event gives, whichever of the two the rollout sees first.
 func (w *worker) waitHealthy(ctx context.Context, inst liveInstance, spec *agentv1.ServiceSpec) error {
 	target := health.Target{ContainerID: inst.id, Address: inst.ip}
 	if !health.IsImage(spec.GetHealthCheck()) {
@@ -82,6 +101,8 @@ func (w *worker) waitHealthy(ctx context.Context, inst liveInstance, spec *agent
 		switch {
 		case err != nil:
 			last = "reading the container's health: " + err.Error()
+		case !d.Running:
+			return errNewContainerExited(d.ExitCode)
 		case d.Health == nil:
 			return w.r.o.Prober.WaitHealthy(ctx, target, nil, spec.GetPorts())
 		default:

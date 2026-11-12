@@ -142,7 +142,7 @@ func (w *worker) event(ev docker.Event) {
 	if ev.Action == docker.EventDie {
 		w.rollMu.Lock()
 		if w.rolling && w.rollIDs[ev.ContainerID] {
-			w.rollCancel(fmt.Errorf("the new container exited with code %d", ev.ExitCode))
+			w.rollCancel(errNewContainerExited(ev.ExitCode))
 		}
 		w.rollMu.Unlock()
 	}

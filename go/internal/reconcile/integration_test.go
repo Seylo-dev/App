@@ -48,6 +48,9 @@ type itEnv struct {
 	done    chan error
 	// drain is Options.ReattachDrain from the next start (0: the default).
 	drain time.Duration
+	// engine is what the runtime sees of eng from the next start (nil:
+	// eng itself).
+	engine docker.Engine
 }
 
 func newIT(t *testing.T) *itEnv {
@@ -85,8 +88,12 @@ func (e *itEnv) start() {
 	if os.Getenv("SEYLO_TEST_LOG") != "" {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
+	var eng docker.Engine = e.eng
+	if e.engine != nil {
+		eng = e.engine
+	}
 	rt, err := New(Options{
-		Docker: e.eng, Prober: health.NewProber(health.ExecFunc(func(ctx context.Context, id string, cmd []string, max int) (int, []byte, error) {
+		Docker: eng, Prober: health.NewProber(health.ExecFunc(func(ctx context.Context, id string, cmd []string, max int) (int, []byte, error) {
 			r, err := e.eng.ExecRun(ctx, id, cmd, max)
 			return r.ExitCode, r.Output, err
 		})),

@@ -118,6 +118,49 @@ func TestImageHealthCheckUnhealthyFailsWithItsOutput(t *testing.T) {
 	}
 }
 
+// A new container that exits during the wait fails the deploy with its
+// exit code, not with Docker's health status: Docker says unhealthy the
+// moment a checked container stops, before the die event arrives, though
+// the check never failed.
+func TestImageHealthCheckExitedContainerFailsWithItsExitCode(t *testing.T) {
+	h := newHarness(t)
+	h.eng.Images["api:1"] = docker.Image{Healthcheck: respoCheck}
+	h.applyAsync(1, imageSpec("api", 1, "api:1"))
+	name := h.runningContainer("api", 1)
+	emittedHealthChecking(h, "api", 1)
+
+	// Exited, die event still on its way: Docker already says unhealthy.
+	h.eng.CrashQuietly(name, 3)
+	if c, _ := h.eng.Get(name); c.Running || c.Health.Status != docker.HealthUnhealthy || c.Health.FailingStreak != 0 {
+		t.Fatalf("container = running %v, health %v", c.Running, c.Health)
+	}
+	r := h.deployResult("api", 1)
+	if r.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED || !strings.Contains(r.GetMessage(), "the new container exited with code 3") ||
+		strings.Contains(r.GetMessage(), "HEALTHCHECK") {
+		t.Fatalf("result = %v", r)
+	}
+}
+
+// The runtime watch does not take Docker's unhealthy of a container that
+// stopped between listing and probing as the check's verdict: it is one
+// failed probe (as a TCP check's on a dead container), not Final.
+func TestImageHealthCheckProbeOfAStoppedContainer(t *testing.T) {
+	h := newHarness(t)
+	h.eng.Images["api:1"] = docker.Image{Healthcheck: respoCheck}
+	h.applyAsync(1, imageSpec("api", 1, "api:1"))
+	name := h.runningContainer("api", 1)
+	h.eng.SetHealth(name, docker.HealthHealthy, "")
+	h.deployResult("api", 1)
+
+	c, _ := h.eng.Get(name)
+	h.eng.CrashQuietly(name, 137)
+	w := &worker{r: h.rt}
+	res := w.probe(context.Background(), liveInstance{id: c.ID, name: name}, imageSpec("api", 1, "api:1"))
+	if res.Healthy || res.Final || res.Starting || !strings.Contains(res.Output, "exited with code 137") {
+		t.Fatalf("probe = %+v", res)
+	}
+}
+
 // A health timeout the service set wins over the image's start period, and
 // the deploy log says it is shorter.
 func TestImageHealthCheckExplicitTimeoutWins(t *testing.T) {

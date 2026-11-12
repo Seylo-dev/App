@@ -32,7 +32,8 @@ type Container struct {
 	// Networks maps network name to IP.
 	Networks map[string]string
 	// Health is Docker's health status: "starting" from each start when
-	// the image has a HEALTHCHECK (Fake.Images), changed with SetHealth.
+	// the image has a HEALTHCHECK (Fake.Images), changed with SetHealth,
+	// and "unhealthy" once the container stops, as Docker reports it.
 	Health *docker.ContainerHealth
 }
 
@@ -119,6 +120,21 @@ func (f *Fake) SetHealth(id, status, output string) {
 	}
 }
 
+// stoppedLocked marks a container stopped with code, as Docker does when
+// its process ends: no addresses, and a health status of unhealthy (Docker
+// closes the check's monitor on exit and says unhealthy, keeping the
+// streak and the last check's output, before the die event). Callers hold
+// f.mu.
+func (f *Fake) stoppedLocked(c *Container, code int) {
+	c.Running, c.ExitCode, c.Finished = false, code, f.now()
+	for n := range c.Networks {
+		c.Networks[n] = ""
+	}
+	if c.Health != nil {
+		c.Health.Status = docker.HealthUnhealthy
+	}
+}
+
 func (f *Fake) now() time.Time {
 	if f.Now != nil {
 		return f.Now()
@@ -175,10 +191,7 @@ func (f *Fake) ExitQuietly(id string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if c := f.find(id); c != nil && c.Running {
-		c.Running, c.ExitCode, c.Finished = false, 0, f.now()
-		for n := range c.Networks {
-			c.Networks[n] = ""
-		}
+		f.stoppedLocked(c, 0)
 	}
 }
 
@@ -388,10 +401,7 @@ func (f *Fake) CrashQuietly(id string, code int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if c := f.find(id); c != nil && c.Running {
-		c.Running, c.ExitCode, c.Finished = false, code, f.now()
-		for n := range c.Networks {
-			c.Networks[n] = ""
-		}
+		f.stoppedLocked(c, code)
 	}
 }
 
@@ -412,10 +422,8 @@ func (f *Fake) Crash(id string, code int, oom bool) {
 	if c == nil || !c.Running {
 		return
 	}
-	c.Running, c.ExitCode, c.OOM, c.Finished = false, code, oom, f.now()
-	for n := range c.Networks {
-		c.Networks[n] = ""
-	}
+	f.stoppedLocked(c, code)
+	c.OOM = oom
 	if oom {
 		f.emitLocked(c, docker.EventOOM, 0)
 	}
@@ -433,10 +441,7 @@ func (f *Fake) StopContainer(ctx context.Context, id string, grace time.Duration
 	if !c.Running {
 		return nil
 	}
-	c.Running, c.ExitCode, c.Finished = false, 143, f.now()
-	for n := range c.Networks {
-		c.Networks[n] = ""
-	}
+	f.stoppedLocked(c, 143)
 	f.emitLocked(c, docker.EventDie, 143)
 	return nil
 }

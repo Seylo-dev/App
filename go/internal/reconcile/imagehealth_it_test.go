@@ -143,3 +143,92 @@ CMD ["sh", "-c", "mkdir -p /www && echo bad > /www/index.html && exec httpd -f -
 		t.Fatalf("the old generation stopped serving: %q", got)
 	}
 }
+
+// lateDie is the VM's Docker with its die events held back: the gap
+// between a container stopping and the agent hearing of it, a few ms on an
+// idle node, made wider than a health poll.
+type lateDie struct {
+	*docker.Moby
+	by time.Duration
+}
+
+func (l lateDie) Events(ctx context.Context) (<-chan docker.Event, <-chan error) {
+	in, errc := l.Moby.Events(ctx)
+	out := make(chan docker.Event)
+	go func() {
+		defer close(out)
+		for ev := range in {
+			if ev.Action == docker.EventDie {
+				select {
+				case <-time.After(l.by):
+				case <-ctx.Done():
+					return
+				}
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, errc
+}
+
+// A new container that dies a few seconds after start (a failed boot
+// migration) fails the deploy with its exit code. Docker says unhealthy
+// the moment a checked container stops, before its die event, though the
+// check never ran: that status is no verdict of the image's HEALTHCHECK.
+// The die events come late here, so the wait always sees that gap.
+func TestITImageHealthCheckExitedContainerFailsWithItsExitCode(t *testing.T) {
+	e := newIT(t)
+	tag := "seylo-it-hc-dies:" + e.prefix
+	buildITImage(t, tag, `FROM busybox:1.37
+HEALTHCHECK --interval=30s --timeout=2s --start-period=600s --retries=3 CMD true
+CMD ["sh", "-c", "sleep 2; exit 7"]
+`)
+	// What the fake models: a stopped checked container reports unhealthy
+	// with no failed check.
+	ctx := context.Background()
+	// Outside the runtime's scope, so it never sees this one.
+	cid, err := e.eng.CreateContainer(ctx, docker.ContainerSpec{Name: e.prefix + "hc-dies-probe", Image: tag})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = e.eng.RemoveContainer(context.Background(), cid) })
+	if err := e.eng.StartContainer(ctx, cid); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		d, err := e.eng.InspectContainer(ctx, cid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !d.Running {
+			if d.ExitCode != 7 || d.Health == nil || d.Health.Status != docker.HealthUnhealthy || d.Health.FailingStreak != 0 {
+				t.Fatalf("stopped: exit code %d, health %+v", d.ExitCode, d.Health)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the probe container never exited")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	e.stop()
+	e.engine = lateDie{Moby: e.eng, by: 3 * dockerHealthPoll}
+	e.start()
+	id := e.id("api")
+	start := time.Now()
+	e.apply(1, e.imageCheckSpec("api", 1, tag))
+	p := e.result(id, 1)
+	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED || !strings.Contains(p.GetMessage(), "the new container exited with code 7") ||
+		strings.Contains(p.GetMessage(), "HEALTHCHECK") {
+		t.Fatalf("result: %v", p)
+	}
+	if took := time.Since(start); took > time.Minute {
+		t.Fatalf("failed after %s: it waited for the timeout instead of the exit", took)
+	}
+}
