@@ -41,6 +41,7 @@ export const DiagnosticCode = Type.Union(
     "service-not-exposed",
     "empty-reference",
     "reference-cycle",
+    "hardcoded-reference",
   ].map((code) => Type.Literal(code)),
 );
 
@@ -110,6 +111,19 @@ export const AnalyzeContext = Type.Object({
   targets: Type.Array(ReferenceTarget),
 });
 
+/** A variable name as the .env parser takes it. */
+export const EnvKey = Type.String({
+  minLength: 1,
+  maxLength: 256,
+  pattern: "^[A-Za-z_][A-Za-z0-9_.-]*$",
+  description: "Variable name: a letter or _, then letters, digits, _, . or -.",
+});
+
+/** One variable's new value; null removes the variable. */
+export const EnvValue = Type.Union([Type.String({ maxLength: 262144 }), Type.Null()], {
+  description: "The new value as the program should read it, without quotes (references allowed). null removes the variable.",
+});
+
 export const EnvVariable = Type.Object({
   key: Type.String(),
   value: Type.String(),
@@ -125,7 +139,7 @@ export const get = defineOp({
   kind: "query",
   summary: "Get a service's environment",
   description:
-    "Returns the service's .env text as saved, the parsed variables (references left as written) and how many shared project variables it also receives.",
+    "Returns the service's .env text as saved, the parsed variables (references left as written) and how many shared project variables it also receives. Model callers (MCP, the assistant) get every value redacted: to change one variable without the others, use env.setVariable.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     text: EnvText,
@@ -146,7 +160,7 @@ export const set = defineOp({
   kind: "mutation",
   summary: "Save a service's environment",
   description:
-    "Replaces the service's .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy or restart.",
+    "Replaces the service's whole .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy or restart. To change one variable and keep the others as they are, use env.setVariable.",
   input: Type.Object({
     serviceId: Id,
     text: EnvText,
@@ -160,6 +174,32 @@ export const set = defineOp({
     restartNeeded: Type.Boolean(),
   }),
   sensitive: { input: ["text"] },
+  permission: serviceScope("env.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const setVariable = defineOp({
+  id: "env.setVariable",
+  kind: "mutation",
+  summary: "Set one variable of a service's environment",
+  description:
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
+    "Sets one variable and keeps the rest of the .env text as it is, so a caller that cannot read the other values (model callers get env.get redacted) changes only this line. An existing key keeps its line: the value of the last line with that key (the one that wins) is replaced, in its quote style when the value fits it, with its export, its trailing comment and the comment lines above it (# @public stays). A new key is appended as KEY=value. value null removes every line with the key (NOT_FOUND when there is none). Give the value unquoted; ${{target.VARIABLE}} references are allowed, and a value with spaces or a newline is written in double quotes. Same checks as env.set; the diagnostics of the whole file come back (hardcoded-reference: a value that spells out a service's URL, with a fix to its reference). The new value applies on the next deploy or restart.",
+  input: Type.Object({
+    serviceId: Id,
+    key: EnvKey,
+    value: EnvValue,
+    /** updatedAt from env.get; refused with CONFLICT when someone saved in between. Leave out to edit whatever is saved now. */
+    expectedUpdatedAt: Type.Optional(Type.Union([Timestamp, Type.Null()])),
+  }),
+  output: Type.Object({
+    updatedAt: Timestamp,
+    diagnostics: Type.Array(Diagnostic),
+    /** True when running instances still have the old values. */
+    restartNeeded: Type.Boolean(),
+  }),
+  sensitive: { input: ["value"] },
   permission: serviceScope("env.edit"),
   mcp: true,
   audit: true,
@@ -229,6 +269,30 @@ export const setShared = defineOp({
     affectedServiceIds: Type.Array(Id),
   }),
   sensitive: { input: ["text"] },
+  permission: projectScope("env.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const setSharedVariable = defineOp({
+  id: "env.setSharedVariable",
+  kind: "mutation",
+  summary: "Set one of a project's shared variables",
+  description:
+    "Sets one shared variable and keeps the others as they are, like env.setVariable for a service: the last line with the key gets the new value (its quoting, comments and # @public kept), a new key is appended, value null removes every line with the key (NOT_FOUND when there is none). Shared variables cannot reference services. Services that use them get the new value on their next deploy or restart.",
+  input: Type.Object({
+    projectId: Id,
+    key: EnvKey,
+    value: EnvValue,
+    expectedUpdatedAt: Type.Optional(Type.Union([Timestamp, Type.Null()])),
+  }),
+  output: Type.Object({
+    updatedAt: Timestamp,
+    diagnostics: Type.Array(Diagnostic),
+    /** Services that reference or receive the changed variable and still run with the old value. */
+    affectedServiceIds: Type.Array(Id),
+  }),
+  sensitive: { input: ["value"] },
   permission: projectScope("env.edit"),
   mcp: true,
   audit: true,

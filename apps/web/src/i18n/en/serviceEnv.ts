@@ -89,6 +89,15 @@ export default {
     notExposed: "{target} is internal-only on {nodes}",
     notExposedDetail: "{self} runs on {selfNodes} and cannot reach it. Expose {target} or move {self} next to it.",
     emptyReference: "{target}.{variable} has no value yet",
+    hardcodedReference: "{key} can use {reference}",
+    hardcodedReferenceSame:
+      "This is {target}'s {matched} written out. {reference} gives the same value and stays right when {target}'s address changes.",
+    hardcodedReferencePublic:
+      "{key} is read in the browser, which cannot reach {target}'s internal address, so the fix uses its public one.",
+    hardcodedReferenceNoPublic:
+      "{key} is read in the browser, which cannot reach {target}'s internal address. Give {target} a public address and use that instead.",
+    hardcodedReferenceInternalBrowser: "A server-side variable can use {internalReference} instead when both services share a node.",
+    hardcodedReferenceInternalServer: "Read on the server, {key} can also use {internalReference} when both services share a node.",
   },
   shared: {
     title: "Shared variables",

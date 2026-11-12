@@ -1,10 +1,11 @@
 // The Monaco .env editor (Environment.dc.html): the env tokenizer, violet
 // reference pills, red squiggles and line backgrounds from env-analyzer,
 // hovers with a reference's resolved value, ${{ completions, quick fixes
-// for edit fixes, secret values as dots until "Show values" is on (the
-// line being edited shows its value), and a Secret chip after each variable
-// builds and crash reports treat as a secret (Public after one that only
-// looks like one), with a hover that says why and what it changes.
+// for edit fixes (also the blue hint on a hardcoded service URL), secret
+// values as dots until "Show values" is on (the line being edited shows its
+// value), and a Secret chip after each variable builds and crash reports
+// treat as a secret (Public after one that only looks like one), with a
+// hover that says why and what it changes.
 
 import {
   type AnalyzeContext,
@@ -20,7 +21,7 @@ import { t } from "../../../i18n/t";
 import { CodeEditor, type CodeEditorInstance } from "./code-editor";
 import "./env-editor.css";
 import { envLanguageId } from "./env-language";
-import { errorLines, fixTitle, problemMessage, referenceRanges, secretChips, secretRanges, toMarkers } from "./env-model";
+import { errorLines, problemMessage, quickFixActions, referenceRanges, secretChips, secretRanges, toMarkers } from "./env-model";
 import type { Monaco } from "./monaco";
 
 export interface EnvEditorHandle {
@@ -233,38 +234,35 @@ export function EnvEditor({
           const index = new LineIndex(a.parsed.text);
           const from = model.getOffsetAt(range.getStartPosition());
           const to = model.getOffsetAt(range.getEndPosition());
-          const actions: MonacoApi.languages.CodeAction[] = [];
-          for (const d of a.diagnostics) {
-            if (d.range.end < from || d.range.start > to) continue;
-            for (const fix of d.fixes) {
-              if (fix.kind !== "edit") continue;
-              actions.push({
-                title: fixTitle(fix, self),
-                kind: "quickfix",
-                isPreferred: actions.length === 0,
-                diagnostics: [
-                  {
-                    severity: monaco.MarkerSeverity.Error,
-                    message: problemMessage(d),
-                    startLineNumber: d.range.startLine,
-                    startColumn: d.range.startColumn,
-                    endLineNumber: d.range.endLine,
-                    endColumn: d.range.endColumn,
-                  },
-                ],
-                edit: {
-                  edits: fix.edits.map((e) => {
-                    const r = index.range(e.range.start, e.range.end);
-                    return {
-                      resource: model.uri,
-                      versionId: model.getVersionId(),
-                      textEdit: { range: new monaco.Range(r.startLine, r.startColumn, r.endLine, r.endColumn), text: e.text },
-                    };
-                  }),
+          // Fixes of errors and of hints (a hardcoded URL's "Use ${{api.URL}}"), each with its own severity.
+          const actions: MonacoApi.languages.CodeAction[] = quickFixActions(a.diagnostics, from, to, self).map((action) => {
+            const d = action.diagnostic;
+            return {
+              title: action.title,
+              kind: "quickfix",
+              isPreferred: action.isPreferred,
+              diagnostics: [
+                {
+                  severity: action.severity,
+                  message: problemMessage(d),
+                  startLineNumber: d.range.startLine,
+                  startColumn: d.range.startColumn,
+                  endLineNumber: d.range.endLine,
+                  endColumn: d.range.endColumn,
                 },
-              });
-            }
-          }
+              ],
+              edit: {
+                edits: action.edits.map((e) => {
+                  const r = index.range(e.range.start, e.range.end);
+                  return {
+                    resource: model.uri,
+                    versionId: model.getVersionId(),
+                    textEdit: { range: new monaco.Range(r.startLine, r.startColumn, r.endLine, r.endColumn), text: e.text },
+                  };
+                }),
+              },
+            };
+          });
           return { actions, dispose() {} };
         },
       }),

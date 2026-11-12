@@ -6,10 +6,13 @@
 //   const { parsed, diagnostics } = analyzeEnv(text, context); // context from the env.references op
 //   const { values } = resolveEnv(parsed, context);
 
-export { analyzeEnv, analyzeParsed, missingNodes, pickPublicVariable } from "./analyze";
+export { analyzeEnv, analyzeParsed, pickPublicVariable } from "./analyze";
 export { appVariables, type BuiltinVariable, builtinVariablesFor, clickhouseVariables, databaseVariables } from "./builtins";
+export { type EnvEdit, setEnvVariable } from "./edit";
+export { browserPrefixes, isBrowserVariable } from "./hardcoded";
 export { type HostMention, hostMentions } from "./hosts";
-export { parseEnv, stringifyEnv } from "./parse";
+export { missingNodes } from "./nodes";
+export { isValidKey, parseEnv, stringifyEnv } from "./parse";
 export { formatReference, referenceAt, scanReferences, sharedTarget, substituteReferences } from "./references";
 export {
   describeReference,

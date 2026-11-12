@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { type AnalyzeContext, analyzeEnv } from "@seylo/env-analyzer";
-import { errorLines, fixTitle, markerSeverity, problemMessage, referenceRanges, secretChips, secretRanges, toMarkers } from "./env-model";
+import {
+  errorLines,
+  fixTitle,
+  markerSeverity,
+  problemMessage,
+  quickFixActions,
+  referenceRanges,
+  secretChips,
+  secretRanges,
+  toMarkers,
+} from "./env-model";
 
 const de = { id: "n000000000000001", name: "de-fsn-1" };
 const us = { id: "n000000000000002", name: "us-ash-1" };
@@ -175,5 +185,62 @@ describe("env editor model", () => {
       "**`NEXT_PUBLIC_DB` is a secret** - it uses `db.INTERNAL_URL`, which carries a database password, so its `NEXT_PUBLIC_` prefix does not make it public.",
     );
     expect(chips[1]?.hover[2]).toBe("Not a secret? Put `# @public` on the line above it.");
+  });
+});
+
+describe("hardcoded service URLs", () => {
+  // web on de-fsn-1 next to api, which has a domain.
+  const local: AnalyzeContext = {
+    self: { serviceId: "s000000000000004", name: "web", nodes: [de] },
+    targets: [
+      {
+        name: "api",
+        kind: "service",
+        serviceId: "s000000000000005",
+        serviceKind: "app",
+        nodes: [de],
+        internalHost: "api",
+        exposed: true,
+        variables: [
+          { name: "URL", value: "https://api.example.com", scope: "public", sensitive: false, description: "public URL" },
+          { name: "INTERNAL_URL", value: "http://api:3000", scope: "internal", sensitive: false, description: "internal URL" },
+        ],
+      },
+    ],
+  };
+  const env = ["NEXT_PUBLIC_API=https://api.example.com/v1", "API=http://api:3000", "BAD=${{apx.URL}}", ""].join("\n");
+  const result = analyzeEnv(env, local);
+
+  test("show as a soft info hint, never as an error line", () => {
+    const markers = toMarkers(result.diagnostics, "web").filter((m) => m.code === "hardcoded-reference");
+    expect(markers.map((m) => [m.startLineNumber, m.severity])).toEqual([
+      [1, markerSeverity.info],
+      [2, markerSeverity.info],
+    ]);
+    expect(markers[0]?.message).toBe(
+      "NEXT_PUBLIC_API can use ${{api.URL}}\nThis is api's URL written out. ${{api.URL}} gives the same value and stays right when api's address changes. A server-side variable can use ${{api.INTERNAL_URL}} instead when both services share a node.",
+    );
+    expect(errorLines(result.diagnostics)).toEqual([3]);
+  });
+
+  test("the code action at the cursor replaces the URL with the reference, with the hint's own severity", () => {
+    const at = env.indexOf("api.example.com/v1");
+    const actions = quickFixActions(result.diagnostics, at, at, "web");
+    expect(actions.map((a) => [a.title, a.severity, a.isPreferred])).toEqual([["Use ${{api.URL}}", markerSeverity.info, true]]);
+    const edit = actions[0]?.edits[0];
+    expect(edit && env.slice(edit.range.start, edit.range.end)).toBe("https://api.example.com");
+    expect(edit?.text).toBe("${{api.URL}}");
+    const second = env.indexOf("http://api");
+    expect(quickFixActions(result.diagnostics, second, second, "web").map((a) => a.title)).toEqual(["Use ${{api.INTERNAL_URL}}"]);
+  });
+
+  test("next to an error, the error's fix comes first", () => {
+    // The whole file selected: the typo's "Change to api" (an error) before the hints.
+    const actions = quickFixActions(result.diagnostics, 0, env.length, "web");
+    expect(actions.map((a) => [a.title, a.severity, a.isPreferred])).toEqual([
+      ["Use api", markerSeverity.error, true],
+      ["Use ${{api.URL}}", markerSeverity.info, false],
+      ["Use ${{api.INTERNAL_URL}}", markerSeverity.info, false],
+    ]);
   });
 });

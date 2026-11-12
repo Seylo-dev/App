@@ -19,6 +19,11 @@ import type { Diagnostic, EnvComment, EnvEntry, ParsedEnv, QuoteStyle } from "./
 const keyPattern = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 const keyChar = /[A-Za-z0-9_.-]/;
 
+/** A name the parser takes as a key: a letter or _, then letters, digits, _, . or -. */
+export function isValidKey(key: string): boolean {
+  return keyPattern.test(key);
+}
+
 export function parseEnv(text: string): ParsedEnv {
   const index = new LineIndex(text);
   const entries: EnvEntry[] = [];

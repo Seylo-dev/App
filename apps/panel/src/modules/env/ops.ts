@@ -3,13 +3,13 @@
 // where the caller may not see the target), and diagnostics from
 // @seylo/env-analyzer, the same code the web editor runs locally.
 
-import { analyzeEnv, analyzeParsed, type Diagnostic, type ParsedEnv, parseEnv } from "@seylo/env-analyzer";
+import { analyzeEnv, analyzeParsed, type Diagnostic, type EnvEntry, type ParsedEnv, parseEnv, setEnvVariable } from "@seylo/env-analyzer";
 import { env as envOps, OpError } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { projects, servicePlacements, services } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
-import { getService, invalidateService } from "../domains/lookup";
+import { getService, invalidateService, type ServiceRow } from "../domains/lookup";
 import { receivesShared } from "./desired";
 import { buildEnvGraph, contextFor, type GraphService, isCredentialVariable } from "./graph";
 import { matchesExpected, readProjectEnv, readServiceEnv, writeProjectEnv, writeServiceEnv } from "./store";
@@ -141,6 +141,35 @@ function assertVisible(
   });
 }
 
+function refuseStale(what: "environment" | "shared"): never {
+  const message =
+    what === "environment"
+      ? "Someone else saved this environment in the meantime. Reload to see their changes."
+      : "Someone else saved the shared variables in the meantime. Reload to see their changes.";
+  throw new OpError("CONFLICT", message, { reason: "stale" });
+}
+
+/**
+ * One variable changed in stored text (setEnvVariable), or the refusal. The
+ * messages name the key, never the value: it can be a secret and the audit
+ * log and model transcripts keep error messages.
+ */
+function editVariable(text: string, key: string, value: string | null): string {
+  const edit = setEnvVariable(text, key, value);
+  if (edit.ok) return edit.text;
+  if (edit.reason === "not-set") throw new OpError("NOT_FOUND", `${key} is not set, so there is nothing to remove.`, { field: "key", key });
+  throw new OpError("BAD_REQUEST", edit.message, { field: edit.reason === "invalid-key" ? "key" : "value", key });
+}
+
+/** Whether running instances still have the old values after a change, and the live updates every service env write sends. */
+function afterServiceWrite(ctx: OpContext, service: ServiceRow, changed: boolean): boolean {
+  const running = ctx.agents.state.serviceStatuses(service.id).length > 0 || service.liveDeploymentId !== null;
+  invalidateService(ctx, service.id, [envOps.get.id, envOps.analyze.id]);
+  // Other services that reference this one see new values in their References list.
+  ctx.live.publish(`project:${service.projectId}`, { type: "invalidate", ops: [envOps.references.id] });
+  return changed && running;
+}
+
 export const set = implement(envOps.set, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
   const graph = buildEnvGraph(ctx, service.projectId);
@@ -151,21 +180,41 @@ export const set = implement(envOps.set, (input, ctx) => {
 
   const updatedAt = ctx.db.transaction((tx) => {
     const stored = readServiceEnv(tx, ctx.secrets, service.id);
-    if (!matchesExpected(stored.updatedAt, input.expectedUpdatedAt)) {
-      throw new OpError("CONFLICT", "Someone else saved this environment in the meantime. Reload to see their changes.", {
-        reason: "stale",
-      });
-    }
+    if (!matchesExpected(stored.updatedAt, input.expectedUpdatedAt)) refuseStale("environment");
     return {
       at: writeServiceEnv(tx, ctx.secrets, service.id, input.text, userOf(ctx.principal)?.id ?? null),
       changed: stored.text !== input.text,
     };
   });
-  const running = ctx.agents.state.serviceStatuses(service.id).length > 0 || service.liveDeploymentId !== null;
-  invalidateService(ctx, service.id, [envOps.get.id, envOps.analyze.id]);
-  // Other services that reference this one see new values in their References list.
-  ctx.live.publish(`project:${service.projectId}`, { type: "invalidate", ops: [envOps.references.id] });
-  return { updatedAt: updatedAt.at.toISOString(), diagnostics, restartNeeded: updatedAt.changed && running };
+  return { updatedAt: updatedAt.at.toISOString(), diagnostics, restartNeeded: afterServiceWrite(ctx, service, updatedAt.changed) };
+});
+
+/**
+ * One variable of the saved text, the others left as they are: what a model
+ * can do with env.get's values redacted. The same checks as env.set, on the
+ * edited line: its references must be ones the caller may see (other lines
+ * were written by whoever wrote them), and the file must have no syntax errors.
+ */
+export const setVariable = implement(envOps.setVariable, (input, ctx) => {
+  const service = getService(ctx.db, input.serviceId);
+  const graph = buildEnvGraph(ctx, service.projectId);
+  const saved = ctx.db.transaction((tx) => {
+    const stored = readServiceEnv(tx, ctx.secrets, service.id);
+    if (!matchesExpected(stored.updatedAt, input.expectedUpdatedAt)) refuseStale("environment");
+    const text = editVariable(stored.text, input.key, input.value);
+    const parsed = parseEnv(text);
+    const errors = syntaxErrors(parsed.problems);
+    if (errors.length > 0) refuseSyntax(errors);
+    const edited = parsed.entries.findLast((e) => e.key === input.key);
+    assertVisible(ctx, graph, service.projectId, [service.name], { ...parsed, entries: edited ? [edited] : [] });
+    return {
+      at: writeServiceEnv(tx, ctx.secrets, service.id, text, userOf(ctx.principal)?.id ?? null),
+      text,
+      changed: stored.text !== text,
+    };
+  });
+  const { diagnostics } = analyzeEnv(saved.text, contextFor(graph, service.id));
+  return { updatedAt: saved.at.toISOString(), diagnostics, restartNeeded: afterServiceWrite(ctx, service, saved.changed) };
 });
 
 export const references = implement(envOps.references, (input, ctx) => {
@@ -194,41 +243,36 @@ export const getShared = implement(envOps.getShared, (input, ctx) => {
   return { text: stored.text, variables: variablesOf(stored.text), updatedAt: stored.updatedAt?.toISOString() ?? null };
 });
 
-export const setShared = implement(envOps.setShared, (input, ctx) => {
-  requireProject(ctx, input.projectId);
-  const parsed = parseEnv(input.text);
-  const errors = syntaxErrors(parsed.problems);
-  if (errors.length > 0) refuseSyntax(errors);
-  const withReference = parsed.entries.find((e) => e.references.length > 0);
-  if (withReference) {
-    throw new OpError(
-      "BAD_REQUEST",
-      `Line ${withReference.keyRange.startLine}: shared variables cannot reference services. Write the value instead.`,
-      {
-        field: "text",
-        line: String(withReference.keyRange.startLine),
-      },
-    );
-  }
+/** Shared variables are plain values: the first entry with a reference is refused. */
+function refuseSharedReferences(entries: readonly EnvEntry[], field: "text" | "value"): void {
+  const withReference = entries.find((e) => e.references.length > 0);
+  if (!withReference) return;
+  throw new OpError(
+    "BAD_REQUEST",
+    `Line ${withReference.keyRange.startLine}: shared variables cannot reference services. Write the value instead.`,
+    {
+      field,
+      line: String(withReference.keyRange.startLine),
+    },
+  );
+}
 
-  const result = ctx.db.transaction((tx) => {
-    const stored = readProjectEnv(tx, ctx.secrets, input.projectId);
-    if (!matchesExpected(stored.updatedAt, input.expectedUpdatedAt)) {
-      throw new OpError("CONFLICT", "Someone else saved the shared variables in the meantime. Reload to see their changes.", {
-        reason: "stale",
-      });
-    }
-    const before = new Map(parseEnv(stored.text).entries.map((e) => [e.key, e.value]));
-    const after = new Map(parsed.entries.map((e) => [e.key, e.value]));
-    const changedKeys = new Set([...before.keys(), ...after.keys()].filter((k) => before.get(k) !== after.get(k)));
-    const at = writeProjectEnv(tx, ctx.secrets, input.projectId, input.text, userOf(ctx.principal)?.id ?? null);
-    return { at, changedKeys };
-  });
+/** Keys whose last value differs between two versions of a .env text (added and removed ones too). */
+function changedKeys(before: ParsedEnv, after: ParsedEnv): Set<string> {
+  const old = new Map(before.entries.map((e) => [e.key, e.value]));
+  const now = new Map(after.entries.map((e) => [e.key, e.value]));
+  return new Set([...old.keys(), ...now.keys()].filter((k) => old.get(k) !== now.get(k)));
+}
 
-  // Services running with an old value: they receive shared variables (or reference them) and do not override the key.
+/**
+ * Services running with an old value after shared keys changed: they
+ * receive shared variables (or reference them) and do not override the key.
+ * Also sends the live updates every shared variables write sends.
+ */
+function afterSharedWrite(ctx: OpContext, projectId: string, changed: ReadonlySet<string>): string[] {
   const affected: string[] = [];
-  if (result.changedKeys.size > 0) {
-    const rows = ctx.db.select().from(services).where(eq(services.projectId, input.projectId)).all();
+  if (changed.size > 0) {
+    const rows = ctx.db.select().from(services).where(eq(services.projectId, projectId)).all();
     for (const row of rows) {
       const placed = ctx.db
         .select({ nodeId: servicePlacements.nodeId })
@@ -238,11 +282,55 @@ export const setShared = implement(envOps.setShared, (input, ctx) => {
       if (!placed) continue;
       const own = parseEnv(readServiceEnv(ctx.db, ctx.secrets, row.id).text);
       const ownKeys = new Set(own.entries.map((e) => e.key));
-      const references = own.entries.some((e) => e.references.some((r) => r.target === "project" && result.changedKeys.has(r.variable)));
-      const inherits = receivesShared(row.kind) && [...result.changedKeys].some((k) => !ownKeys.has(k));
+      const references = own.entries.some((e) => e.references.some((r) => r.target === "project" && changed.has(r.variable)));
+      const inherits = receivesShared(row.kind) && [...changed].some((k) => !ownKeys.has(k));
       if (references || inherits) affected.push(row.id);
     }
   }
-  ctx.live.publish(`project:${input.projectId}`, { type: "invalidate", ops: [envOps.getShared.id, envOps.get.id, envOps.references.id] });
-  return { updatedAt: result.at.toISOString(), diagnostics: parsed.problems, affectedServiceIds: affected };
+  ctx.live.publish(`project:${projectId}`, { type: "invalidate", ops: [envOps.getShared.id, envOps.get.id, envOps.references.id] });
+  return affected;
+}
+
+export const setShared = implement(envOps.setShared, (input, ctx) => {
+  requireProject(ctx, input.projectId);
+  const parsed = parseEnv(input.text);
+  const errors = syntaxErrors(parsed.problems);
+  if (errors.length > 0) refuseSyntax(errors);
+  refuseSharedReferences(parsed.entries, "text");
+
+  const result = ctx.db.transaction((tx) => {
+    const stored = readProjectEnv(tx, ctx.secrets, input.projectId);
+    if (!matchesExpected(stored.updatedAt, input.expectedUpdatedAt)) refuseStale("shared");
+    const at = writeProjectEnv(tx, ctx.secrets, input.projectId, input.text, userOf(ctx.principal)?.id ?? null);
+    return { at, changed: changedKeys(parseEnv(stored.text), parsed) };
+  });
+  return {
+    updatedAt: result.at.toISOString(),
+    diagnostics: parsed.problems,
+    affectedServiceIds: afterSharedWrite(ctx, input.projectId, result.changed),
+  };
+});
+
+/** One shared variable, the others left as they are (env.setVariable for the project's shared variables). */
+export const setSharedVariable = implement(envOps.setSharedVariable, (input, ctx) => {
+  requireProject(ctx, input.projectId);
+  const result = ctx.db.transaction((tx) => {
+    const stored = readProjectEnv(tx, ctx.secrets, input.projectId);
+    if (!matchesExpected(stored.updatedAt, input.expectedUpdatedAt)) refuseStale("shared");
+    const text = editVariable(stored.text, input.key, input.value);
+    const parsed = parseEnv(text);
+    const errors = syntaxErrors(parsed.problems);
+    if (errors.length > 0) refuseSyntax(errors);
+    refuseSharedReferences(
+      parsed.entries.filter((e) => e.key === input.key),
+      "value",
+    );
+    const at = writeProjectEnv(tx, ctx.secrets, input.projectId, text, userOf(ctx.principal)?.id ?? null);
+    return { at, parsed, changed: changedKeys(parseEnv(stored.text), parsed) };
+  });
+  return {
+    updatedAt: result.at.toISOString(),
+    diagnostics: result.parsed.problems,
+    affectedServiceIds: afterSharedWrite(ctx, input.projectId, result.changed),
+  };
 });

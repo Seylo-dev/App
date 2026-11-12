@@ -88,7 +88,13 @@ export type ContextCode =
   /** The referenced variable exists but has no value yet (for example no domain yet). */
   | "empty-reference"
   /** Following the reference leads back to this variable (or into a loop), so it can never resolve. */
-  | "reference-cycle";
+  | "reference-cycle"
+  /**
+   * Info: the value is another service's (or this one's) built-in address
+   * written out (its URL, DOMAIN, INTERNAL_URL, ...), so a fix offers the
+   * reference. Never names the value, only the key and the reference.
+   */
+  | "hardcoded-reference";
 
 export type DiagnosticCode = SyntaxCode | ContextCode;
 

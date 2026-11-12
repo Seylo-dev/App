@@ -2,9 +2,12 @@
 // duplicate keys, and the one this package exists for - an internal address
 // of a service that runs on another node. There is no cross-node private
 // network, so db:5432 or ${{db.INTERNAL_URL}} only works for services that
-// have an instance on every node this service runs on.
+// have an instance on every node this service runs on. hardcoded.ts adds a
+// hint for another service's address written out instead of referenced.
 
+import { checkHardcoded } from "./hardcoded";
 import { hostMentions } from "./hosts";
+import { missingNodes } from "./nodes";
 import { parseEnv } from "./parse";
 import { formatReference, sharedTarget } from "./references";
 import { LineIndex } from "./source";
@@ -54,6 +57,9 @@ export function analyzeParsed(parsed: ParsedEnv, context: AnalyzeContext): Diagn
 
     for (const reference of entry.references) diagnostics.push(...checkReference(entry, reference, context, targets, selfDeps));
     if (entry.quote !== "single") diagnostics.push(...checkLiteralAddresses(index, entry, context));
+    if (!parsed.problems.some((p) => p.range.start < entry.range.end && p.range.end > entry.range.start)) {
+      diagnostics.push(...checkHardcoded(index, entry, context));
+    }
   }
 
   return diagnostics.sort((a, b) => a.range.start - b.range.start || a.range.end - b.range.end);
@@ -305,13 +311,6 @@ function editDistance(a: string, b: string): number {
   return previous[b.length] ?? 0;
 }
 
-/** Nodes of self that the target has no instance on. Shared targets and unplaced services never miss. */
-export function missingNodes(self: readonly NodeRef[], target: readonly NodeRef[]): NodeRef[] {
-  if (target.length === 0) return [];
-  const have = new Set(target.map((n) => n.id));
-  return self.filter((n) => !have.has(n.id));
-}
-
 function diag(
   code: Diagnostic["code"],
   severity: Diagnostic["severity"],
@@ -323,4 +322,3 @@ function diag(
 ): Diagnostic {
   return { code, severity, message, detail, params, range, fixes };
 }
-

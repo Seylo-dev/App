@@ -33628,6 +33628,10 @@
                               {
                                 "const": "reference-cycle",
                                 "type": "string"
+                              },
+                              {
+                                "const": "hardcoded-reference",
+                                "type": "string"
                               }
                             ]
                           },
@@ -33847,7 +33851,7 @@
       "get": {
         "operationId": "env.get",
         "summary": "Get a service's environment",
-        "description": "Returns the service's .env text as saved, the parsed variables (references left as written) and how many shared project variables it also receives.",
+        "description": "Returns the service's .env text as saved, the parsed variables (references left as written) and how many shared project variables it also receives. Model callers (MCP, the assistant) get every value redacted: to change one variable without the others, use env.setVariable.",
         "tags": [
           "env"
         ],
@@ -34368,7 +34372,7 @@
       "post": {
         "operationId": "env.set",
         "summary": "Save a service's environment",
-        "description": "Replaces the service's .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy or restart.",
+        "description": "Replaces the service's whole .env text. Syntax errors are refused; context problems (for example an internal address of a service on another node) are saved and returned as diagnostics. The new values apply on the next deploy or restart. To change one variable and keep the others as they are, use env.setVariable.",
         "tags": [
           "env"
         ],
@@ -34513,6 +34517,10 @@
                               },
                               {
                                 "const": "reference-cycle",
+                                "type": "string"
+                              },
+                              {
+                                "const": "hardcoded-reference",
                                 "type": "string"
                               }
                             ]
@@ -34882,6 +34890,10 @@
                               {
                                 "const": "reference-cycle",
                                 "type": "string"
+                              },
+                              {
+                                "const": "hardcoded-reference",
+                                "type": "string"
                               }
                             ]
                           },
@@ -35102,6 +35114,785 @@
         },
         "x-op-kind": "mutation",
         "x-permission": "project:env.edit",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/env.setSharedVariable": {
+      "post": {
+        "operationId": "env.setSharedVariable",
+        "summary": "Set one of a project's shared variables",
+        "description": "Sets one shared variable and keeps the others as they are, like env.setVariable for a service: the last line with the key gets the new value (its quoting, comments and # @public kept), a new key is appended, value null removes every line with the key (NOT_FOUND when there is none). Shared variables cannot reference services. Services that use them get the new value on their next deploy or restart.",
+        "tags": [
+          "env"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectId",
+                  "key",
+                  "value"
+                ],
+                "properties": {
+                  "projectId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "key": {
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                    "description": "Variable name: a letter or _, then letters, digits, _, . or -.",
+                    "type": "string"
+                  },
+                  "value": {
+                    "description": "The new value as the program should read it, without quotes (references allowed). null removes the variable.",
+                    "anyOf": [
+                      {
+                        "maxLength": 262144,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expectedUpdatedAt": {
+                    "anyOf": [
+                      {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "updatedAt",
+                    "diagnostics",
+                    "affectedServiceIds"
+                  ],
+                  "properties": {
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "severity",
+                          "message",
+                          "detail",
+                          "params",
+                          "range",
+                          "fixes"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "invalid-line",
+                                "type": "string"
+                              },
+                              {
+                                "const": "invalid-key",
+                                "type": "string"
+                              },
+                              {
+                                "const": "missing-equals",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unterminated-quote",
+                                "type": "string"
+                              },
+                              {
+                                "const": "trailing-characters",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unterminated-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "malformed-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "duplicate-key",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown-service",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown-variable",
+                                "type": "string"
+                              },
+                              {
+                                "const": "self-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "internal-reference-other-node",
+                                "type": "string"
+                              },
+                              {
+                                "const": "internal-address-other-node",
+                                "type": "string"
+                              },
+                              {
+                                "const": "service-not-exposed",
+                                "type": "string"
+                              },
+                              {
+                                "const": "empty-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "reference-cycle",
+                                "type": "string"
+                              },
+                              {
+                                "const": "hardcoded-reference",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "severity": {
+                            "anyOf": [
+                              {
+                                "const": "error",
+                                "type": "string"
+                              },
+                              {
+                                "const": "warning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "info",
+                                "type": "string"
+                              },
+                              {
+                                "const": "hint",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "params": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^(.*)$": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "range": {
+                            "type": "object",
+                            "required": [
+                              "start",
+                              "end",
+                              "startLine",
+                              "startColumn",
+                              "endLine",
+                              "endColumn"
+                            ],
+                            "properties": {
+                              "start": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "end": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "startLine": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "startColumn": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "endLine": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "endColumn": {
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "fixes": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "kind",
+                                    "title",
+                                    "edits"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "edit",
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "edits": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "range",
+                                          "text"
+                                        ],
+                                        "properties": {
+                                          "range": {
+                                            "type": "object",
+                                            "required": [
+                                              "start",
+                                              "end",
+                                              "startLine",
+                                              "startColumn",
+                                              "endLine",
+                                              "endColumn"
+                                            ],
+                                            "properties": {
+                                              "start": {
+                                                "minimum": 0,
+                                                "type": "integer"
+                                              },
+                                              "end": {
+                                                "minimum": 0,
+                                                "type": "integer"
+                                              },
+                                              "startLine": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "startColumn": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "endLine": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "endColumn": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              }
+                                            }
+                                          },
+                                          "text": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "kind",
+                                    "title",
+                                    "nodeId",
+                                    "nodeName"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "moveService",
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "nodeId": {
+                                      "type": "string"
+                                    },
+                                    "nodeName": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "kind",
+                                    "title",
+                                    "serviceId",
+                                    "serviceName"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "exposeService",
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "serviceId": {
+                                      "type": "string"
+                                    },
+                                    "serviceName": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "affectedServiceIds": {
+                      "type": "array",
+                      "items": {
+                        "pattern": "^[a-z0-9]{16}$",
+                        "description": "Panel-issued id.",
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "project:env.edit",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/env.setVariable": {
+      "post": {
+        "operationId": "env.setVariable",
+        "summary": "Set one variable of a service's environment",
+        "description": "Sets one variable and keeps the rest of the .env text as it is, so a caller that cannot read the other values (model callers get env.get redacted) changes only this line. An existing key keeps its line: the value of the last line with that key (the one that wins) is replaced, in its quote style when the value fits it, with its export, its trailing comment and the comment lines above it (# @public stays). A new key is appended as KEY=value. value null removes every line with the key (NOT_FOUND when there is none). Give the value unquoted; ${{target.VARIABLE}} references are allowed, and a value with spaces or a newline is written in double quotes. Same checks as env.set; the diagnostics of the whole file come back (hardcoded-reference: a value that spells out a service's URL, with a fix to its reference). The new value applies on the next deploy or restart.",
+        "tags": [
+          "env"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "key",
+                  "value"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "key": {
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                    "description": "Variable name: a letter or _, then letters, digits, _, . or -.",
+                    "type": "string"
+                  },
+                  "value": {
+                    "description": "The new value as the program should read it, without quotes (references allowed). null removes the variable.",
+                    "anyOf": [
+                      {
+                        "maxLength": 262144,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expectedUpdatedAt": {
+                    "anyOf": [
+                      {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "updatedAt",
+                    "diagnostics",
+                    "restartNeeded"
+                  ],
+                  "properties": {
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "severity",
+                          "message",
+                          "detail",
+                          "params",
+                          "range",
+                          "fixes"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "invalid-line",
+                                "type": "string"
+                              },
+                              {
+                                "const": "invalid-key",
+                                "type": "string"
+                              },
+                              {
+                                "const": "missing-equals",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unterminated-quote",
+                                "type": "string"
+                              },
+                              {
+                                "const": "trailing-characters",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unterminated-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "malformed-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "duplicate-key",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown-service",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown-variable",
+                                "type": "string"
+                              },
+                              {
+                                "const": "self-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "internal-reference-other-node",
+                                "type": "string"
+                              },
+                              {
+                                "const": "internal-address-other-node",
+                                "type": "string"
+                              },
+                              {
+                                "const": "service-not-exposed",
+                                "type": "string"
+                              },
+                              {
+                                "const": "empty-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "reference-cycle",
+                                "type": "string"
+                              },
+                              {
+                                "const": "hardcoded-reference",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "severity": {
+                            "anyOf": [
+                              {
+                                "const": "error",
+                                "type": "string"
+                              },
+                              {
+                                "const": "warning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "info",
+                                "type": "string"
+                              },
+                              {
+                                "const": "hint",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "params": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^(.*)$": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "range": {
+                            "type": "object",
+                            "required": [
+                              "start",
+                              "end",
+                              "startLine",
+                              "startColumn",
+                              "endLine",
+                              "endColumn"
+                            ],
+                            "properties": {
+                              "start": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "end": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "startLine": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "startColumn": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "endLine": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "endColumn": {
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "fixes": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "kind",
+                                    "title",
+                                    "edits"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "edit",
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "edits": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "range",
+                                          "text"
+                                        ],
+                                        "properties": {
+                                          "range": {
+                                            "type": "object",
+                                            "required": [
+                                              "start",
+                                              "end",
+                                              "startLine",
+                                              "startColumn",
+                                              "endLine",
+                                              "endColumn"
+                                            ],
+                                            "properties": {
+                                              "start": {
+                                                "minimum": 0,
+                                                "type": "integer"
+                                              },
+                                              "end": {
+                                                "minimum": 0,
+                                                "type": "integer"
+                                              },
+                                              "startLine": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "startColumn": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "endLine": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              },
+                                              "endColumn": {
+                                                "minimum": 1,
+                                                "type": "integer"
+                                              }
+                                            }
+                                          },
+                                          "text": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "kind",
+                                    "title",
+                                    "nodeId",
+                                    "nodeName"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "moveService",
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "nodeId": {
+                                      "type": "string"
+                                    },
+                                    "nodeName": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "kind",
+                                    "title",
+                                    "serviceId",
+                                    "serviceName"
+                                  ],
+                                  "properties": {
+                                    "kind": {
+                                      "const": "exposeService",
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "serviceId": {
+                                      "type": "string"
+                                    },
+                                    "serviceName": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "restartNeeded": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:env.edit",
         "x-mcp": true
       }
     },

@@ -3,6 +3,6 @@
 // desired.ts resolves the final environment for the desired state.
 
 import { defineModule } from "../module";
-import { analyze, get, getShared, references, set, setShared } from "./ops";
+import { analyze, get, getShared, references, set, setShared, setSharedVariable, setVariable } from "./ops";
 
-export default defineModule({ name: "env", ops: [get, set, references, analyze, getShared, setShared] });
+export default defineModule({ name: "env", ops: [get, set, setVariable, references, analyze, getShared, setShared, setSharedVariable] });

@@ -14,6 +14,7 @@ import {
   type SecretVerdict,
   type SourceRange,
   secretOverride,
+  type TextEdit,
 } from "@seylo/env-analyzer";
 import { type MessageKey, t } from "../../../i18n/t";
 
@@ -37,6 +38,13 @@ const messageKeys: Record<string, MessageKey> = {
   "internal-address-other-node": "serviceEnv.problem.otherNode",
   "service-not-exposed": "serviceEnv.problem.notExposed",
   "empty-reference": "serviceEnv.problem.emptyReference",
+  "hardcoded-reference": "serviceEnv.problem.hardcodedReference",
+};
+
+const hardcodedReasons: Record<string, MessageKey> = {
+  same: "serviceEnv.problem.hardcodedReferenceSame",
+  public: "serviceEnv.problem.hardcodedReferencePublic",
+  noPublic: "serviceEnv.problem.hardcodedReferenceNoPublic",
 };
 
 const detailKeys: Record<string, MessageKey> = {
@@ -57,8 +65,26 @@ export function problemMessage(d: Pick<Diagnostic, "code" | "params" | "message"
 export function problemDetail(d: Pick<Diagnostic, "code" | "params" | "detail">, selfName: string): string {
   // What the service can reference of itself instead (its DOMAIN, URL, ...), when the panel sent them.
   if (d.code === "self-reference") return d.params.builtins ? t("serviceEnv.problem.selfReferenceDetail", d.params) : "";
+  if (d.code === "hardcoded-reference") return hardcodedDetail(d.params);
   const key = detailKeys[d.code];
   return key ? t(key, { ...d.params, self: selfName }) : "";
+}
+
+/** Why the reference is better, and for another service's public URL, where INTERNAL_URL works instead. */
+function hardcodedDetail(params: Record<string, string>): string {
+  const reason = hardcodedReasons[params.reason ?? ""];
+  const parts = reason ? [t(reason, params)] : [];
+  if (params.internalReference) {
+    parts.push(
+      t(
+        params.browser === "true"
+          ? "serviceEnv.problem.hardcodedReferenceInternalBrowser"
+          : "serviceEnv.problem.hardcodedReferenceInternalServer",
+        params,
+      ),
+    );
+  }
+  return parts.join(" ");
 }
 
 /** Button text for a quick fix. */
@@ -71,6 +97,30 @@ export function fixTitle(fix: QuickFix, selfName: string): string {
     case "exposeService":
       return t("serviceEnv.fix.expose", { service: fix.serviceName });
   }
+}
+
+export interface QuickFixAction {
+  title: string;
+  /** Monaco's preferred action (Cmd+. puts it first): the first fix of the most severe problem. */
+  isPreferred: boolean;
+  /** Monaco MarkerSeverity of the diagnostic it fixes: a hardcoded-reference hint stays an info, not an error. */
+  severity: number;
+  diagnostic: Diagnostic;
+  edits: readonly TextEdit[];
+}
+
+/** The edit fixes of every diagnostic touching offsets [from, to], for Monaco's code actions (the lightbulb). */
+export function quickFixActions(diagnostics: readonly Diagnostic[], from: number, to: number, selfName: string): QuickFixAction[] {
+  const out: Omit<QuickFixAction, "isPreferred">[] = [];
+  for (const d of diagnostics) {
+    if (d.range.end < from || d.range.start > to) continue;
+    for (const fix of d.fixes) {
+      if (fix.kind !== "edit") continue;
+      out.push({ title: fixTitle(fix, selfName), severity: markerSeverity[d.severity], diagnostic: d, edits: fix.edits });
+    }
+  }
+  // Stable: errors before hints, each in file order.
+  return out.sort((a, b) => b.severity - a.severity).map((action, i) => ({ ...action, isPreferred: i === 0 }));
 }
 
 export interface MarkerData {

@@ -2,7 +2,7 @@
 // desired state for an agent, for hovers in the editor, and for the
 // References list.
 
-import { missingNodes } from "./analyze";
+import { missingNodes } from "./nodes";
 import { formatReference, substituteReferences } from "./references";
 import type { AnalyzeContext, EnvReference, ParsedEnv, ReferenceTarget, ReferenceVariable } from "./types";
 
