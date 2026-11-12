@@ -8,7 +8,12 @@
 // no group for the service itself. Internal variables of services on other
 // nodes are struck through, exposed ones too (their tip names the exposed
 // variable to use instead); services with no way in get an Expose link
-// instead.
+// instead. A variable whose value is empty right now (URL and DOMAIN
+// before a domain, an empty shared variable) gets no chip, and a group left
+// with none is not shown; a reference to it is still valid (the editor
+// completes it) and resolves once it has a value. A null value is one the
+// caller may not see or that is not known yet, not an empty one: it keeps
+// its chip.
 
 import type { AnalyzeContext, ReferenceTarget, ReferenceVariable } from "@seylo/env-analyzer";
 import { formatReference, missingNodes, pickPublicVariable } from "@seylo/env-analyzer";
@@ -34,7 +39,11 @@ export function ReferencesPanel({
   onInsert: (text: string) => void;
 }) {
   const selfNodes = context.self.nodes.map((n) => n.name).join(", ");
-  const own = context.self.name ? (context.self.builtins ?? []) : [];
+  const own = context.self.name ? (context.self.builtins ?? []).filter(hasValue) : [];
+  // Each group with only the chips it shows, so whether it is reachable and what its tips suggest go by those.
+  const targets = context.targets
+    .map((target) => ({ ...target, variables: target.variables.filter(hasValue) }))
+    .filter((target) => target.variables.length > 0);
   return (
     <aside
       aria-label={t("serviceEnv.refs.title")}
@@ -48,12 +57,12 @@ export function ReferencesPanel({
       </div>
       <div className="flex flex-col px-[18px] pt-1.5 pb-4">
         {own.length > 0 && <SelfGroup name={context.self.name} kind={serviceKind} builtins={own} reveal={reveal} onInsert={onInsert} />}
-        {context.targets.length === 0 && (
+        {targets.length === 0 && (
           <p className={cn("m-0 py-3 text-[12.5px] text-muted-foreground", own.length > 0 && "border-t border-divider")}>
             {own.length > 0 ? t("serviceEnv.refs.emptyOthers") : t("serviceEnv.refs.empty")}
           </p>
         )}
-        {context.targets.map((target, i) => (
+        {targets.map((target, i) => (
           <TargetGroup
             key={`${target.kind}:${target.name}`}
             target={target}
@@ -183,11 +192,19 @@ function GroupHeader({ kind, name, meta }: { kind: string | null; name: string; 
   );
 }
 
-/** The value line of a variable's tip: its value, or why there is none to show. */
+/**
+ * Whether a variable gets a chip: not when its value is empty right now.
+ * Null (hidden from the caller, or not known yet) is not empty.
+ */
+export function hasValue(variable: ReferenceVariable): boolean {
+  return variable.value !== "";
+}
+
+/** The value line of a variable's tip: its value, or why it is not shown. Empty ones have no chip (hasValue). */
 export function shownValue(variable: ReferenceVariable, reveal: boolean): string {
   if (variable.value == null) return t("serviceEnv.hover.unknown");
   if (variable.sensitive && !reveal) return t("serviceEnv.hover.hidden");
-  return variable.value || t("serviceEnv.hover.empty");
+  return variable.value;
 }
 
 function VariableButton({

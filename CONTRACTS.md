@@ -5715,7 +5715,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   underline outside the problem count), `env/references-panel.tsx` (the References panel: first the
   edited service with `env.references` `self.builtins` only, each inserting
   `${{<its name>.VAR}}`, never its own .env keys, and no such group when
-  `self.builtins` is empty or missing; then `targets`), `terminal/xterm-view.tsx` +
+  `self.builtins` is empty or missing; then `targets`. A variable whose
+  value is `""` right now gets no chip (`hasValue`: `URL` and `DOMAIN`
+  before a domain, `EXPOSED_*` of a database not exposed, an empty shared
+  variable), and a group left with no chip is not shown, so the empty-state
+  text shows when nothing is left; a `null` value, hidden from the caller
+  (no `env.view` on the target, a database credential without
+  `databases.credentials`) or not known yet, keeps its chip. Whether a group
+  is reachable and the exposed variable a struck-through tip names go by the
+  chips shown. References to an empty variable stay valid in the editor and
+  resolve once it has a value), `terminal/xterm-view.tsx` +
   `terminal/use-terminal-session.ts` (ticketed terminal sockets, one xterm
   write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
   `copy/` (the header's "..." `ServiceMenu` with the Clone and Move to
@@ -5780,8 +5789,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
   text unsaved), `env-references.spec.ts` (the References panel on the demo
-  data: worker first with its own built-ins and tips, none of its own
-  variables, a click inserting `${{worker.DOMAIN}}`; an exposed database's
+  data: worker first with only its own built-ins that have a value
+  (`INTERNAL_HOST`, no domain or port yet) and their tips, none of its own
+  variables, a click inserting `${{worker.INTERNAL_HOST}}`; an exposed database's
   internal variables on another node struck through, the Expose link),
   `env-hint.spec.ts` (a hardcoded service URL is a blue info
   squiggle outside the problems, and Ctrl+. offers Use `${{api.URL}}`,

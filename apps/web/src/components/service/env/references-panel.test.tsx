@@ -1,19 +1,23 @@
 // The References panel lists the service being edited first, with its own
 // built-ins (URL, DOMAIN, the internal address) and none of its own .env
 // variables, then the other services; a panel that sends no self.builtins
-// gets no group for it.
+// gets no group for it. A variable that is empty right now gets no chip and
+// a group left with none is not shown; a value the caller may not see
+// (null) is not empty and keeps its chip.
 
 import { expect, test } from "bun:test";
-import { type AnalyzeContext, appVariables, databaseVariables, type ReferenceVariable } from "@seylo/env-analyzer";
+import { type AnalyzeContext, appVariables, databaseVariables, type ReferenceTarget, type ReferenceVariable } from "@seylo/env-analyzer";
 import { TooltipProvider } from "@seylo/ui/components/tooltip";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
-import { ReferencesPanel, shownValue } from "./references-panel";
+import { hasValue, ReferencesPanel, shownValue } from "./references-panel";
 
 const node = { id: "node00000000000a", name: "de-fsn-1" };
+const other = { id: "node00000000000b", name: "us-ash-1" };
+// No domain yet: URL and DOMAIN are empty.
 const web = { URL: "", DOMAIN: "", INTERNAL_URL: "http://web:3000", INTERNAL_HOST: "web", INTERNAL_PORT: "3000" };
-const builtins = (values: Record<string, string>, defs = appVariables): ReferenceVariable[] =>
-  defs.map((d) => ({ ...d, value: values[d.name] ?? "" }));
+const builtins = (values: Record<string, string | null>, defs = appVariables): ReferenceVariable[] =>
+  defs.map((d) => ({ ...d, value: d.name in values ? (values[d.name] ?? null) : "" }));
 
 const api = {
   name: "api",
@@ -24,7 +28,13 @@ const api = {
   internalHost: "api",
   exposed: true,
   variables: [
-    ...builtins({ URL: "https://api.example.com", DOMAIN: "api.example.com", INTERNAL_URL: "http://api:3000" }),
+    ...builtins({
+      URL: "https://api.example.com",
+      DOMAIN: "api.example.com",
+      INTERNAL_URL: "http://api:3000",
+      INTERNAL_HOST: "api",
+      INTERNAL_PORT: "3000",
+    }),
     {
       name: "PUBLIC_NAME",
       value: "shop",
@@ -36,20 +46,61 @@ const api = {
   ],
 };
 
-const context = (self: Partial<AnalyzeContext["self"]> = {}, targets = [api]): AnalyzeContext => ({
+const service = (name: string, variables: ReferenceVariable[], more: Partial<ReferenceTarget> = {}): ReferenceTarget => ({
+  name,
+  kind: "service",
+  serviceId: `svc00000000${name.padEnd(5, "0").slice(0, 5)}`,
+  serviceKind: "app",
+  nodes: [node],
+  internalHost: name,
+  exposed: false,
+  variables,
+  ...more,
+});
+
+const shared = (variables: Record<string, string | null>): ReferenceTarget => ({
+  name: "project",
+  kind: "shared",
+  serviceId: null,
+  serviceKind: null,
+  nodes: [],
+  internalHost: null,
+  exposed: false,
+  variables: Object.entries(variables).map(([name, value]) => ({
+    name,
+    value,
+    scope: "plain",
+    sensitive: true,
+    secret: name.endsWith("_PASS"),
+    description: "shared variable",
+  })),
+});
+
+const context = (self: Partial<AnalyzeContext["self"]> = {}, targets: ReferenceTarget[] = [api]): AnalyzeContext => ({
   self: { serviceId: "svc0000000000web", name: "web", nodes: [node], builtins: builtins(web), ...self },
   targets,
 });
 
-const render = (ctx: AnalyzeContext, kind = "app") =>
+const render = (ctx: AnalyzeContext, kind = "app", reveal = false) =>
   renderStatic(() => (
     <TooltipProvider>
-      <ReferencesPanel context={ctx} serviceKind={kind} projectId="prj0000000000001" reveal={false} onInsert={() => {}} />
+      <ReferencesPanel context={ctx} serviceKind={kind} projectId="prj0000000000001" reveal={reveal} onInsert={() => {}} />
     </TooltipProvider>
   ));
 
 /** The chip names in the markup, in order. */
 const chips = (html: string) => [...html.matchAll(/<button type="button"[^>]*>([A-Z_]+)<\/button>/g)].map((m) => m[1]);
+
+/** The group names (the bold text of each group header), in order. */
+const groups = (html: string) => [...html.matchAll(/<b class="font-semibold">([^<]+)<\/b>/g)].map((m) => m[1]);
+
+/** The chips of one group: from its header to the next one. */
+const chipsOf = (html: string, group: string) => {
+  const start = html.indexOf(`<b class="font-semibold">${group}</b>`);
+  expect(start).toBeGreaterThan(-1);
+  const next = html.indexOf('<b class="font-semibold">', start + 1);
+  return chips(html.slice(start, next === -1 ? undefined : next));
+};
 
 test("the service itself comes first, with its built-ins and none of its own variables", async () => {
   const out = await render(context());
@@ -60,27 +111,11 @@ test("the service itself comes first, with its built-ins and none of its own var
   expect(out.indexOf('<b class="font-semibold">api</b>')).toBeGreaterThan(self);
   // Its APP badge, then the same chips as any other group.
   expect(out.slice(0, self)).toContain(">APP<");
-  expect(chips(out.slice(0, out.indexOf('<b class="font-semibold">api</b>')))).toEqual([
-    "URL",
-    "DOMAIN",
-    "INTERNAL_URL",
-    "INTERNAL_HOST",
-    "INTERNAL_PORT",
-  ]);
+  expect(groups(out)).toEqual(["web", "api"]);
+  // web has no domain yet: its URL and DOMAIN have no chip.
+  expect(chipsOf(out, "web")).toEqual(["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT"]);
   // api keeps its own variable; the edited service never lists one (the lines of its file).
-  expect(chips(out)).toEqual([
-    "URL",
-    "DOMAIN",
-    "INTERNAL_URL",
-    "INTERNAL_HOST",
-    "INTERNAL_PORT",
-    "URL",
-    "DOMAIN",
-    "INTERNAL_URL",
-    "INTERNAL_HOST",
-    "INTERNAL_PORT",
-    "PUBLIC_NAME",
-  ]);
+  expect(chipsOf(out, "api")).toEqual(["URL", "DOMAIN", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "PUBLIC_NAME"]);
   // Its internal address works from where it runs: nothing is struck through.
   expect(out).not.toContain('aria-disabled="true"');
 });
@@ -90,6 +125,9 @@ test("a database lists its own database set under its engine's badge", async () 
     INTERNAL_URL: "postgres://postgres:pw@db:5432/shop",
     INTERNAL_HOST: "db",
     INTERNAL_PORT: "5432",
+    EXPOSED_URL: "postgres://postgres:pw@203.0.113.10:15432/shop?sslmode=require",
+    EXPOSED_HOST: "203.0.113.10",
+    EXPOSED_PORT: "15432",
     USER: "postgres",
     PASSWORD: "pw",
     DATABASE: "shop",
@@ -113,11 +151,109 @@ test("no group for the service itself without its built-ins (an older panel)", a
   expect(empty).toContain(t("serviceEnv.refs.empty"));
 });
 
-test("the tip's value line: the value, or why there is none", () => {
-  const domain = { name: "DOMAIN", value: "", scope: "public" as const, sensitive: false, description: "" };
-  expect(shownValue(domain, false)).toBe(t("serviceEnv.hover.empty"));
+test("a built-in that is empty right now gets no chip, the service's own and another service's", async () => {
+  // worker has no domain and no port yet: only its host name has a value.
+  const worker = service("worker", builtins({ INTERNAL_HOST: "worker" }));
+  const out = await render(context({}, [worker, api]));
+  expect(groups(out)).toEqual(["web", "worker", "api"]);
+  expect(chipsOf(out, "web")).toEqual(["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT"]);
+  expect(chipsOf(out, "worker")).toEqual(["INTERNAL_HOST"]);
+  // The same names with a value keep their chips.
+  expect(chipsOf(out, "api")).toEqual(["URL", "DOMAIN", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "PUBLIC_NAME"]);
+  // A database not exposed yet: no EXPOSED_* chips.
+  const db = service(
+    "db",
+    builtins(
+      {
+        INTERNAL_URL: "postgres://postgres:pw@db:5432/shop",
+        INTERNAL_HOST: "db",
+        INTERNAL_PORT: "5432",
+        USER: "postgres",
+        PASSWORD: "pw",
+        DATABASE: "shop",
+      },
+      databaseVariables,
+    ),
+    { serviceKind: "postgres" },
+  );
+  expect(chipsOf(await render(context({}, [db])), "db")).toEqual([
+    "INTERNAL_URL",
+    "INTERNAL_HOST",
+    "INTERNAL_PORT",
+    "USER",
+    "PASSWORD",
+    "DATABASE",
+  ]);
+});
+
+test("an empty shared variable gets no chip", async () => {
+  const out = await render(context({}, [shared({ SMTP_HOST: "smtp.example.com", SMTP_USER: "", SMTP_PASS: "" })]));
+  expect(groups(out)).toEqual(["web", t("serviceEnv.refs.project")]);
+  expect(chipsOf(out, t("serviceEnv.refs.project"))).toEqual(["SMTP_HOST"]);
+});
+
+test("a value the caller may not see is not empty: it keeps its chip, with or without Show values", async () => {
+  // Without databases.credentials the database's PASSWORD and URLs come as null; without env.view
+  // on api, its own variables too. A secret with a value is only masked.
+  const db = service(
+    "db",
+    builtins(
+      { INTERNAL_URL: null, INTERNAL_HOST: "db", INTERNAL_PORT: "5432", USER: "postgres", PASSWORD: null, DATABASE: "shop" },
+      databaseVariables,
+    ),
+    { serviceKind: "postgres" },
+  );
+  const hiddenApi = { ...api, variables: api.variables.map((v) => (v.name === "PUBLIC_NAME" ? { ...v, value: null } : v)) };
+  const ctx = context({}, [db, hiddenApi, shared({ SMTP_PASS: "pw", SMTP_TOKEN: null, SMTP_USER: "" })]);
+  for (const reveal of [false, true]) {
+    const out = await render(ctx, "app", reveal);
+    expect(chipsOf(out, "db")).toEqual(["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "USER", "PASSWORD", "DATABASE"]);
+    expect(chipsOf(out, "api")).toContain("PUBLIC_NAME");
+    expect(chipsOf(out, t("serviceEnv.refs.project"))).toEqual(["SMTP_PASS", "SMTP_TOKEN"]);
+  }
+  const url = { name: "URL", value: "", scope: "public" as const, sensitive: false, description: "" };
+  expect(hasValue(url)).toBe(false);
+  expect(hasValue({ ...url, value: null })).toBe(true);
+});
+
+test("a group with no chip left is not shown", async () => {
+  const empty = service("empty", builtins({}));
+  const out = await render(context({}, [empty, api, shared({ SMTP_HOST: "", SMTP_USER: "" })]));
+  expect(groups(out)).toEqual(["web", "api"]);
+  expect(out).not.toContain(t("serviceEnv.refs.shared"));
+  expect(out).not.toContain(t("serviceEnv.refs.emptyOthers"));
+  // A service with no chip of its own left: no "this service" group either.
+  const noSelf = await render(context({ builtins: builtins({}) }, [api]));
+  expect(noSelf).not.toContain(t("serviceEnv.refs.thisService"));
+  expect(groups(noSelf)).toEqual(["api"]);
+});
+
+test("nothing left with a value: the panel's empty state", async () => {
+  const blank = [service("empty", builtins({})), shared({ SMTP_HOST: "" })];
+  // Only the service's own chips left: the hint that others show up here.
+  const others = await render(context({}, blank));
+  expect(groups(others)).toEqual(["web"]);
+  expect(others).toContain(t("serviceEnv.refs.emptyOthers"));
+  // Not even those: nothing to reference yet.
+  const none = await render(context({ builtins: builtins({}) }, blank));
+  expect(groups(none)).toEqual([]);
+  expect(chips(none)).toEqual([]);
+  expect(none).toContain(t("serviceEnv.refs.empty"));
+});
+
+test("a service on another node with no way in, only its internal address left: the Expose link", async () => {
+  // No domain and no port yet: URL, DOMAIN, INTERNAL_URL and INTERNAL_PORT are empty, the host name is internal.
+  const worker = service("worker", builtins({ INTERNAL_HOST: "worker" }), { nodes: [other] });
+  const out = await render(context({}, [worker]));
+  expect(groups(out)).toEqual(["web", "worker"]);
+  expect(chipsOf(out, "worker")).toEqual([]);
+  expect(out).toContain(t("serviceEnv.fix.expose", { service: "worker" }));
+});
+
+test("the tip's value line: the value, or why it is not shown", () => {
+  const domain = { name: "DOMAIN", value: "web.example.com", scope: "public" as const, sensitive: false, description: "" };
+  expect(shownValue(domain, false)).toBe("web.example.com");
   expect(shownValue({ ...domain, value: null }, false)).toBe(t("serviceEnv.hover.unknown"));
-  expect(shownValue({ ...domain, value: "web.example.com" }, false)).toBe("web.example.com");
   const password = { ...domain, name: "PASSWORD", value: "pw", sensitive: true };
   expect(shownValue(password, false)).toBe(t("serviceEnv.hover.hidden"));
   expect(shownValue(password, true)).toBe("pw");
