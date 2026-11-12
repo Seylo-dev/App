@@ -6,7 +6,11 @@
 // the record is right without anyone looking: every 2 minutes in the
 // domain's first hour, every 15 minutes in its first day, then every 6
 // hours. A check from the tab counts too (dns_checked_at), and so does one
-// whose lookup failed, which leaves the domain waiting.
+// whose lookup failed, which leaves the domain waiting. A domain whose
+// service's nodes cannot have a route for it (not deployed yet, a compose
+// stack, a cron service: no-route.ts) waits for that first: it is not
+// re-checked, and checkDns runs no origin check for it. Once the service
+// deploys it is due again at once, its last check being long ago.
 
 import { domains as domainOps } from "@seylo/ops";
 import { and, eq, isNull } from "drizzle-orm";
@@ -16,6 +20,7 @@ import { defineJob } from "../../jobs/queue";
 import { acmeHeld, keepsLastAnswer, settleHold } from "./acme-hold";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, serviceNodes } from "./lookup";
+import { unroutableDomain } from "./no-route";
 import { checkOrigin, type OriginReason, originApplies, originProvable, saveOrigin } from "./origin";
 import type { DomainRow } from "./rows";
 
@@ -35,8 +40,9 @@ export async function checkDomain(
     deps.db.update(domains).set({ dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
     return { dns, origin: null, checkedAt };
   }
-  // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node.
-  const check = originApplies(row, dns.status) ? await checkOrigin(deps, row) : null;
+  // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node; with no
+  // route on the service's nodes (not deployed yet) nothing there could answer it.
+  const check = originApplies(row, dns.status) && !unroutableDomain(deps.db, row) ? await checkOrigin(deps, row) : null;
   const origin = check?.origin ?? null;
   const checkedAt = new Date();
   deps.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
@@ -69,6 +75,8 @@ export const recheckJob = defineJob({
       .where(and(eq(domains.https, "acme"), eq(domains.auto, false), isNull(domains.acmeReleasedAt), isNull(domains.liveAt)))
       .all()
       .filter((row) => acmeHeld(row) && now - (row.dnsCheckedAt?.getTime() ?? 0) >= recheckEveryMs(now - row.createdAt.getTime()))
+      // Waiting for its service to deploy first: a check could not change anything.
+      .filter((row) => !unroutableDomain(ctx.db, row))
       .sort((a, b) => (a.dnsCheckedAt?.getTime() ?? 0) - (b.dnsCheckedAt?.getTime() ?? 0))
       .slice(0, recheckPerRun);
     for (const row of due) {

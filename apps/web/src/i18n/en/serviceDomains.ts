@@ -9,6 +9,7 @@ export default {
   addBody: "Point its DNS at the service's node; the route goes live with a certificate once it resolves.",
   addedLive: "Domain added. It is live.",
   addedWaiting: "Domain added. Create the DNS record shown on its row.",
+  addedNotDeployed: "Domain added. It goes live once {name} deploys.",
   addAuto: "Add",
   autoAdded: "Automatic domain added.",
   autoHint: "from the node's wildcard record, no DNS change needed",
@@ -67,6 +68,25 @@ export default {
       "Cloudflare's security answered the check with a challenge or a block instead of passing it to the node (Bot Fight Mode, Under Attack mode, or a WAF or rate limiting rule), and it can stop Let's Encrypt the same way. Let requests to /.well-known/ on {host} through (a WAF skip rule, or Bot Fight Mode off), then Check again.",
     notFound:
       "Requests to {host} through Cloudflare get 404 from the server they reach, not the node's answer: its record in Cloudflare must point at {ip}. If it already does, the node may not have the domain yet: Check again in a minute.",
+  },
+  // A domain with no route on the service's node (Domain.noRoute): why, instead of waiting for DNS or Cloudflare.
+  noRoute: {
+    chip: {
+      notDeployed: "Not deployed yet",
+      deploying: "Waiting for the first deploy",
+      stackParent: "No route",
+      cronService: "No route",
+      routeWriteFailed: "No route on {node}",
+    },
+    notDeployed: "{name} has not deployed yet: its domains go live, and their certificates are asked for, once a deployment goes live.",
+    deploying:
+      "{name} is deploying for the first time: its domains go live, and their certificates are asked for, once that deployment goes live.",
+    stackParent:
+      "{name} is a compose stack, which runs no container of its own, so this domain routes nowhere. Add it on the Domains tab of the stack member that serves it, then remove it here.",
+    cronService: "{name} is a cron service: it runs on its schedule and serves no requests, so this domain routes nowhere. Remove it here.",
+    routeWriteFailed: "{node} could not write this service's routes: {error}",
+    routeWriteFailedHint: "The node keeps serving the routes it wrote before and tries again every 10 seconds.",
+    openDeployments: "Deployments",
   },
   theNode: "the node",
   originFixProxied:

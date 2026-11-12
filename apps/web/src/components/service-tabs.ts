@@ -98,12 +98,24 @@ export const boxTabs: readonly ServiceTab[] = [
   tab("settings", "service.tabs.settings"),
 ];
 
-export function tabsFor(kind: ServiceKind | undefined): readonly ServiceTab[] {
+/** Where the Domains tab goes for a compose stack or a cron service that has domains from before. */
+function withDomains(tabs: readonly ServiceTab[], after: TabPath): readonly ServiceTab[] {
+  const at = tabs.findIndex((t) => t.path === after) + 1;
+  return [...tabs.slice(0, at), tab("domains", "service.tabs.domains"), ...tabs.slice(at)];
+}
+
+/**
+ * The tabs of a kind. A compose stack or a cron service takes no domains,
+ * but one that has some from before (added through the API, which did not
+ * check) shows the Domains tab for them (strayDomains), where each says
+ * where it belongs.
+ */
+export function tabsFor(kind: ServiceKind | undefined, options: { strayDomains?: boolean } = {}): readonly ServiceTab[] {
   switch (kind) {
     case "cron":
-      return cronTabs;
+      return options.strayDomains ? withDomains(cronTabs, "environment") : cronTabs;
     case "compose":
-      return composeTabs;
+      return options.strayDomains ? withDomains(composeTabs, "source") : composeTabs;
     case "postgres":
     case "mysql":
     case "mariadb":

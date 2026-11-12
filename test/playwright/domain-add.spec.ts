@@ -329,3 +329,79 @@ test("the Overview's Domains card adds a domain with its + button", async ({ pag
   await expect.poll(() => calls("domains.add").length).toBe(1);
   expect(calls("domains.add")[0]).toMatchObject({ serviceId: svc.api, host: "api2.example.com" });
 });
+
+// Two custom domains behind Cloudflare's proxy read "Certificate waits for
+// Cloudflare" for hours next to "Cloudflare proxy -> <node IP>", while the
+// node had no route for them: their app had never deployed. The row now
+// says why (domains.list noRoute), links to the Deployments tab and checks
+// nothing on its own; a stack shows its leftover domains with where they
+// belong, and a node that cannot write the routes names its error.
+test("a domain with no route on the node says why, instead of waiting for Cloudflare", async ({ page }) => {
+  const calls = watchOps(page);
+  const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
+  const pending = { status: "pending", expiresAt: null, issuer: null, error: null };
+  let noRoute: Input = { reason: "notDeployed" };
+  const shop = () => ({
+    ...base[0],
+    id: "m00000000000000d",
+    origin: undefined,
+    originCheckedAt: undefined,
+    liveAt: null,
+    certificate: { ...pending, waitingForDns: true },
+    noRoute,
+  });
+  await installDemo(page, { overrides: { "domains.list": () => ({ domains: [shop()], autoDomainSuggestion: null }) } });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
+  const row = page.locator('[data-domain="shop.example.com"]');
+  await expect(row.getByTestId("no-route")).toHaveText("Not deployed yet");
+  await expect(row.getByTestId("no-route-note")).toContainText(
+    "api has not deployed yet: its domains go live, and their certificates are asked for, once a deployment goes live.",
+  );
+  await expect(row.getByRole("link", { name: "Deployments" })).toHaveAttribute("href", `/p/${ids.acme}/s/${svc.api}/deployments`);
+  await expect(row.getByTestId("certificate-waiting")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Check again" })).toHaveCount(0);
+  // The record in Cloudflare is named as it is.
+  await expect(row.getByTestId("dns-chip")).toHaveText("Cloudflare proxy → 203.0.113.10");
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/no-route-not-deployed.png` });
+  // Nothing on the node could answer: the row checks nothing on its own.
+  await page.waitForTimeout(1500);
+  expect(calls("domains.checkDns")).toHaveLength(0);
+
+  // The node could not write the service's routes: its error, not Cloudflare.
+  noRoute = {
+    reason: "routeWriteFailed",
+    nodeId: svc.nodeDe,
+    nodeName: "de-fsn-1",
+    error: "invalid route: the host belongs to another service: shop.example.com (service svcother00000001)",
+  };
+  await page.reload();
+  await expect(row.getByTestId("no-route")).toHaveText("No route on de-fsn-1");
+  await expect(row.getByTestId("no-route-note")).toContainText(
+    "de-fsn-1 could not write this service's routes: invalid route: the host belongs to another service: shop.example.com",
+  );
+  await page.screenshot({ path: `${shots}/no-route-write-failed.png` });
+});
+
+test("a compose stack shows the domains it has from before, where they belong, and adds none", async ({ page }) => {
+  const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
+  const stray = { ...base[0], id: "m00000000000000e", serviceId: svc.stack, noRoute: { reason: "stackParent" } };
+  await installDemo(page, {
+    overrides: {
+      "domains.list": (input: Input) =>
+        input.serviceId === svc.stack ? { domains: [stray], autoDomainSuggestion: null } : { domains: base, autoDomainSuggestion: null },
+    },
+  });
+  await page.goto(`/p/${ids.acme}/s/${svc.stack}`);
+  // The tab is there for the leftover domain, with it counted as one to fix.
+  await page.getByRole("link", { name: /^Domains/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/s/${svc.stack}/domains$`));
+  const row = page.locator('[data-domain="shop.example.com"]');
+  await expect(row.getByTestId("no-route")).toHaveText("No route");
+  await expect(row.getByTestId("no-route-note")).toContainText(
+    "is a compose stack, which runs no container of its own, so this domain routes nowhere.",
+  );
+  await expect(page.getByRole("button", { name: "Add domain" })).toHaveCount(0);
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/no-route-stack.png` });
+});

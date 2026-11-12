@@ -27,9 +27,13 @@ export function waitsForDns(d: Domain): boolean {
   return d.https === "acme" && d.certificate.waitingForDns === true;
 }
 
-/** A Let's Encrypt certificate that is not there yet: issuing or failed. Not while it waits for DNS: nothing would be retried. */
+/**
+ * A Let's Encrypt certificate that is not there yet: issuing or failed. Not
+ * while it waits for DNS, or while the node has no route for the domain:
+ * nothing would be retried.
+ */
 export function canRegenerate(d: Domain): boolean {
-  return d.https === "acme" && !waitsForDns(d) && (d.certificate.status === "pending" || d.certificate.status === "failed");
+  return d.https === "acme" && !d.noRoute && !waitsForDns(d) && (d.certificate.status === "pending" || d.certificate.status === "failed");
 }
 
 /**

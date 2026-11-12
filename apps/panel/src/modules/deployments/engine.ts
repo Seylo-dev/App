@@ -36,6 +36,7 @@ import type { AgentStream } from "../../agent-hub/calls";
 import { builds, type DeployStep, deployments, nodes, servicePlacements, services, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { RefusedSpec } from "../../desired";
+import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
 import { dataVolumes } from "../services/insert";
 import { restoreProjectMove } from "../services/project-move-restore";
@@ -768,6 +769,8 @@ function succeed(s: EngineState, d: DeploymentRow): void {
       : "The new version is live.";
   appendLog(s.deps, d.serviceId, d.id, "switch", [finalLine]);
   publishDeploymentChange(s.deps, d.serviceId, d.id);
+  // A first deployment gave the service's domains their routes: the ones whose certificate waits are checked now.
+  checkWaitingDomains(s.deps, d.serviceId);
   kickNext(s, d.serviceId);
 }
 

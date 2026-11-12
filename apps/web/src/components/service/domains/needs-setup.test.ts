@@ -26,3 +26,11 @@ test("custom domains whose DNS, origin or certificate still need the owner count
   expect(domainsNeedingSetup([base, d({ dnsStatus: "missing" }), d({ origin: "elsewhere" })])).toBe(2);
   expect(domainsNeedingSetup(undefined)).toBe(0);
 });
+
+test("a domain with no route counts when the domain is the problem, not while its service has not deployed", () => {
+  // Behind Cloudflare without an origin check: the deploy is what is missing, not the record.
+  expect(domainNeedsSetup(d({ dnsStatus: "proxied", origin: undefined, noRoute: { reason: "notDeployed" } }))).toBe(false);
+  expect(domainNeedsSetup(d({ noRoute: { reason: "stackParent" } }))).toBe(true);
+  expect(domainNeedsSetup(d({ noRoute: { reason: "cronService" } }))).toBe(true);
+  expect(domainNeedsSetup(d({ noRoute: { reason: "routeWriteFailed", error: "x" } }))).toBe(true);
+});

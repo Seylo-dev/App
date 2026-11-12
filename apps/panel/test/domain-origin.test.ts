@@ -98,7 +98,7 @@ async function proxiedDomain(options: { capable?: boolean; routed?: boolean; han
   const project = seedProject(panel);
   const node = seedNode(panel, { name: "de-fsn-1", ipv4: "203.0.113.10" });
   panel.deps.db.update(nodes).set({ publicKey: key.publicKey }).where(eq(nodes.id, node.id)).run();
-  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id] });
+  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id], deployed: true });
   const lookups: DnsLookups = {
     resolve4: async (name) => (name === "shop.example.com" ? ["104.16.1.1"] : []),
     resolve6: async () => [],
@@ -562,7 +562,7 @@ describe("the check after domains.add", () => {
   test("a domain still waiting for DNS is not checked", async () => {
     const project = seedProject(panel);
     const node = seedNode(panel);
-    const service = seedService(panel, { projectId: project.id, name: "api", ports: [3000], nodeIds: [node.id] });
+    const service = seedService(panel, { projectId: project.id, name: "api", ports: [3000], nodeIds: [node.id], deployed: true });
     setDnsLookups({ resolve4: async () => [], resolve6: async () => [], resolveCname: async () => [], resolveNs: async () => [] });
     await callOp(panel, domainOps.add, { serviceId: service.id, host: "api.example.com" }, { cookie });
     expect(queued().filter((j) => j.type === originCheckJobType)).toHaveLength(0);

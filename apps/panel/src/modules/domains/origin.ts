@@ -48,9 +48,13 @@
 // It runs for custom domains (not automatic, not redirect-only) whose DNS
 // is ok or proxied: in domains.checkDns, a few seconds after domains.add as
 // the domains.checkOrigin job once the nodes have the route, and before
-// domains.retryCertificate. Requests go only to public addresses or a
-// node's own (vettedFetch): a name that resolves into the panel's network
-// gets no request and reads as unknown.
+// domains.retryCertificate. Not while the service's nodes cannot have a
+// route for the domain (a service that has not deployed yet, a compose
+// stack, a cron service: no-route.ts), where it could only fail; the
+// service's deployment going live runs the job (checkWaitingDomains).
+// Requests go only to public addresses or a node's own (vettedFetch): a
+// name that resolves into the panel's network gets no request and reads
+// as unknown.
 
 import { randomBytes } from "node:crypto";
 import { slug } from "@seylo/brand";
@@ -66,6 +70,7 @@ import { enqueueNext } from "../nodes/recurring";
 import { blockedTarget, checkTarget } from "../uptime/targets";
 import { settleHold } from "./acme-hold";
 import { invalidateService } from "./lookup";
+import { unroutableDomain } from "./no-route";
 import type { DomainRow } from "./rows";
 
 /** Advertised by agents whose edge answers the origin path (go/internal/edge OriginCapability). */
@@ -341,6 +346,8 @@ export const originCheckJob = defineJob<{ domainId: string; tries?: number }>({
   async run(payload, ctx) {
     const row = ctx.db.select().from(domains).where(eq(domains.id, payload.domainId)).get();
     if (!row || !originApplies(row, row.dnsStatus)) return;
+    // Nothing of the service runs on its nodes (not deployed yet): no route answers, so nothing to learn.
+    if (unroutableDomain(ctx.db, row)) return;
     const check = await checkOrigin(ctx, row);
     const tries = payload.tries ?? 1;
     if (check.waiting && tries < originCheckTries) {

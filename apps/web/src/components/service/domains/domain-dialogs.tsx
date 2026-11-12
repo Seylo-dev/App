@@ -213,7 +213,13 @@ export function AddDomainDialog({
   const add = useOpMutation(domains.add, {
     onSuccess: (res) => {
       invalidate(domains.list);
-      toast.success(res.dns.status === "ok" ? t("serviceDomains.addedLive") : t("serviceDomains.addedWaiting"));
+      toast.success(
+        res.domain.noRoute?.reason === "notDeployed"
+          ? t("serviceDomains.addedNotDeployed", { name: service.name })
+          : res.dns.status === "ok"
+            ? t("serviceDomains.addedLive")
+            : t("serviceDomains.addedWaiting"),
+      );
       onOpenChange(false);
       setHost("");
     },

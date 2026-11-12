@@ -48,6 +48,28 @@ const runtimeKinds: ReadonlySet<string> = new Set([...dbOps.databaseEngineIds, "
 const seconds = (n: number) => durationFromMs(n * 1000);
 
 /**
+ * Why no node gets a spec of the service, wherever it is placed: "stack"
+ * for a compose stack (its members run instead), "notDeployed" for an app
+ * or cron service with no deployment to run (none went live yet, or the
+ * target has no image); null when its nodes get one. Databases and Boxes
+ * always do, and so does a stopped service that was never deployed (a
+ * clone, parked). The domains module tells from it that a service's
+ * domains have no route on its nodes (domains/no-route.ts).
+ */
+export function specMissing(
+  svc: Pick<typeof services.$inferSelect, "kind" | "stopped" | "targetDeploymentId">,
+  target: { imageRef: string | null } | undefined,
+): "stack" | "notDeployed" | null {
+  if (svc.kind === "compose") return "stack";
+  // Databases and Boxes run from their module's runtime (image, env, ports) and need no deployment.
+  if (runtimeKinds.has(svc.kind)) return null;
+  // A stopped service that was never deployed (a clone) goes as a stopped spec without an image, so
+  // its node keeps the folders a data copy fills instead of sweeping them as an orphan's.
+  if (svc.stopped && !svc.targetDeploymentId) return null;
+  return svc.targetDeploymentId && target?.imageRef ? null : "notDeployed";
+}
+
+/**
  * The ServiceSpec of one service on one node, or null when nothing of it
  * should run there: not placed on the node, never deployed, or a compose
  * stack (its members run instead).
@@ -55,17 +77,14 @@ const seconds = (n: number) => durationFromMs(n * 1000);
 export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: string, nodeId: string): ServiceSpec | null {
   const svc = db.select().from(services).where(eq(services.id, serviceId)).get();
   if (!svc || svc.kind === "compose") return null;
-  // Databases and Boxes run from their module's runtime (image, env, ports) and need no deployment.
   const ownRuntime = runtimeKinds.has(svc.kind);
-  // A stopped service that was never deployed (a clone) goes as a stopped spec without an image, so
-  // its node keeps the folders a data copy fills instead of sweeping them as an orphan's.
   const parked = svc.stopped && !svc.targetDeploymentId;
   if (!svc.targetDeploymentId && !ownRuntime && !parked) return null;
   const placements = db.select().from(servicePlacements).where(eq(servicePlacements.serviceId, serviceId)).all();
   const here = placements.find((p) => p.nodeId === nodeId);
   if (!here) return null;
   const found = svc.targetDeploymentId ? db.select().from(deployments).where(eq(deployments.id, svc.targetDeploymentId)).get() : undefined;
-  if (!found?.imageRef && !ownRuntime && !parked) return null;
+  if (specMissing(svc, found)) return null;
   const target = found ?? { imageRef: "", imageDigest: null, generation: Math.max(1, svc.generation), runSettings: null };
 
   const spec = readSpec(svc.spec);

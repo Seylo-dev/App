@@ -53,7 +53,7 @@ const retryHandler = (request: { serviceId: string; routeId: string }) => ({
 async function failedDomain(options: { old?: boolean; handler?: (request: { serviceId: string; routeId: string }) => unknown } = {}) {
   const project = seedProject(panel);
   const node = seedNode(panel, { name: "de-fsn-1", ipv4: "203.0.113.10" });
-  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id] });
+  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id], deployed: true });
   dnsPointsAt("203.0.113.10");
   const added = await callOp(panel, domainOps.add, { serviceId: service.id, host: "shop.example.com" }, { cookie: owner.cookie });
   const domainId: string = added.body.domain.id;

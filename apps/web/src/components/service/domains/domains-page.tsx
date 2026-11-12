@@ -1,5 +1,8 @@
 // The Domains tab (Domains.dc.html): the domain list with DNS help, then
-// IP:port access, maintenance pages and dev access.
+// IP:port access, maintenance pages and dev access. A compose stack or a
+// cron service takes no domains: it shows this tab only for the domains it
+// has from before (service-tabs.ts), each saying where it belongs, with
+// nothing to add.
 
 import { domains } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -31,7 +34,9 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
   });
   const rows = list.data?.domains ?? [];
   const current = editing ? rows.find((d) => d.id === editing.id) : undefined;
-  const suggestion = list.data?.autoDomainSuggestion;
+  // A stack or a cron service: only its leftover domains, to remove.
+  const takesDomains = service.kind !== "compose" && service.kind !== "cron";
+  const suggestion = takesDomains ? list.data?.autoDomainSuggestion : null;
   const hasAuto = rows.some((d) => d.auto);
 
   return (
@@ -40,10 +45,12 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
         <div className="flex flex-wrap items-center gap-2.5 px-5 pt-4 pb-3.5">
           <h2 className="m-0 text-[15px] font-semibold">{t("serviceDomains.title")}</h2>
           <span className="text-[12.5px] text-muted-foreground">{t("serviceDomains.subtitle")}</span>
-          <Button size="sm" variant="primary" className="ml-auto" onClick={() => setAdding(true)}>
-            <IconPlus size={14} />
-            {t("serviceDomains.add")}
-          </Button>
+          {takesDomains && (
+            <Button size="sm" variant="primary" className="ml-auto" onClick={() => setAdding(true)}>
+              <IconPlus size={14} />
+              {t("serviceDomains.add")}
+            </Button>
+          )}
         </div>
         {list.isPending ? (
           <RowsSkeleton rows={3} lead="dot" lines={1} width="w-72" />
@@ -56,6 +63,7 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
             {rows.map((d) => (
               <DomainRow
                 key={d.id}
+                projectId={service.projectId}
                 serviceId={service.id}
                 serviceName={service.name}
                 domain={d}
@@ -91,11 +99,15 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
           </>
         )}
       </Card>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
-        <FirstRunCard service={service} />
-        <MaintenanceCard service={service} />
-      </div>
-      <DevAccessCard service={service} />
+      {takesDomains && (
+        <>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
+            <FirstRunCard service={service} />
+            <MaintenanceCard service={service} />
+          </div>
+          <DevAccessCard service={service} />
+        </>
+      )}
       <AddDomainDialog
         service={service}
         open={adding}

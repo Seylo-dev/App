@@ -68,11 +68,11 @@ packages use. "Built" means implemented and tested.
 | `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 20 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.12, see "Container DNS check"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, since 0.2.12 `set-panel`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
-| `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
+| `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI; `NodeStatus.RouteErrors` (0.2.12) lists the services whose route file reconcile cannot write, and `seylo status` prints them under Recent errors after the last 5 connection errors, whatever their number | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
 | `panelapi` | Laptop CLI client for the panel op API (hand-written over the contracts, not generated), saved logins in `~/.config/seylo/config.json`, `SEYLO_PANEL_URL` + `SEYLO_TOKEN` for CI | Built (tested against a fake panel) |
 | `troubleshoot` | Redacted Markdown report + upload to `<site>/l`; exact secret values from the persisted desired state (`crash.SecretValues`) are stripped before the shape-based pass, and an upload prints which sections it contains | Built (uploads verified against the site API) |
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
-| `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
+| `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`); a route file it cannot write goes in the service's status (`ServiceStatus.route_write_error`, message and since when, cleared by the next write that works, since 0.2.12; before, only a "writing routes" warning every 10 s in the journal) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
@@ -4909,6 +4909,38 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   moves an ACME domain's DNS between `ok` and anything else marks the
   service dirty (`settleHold`), so the route follows a record put behind
   Cloudflare's proxy or taken out of it.
+- Domains without a route (0.2.12, `modules/domains/no-route.ts`):
+  `Domain.noRoute` (`NoRoute`, set by `domains.list` and `domains.add`)
+  says why the service's nodes have no route for a domain. The panel's
+  own reasons, for every domain of the service (`unroutable`):
+  `notDeployed` while `services/desired.ts` `specMissing` says so (an app
+  or cron service with no target deployment, or one without an image;
+  not a parked clone, which goes stopped with its routes), with
+  `deploymentId` of a deployment queued, building or deploying;
+  `stackParent` for a compose stack; `cronService` for a cron service (the
+  agent never syncs its access). The node's: `routeWriteFailed` with
+  `nodeId`, `nodeName` and `error` for a domain missing from the routes an
+  online node reports while its `ServiceStatus.route_write_error` is set.
+  `domains.add`, `addAuto` and `update` refuse a stack or a cron service
+  (BAD_REQUEST, `reason` `stackParent` or `cronService`); `remove` still
+  works. `domains.retryCertificate` refuses the panel's own reasons
+  (CONFLICT, `reason` as in `noRoute`). While one holds, `domains.add`
+  enqueues no origin check, the `domains.checkOrigin` job returns at once,
+  `checkDomain` (`domains.checkDns`, the re-check) runs the DNS lookup but
+  no origin check, and `domains.recheckWaiting` skips the domain. When a
+  deployment goes live (`deployments/engine.ts` `succeed`) and when a
+  node's route write error clears (`tracking.ts`
+  `applyRouteWriteError`, which also invalidates `domains.list` when the
+  error appears or changes), `checkWaitingDomains` enqueues the origin
+  check of each held custom domain whose DNS is ok or proxied. The web's
+  row shows `NoRouteChip` and `NoRouteNote` (`domains/no-route.tsx`; a
+  link to the Deployments tab for `notDeployed`) in place of the wait for
+  DNS or Cloudflare, the origin help and the certificate notes; DNS help
+  stays for a record still missing, without the once-a-minute check
+  (`routeless`); Regenerate is not offered; the Domains tab's count leaves
+  `notDeployed` out. A compose stack or a cron service shows the Domains
+  tab only while it has domains (`tabsFor(kind, { strayDomains })`), with
+  no Add domain button and no access cards.
 
 ## Web app
 

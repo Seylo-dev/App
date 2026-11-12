@@ -33,7 +33,7 @@ function fakeDns(records: { a?: Record<string, string[]>; aaaa?: Record<string, 
 function setup() {
   const project = seedProject(panel);
   const node = seedNode(panel, { name: "de-fsn-1", ipv4: "203.0.113.10", wildcard: "n1.example.com" });
-  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id] });
+  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id], deployed: true });
   return { project, node, service };
 }
 

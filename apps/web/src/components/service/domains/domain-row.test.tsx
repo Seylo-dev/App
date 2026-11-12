@@ -37,7 +37,8 @@ const domain = (over: Partial<Domain> = {}): Domain => ({
   ...over,
 });
 
-const render = (d: Domain) => renderStatic(() => <DomainRow serviceId={d.serviceId} serviceName="web" domain={d} onEdit={() => {}} />);
+const render = (d: Domain) =>
+  renderStatic(() => <DomainRow projectId="prj0000000000001" serviceId={d.serviceId} serviceName="web" domain={d} onEdit={() => {}} />);
 
 const text = (html: string) =>
   html
@@ -160,4 +161,71 @@ test("a slow certificate behind Cloudflare names what stops Let's Encrypt, not A
   );
   expect(shown).toContain("with a Redirect Rule or Page Rule that sends every request to https, set SSL/TLS to Full, not Full (strict)");
   expect(shown).not.toContain("turn off Always Use HTTPS");
+});
+
+// A domain with no route on its node used to read "Certificate waits for
+// Cloudflare" (or for DNS) with "Cloudflare proxy -> <node IP>" beside it,
+// as if the record were the problem, for as long as the service had not
+// deployed. The row now says why there is no route, and checks nothing.
+const shop = { host: "shop.example.com", url: "https://shop.example.com", pointsTo: ["203.0.113.10"], certificate: waitingCert };
+
+test("a service that has not deployed yet: why, with its Deployments tab, and nothing about DNS or Cloudflare", async () => {
+  const html = await render(domain({ ...shop, noRoute: { reason: "notDeployed" } }));
+  const shown = text(html);
+  expect(shown).toContain("Not deployed yet");
+  expect(shown).toContain(
+    "web has not deployed yet: its domains go live, and their certificates are asked for, once a deployment goes live.",
+  );
+  expect(html).toContain('href="/p/prj0000000000001/s/svc0000000000001/deployments"');
+  expect(shown).not.toContain("Certificate waits for");
+  expect(shown).not.toContain("Check again");
+  expect(shown).not.toContain("Regenerate certificate");
+  // The record in Cloudflare is still named as it is: it may well be right.
+  expect(shown).toContain("Cloudflare proxy → 203.0.113.10");
+  // Not a link while nothing serves it.
+  expect(html).not.toContain('href="https://shop.example.com"');
+});
+
+test("its first deployment on its way says so", async () => {
+  const shown = text(await render(domain({ ...shop, noRoute: { reason: "notDeployed", deploymentId: "dep0000000000001" } })));
+  expect(shown).toContain("Waiting for the first deploy");
+  expect(shown).toContain("web is deploying for the first time");
+});
+
+test("a record still missing on a service that has not deployed: the deploy first, the record to create still shown", async () => {
+  const shown = text(await render(domain({ ...shop, dnsStatus: "missing", noRoute: { reason: "notDeployed" } })));
+  expect(shown).toContain("Not deployed yet");
+  expect(shown).not.toContain("Waiting for DNS");
+  expect(shown).toContain("Check now");
+});
+
+test("a compose stack and a cron service: where the domain belongs", async () => {
+  let shown = text(await render(domain({ ...shop, noRoute: { reason: "stackParent" } })));
+  expect(shown).toContain("No route");
+  expect(shown).toContain("web is a compose stack, which runs no container of its own, so this domain routes nowhere.");
+  expect(shown).toContain("Add it on the Domains tab of the stack member that serves it, then remove it here.");
+  shown = text(await render(domain({ ...shop, noRoute: { reason: "cronService" } })));
+  expect(shown).toContain("web is a cron service: it runs on its schedule and serves no requests");
+});
+
+test("a node that could not write the routes: the node and its error", async () => {
+  const html = await render(
+    domain({
+      ...shop,
+      noRoute: {
+        reason: "routeWriteFailed",
+        nodeId: "nod0000000000001",
+        nodeName: "node-1",
+        error: "invalid route: the host belongs to another service: shop.example.com (service other)",
+      },
+    }),
+  );
+  const shown = text(html);
+  expect(shown).toContain("No route on node-1");
+  expect(shown).toContain(
+    "node-1 could not write this service's routes: invalid route: the host belongs to another service: shop.example.com (service other)",
+  );
+  expect(shown).toContain("tries again every 10 seconds");
+  expect(shown).not.toContain("Certificate waits for Cloudflare");
+  expect(html).toContain('data-reason="routeWriteFailed"');
 });

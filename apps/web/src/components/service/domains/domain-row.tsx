@@ -14,7 +14,10 @@
 // reach, or a 404); every note about a pending certificate has Check
 // again, which runs the DNS and origin check at once, and a waiting domain
 // is checked once a minute while the tab is open, so a fixed record starts
-// the certificate.
+// the certificate. A domain with no route on the service's node says why
+// instead (no-route.tsx: not deployed yet, a compose stack or cron service,
+// or the node's error writing the routes), and while the panel knows no
+// check could pass (routeless) nothing is checked again on its own.
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -62,6 +65,7 @@ import {
   WaitingForDnsChip,
   waitsForDns,
 } from "./certificate-state";
+import { NoRouteChip, NoRouteNote, routeless } from "./no-route";
 
 export type Domain = OpOutput<typeof domains.list>["domains"][number];
 export type DomainDialog = "routing" | "access" | "certificate";
@@ -72,6 +76,8 @@ type Tone = "ok" | "busy" | "error" | "off";
 export const waitingRecheckMs = 60_000;
 
 function domainTone(d: Domain): Tone {
+  // No route on the node: waiting for a deployment, or nowhere to go.
+  if (d.noRoute) return d.noRoute.reason === "notDeployed" ? "busy" : "error";
   if (d.forward) return "ok";
   // A failure from before the certificate waited for DNS is not what holds it up now.
   if (d.dnsStatus === "wrongTarget" || (d.certificate.status === "failed" && !waitsForDns(d)) || elsewhere(d)) return "error";
@@ -82,7 +88,8 @@ function domainTone(d: Domain): Tone {
 
 /** The origin check found that requests to the domain reach another server, not this service's node. */
 function elsewhere(d: Domain): boolean {
-  return !d.auto && !d.forward && d.origin === "elsewhere" && (d.dnsStatus === "ok" || d.dnsStatus === "proxied");
+  // Without a route on the node an answer from elsewhere is no news about the record.
+  return !d.noRoute && !d.auto && !d.forward && d.origin === "elsewhere" && (d.dnsStatus === "ok" || d.dnsStatus === "proxied");
 }
 
 const tileTone: Record<Tone, string> = {
@@ -93,11 +100,13 @@ const tileTone: Record<Tone, string> = {
 };
 
 export function DomainRow({
+  projectId,
   serviceId,
   serviceName,
   domain: d,
   onEdit,
 }: {
+  projectId: string;
   serviceId: string;
   serviceName: string;
   domain: Domain;
@@ -115,7 +124,8 @@ export function DomainRow({
   const held = waitsForDns(d);
   const generating = d.https === "acme" && !held && (d.certificate.status === "pending" || regenerate.isPending);
   const runRegenerate = () => regenerate.mutate({ serviceId, domainId: d.id });
-  const rateLimited = !waiting && !generating && !held && d.certificate.status === "failed" && isRateLimited(d.certificate.error);
+  const rateLimited =
+    !d.noRoute && !waiting && !generating && !held && d.certificate.status === "failed" && isRateLimited(d.certificate.error);
   const mw = d.middlewares;
   const Icon = d.forward
     ? IconCornerDownRight
@@ -138,7 +148,7 @@ export function DomainRow({
           <Icon size={14} stroke={2.2} />
         </span>
         <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
-          {d.forward || waiting ? (
+          {d.forward || waiting || d.noRoute ? (
             <span className="font-mono text-[13px] font-medium">{d.url}</span>
           ) : (
             <a href={d.url} target="_blank" rel="noreferrer" className="font-mono text-[13px] font-medium">
@@ -209,10 +219,11 @@ export function DomainRow({
           </span>
         </div>
       </div>
-      {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} held={held} />}
+      {d.noRoute && <NoRouteNote projectId={projectId} serviceId={serviceId} serviceName={serviceName} noRoute={d.noRoute} />}
+      {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} held={held} poll={!routeless(d)} />}
       {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} held={held} />}
       {rateLimited && <RateLimitNote />}
-      {(generating || held) && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
+      {(generating || held) && !d.noRoute && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -423,6 +434,7 @@ function RowStatus({
   onRegenerate: () => void;
   busy: boolean;
 }) {
+  if (d.noRoute) return <NoRouteChip noRoute={d.noRoute} />;
   if (waiting) {
     return (
       <span className="flex items-center gap-2">
@@ -480,13 +492,14 @@ function RowStatus({
 
 /**
  * The record to create, Open Cloudflare DNS, and Check now. While the
- * certificate waits for DNS it says so, and the check runs every minute.
+ * certificate waits for DNS it says so, and the check runs every minute
+ * (poll), unless the domain has no route that could pass it.
  */
-function DnsHelp({ serviceId, domainId, held }: { serviceId: string; domainId: string; held: boolean }) {
+function DnsHelp({ serviceId, domainId, held, poll }: { serviceId: string; domainId: string; held: boolean; poll: boolean }) {
   const check = useOp(
     domains.checkDns,
     { serviceId, domainId },
-    { retry: retryOp, staleTime: 60_000, refetchInterval: held ? waitingRecheckMs : false },
+    { retry: retryOp, staleTime: 60_000, refetchInterval: held && poll ? waitingRecheckMs : false },
   );
   const invalidate = useInvalidate();
   const [copied, copy] = useCopy();

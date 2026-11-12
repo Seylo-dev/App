@@ -18,7 +18,8 @@ import { domains } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { keepsLastAnswer, settleHold } from "./acme-hold";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
-import { invalidateService, type PlacedNode, serviceNodes } from "./lookup";
+import { getService, invalidateService, type PlacedNode, serviceNodes } from "./lookup";
+import { noRouteMessage, unroutable } from "./no-route";
 import { requireDomain } from "./ops";
 import { checkOrigin, originApplies, originProvable, saveOrigin } from "./origin";
 import { toDomain } from "./rows";
@@ -78,6 +79,10 @@ export const retryCertificate = implement(domainOps.retryCertificate, async (inp
       reason: "certificateValid",
     });
   }
+  // Nothing on the service's nodes routes the domain, so Let's Encrypt cannot reach it there (no-route.ts).
+  const service = getService(ctx.db, row.serviceId);
+  const noRoute = unroutable(ctx.db, service);
+  if (noRoute) throw new OpError("CONFLICT", noRouteMessage(service, noRoute.reason), { reason: noRoute.reason });
   const retries = retriesOf(ctx.db);
   const now = Date.now();
   const wait = waitSeconds(retries, row.id, now);

@@ -28863,7 +28863,7 @@
       "post": {
         "operationId": "domains.add",
         "summary": "Add a custom domain",
-        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
+        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService).",
         "tags": [
           "domains"
         ],
@@ -29265,6 +29265,50 @@
                             }
                           ]
                         },
+                        "noRoute": {
+                          "type": "object",
+                          "required": [
+                            "reason"
+                          ],
+                          "properties": {
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "const": "notDeployed",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "stackParent",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "cronService",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "routeWriteFailed",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "deploymentId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "nodeId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "nodeName": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "string"
+                            }
+                          }
+                        },
                         "certificate": {
                           "type": "object",
                           "required": [
@@ -29561,7 +29605,7 @@
       "post": {
         "operationId": "domains.addAuto",
         "summary": "Add an automatic domain",
-        "description": "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set.",
+        "description": "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set, and on a compose stack or a cron service (reason stackParent or cronService): a stack's domains go on its members.",
         "tags": [
           "domains"
         ],
@@ -29903,6 +29947,50 @@
                         }
                       ]
                     },
+                    "noRoute": {
+                      "type": "object",
+                      "required": [
+                        "reason"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "const": "notDeployed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "stackParent",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cronService",
+                              "type": "string"
+                            },
+                            {
+                              "const": "routeWriteFailed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "deploymentId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -30008,7 +30096,7 @@
       "get": {
         "operationId": "domains.checkDns",
         "summary": "Check a domain's DNS",
-        "description": "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node. Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
+        "description": "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
         "tags": [
           "domains"
         ],
@@ -30584,6 +30672,50 @@
                               }
                             ]
                           },
+                          "noRoute": {
+                            "type": "object",
+                            "required": [
+                              "reason"
+                            ],
+                            "properties": {
+                              "reason": {
+                                "anyOf": [
+                                  {
+                                    "const": "notDeployed",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "stackParent",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "cronService",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "routeWriteFailed",
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "deploymentId": {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              "nodeId": {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              "nodeName": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            }
+                          },
                           "certificate": {
                             "type": "object",
                             "required": [
@@ -30770,7 +30902,7 @@
       "post": {
         "operationId": "domains.retryCertificate",
         "summary": "Regenerate a domain's certificate",
-        "description": "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise); behind Cloudflare's proxy the origin check runs too, and the op refuses (reason originElsewhere) while something other than the node answers, and (reason waitingForDns) while a domain whose certificate waits for DNS is not seen reaching the node; when the check shows it reaching the node, the certificate starts. Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
+        "description": "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise); behind Cloudflare's proxy the origin check runs too, and the op refuses (reason originElsewhere) while something other than the node answers, and (reason waitingForDns) while a domain whose certificate waits for DNS is not seen reaching the node; when the check shows it reaching the node, the certificate starts. Refused (reason notDeployed, stackParent or cronService, as in Domain.noRoute) while the service's nodes cannot have a route for the domain. Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
         "tags": [
           "domains"
         ],
@@ -31105,6 +31237,50 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "noRoute": {
+                      "type": "object",
+                      "required": [
+                        "reason"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "const": "notDeployed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "stackParent",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cronService",
+                              "type": "string"
+                            },
+                            {
+                              "const": "routeWriteFailed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "deploymentId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
                     },
                     "certificate": {
                       "type": "object",
@@ -31559,6 +31735,50 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "noRoute": {
+                      "type": "object",
+                      "required": [
+                        "reason"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "const": "notDeployed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "stackParent",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cronService",
+                              "type": "string"
+                            },
+                            {
+                              "const": "routeWriteFailed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "deploymentId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
                     },
                     "certificate": {
                       "type": "object",
@@ -32110,6 +32330,50 @@
                         }
                       ]
                     },
+                    "noRoute": {
+                      "type": "object",
+                      "required": [
+                        "reason"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "const": "notDeployed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "stackParent",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cronService",
+                              "type": "string"
+                            },
+                            {
+                              "const": "routeWriteFailed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "deploymentId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -32551,6 +32815,50 @@
                         }
                       ]
                     },
+                    "noRoute": {
+                      "type": "object",
+                      "required": [
+                        "reason"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "const": "notDeployed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "stackParent",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cronService",
+                              "type": "string"
+                            },
+                            {
+                              "const": "routeWriteFailed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "deploymentId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -32656,7 +32964,7 @@
       "post": {
         "operationId": "domains.update",
         "summary": "Change a domain's routing",
-        "description": "Changes path prefix, strip prefix, target port, HTTPS mode, the HTTP to HTTPS redirect or the forward target of a domain. Fields left out keep their value; forward null turns a redirect-only domain back into a normal one.",
+        "description": "Changes path prefix, strip prefix, target port, HTTPS mode, the HTTP to HTTPS redirect or the forward target of a domain. Fields left out keep their value; forward null turns a redirect-only domain back into a normal one. Refused on a compose stack or a cron service (reason stackParent or cronService), whose domains route nowhere: remove them there and add them to the service that serves the requests.",
         "tags": [
           "domains"
         ],
@@ -33055,6 +33363,50 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "noRoute": {
+                      "type": "object",
+                      "required": [
+                        "reason"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "const": "notDeployed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "stackParent",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cronService",
+                              "type": "string"
+                            },
+                            {
+                              "const": "routeWriteFailed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "deploymentId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
                     },
                     "certificate": {
                       "type": "object",

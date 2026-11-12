@@ -13,6 +13,7 @@ import { releases } from "./acme-hold";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
 import { checkHost, dnsLookups, pointsTo } from "./dns";
 import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
+import { assertTakesDomains, noRoutes, unroutable } from "./no-route";
 import { enqueueOriginCheck, originApplies, originProvable } from "./origin";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
 import { checkDomain } from "./recheck";
@@ -74,14 +75,21 @@ export const list = implement(domainOps.list, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
   // The address every row names: what its records point at (one lookup of the nodes, no DNS query).
   const addresses = pointsTo(serviceNodes(ctx.db, service.id));
+  const rows = serviceDomains(ctx.db, service.id);
+  // Why a domain has no route on the service's nodes, when the panel or a node knows (no-route.ts).
+  const missing = noRoutes(ctx, service, rows);
   return {
-    domains: serviceDomains(ctx.db, service.id).map((row) => ({ ...toDomain(row), pointsTo: addresses })),
+    domains: rows.map((row) => {
+      const noRoute = missing.get(row.id);
+      return { ...toDomain(row), pointsTo: addresses, ...(noRoute ? { noRoute } : {}) };
+    }),
     autoDomainSuggestion: autoSuggestion(ctx.db, service),
   };
 });
 
 export const addAuto = implement(domainOps.addAuto, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
+  assertTakesDomains(service);
   const node = serviceNodes(ctx.db, service.id).find((n) => n.wildcardDomain);
   if (!node?.wildcardDomain) {
     throw new OpError("CONFLICT", "None of this service's nodes has a wildcard domain. Set one on the node first.", {
@@ -112,6 +120,7 @@ export const addAuto = implement(domainOps.addAuto, (input, ctx) => {
 
 export const add = implement(domainOps.add, async (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
+  assertTakesDomains(service);
   const https = input.https ?? "acme";
   if (https === "custom") {
     throw new OpError("BAD_REQUEST", "Add the domain with acme or off, then upload its certificate with domains.setCertificate.", {
@@ -143,9 +152,14 @@ export const add = implement(domainOps.add, async (input, ctx) => {
     });
   });
   afterChange(ctx, service.id);
-  // The node writes the route a moment from now; the origin check waits for it (origin.ts).
-  if (originApplies(row, dns.status)) enqueueOriginCheck(ctx, row.id);
-  return { domain: toDomain(row), dns: { domainId: row.id, host: row.host, checkedAt: new Date().toISOString(), ...dns } };
+  // The node writes the route a moment from now; the origin check waits for it (origin.ts). A service that
+  // has not deployed yet has no route to check: its deployment going live starts the check (no-route.ts).
+  const noRoute = unroutable(ctx.db, service);
+  if (originApplies(row, dns.status) && !noRoute) enqueueOriginCheck(ctx, row.id);
+  return {
+    domain: { ...toDomain(row), ...(noRoute ? { noRoute } : {}) },
+    dns: { domainId: row.id, host: row.host, checkedAt: new Date().toISOString(), ...dns },
+  };
 });
 
 export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
@@ -164,6 +178,7 @@ export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
 
 export const update = implement(domainOps.update, (input, ctx) => {
   const row = requireDomain(ctx.db, input.serviceId, input.domainId);
+  assertTakesDomains(getService(ctx.db, input.serviceId));
   if (input.https === "custom" && !row.certificateSealed) {
     throw new OpError("BAD_REQUEST", "Upload a certificate with domains.setCertificate to use HTTPS mode custom.", { field: "https" });
   }

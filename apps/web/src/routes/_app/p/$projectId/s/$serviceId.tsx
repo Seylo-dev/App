@@ -35,9 +35,12 @@ function ServiceLayout() {
   const project = useOp(projects.get, { projectId });
   const service = useService();
   useLiveTopic(`service:${serviceId}`);
-  const tabs = tabsFor(service.data?.kind);
+  const kind = service.data?.kind;
+  // A stack or a cron service shows the Domains tab only for the domains it has from before (service-tabs.ts).
+  const strayKind = kind === "compose" || kind === "cron";
   // The same query the Domains tab and the overview read: the count costs nothing more.
-  const domainList = useOp(domains.list, { serviceId }, { enabled: tabs.some((tab) => tab.path === "domains") });
+  const domainList = useOp(domains.list, { serviceId }, { enabled: strayKind || tabsFor(kind).some((tab) => tab.path === "domains") });
+  const tabs = tabsFor(kind, { strayDomains: strayKind && (domainList.data?.domains.length ?? 0) > 0 });
   const domainsToFix = domainsNeedingSetup(domainList.data?.domains);
   const tabMatch = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   const parent = service.data?.parentId;

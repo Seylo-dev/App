@@ -4,9 +4,10 @@
 
 import { create, fromBinary, type MessageInitShape, toBinary } from "@bufbuild/protobuf";
 import { NodeFactsSchema, type StateSnapshot, StateSnapshotSchema } from "@seylo/proto";
+import { eq } from "drizzle-orm";
 import { type AgentMethodName, agentMethod, methodCapability } from "../src/agent-hub/calls";
 import type { ConnectedAgent } from "../src/agent-hub/hub";
-import { nodes, projects, servicePlacements, services } from "../src/db/schema";
+import { deployments, nodes, projects, servicePlacements, services } from "../src/db/schema";
 import type { Panel } from "../src/panel";
 
 let counter = 0;
@@ -35,7 +36,15 @@ export function seedNode(
 
 export function seedService(
   panel: Panel,
-  options: { projectId: string; name: string; kind?: (typeof services.$inferInsert)["kind"]; ports?: number[]; nodeIds?: string[] },
+  options: {
+    projectId: string;
+    name: string;
+    kind?: (typeof services.$inferInsert)["kind"];
+    ports?: number[];
+    nodeIds?: string[];
+    /** A live deployment of nginx:1.27, so the nodes get the service (and its domains' routes). */
+    deployed?: boolean;
+  },
 ) {
   const row = panel.deps.db
     .insert(services)
@@ -52,7 +61,23 @@ export function seedService(
     .returning()
     .get();
   for (const nodeId of options.nodeIds ?? []) panel.deps.db.insert(servicePlacements).values({ serviceId: row.id, nodeId }).run();
+  if (options.deployed) return seedLiveDeployment(panel, row.id);
   return row;
+}
+
+/** A live deployment of the service, its target: its nodes get it and its domains' routes. */
+export function seedLiveDeployment(panel: Panel, serviceId: string) {
+  const deployment = panel.deps.db
+    .insert(deployments)
+    .values({ serviceId, generation: 1, status: "live", trigger: "manual", imageRef: "nginx:1.27", finishedAt: new Date() })
+    .returning()
+    .get();
+  return panel.deps.db
+    .update(services)
+    .set({ targetDeploymentId: deployment.id, liveDeploymentId: deployment.id, generation: 1 })
+    .where(eq(services.id, serviceId))
+    .returning()
+    .get();
 }
 
 /** Handlers get the decoded request message and return a response init object (or nothing). */

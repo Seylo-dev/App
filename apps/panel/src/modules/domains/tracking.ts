@@ -4,7 +4,11 @@
 // live, first-run IP:port access switches to redirect-then-close. A domain
 // whose certificate waits for DNS (acme-hold.ts) is served without one
 // (plain HTTP, and Traefik's default certificate on HTTPS), so its reports
-// count only when they name a certificate.
+// count only when they name a certificate. A node that cannot write a
+// service's route file says why (ServiceStatus.route_write_error): open
+// Domains tabs show it on the domains it has no route for (no-route.ts),
+// and once it writes the file the service's waiting domains are checked
+// at once.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { domains as domainOps, exposures as exposureOps } from "@seylo/ops";
@@ -15,6 +19,7 @@ import type { Deps } from "../../deps";
 import { applyDomainLive } from "../exposures/logic";
 import { acmeHeld } from "./acme-hold";
 import { invalidateService } from "./lookup";
+import { checkWaitingDomains } from "./no-route";
 
 /** Applies one service's route reports; returns true when a row changed. */
 export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "alerts">, status: ServiceStatus, now = new Date()): boolean {
@@ -97,11 +102,43 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
   return changed;
 }
 
+/**
+ * Follows a node's route write error for a service: open screens learn when
+ * it appears, changes or clears, and when it clears (the node wrote the
+ * file, with the routes it lacked) the service's waiting domains are
+ * checked. `failing` holds the last error by node and service.
+ */
+export function applyRouteWriteError(
+  deps: Pick<Deps, "db" | "jobs" | "live">,
+  failing: Map<string, string>,
+  nodeId: string,
+  serviceId: string,
+  status: ServiceStatus | undefined,
+): void {
+  const key = `${nodeId}:${serviceId}`;
+  const error = status?.routeWriteError?.message ?? "";
+  const before = failing.get(key) ?? "";
+  if (error === before) return;
+  if (error) failing.set(key, error);
+  else failing.delete(key);
+  invalidateService(deps, serviceId, [domainOps.list.id]);
+  if (!error && status) checkWaitingDomains(deps, serviceId);
+}
+
 /** Subscribes to node state; called from the domains module's start(). */
 export function trackRoutes(deps: Deps): () => void {
+  const failing = new Map<string, string>();
   return deps.agents.state.onChange((nodeId, change) => {
     const view = deps.agents.state.get(nodeId);
     if (!view) return;
+    if (change.kind === "service" && change.removed) applyRouteWriteError(deps, failing, nodeId, change.serviceId, undefined);
+    if (change.kind === "snapshot") {
+      // A service the node no longer has takes its error with it.
+      for (const key of [...failing.keys()]) {
+        const [node, serviceId] = key.split(":") as [string, string];
+        if (node === nodeId && !view.services.has(serviceId)) applyRouteWriteError(deps, failing, nodeId, serviceId, undefined);
+      }
+    }
     const statuses =
       change.kind === "snapshot"
         ? [...view.services.values()]
@@ -111,6 +148,7 @@ export function trackRoutes(deps: Deps): () => void {
     for (const status of statuses) {
       try {
         applyRouteStatus(deps, status);
+        applyRouteWriteError(deps, failing, nodeId, status.serviceId, status);
       } catch (error) {
         deps.logger.warn({ err: error, nodeId, serviceId: status.serviceId }, "applying route status failed");
       }

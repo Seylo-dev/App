@@ -77,7 +77,7 @@ function setup(options: { capable?: boolean } = {}) {
   const project = seedProject(panel);
   const node = seedNode(panel, { name: "de-fsn-1", ipv4: nodeIp });
   panel.deps.db.update(nodes).set({ publicKey: key.publicKey }).where(eq(nodes.id, node.id)).run();
-  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id] });
+  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3000], nodeIds: [node.id], deployed: true });
   const agent = fakeAgent(panel, node.id, {}, ["getNodeFacts"], options.capable === false ? [] : [originCapability]);
   agents.push(agent);
   setOriginFetch(() => Promise.reject(new Error("no network in tests")));

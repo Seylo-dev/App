@@ -24,6 +24,7 @@ import { describeCron } from "../cron-text";
 import { StepChips } from "../deploy-steps";
 import { deploymentTitle, deploymentVersion } from "../deployment-meta";
 import { AddDomainDialog } from "../domains/domain-dialogs";
+import { NoRouteChip } from "../domains/no-route";
 import { formatBytes, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { OpErrorNote, retryOp } from "../op-state";
@@ -421,8 +422,11 @@ export function DomainsPanel({ service }: { service: ServiceDetail }) {
                 {d.pathPrefix !== "/" ? d.pathPrefix : ""}
               </a>
               {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
-              {/* The origin check found another server answering (the Domains tab says what to fix). */}
-              {!d.auto && !d.forward && d.origin === "elsewhere" && (d.dnsStatus === "ok" || d.dnsStatus === "proxied") ? (
+              {/* No route on the node (not deployed yet, or the node's error): the Domains tab says why. */}
+              {d.noRoute ? (
+                <NoRouteChip noRoute={d.noRoute} />
+              ) : /* The origin check found another server answering (the Domains tab says what to fix). */
+              !d.auto && !d.forward && d.origin === "elsewhere" && (d.dnsStatus === "ok" || d.dnsStatus === "proxied") ? (
                 <Chip
                   tone="amber"
                   title={t(d.dnsStatus === "proxied" ? "serviceDomains.originElsewhereProxiedHint" : "serviceDomains.originElsewhereHint", {
