@@ -138,6 +138,10 @@ func (e *itEnv) edgeHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", PageContentSecurityPolicy)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = io.WriteString(w, "maintenance for "+strings.TrimPrefix(r.URL.Path, MaintenancePath+"/"))
+	case strings.HasPrefix(r.URL.Path, OriginPath):
+		// The real edge signs the challenge (edge/origin.go); this one says
+		// what reached it, and over which of Traefik's entry points.
+		_, _ = fmt.Fprintf(w, "origin %s %s over %s", r.Host, strings.TrimPrefix(r.URL.Path, OriginPath), r.Header.Get("X-Forwarded-Proto"))
 	default:
 		http.NotFound(w, r)
 	}

@@ -28,9 +28,13 @@ const (
 	priorityHandoff = 1_999_999_000
 	// priorityOrigin puts the origin routers above every router of the
 	// same hosts, owned ones included. Traefik's own ACME challenge router
-	// (/.well-known/acme-challenge/, priority MaxInt32 or more) never
+	// (/.well-known/acme-challenge/ on web, priority MaxInt32 or more) never
 	// matches the same path, so it keeps answering Let's Encrypt.
 	priorityOrigin = 1_999_998_000
+	// priorityAcmeChallenge puts the challenge routers on websecure
+	// (addAcmeChallenge) above every router of the same hosts, owned ones
+	// included. They never match the origin path, so below those is fine.
+	priorityAcmeChallenge = 1_999_997_000
 	// priorityOwned (plus the rule's length) lifts the routers of hosts
 	// nobody else may serve: the panel's own routes, tool hosts and a
 	// database's certificate host. A longer rule for the same host in
@@ -630,6 +634,9 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	if b.in.Edge != "" && r.GetId() != toolRouteID {
 		b.addOrigin(r.GetId(), ruleText, tls)
 	}
+	if https == agentv1.HttpsMode_HTTPS_MODE_ACME {
+		b.addAcmeChallenge(r.GetId(), ruleText)
+	}
 
 	if b.lbRouters() && len(r.GetAllowedSourceCidrs()) == 0 && (m != modeUpstream || len(b.in.Upstreams) == 0) && m != modeTool {
 		// No copy here right now (stopped, between restarts, maintenance):
@@ -674,37 +681,76 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 // node, also behind Cloudflare's proxy. In every mode (the app running,
 // stopped or in maintenance), on plain HTTP without the HTTPS redirect (the
 // panel asks over http://, Cloudflare may forward either way) and on HTTPS
-// with the route's certificate, above every other router of the hosts. The
-// route's middlewares stay off: an allowlist or a password would hide the
-// node from the check, and the answer reveals nothing else. Next to the
-// Wings fork the routers go to its Traefik like the rest of the file; the
-// LB file (LBOnly) keeps none. Routes of the service on the same hosts
-// (other paths) share the routers of the first.
+// with the route's certificate, above every other router of the hosts. A
+// route with HTTPS off gets the HTTPS one too, with Traefik's default
+// certificate: behind Cloudflare's proxy with Always Use HTTPS and SSL/TLS
+// Full the check is redirected to https and reaches port 443 whatever the
+// route serves, and Traefik's 404 there would read as another server
+// answering. The route's middlewares stay off: an allowlist or a password
+// would hide the node from the check, and the answer reveals nothing else.
+// Next to the Wings fork the routers go to its Traefik like the rest of the
+// file; the LB file (LBOnly) keeps none. Routes of the service on the same
+// hosts (other paths) share the routers of the first.
 func (b *builder) addOrigin(routeID, ruleText string, tls *routerTLS) {
 	ruleText = fmt.Sprintf("%s && PathPrefix(`%s`)", hostsOnly(ruleText), OriginPath)
 	edge := b.n.svc("edge")
-	if !b.hasOrigin(EntryPointWeb, ruleText) {
+	if b.findRouter(EntryPointWeb, priorityOrigin, ruleText) == nil {
 		b.cfg.HTTP.Routers[b.n.route(routeID, "origin-http")] = &router{
 			EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Priority: priorityOrigin, Service: edge,
 		}
 	}
-	if tls != nil && !b.hasOrigin(EntryPointSecure, ruleText) {
-		t := *tls
-		b.cfg.HTTP.Routers[b.n.route(routeID, "origin")] = &router{
-			EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Priority: priorityOrigin, Service: edge, TLS: &t,
+	t := routerTLS{}
+	if tls != nil {
+		t = *tls
+	}
+	if rt := b.findRouter(EntryPointSecure, priorityOrigin, ruleText); rt != nil {
+		// The first route was plain HTTP: the certificate of one that is not wins.
+		if *rt.TLS == (routerTLS{}) {
+			rt.TLS = &t
 		}
+		return
+	}
+	b.cfg.HTTP.Routers[b.n.route(routeID, "origin")] = &router{
+		EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Priority: priorityOrigin, Service: edge, TLS: &t,
 	}
 }
 
-// hasOrigin reports whether the file has an origin router with this rule on
-// this entry point.
-func (b *builder) hasOrigin(entryPoint, ruleText string) bool {
+// addAcmeChallenge answers Let's Encrypt's HTTP-01 challenge for an ACME
+// route's hosts on websecure as well, with Traefik's own handler
+// (AcmeChallengeService, the one its router on web uses). Let's Encrypt
+// asks http://<host>/.well-known/acme-challenge/<token> and follows a
+// redirect to https without checking the certificate there. Behind
+// Cloudflare's proxy with Always Use HTTPS that is where it ends up:
+// Cloudflare answers 301, and with SSL/TLS Full sends the https request to
+// port 443, where without this router the app (or Traefik's 404) answered
+// and the certificate was never issued. The router has the default
+// certificate and no resolver (it asks the CA for nothing), no middlewares
+// (an allowlist or a password would refuse the CA), and sits above every
+// other router of the hosts. Held routes (Route.acme_hold) get it too, so
+// the first order after the release finds it in place. The handler answers
+// only the tokens of a challenge in progress (404 otherwise). Routes of the
+// service on the same hosts share the router of the first; the LB file
+// keeps none.
+func (b *builder) addAcmeChallenge(routeID, ruleText string) {
+	ruleText = fmt.Sprintf("%s && PathPrefix(`%s`)", hostsOnly(ruleText), AcmeChallengePath)
+	if b.findRouter(EntryPointSecure, priorityAcmeChallenge, ruleText) != nil {
+		return
+	}
+	b.cfg.HTTP.Routers[b.n.route(routeID, "acme-challenge")] = &router{
+		EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Priority: priorityAcmeChallenge,
+		Service: AcmeChallengeService, TLS: &routerTLS{},
+	}
+}
+
+// findRouter returns the file's router with this priority and rule on this
+// entry point (the origin and challenge routers), or nil.
+func (b *builder) findRouter(entryPoint string, priority int, ruleText string) *router {
 	for _, rt := range b.cfg.HTTP.Routers {
-		if rt.Priority == priorityOrigin && rt.Rule == ruleText && slices.Equal(rt.EntryPoints, []string{entryPoint}) {
-			return true
+		if rt.Priority == priority && rt.Rule == ruleText && slices.Equal(rt.EntryPoints, []string{entryPoint}) {
+			return rt
 		}
 	}
-	return false
+	return nil
 }
 
 // lbRouters reports whether the route file gets routers on the LB entry

@@ -43,7 +43,17 @@ const (
 	// service's domains (edge/origin.go). Not under InternalPrefix: it is a
 	// well-known path of the domain, routed on every service host.
 	OriginPath = "/.well-known/" + brand.Slug + "-origin/"
+	// AcmeChallengePath + "<token>" is Let's Encrypt's HTTP-01 challenge.
+	// Traefik answers it on the challenge's entry point (web) by itself;
+	// route files send it to AcmeChallengeService on websecure too, for a
+	// CA that followed a redirect to https (Cloudflare's Always Use HTTPS).
+	AcmeChallengePath = "/.well-known/acme-challenge/"
 )
+
+// AcmeChallengeService is Traefik's own HTTP-01 challenge handler. It
+// exists whenever a resolver has the HTTP challenge on, which the agent's
+// Traefik and the Wings fork's both have (resolver CertResolver).
+const AcmeChallengeService = "acme-http@internal"
 
 // PageContentSecurityPolicy is sent with every page the edge serves on a
 // service's domains (maintenance, status and its own default pages): a

@@ -11,6 +11,13 @@ http:
       service: seylo-db1-edge
       tls:
         certResolver: le
+    seylo-db1-r-edge-tool-acme-challenge:
+      entryPoints:
+        - websecure
+      rule: Host(`seylo-db-db1.n1.example.com`) && PathPrefix(`/.well-known/acme-challenge/`)
+      priority: 1999997000
+      service: acme-http@internal
+      tls: {}
     seylo-db1-r-edge-tool-http:
       entryPoints:
         - web

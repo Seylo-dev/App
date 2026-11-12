@@ -10,6 +10,13 @@ http:
       service: seylo-box1-edge
       tls:
         certResolver: le
+    seylo-box1-r-r1-acme-challenge:
+      entryPoints:
+        - websecure
+      rule: Host(`box.n1.example.com`) && PathPrefix(`/.well-known/acme-challenge/`)
+      priority: 1999997000
+      service: acme-http@internal
+      tls: {}
     seylo-box1-r-r1-http:
       entryPoints:
         - web

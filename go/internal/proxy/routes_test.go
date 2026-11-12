@@ -411,9 +411,11 @@ func TestBuildRemoteCopyNames(t *testing.T) {
 // Every route with hosts sends OriginPath to the edge, above every other
 // router of its hosts (the panel's own, raised as owned, included), in
 // every mode, on plain HTTP without the redirect and on HTTPS with the
-// route's certificate, and without the route's middlewares. The LB file
-// and the tool host get none, and nothing is routed before the edge
-// address is known.
+// route's certificate (Traefik's default one for a route with HTTPS off:
+// behind Cloudflare's Always Use HTTPS with SSL/TLS Full the check reaches
+// port 443 whatever the route serves), and without the route's
+// middlewares. The LB file and the tool host get none, and nothing is
+// routed before the edge address is known.
 func TestBuildOriginRouters(t *testing.T) {
 	decode := func(in BuildInput) dynamicConfig {
 		t.Helper()
@@ -456,6 +458,7 @@ func TestBuildOriginRouters(t *testing.T) {
 		"seylo-svc1-r-r2-origin-http": {EntryPointWeb, nil},
 		"seylo-svc1-r-r2-origin":      {EntryPointSecure, &routerTLS{}},
 		"seylo-svc1-r-r3-origin-http": {EntryPointWeb, nil},
+		"seylo-svc1-r-r3-origin":      {EntryPointSecure, &routerTLS{}},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("origin routers %v, want %d", slices.Sorted(maps.Keys(got)), len(want))
@@ -559,6 +562,8 @@ func TestBuildHeldAcmeRoute(t *testing.T) {
 		"seylo-svc1-r-r1-http":        {EntryPointWeb, false},
 		"seylo-svc1-r-r1-origin":      {EntryPointSecure, true},
 		"seylo-svc1-r-r1-origin-http": {EntryPointWeb, false},
+		// In place for the first order after the release (TestBuildAcmeChallengeRouters).
+		"seylo-svc1-r-r1-acme-challenge": {EntryPointSecure, true},
 	}
 	for name, w := range want {
 		r := cfg.HTTP.Routers[name]
@@ -586,5 +591,116 @@ func TestBuildHeldAcmeRoute(t *testing.T) {
 	}
 	if !strings.Contains(string(built.Data), "certResolver: "+CertResolver) || !strings.Contains(string(built.Data), "redirectScheme") {
 		t.Fatalf("released route:\n%s", built.Data)
+	}
+}
+
+// Every ACME route, held or not, answers Let's Encrypt's HTTP-01 challenge
+// on websecure too, with Traefik's own handler: behind Cloudflare's proxy
+// with Always Use HTTPS, Let's Encrypt's http:// request is redirected to
+// https, and with SSL/TLS Full Cloudflare sends it to port 443. Before,
+// only Traefik's router on web answered the challenge, so there the app
+// (or Traefik's 404) answered and the first certificate never came. The
+// router has the default certificate and no resolver, no middlewares (an
+// allowlist or a password would refuse the CA), sits above every other
+// router of the hosts but the origin ones (another path), in every mode,
+// and is shared by the routes of a host. Custom certificates, HTTPS off
+// and the LB file get none.
+func TestBuildAcmeChallengeRouters(t *testing.T) {
+	decode := func(in BuildInput) dynamicConfig {
+		t.Helper()
+		built, err := Build(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg dynamicConfig
+		if err := yaml.Unmarshal(built.Data, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	challenges := func(cfg dynamicConfig) map[string]*router {
+		out := map[string]*router{}
+		for name, r := range cfg.HTTP.Routers {
+			if strings.Contains(r.Rule, AcmeChallengePath) {
+				out[name] = r
+			}
+		}
+		return out
+	}
+	guarded := route("r1", "app.example.com", "www.example.com")
+	guarded.AllowedSourceCidrs = []string{"10.0.0.0/8"}
+	guarded.BasicAuth = &agentv1.BasicAuth{Users: []*agentv1.BasicAuthUser{{Username: "u", PasswordHash: "$2y$05$abcdefghijklmnopqrstuuxN0J7Zqf6g2b2b6ZJ1Q2YjY1Jj1Jj1W"}}}
+	// Another path of the same hosts shares r1's router.
+	api := route("r5", "app.example.com", "www.example.com")
+	api.PathPrefix = "/api"
+	custom := &agentv1.Route{Id: "r2", Hosts: []string{"corp.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE,
+		Certificate: &agentv1.Certificate{CertPem: "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n", KeyPem: "-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----\n"}}
+	plain := &agentv1.Route{Id: "r3", Hosts: []string{"plain.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_OFF}
+	held := route("r4", "shop.example.com")
+	held.AcmeHold = true
+	// Unset means ACME.
+	unset := &agentv1.Route{Id: "r6", Hosts: []string{"blog.example.com"}}
+	spec := app("svc1", guarded, api, custom, plain, held, unset)
+	running := BuildInput{Service: spec, Upstreams: ups("http://seylo-svc1-7:3000", "http://seylo-svc1-7-1:3000"), Edge: testEdge, ProbeSecret: "s",
+		CertRetries: map[string]string{"r1": "c1"}}
+	wantRules := map[string]string{
+		"seylo-svc1-r-r1-acme-challenge": "(Host(`app.example.com`) || Host(`www.example.com`)) && PathPrefix(`/.well-known/acme-challenge/`)",
+		"seylo-svc1-r-r4-acme-challenge": "Host(`shop.example.com`) && PathPrefix(`/.well-known/acme-challenge/`)",
+		"seylo-svc1-r-r6-acme-challenge": "Host(`blog.example.com`) && PathPrefix(`/.well-known/acme-challenge/`)",
+	}
+	for name, in := range map[string]BuildInput{
+		"running":     running,
+		"stopped":     {Service: spec, Edge: testEdge},
+		"maintenance": {Service: spec, Upstreams: running.Upstreams, Edge: testEdge, Settings: &agentv1.NodeSettings{Maintenance: &agentv1.Maintenance{Enabled: true}}},
+	} {
+		cfg := decode(in)
+		got := challenges(cfg)
+		if len(got) != len(wantRules) {
+			t.Fatalf("%s: challenge routers %v, want %v", name, slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(wantRules)))
+		}
+		top := 0
+		for n, r := range cfg.HTTP.Routers {
+			if _, ok := got[n]; !ok && r.Priority > top && r.Priority < priorityOrigin {
+				top = r.Priority
+			}
+		}
+		for n, rule := range wantRules {
+			r := got[n]
+			if r == nil {
+				t.Fatalf("%s: no %s in %v", name, n, slices.Sorted(maps.Keys(got)))
+			}
+			if r.Rule != rule || !slices.Equal(r.EntryPoints, []string{EntryPointSecure}) || r.Service != "acme-http@internal" ||
+				len(r.Middlewares) != 0 || r.Priority != priorityAcmeChallenge || r.Priority <= top || r.TLS == nil || *r.TLS != (routerTLS{}) {
+				t.Errorf("%s: %s: %+v tls %+v", name, n, r, r.TLS)
+			}
+		}
+	}
+
+	// The panel's own routes are raised as owned; the challenge router stays above them.
+	panel := app("panel1", route("r1", "panel.example.com"))
+	panel.Protected = true
+	cfg := decode(BuildInput{Service: panel, Upstreams: ups("http://seylo-panel1-1:5755"), Edge: testEdge})
+	ch := cfg.HTTP.Routers["seylo-panel1-r-r1-acme-challenge"]
+	if ch == nil || ch.Priority != priorityAcmeChallenge {
+		t.Fatalf("panel service: %+v", ch)
+	}
+	for name, r := range cfg.HTTP.Routers {
+		if r != ch && r.Priority >= priorityAcmeChallenge && !strings.Contains(r.Rule, OriginPath) {
+			t.Errorf("%s (priority %d) outranks the challenge router", name, r.Priority)
+		}
+	}
+
+	// The tool host of a Box asks Let's Encrypt too.
+	box := &agentv1.ServiceSpec{Id: "box1", Kind: agentv1.ServiceKind_SERVICE_KIND_BOX}
+	cfg = decode(BuildInput{Service: box, Settings: &agentv1.NodeSettings{WildcardDomain: "n1.example.com"}, Edge: testEdge})
+	if n := len(challenges(cfg)); n != 1 {
+		t.Errorf("tool host: %d challenge routers", n)
+	}
+
+	// The LB Traefik next to the Wings fork has no ACME resolver and gets none.
+	lb := running
+	lb.LBOnly, lb.Settings = true, &agentv1.NodeSettings{LbTls: fakeLBTLS}
+	if built, err := Build(lb); err != nil || strings.Contains(string(built.Data), AcmeChallengePath) {
+		t.Fatalf("LB file: %v\n%s", err, built.Data)
 	}
 }

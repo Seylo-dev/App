@@ -14,6 +14,13 @@ http:
       service: seylo-svc3
       tls:
         certResolver: le
+    seylo-svc3-r-r1-acme-challenge:
+      entryPoints:
+        - websecure
+      rule: Host(`secure.example.com`) && PathPrefix(`/.well-known/acme-challenge/`)
+      priority: 1999997000
+      service: acme-http@internal
+      tls: {}
     seylo-svc3-r-r1-http:
       entryPoints:
         - web

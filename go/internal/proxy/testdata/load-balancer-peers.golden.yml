@@ -12,6 +12,13 @@ http:
       service: seylo-svc10
       tls:
         certResolver: le
+    seylo-svc10-r-r1-acme-challenge:
+      entryPoints:
+        - websecure
+      rule: Host(`peers.example.com`) && PathPrefix(`/.well-known/acme-challenge/`)
+      priority: 1999997000
+      service: acme-http@internal
+      tls: {}
     seylo-svc10-r-r1-http:
       entryPoints:
         - web
@@ -71,6 +78,13 @@ http:
       service: seylo-svc10-local-p9000
       tls:
         options: seylo-lb
+    seylo-svc10-r-r2-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`admin.peers.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc10-edge
+      tls: {}
     seylo-svc10-r-r2-origin-http:
       entryPoints:
         - web
