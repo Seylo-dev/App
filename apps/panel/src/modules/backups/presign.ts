@@ -8,14 +8,13 @@
 // complete and abort POST/DELETE requests, which not every provider takes
 // presigned) the panel makes itself with header signing (signedRequest).
 //
-// Addressing follows minio-go's BucketLookupAuto, which the agent used with
-// the keys before (go/internal/backup/store.go): virtual-hosted URLs only
-// for AWS, Google and Aliyun endpoints (and never for a dotted bucket over
-// https), path-style everywhere else or when the destination asks for it.
-// Test vectors from minio-go's own signer are in
+// Where the requests go is address.ts bucketAddress, the same answer the
+// panel's own requests through Bun's S3 client get (storage.ts). Test
+// vectors from minio-go's own signer are in
 // test/fixtures/s3-presign-vectors.json.
 
 import { createHash, createHmac } from "node:crypto";
+import { type AddressConfig, bucketAddress, signingRegion } from "./address";
 import type { StorageConfig } from "./storage";
 
 export type SignedMethod = "GET" | "PUT" | "POST" | "DELETE";
@@ -53,43 +52,11 @@ function amzDate(now: Date): string {
     .replace(/\.\d{3}/, "");
 }
 
-const isAmazon = (host: string) => /(^|\.)s3([.-][a-z0-9-]+)*\.amazonaws\.com(\.cn)?$/.test(host) || host === "s3-external-1.amazonaws.com";
-
-function isVirtualHostEndpoint(url: URL, bucket: string): boolean {
-  if (url.protocol === "https:" && bucket.includes(".")) return false;
-  const host = url.hostname;
-  return isAmazon(host) || host === "storage.googleapis.com" || host.endsWith("aliyuncs.com");
-}
-
-/** minio-go's host for an AWS endpoint: the region's dual-stack endpoint (us-east-1 for an unknown region). */
-function amazonHost(region: string): string {
-  if (!/^[a-z]{2}(-[a-z]+)+-\d+$/.test(region)) return "s3.dualstack.us-east-1.amazonaws.com";
-  return `s3.dualstack.${region}.amazonaws.com${region.startsWith("cn-") ? ".cn" : ""}`;
-}
-
-/** Signing region: the destination's, "auto" for R2, else us-east-1 (MinIO's default). */
-export function signingRegion(config: Pick<StorageConfig, "endpoint" | "region">): string {
-  if (config.region) return config.region;
-  return /\.r2\.cloudflarestorage\.com$/.test(new URL(config.endpoint).hostname) ? "auto" : "us-east-1";
-}
-
 /** The origin and canonical (already encoded) path of a key in the destination. */
-export function storageTarget(
-  config: Pick<StorageConfig, "endpoint" | "region" | "bucket" | "pathStyle">,
-  key: string | null,
-): { origin: string; path: string } {
-  const url = new URL(config.endpoint);
-  let host = url.host;
-  // minio-go sends every AWS request to the region's dual-stack endpoint,
-  // except for FIPS and PrivateLink endpoints.
-  if (isAmazon(url.hostname) && !url.hostname.includes("fips") && !url.hostname.includes("vpce")) {
-    host = amazonHost(signingRegion(config));
-  }
+export function storageTarget(config: AddressConfig, key: string | null): { origin: string; path: string } {
+  const address = bucketAddress(config);
   const object = key ? encode(key, true) : "";
-  if (!config.pathStyle && isVirtualHostEndpoint(url, config.bucket)) {
-    return { origin: `${url.protocol}//${config.bucket}.${host}`, path: `/${object}` };
-  }
-  return { origin: `${url.protocol}//${host}`, path: `/${encode(config.bucket)}/${object}` };
+  return { origin: address.origin, path: address.virtualHosted ? `/${object}` : `/${encode(config.bucket)}/${object}` };
 }
 
 /** The canonical query string: encoded keys and values, sorted by key. */
