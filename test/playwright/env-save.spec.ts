@@ -63,6 +63,8 @@ test.describe("environment saves", () => {
     await editor.click();
     await page.keyboard.press("Control+End");
     await page.keyboard.type("THIRD=3");
+    // As above: Save only once the editor's state has the keys, or Control+S finds nothing to save.
+    await expect(page.getByText(/Ln 11, Col 8/)).toBeVisible();
     await page.keyboard.press("Control+s");
     await expect(page.getByText("Saved.")).toBeVisible();
 
