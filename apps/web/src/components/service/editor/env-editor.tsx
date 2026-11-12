@@ -1,8 +1,10 @@
 // The Monaco .env editor (Environment.dc.html): the env tokenizer, violet
 // reference pills, red squiggles and line backgrounds from env-analyzer,
 // hovers with a reference's resolved value, ${{ completions, quick fixes
-// for edit fixes, and secret values as dots until "Show values" is on (the
-// line being edited shows its value).
+// for edit fixes, secret values as dots until "Show values" is on (the
+// line being edited shows its value), and a Secret chip after each variable
+// builds and crash reports treat as a secret (Public after one that only
+// looks like one), with a hover that says why and what it changes.
 
 import {
   type AnalyzeContext,
@@ -18,7 +20,7 @@ import { t } from "../../../i18n/t";
 import { CodeEditor, type CodeEditorInstance } from "./code-editor";
 import "./env-editor.css";
 import { envLanguageId } from "./env-language";
-import { errorLines, fixTitle, problemMessage, referenceRanges, secretRanges, toMarkers } from "./env-model";
+import { errorLines, fixTitle, problemMessage, referenceRanges, secretChips, secretRanges, toMarkers } from "./env-model";
 import type { Monaco } from "./monaco";
 
 export interface EnvEditorHandle {
@@ -69,7 +71,7 @@ export function EnvEditor({
     const monaco = monacoRef.current;
     const model = editor?.getModel();
     if (!editor || !monaco || !model) return;
-    const { analysis: a, reveal: show, selfName: self } = state.current;
+    const { analysis: a, context: ctx, reveal: show, selfName: self } = state.current;
     monaco.editor.setModelMarkers(model, "env-analyzer", toMarkers(a.diagnostics, self));
     const range = (r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) =>
       new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
@@ -84,13 +86,31 @@ export function EnvEditor({
         : secretRanges(a.parsed)
             .filter((r) => r.startLineNumber !== editingLine.current)
             .map((r) => ({ range: range(r), options: { inlineClassName: "seylo-env-secret" } }))),
+      // After the line's last character, so a trailing comment stays next to its value.
+      ...secretChips(a.parsed, ctx, self)
+        .filter((chip) => chip.line <= model.getLineCount())
+        .map((chip) => {
+          const end = model.getLineMaxColumn(chip.line);
+          return {
+            range: new monaco.Range(chip.line, end, chip.line, end),
+            options: {
+              // An empty range: without this Monaco drops its injected text.
+              showIfCollapsed: true,
+              after: {
+                content: t(chip.secret ? "serviceEnv.secret.chip" : "serviceEnv.secret.chipPublic"),
+                inlineClassName: chip.secret ? "seylo-env-chip seylo-env-chip-secret" : "seylo-env-chip seylo-env-chip-public",
+                cursorStops: monaco.editor.InjectedTextCursorStops.None,
+              },
+            },
+          };
+        }),
     ];
     decorations.current ??= editor.createDecorationsCollection();
     decorations.current.set(items);
   };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: draw reads the latest state from the ref.
-  useEffect(draw, [analysis, reveal]);
+  useEffect(draw, [analysis, reveal, context]);
 
   const onReady = (editor: CodeEditorInstance, monaco: Monaco) => {
     editorRef.current = editor;
@@ -118,9 +138,28 @@ export function EnvEditor({
       monaco.languages.registerHoverProvider(envLanguageId, {
         provideHover(model, position) {
           if (model !== editor.getModel()) return null;
-          const { analysis: a, context: ctx, reveal: show } = state.current;
+          const { analysis: a, context: ctx, reveal: show, selfName: self } = state.current;
           const hit = referenceAt(a.parsed, offsetAt(position));
-          if (!hit || !ctx) return null;
+          if (!hit) {
+            // A variable's name, or its chip at the end of the line: whether it is a secret, and why.
+            const line = position.lineNumber;
+            const chip = secretChips(a.parsed, ctx, self).find(
+              (c) =>
+                (c.line === line && position.column >= model.getLineMaxColumn(line)) ||
+                (c.keyRange.startLineNumber === line &&
+                  position.column >= c.keyRange.startColumn &&
+                  position.column < c.keyRange.endColumn),
+            );
+            if (!chip) return null;
+            const end = model.getLineMaxColumn(line);
+            const k = chip.keyRange;
+            const r =
+              chip.line === line && position.column >= end
+                ? new monaco.Range(line, end, line, end)
+                : new monaco.Range(k.startLineNumber, k.startColumn, k.endLineNumber, k.endColumn);
+            return { range: r, contents: chip.hover.map((value) => ({ value })) };
+          }
+          if (!ctx) return null;
           const info = describeReference(hit.reference, ctx);
           const r = hit.reference.range;
           const contents: MonacoApi.IMarkdownString[] = [];

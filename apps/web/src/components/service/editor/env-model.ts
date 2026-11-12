@@ -1,9 +1,20 @@
 // Turns @seylo/env-analyzer results into what the Monaco env editor draws:
 // translated problem messages, marker data, reference pills, problem-line
-// backgrounds and the ranges of secret values. Pure, so it is tested
-// without Monaco; env-editor.tsx hands these to the editor.
+// backgrounds, the ranges of secret values and the Secret / Public chips.
+// Pure, so it is tested without Monaco; env-editor.tsx hands these to the
+// editor.
 
-import type { Diagnostic, ParsedEnv, QuickFix, SourceRange } from "@seylo/env-analyzer";
+import {
+  type AnalyzeContext,
+  classifyEntries,
+  type Diagnostic,
+  type ParsedEnv,
+  publicPrefixOf,
+  type QuickFix,
+  type SecretVerdict,
+  type SourceRange,
+  secretOverride,
+} from "@seylo/env-analyzer";
 import { type MessageKey, t } from "../../../i18n/t";
 
 /** Monaco's MarkerSeverity values (Hint 1, Info 2, Warning 4, Error 8), so this file needs no Monaco import. */
@@ -121,11 +132,13 @@ const tokenPrefix = /^(?:[a-z]{2,8}_(?:live|test|prod)_|gh[pousr]_|github_pat_|x
 
 /**
  * Value ranges shown as dots while "Show values" is off (Environment.dc.html):
- * values of keys that look secret, and the password part of URLs
- * (scheme://user:pass@). A secret value keeps what helps to recognise it:
- * a URL keeps everything but its user info (a Sentry DSN shows its host), a
- * token keeps a well-known prefix (sk_live_, ghp_). References are never
- * hidden; they hold no secret themselves.
+ * values of keys that look secret or have a "# @secret" comment, and the
+ * password part of URLs (scheme://user:pass@). A key with a framework
+ * public prefix (NEXT_PUBLIC_, VITE_, ...) or a "# @public" comment is not
+ * hidden whole: every browser gets its value. A secret value keeps what
+ * helps to recognise it: a URL keeps everything but its user info (a
+ * Sentry DSN shows its host), a token keeps a well-known prefix (sk_live_,
+ * ghp_). References are never hidden; they hold no secret themselves.
  */
 export function secretRanges(parsed: ParsedEnv): LineRange[] {
   const out: LineRange[] = [];
@@ -141,7 +154,9 @@ export function secretRanges(parsed: ParsedEnv): LineRange[] {
         endLineNumber: v.startLine,
         endColumn: v.startColumn + to,
       });
-    if (secretKey.test(entry.key) && entry.references.length === 0) {
+    const override = secretOverride(parsed, entry);
+    const secretByName = override === null && publicPrefixOf(entry.key) === null && secretKey.test(entry.key);
+    if ((override === "secret" || secretByName) && entry.references.length === 0) {
       const user = v.startLine === v.endLine ? urlUserInfo.exec(raw) : null;
       const prefix = v.startLine === v.endLine ? (tokenPrefix.exec(raw)?.[0].length ?? 0) : 0;
       if (user?.[1]) {
@@ -170,4 +185,72 @@ export function problemSummary(
   return [...diagnostics]
     .sort((a, b) => rank[a.severity] - rank[b.severity] || a.range.start - b.range.start)
     .map((d) => ({ line: d.range.startLine, text: problemMessage(d), severity: d.severity, diagnostic: d }));
+}
+
+/** A Secret or Public chip at the end of a variable's last line, with its hover. */
+export interface SecretChip {
+  /** Line the chip ends (the entry's last line). */
+  line: number;
+  /** The variable's name, where the hover also shows. */
+  keyRange: LineRange;
+  secret: boolean;
+  /** Markdown paragraphs for the hover. */
+  hover: string[];
+}
+
+const reasonKeys: Record<Exclude<SecretVerdict["reason"], "publicPrefix" | "comment" | "none">, MessageKey> = {
+  name: "serviceEnv.secret.whyName",
+  value: "serviceEnv.secret.whyValue",
+  reference: "serviceEnv.secret.whyReference",
+};
+
+/** The hover of one variable's chip: what it is, why, what that changes and how to change it. */
+export function secretHover(key: string, verdict: SecretVerdict): string[] {
+  const code = (text: string) => `\`${text}\``;
+  if (verdict.secret) {
+    const why =
+      verdict.reason === "comment"
+        ? t("serviceEnv.secret.whySecretComment", { comment: code("# @secret") })
+        : verdict.reason in reasonKeys
+          ? t(reasonKeys[verdict.reason as keyof typeof reasonKeys], { reference: code(verdict.detail ?? "") })
+          : "";
+    return [
+      `**${t("serviceEnv.secret.secretTitle", { key: code(key) })}**${why ? ` - ${why}` : ""}`,
+      t("serviceEnv.secret.secretEffect", { mount: code(`RUN --mount=type=secret,id=${key}`), arg: code(`ARG ${key}`) }),
+      t("serviceEnv.secret.makePublic", { comment: code("# @public") }),
+    ];
+  }
+  const why =
+    verdict.reason === "publicPrefix"
+      ? t("serviceEnv.secret.whyPrefix", { prefix: code(verdict.detail ?? "") })
+      : t("serviceEnv.secret.whyPublicComment", { comment: code("# @public") });
+  return [
+    `**${t("serviceEnv.secret.publicTitle", { key: code(key) })}** - ${why}`,
+    t("serviceEnv.secret.publicEffect", { arg: code(`ARG ${key}`) }),
+    t("serviceEnv.secret.makeSecret", { comment: code("# @secret") }),
+  ];
+}
+
+/**
+ * Chips for the variables builds and crash reports treat as secrets
+ * (env-analyzer classifyEntries with the panel's context, so references
+ * to secrets count), and for public ones whose name or value looks secret
+ * (a framework public prefix or a "# @public" comment). Plain variables
+ * get none.
+ */
+export function secretChips(parsed: ParsedEnv, context: AnalyzeContext | null, selfName: string): SecretChip[] {
+  const ctx: AnalyzeContext = context ?? { self: { serviceId: null, name: selfName, nodes: [] }, targets: [] };
+  const verdicts = classifyEntries(parsed, ctx);
+  const out: SecretChip[] = [];
+  parsed.entries.forEach((entry, i) => {
+    const verdict = verdicts[i];
+    if (!verdict || !(verdict.secret || verdict.overridesGuess)) return;
+    out.push({
+      line: entry.range.endLine,
+      keyRange: toLineRange(entry.keyRange),
+      secret: verdict.secret,
+      hover: secretHover(entry.key, verdict),
+    });
+  });
+  return out;
 }

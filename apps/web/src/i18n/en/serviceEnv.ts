@@ -42,6 +42,24 @@ export default {
     unreachable: "Internal address: only works for services on {nodes}.",
     followsDomain: "Updates on its own if {target}'s domain changes.",
   },
+  // The Secret / Public chip after a variable and its hover. {mount}, {arg} and {comment} are code.
+  secret: {
+    chip: "Secret",
+    chipPublic: "Public",
+    secretTitle: "{key} is a secret",
+    publicTitle: "{key} is public",
+    whyName: "its name has KEY, TOKEN, SECRET, PASS or the like in it.",
+    whyValue: "its value looks like a password or a key.",
+    whyReference: "it uses {reference}, which is a secret.",
+    whySecretComment: "the {comment} comment says so.",
+    whyPrefix: "the framework ships {prefix} variables to every browser.",
+    whyPublicComment: "the {comment} comment says so.",
+    secretEffect:
+      "Dockerfile and Railpack builds get it only as a build secret ({mount}), not as {arg}; Nixpacks builds do not get it. Crash reports and troubleshoot uploads hide its value.",
+    publicEffect: "Builds get it as a build arg too ({arg}), and crash reports show its value.",
+    makePublic: "Not a secret? Put {comment} on the line above it.",
+    makeSecret: "Put {comment} on the line above it to make it a secret.",
+  },
   fix: {
     use: "Use {text}",
     move: "Move {service} to {node}",

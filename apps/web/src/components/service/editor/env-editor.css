@@ -32,3 +32,30 @@
     filter: blur(4px);
   }
 }
+
+/*
+ * The Secret / Public chip after a variable (env-model secretChips): text
+ * Monaco injects after the line's last character, so it never shifts the
+ * columns of the text. Fill only.
+ */
+.seylo-env-chip {
+  margin-left: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: default;
+}
+
+.seylo-env-chip-secret {
+  background: var(--chip-amber-bg);
+  /* biome-ignore lint/complexity/noImportantStyles: Monaco colors injected text with the token class; the chip must win. */
+  color: var(--chip-amber-fg) !important;
+}
+
+.seylo-env-chip-public {
+  background: var(--chip-blue-bg);
+  /* biome-ignore lint/complexity/noImportantStyles: Monaco colors injected text with the token class; the chip must win. */
+  color: var(--chip-blue-fg) !important;
+}
