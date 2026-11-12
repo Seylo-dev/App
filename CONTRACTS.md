@@ -648,7 +648,13 @@ Summary; the full rules are in `proto/README.md` and the comments of
   fallback on the next attempt instead of after 5 minutes; timeouts,
   refused connections and other certificate errors (expired, another
   name) keep the 5 minutes, so a panel restart does not flip the node's
-  address. When the panel then names that same address from the
+  address. So does Traefik's own default certificate, from an untrusted
+  issuer or in place of the pin (`conn.TraefikDefaultCertificate`: the
+  leaf's issuer CN is `TRAEFIK DEFAULT CERT`): the panel's proxy has no
+  certificate for the name for a while (restarted, certificate store
+  lost, a certificate issued again), which is no inspection; a move that
+  fails on it waits 1 h in memory only and its alert has no
+  `inspected_certificate`. When the panel then names that same address from the
   fallback's session, the agent records it as a failed move with that
   error (alert, retry wait, the fallback back as `panel_url`) without
   dialing it again, which would drop the session just accepted. Connected through a fallback, the agent moves
@@ -711,7 +717,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the key, and the panel records Panel address "stay" for the node (by
   "node"), so it no longer names its domain to it. A join with `--pin` at
   an IP address (not loopback) writes the key too; a re-join resets it
-  (`TestJoinDecidesEveryConfigKey`: Join replaces it). Before 0.2.14, at a
+  (`TestJoinDecidesEveryConfigKey`: Join replaces it). A join's request
+  goes with the join credential only: the agent drops the key after the
+  first accepted join hello whatever the panel answered (a panel before
+  0.2.14 never answers it, and a resume that still carried it would be
+  recorded as `seylo set-panel`); `set-panel` needs a `node_id`, so a key
+  on a resume is always its own. Before 0.2.14, at a
   pinned IP the agent tried the domain the panel names and kept the pinned
   address when its certificate was refused (`untrustedMoveRetryAfter`,
   under `pinnedCommand`). Add node prints the
@@ -3420,7 +3431,9 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   `nodes.panelAddressRequest`. Without a stored choice, a node with an
   open PANEL_MOVE_FAILED alert whose key carries `inspected:` (or, from
   agents before 0.2.14, whose message mentions TLS inspection, an unknown
-  authority or the pinned key) counts as "stay", by
+  authority or the pinned key, unless it says the address answered with
+  Traefik's own certificate: `answers with Traefik's own certificate` or
+  `issued by "TRAEFIK DEFAULT CERT"`) counts as "stay", by
   "inspectedCertificate", until the alert resolves or the owner chooses:
   naming the domain again would only drop the node's session.
   HelloAccepted carries `panel_address` (FOLLOW or STAY, so the agent ends
@@ -3463,7 +3476,8 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   (`conn.certificateHint`: TLS inspection, with exempting the domain,
   joining with the IP and `--pin`, or since 0.2.13 `seylo set-panel` as
   the ways out, or Traefik's own certificate when the panel's server has
-  none for the name), a pin mismatch too, and the installer shows that
+  none for the name; since 0.2.14 also when it came in place of the pin,
+  `conn.TraefikDefaultCertificate`), a pin mismatch too, and the installer shows that
   hint instead of the ports one. A join on a node
   already joined to the same `panel_url` joins again with the token (as
   `--force`) only when `seylo status` (read from its `Panel:` line and the
