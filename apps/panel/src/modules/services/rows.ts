@@ -222,7 +222,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     generation: Math.max(1, row.generation),
     sourceConfig: displaySource(spec.source),
     build: spec.build,
-    container: spec.container,
+    container: { ...spec.container, init: spec.container.init ?? "auto" },
     ports: spec.ports,
     appPort: appPort(db, row),
     healthCheck: spec.healthCheck,

@@ -249,6 +249,12 @@ export const DeployStrategy = Type.Object({
   healthTimeoutSeconds: Seconds(10, 3600),
 });
 
+/** A service's init process (ContainerConfig.init on the node); the rule for auto is the agent's docker.OwnInit. */
+export const InitProcess = Type.Union([Type.Literal("auto"), Type.Literal("on"), Type.Literal("off")], {
+  description:
+    "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+});
+
 export const ContainerSettings = Type.Object({
   /** Overrides the image CMD when not empty. */
   command: Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 100 }),
@@ -258,6 +264,8 @@ export const ContainerSettings = Type.Object({
   user: Type.String({ maxLength: 100 }),
   stopSignal: Type.String({ maxLength: 20, pattern: "^(SIG[A-Z0-9]+)?$" }),
   stopGraceSeconds: Seconds(1, 3600),
+  /** Missing reads as "auto" (services.get always says). Compose members take it from the file's init:, else auto. */
+  init: Type.Optional(InitProcess),
 });
 
 /** Schedule of a cron service (kind "cron"); runs to completion in a one-off container. */
@@ -492,7 +500,7 @@ export const update = defineOp({
   kind: "mutation",
   summary: "Change a service's general settings",
   description:
-    "Renames a service or changes its container settings, ports or cron schedule. Omitted fields keep their value. Changes to what runs apply on the next deploy; a rename updates the network alias on the next deploy too.",
+    "Renames a service or changes its container settings (command, entrypoint, working directory, user, stop signal and timeout, init process), ports or cron schedule. Omitted fields keep their value. container.init: auto (default) runs Docker's init (Tini) as PID 1 to forward stop signals and reap zombies, unless the image runs its own init (s6-overlay's /init, tini, dumb-init, s6); on always; off never. Changes to what runs apply on the next deploy; a rename updates the network alias on the next deploy too.",
   input: Type.Object({
     serviceId: Id,
     name: Type.Optional(ServiceName),

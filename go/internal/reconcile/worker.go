@@ -602,9 +602,11 @@ func (w *worker) createInstances(ctx context.Context, spec *agentv1.ServiceSpec,
 			w.systemLine(gen, "%s", msg)
 		}
 	}
+	initOn := w.initFor(ctx, spec, image)
 	var out []docker.Container
 	for _, rep := range reps {
 		cs := containerSpec(spec, image, gen, rep, hash, binds, mounts)
+		cs.Init = initOn
 		cs.Name += suffix
 		cs.Labels = w.r.scoped(cs.Labels)
 		id, err := w.r.o.Docker.CreateContainer(ctx, cs)

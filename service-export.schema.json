@@ -690,6 +690,23 @@
                   "minimum": 1,
                   "maximum": 3600,
                   "type": "integer"
+                },
+                "init": {
+                  "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                  "anyOf": [
+                    {
+                      "const": "auto",
+                      "type": "string"
+                    },
+                    {
+                      "const": "on",
+                      "type": "string"
+                    },
+                    {
+                      "const": "off",
+                      "type": "string"
+                    }
+                  ]
                 }
               }
             },

@@ -49,6 +49,7 @@ interface ComposeService {
   user?: string;
   stop_signal?: string;
   stop_grace_period?: unknown;
+  init?: boolean;
   restart?: string;
   deploy?: { replicas?: number; resources?: { limits?: { memory?: number }; reservations?: { memory?: number } } } | null;
   mem_limit?: number;
@@ -103,6 +104,15 @@ function healthCheckOf(h: ComposeService["healthcheck"]): HealthCheck | null {
     startPeriodSeconds: Math.min(3600, durationSeconds(h.start_period, 0)),
     failureThreshold: Math.min(100, Math.max(1, h.retries ?? 3)),
   };
+}
+
+/**
+ * The file's init: wins (true on, false off); without one the key stays
+ * out, so the member gets the default (auto) and members from before
+ * compare as they did.
+ */
+function initOf(init: ComposeService["init"]): Pick<ContainerSettings, "init"> {
+  return init === true ? { init: "on" } : init === false ? { init: "off" } : {};
 }
 
 /** The file turns the service's health checks off, as docker compose does with HEALTHCHECK NONE. */
@@ -211,6 +221,7 @@ export function planStack(
         user: svc.user ?? "",
         stopSignal: /^SIG[A-Z0-9]+$/.test(svc.stop_signal ?? "") ? (svc.stop_signal as string) : "",
         stopGraceSeconds: Math.min(3600, Math.max(1, durationSeconds(svc.stop_grace_period, 10))),
+        ...initOf(svc.init),
       },
       healthCheck: healthCheckOf(svc.healthcheck),
       imageHealthCheck: !healthChecksOff(svc.healthcheck),

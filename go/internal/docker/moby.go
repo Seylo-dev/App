@@ -219,6 +219,7 @@ func (m *Moby) InspectImage(ctx context.Context, ref string) (Image, error) {
 	}
 	if res.Config != nil {
 		img.Labels = res.Config.Labels
+		img.Entrypoint, img.Cmd = res.Config.Entrypoint, res.Config.Cmd
 		if hc := res.Config.Healthcheck; hc != nil && len(hc.Test) > 0 {
 			img.Healthcheck = &HealthConfig{
 				Test:          hc.Test,
@@ -468,6 +469,10 @@ func (m *Moby) CreateContainer(ctx context.Context, spec ContainerSpec) (string,
 	if spec.PidsLimit > 0 {
 		p := int64(spec.PidsLimit)
 		host.PidsLimit = &p
+	}
+	if spec.Init != nil {
+		on := *spec.Init
+		host.Init = &on
 	}
 	for _, v := range spec.Mounts {
 		host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeVolume, Source: v.Volume, Target: v.Target, ReadOnly: v.ReadOnly})

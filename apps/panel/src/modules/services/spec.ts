@@ -228,10 +228,14 @@ export function checkSpec(spec: ServiceSpecJson): ServiceSpecJson {
   return spec;
 }
 
-/** The run settings a deploy snapshots now. */
+/**
+ * The run settings a deploy snapshots now. The init process is written out
+ * ("auto" when the service never chose), so a snapshot without one is from
+ * before 0.2.14 and keeps containers as they were made.
+ */
 export function runSettingsOf(spec: ServiceSpecJson): RunSettings {
   return {
-    container: spec.container,
+    container: { ...spec.container, init: spec.container.init ?? "auto" },
     ports: spec.ports,
     healthCheck: spec.healthCheck,
     resources: spec.resources,
@@ -245,11 +249,14 @@ export function runSettingsOf(spec: ServiceSpecJson): RunSettings {
 /**
  * A stored snapshot, or the current settings when the deployment has none.
  * What deploys before 0.2.14 did not snapshot reads as they ran: no wait
- * for the image's HEALTHCHECK.
+ * for the image's HEALTHCHECK and no init process (container.init absent).
  */
 export function readRunSettings(raw: unknown, fallback: ServiceSpecJson): RunSettings {
   const current = runSettingsOf(fallback);
-  if (!raw || typeof raw !== "object") return { ...current, imageHealthCheck: false };
+  if (!raw || typeof raw !== "object") {
+    const { init: _, ...container } = current.container;
+    return { ...current, container, imageHealthCheck: false };
+  }
   const row = raw as Partial<RunSettings>;
   return {
     container: { ...defaultContainer, ...row.container },

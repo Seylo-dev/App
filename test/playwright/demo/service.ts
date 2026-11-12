@@ -103,6 +103,10 @@ export const servicesById = {
     sourceConfig: { type: "github", installationId: "i000000000000001", repo: "acme/shop-worker", branch: "main", deployOnPush: true },
     placements: [{ nodeId: us.id, nodeName: us.name, replicas: 1 }],
     liveDeployment: { id: "d000000000000011", label: "3b8d2aa", createdAt: ago(2 * hour) },
+    // No check of its own: the image's HEALTHCHECK applies (the Advanced tab's default line).
+    healthCheck: null,
+    imageHealthCheck: { test: ["CMD-SHELL", "bun run healthcheck"], intervalSeconds: 10, timeoutSeconds: 5, startPeriodSeconds: 600, retries: 3 },
+    container: { command: [], entrypoint: [], workingDir: "", user: "", stopSignal: "", stopGraceSeconds: 10, init: "off" },
   }),
   [ids.db]: baseService({
     id: ids.db,

@@ -225,6 +225,10 @@ func TestScheduledRunUsesServiceContainerAndRedacts(t *testing.T) {
 	if !strings.HasPrefix(spec.Name, "seylo-svc1-cron-") {
 		t.Errorf("name = %q", spec.Name)
 	}
+	// A spec from before 0.2.14 names no init: the daemon's default, as before.
+	if spec.Init != agentv1.InitMode_INIT_MODE_UNSPECIFIED {
+		t.Errorf("init = %v", spec.Init)
+	}
 	// The next run is five minutes later, not right away.
 	h.noReport()
 	h.clock.Advance(5 * time.Minute)
@@ -399,7 +403,7 @@ func TestCronServiceAndSyncKeepsSchedule(t *testing.T) {
 	cronSvc := &agentv1.ServiceSpec{
 		Id: "c1", ProjectId: "p", Kind: agentv1.ServiceKind_SERVICE_KIND_CRON,
 		Image:     &agentv1.ImageRef{Reference: "alpine:3.22"},
-		Container: &agentv1.ContainerConfig{Command: []string{"echo", "hi"}},
+		Container: &agentv1.ContainerConfig{Command: []string{"echo", "hi"}, Init: agentv1.InitMode_INIT_MODE_AUTO},
 		KindSpec:  &agentv1.ServiceSpec_Cron{Cron: &agentv1.CronSpec{Schedule: "@hourly", TimeZone: "Europe/Berlin"}},
 	}
 	_ = h.sched.Sync([]*agentv1.ServiceSpec{cronSvc})
@@ -422,6 +426,10 @@ func TestCronServiceAndSyncKeepsSchedule(t *testing.T) {
 	spec := h.runner.Specs()[0]
 	if spec.Image != "alpine:3.22" || !slices.Equal(spec.Cmd, []string{"echo", "hi"}) || spec.Labels[docker.LabelKind] != "cron" {
 		t.Fatalf("spec = %+v", spec)
+	}
+	// The run gets the service's init process.
+	if spec.Init != agentv1.InitMode_INIT_MODE_AUTO {
+		t.Fatalf("init = %v, want the service's", spec.Init)
 	}
 	// Removing the service unschedules it.
 	_ = h.sched.Sync(nil)

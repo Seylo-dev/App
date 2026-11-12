@@ -354,6 +354,8 @@ func runSpec(layout datadir.Layout, j *job, runID string) (jobrun.Spec, error) {
 		Labels:     labels,
 		Binds:      binds,
 		Network:    jobrun.ProjectNetwork(svc),
+		// Docker's init like the service's own containers (0.2.14).
+		Init: svc.GetContainer().GetInit(),
 	}
 	jobrun.ApplyResources(&spec, svc.GetResources())
 	if spec.Image == "" {

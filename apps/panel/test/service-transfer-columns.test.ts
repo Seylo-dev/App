@@ -247,6 +247,7 @@ const specKeys: Record<string, Decision> = {
   "container.user": "exported",
   "container.stopSignal": "exported",
   "container.stopGraceSeconds": "exported",
+  "container.init": "exported",
   ports: "exported",
   healthCheck: "exported",
   crashPolicy: "exported",

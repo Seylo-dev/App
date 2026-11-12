@@ -60,6 +60,8 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["service-cron", service(svc.api, "cron")],
   ["service-alerts", service(svc.api, "alerts")],
   ["service-advanced", service(svc.api, "advanced")],
+  // No check of its own: "Image HEALTHCHECK: ..." and the init process set to Off.
+  ["service-advanced-image-check", service(svc.worker, "advanced")],
   ["service-notes", service(svc.api, "notes")],
   ["service-settings", service(svc.api, "settings")],
   ["cron-service", service(svc.cron)],

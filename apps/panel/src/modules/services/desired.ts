@@ -21,7 +21,7 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import { databases as dbOps } from "@seylo/ops";
-import { CronConcurrency, DeployMode, PortProtocol, ServiceKind, type ServiceSpec, ServiceSpecSchema } from "@seylo/proto";
+import { CronConcurrency, DeployMode, InitMode, PortProtocol, ServiceKind, type ServiceSpec, ServiceSpecSchema } from "@seylo/proto";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { deployments, servicePlacements, services, volumes } from "../../db/schema";
@@ -147,6 +147,7 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
       user: run.container.user,
       stopSignal: run.container.stopSignal,
       stopGracePeriod: seconds(run.container.stopGraceSeconds),
+      init: initModeOf(run, svc.kind, svc.protected),
     },
     volumes: mounts
       .filter((v) => v.kind === "volume")
@@ -253,6 +254,20 @@ function imageHealthCheckOf(run: RunSettings, kind: ServiceKind, isProtected: bo
  */
 function healthTimeoutOf(secondsSet: number) {
   return secondsSet === defaultHealthTimeoutSeconds ? undefined : seconds(secondsSet);
+}
+
+const initModes = { auto: InitMode.AUTO, on: InitMode.ON, off: InitMode.OFF } as const;
+
+/**
+ * ContainerConfig.init: the deployment's init process for apps, compose
+ * members and cron services. Unspecified (no init, as before 0.2.14) for a
+ * snapshot from before 0.2.14, which has none, so the generation it
+ * describes keeps the hash of the containers running it; and always for
+ * databases, Boxes and the panel.
+ */
+function initModeOf(run: RunSettings, kind: string, isProtected: boolean): InitMode {
+  if (isProtected || runtimeKinds.has(kind) || !run.container.init) return InitMode.UNSPECIFIED;
+  return initModes[run.container.init];
 }
 
 /** Service ids placed on a node whose spec the compiler should ask for. */

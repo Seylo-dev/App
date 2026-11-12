@@ -207,12 +207,16 @@ func TestInspectImageReportsHealthcheck(t *testing.T) {
 		t.Fatalf("healthcheck = %+v", hc)
 	}
 
-	f.image = `{"Id":"sha256:2","Config":{"Cmd":["sh"]}}`
+	f.image = `{"Id":"sha256:2","Config":{"Entrypoint":["/init"],"Cmd":["sh"]}}`
 	img, err = m.InspectImage(context.Background(), "app:1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if img.Healthcheck != nil {
 		t.Fatalf("healthcheck = %+v, want none", img.Healthcheck)
+	}
+	// What InitFor reads.
+	if !slices.Equal(img.Entrypoint, []string{"/init"}) || !slices.Equal(img.Cmd, []string{"sh"}) {
+		t.Fatalf("entrypoint %v, cmd %v", img.Entrypoint, img.Cmd)
 	}
 }

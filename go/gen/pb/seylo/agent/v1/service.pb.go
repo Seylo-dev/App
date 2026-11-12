@@ -86,6 +86,69 @@ func (ServiceKind) EnumDescriptor() ([]byte, []int) {
 	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{0}
 }
 
+// InitMode is ContainerConfig.init.
+type InitMode int32
+
+const (
+	// No init (as before 0.2.14).
+	InitMode_INIT_MODE_UNSPECIFIED InitMode = 0
+	// Docker's init, unless the image runs an init of its own as PID 1: the
+	// main program (the spec's entrypoint when set, else the image's;
+	// without an entrypoint, the command's first word, the spec's else the
+	// image's) has the base name init (s6-overlay's /init in linuxserver.io
+	// images, /sbin/init), systemd, tini or tini-*, dumb-init, docker-init,
+	// catatonit, or s6-*. Those must be PID 1 themselves (s6-overlay and
+	// systemd refuse to start otherwise) or already do what docker-init does.
+	InitMode_INIT_MODE_AUTO InitMode = 1
+	// Docker's init, whatever the image runs.
+	InitMode_INIT_MODE_ON InitMode = 2
+	// No init.
+	InitMode_INIT_MODE_OFF InitMode = 3
+)
+
+// Enum value maps for InitMode.
+var (
+	InitMode_name = map[int32]string{
+		0: "INIT_MODE_UNSPECIFIED",
+		1: "INIT_MODE_AUTO",
+		2: "INIT_MODE_ON",
+		3: "INIT_MODE_OFF",
+	}
+	InitMode_value = map[string]int32{
+		"INIT_MODE_UNSPECIFIED": 0,
+		"INIT_MODE_AUTO":        1,
+		"INIT_MODE_ON":          2,
+		"INIT_MODE_OFF":         3,
+	}
+)
+
+func (x InitMode) Enum() *InitMode {
+	p := new(InitMode)
+	*p = x
+	return p
+}
+
+func (x InitMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InitMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_seylo_agent_v1_service_proto_enumTypes[1].Descriptor()
+}
+
+func (InitMode) Type() protoreflect.EnumType {
+	return &file_seylo_agent_v1_service_proto_enumTypes[1]
+}
+
+func (x InitMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InitMode.Descriptor instead.
+func (InitMode) EnumDescriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{1}
+}
+
 type PortProtocol int32
 
 const (
@@ -119,11 +182,11 @@ func (x PortProtocol) String() string {
 }
 
 func (PortProtocol) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_service_proto_enumTypes[1].Descriptor()
+	return file_seylo_agent_v1_service_proto_enumTypes[2].Descriptor()
 }
 
 func (PortProtocol) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_service_proto_enumTypes[1]
+	return &file_seylo_agent_v1_service_proto_enumTypes[2]
 }
 
 func (x PortProtocol) Number() protoreflect.EnumNumber {
@@ -132,7 +195,7 @@ func (x PortProtocol) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PortProtocol.Descriptor instead.
 func (PortProtocol) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{1}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{2}
 }
 
 type PublicPortMode int32
@@ -168,11 +231,11 @@ func (x PublicPortMode) String() string {
 }
 
 func (PublicPortMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_service_proto_enumTypes[2].Descriptor()
+	return file_seylo_agent_v1_service_proto_enumTypes[3].Descriptor()
 }
 
 func (PublicPortMode) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_service_proto_enumTypes[2]
+	return &file_seylo_agent_v1_service_proto_enumTypes[3]
 }
 
 func (x PublicPortMode) Number() protoreflect.EnumNumber {
@@ -181,7 +244,7 @@ func (x PublicPortMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PublicPortMode.Descriptor instead.
 func (PublicPortMode) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{2}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{3}
 }
 
 type DeployMode int32
@@ -220,11 +283,11 @@ func (x DeployMode) String() string {
 }
 
 func (DeployMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_service_proto_enumTypes[3].Descriptor()
+	return file_seylo_agent_v1_service_proto_enumTypes[4].Descriptor()
 }
 
 func (DeployMode) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_service_proto_enumTypes[3]
+	return &file_seylo_agent_v1_service_proto_enumTypes[4]
 }
 
 func (x DeployMode) Number() protoreflect.EnumNumber {
@@ -233,7 +296,7 @@ func (x DeployMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DeployMode.Descriptor instead.
 func (DeployMode) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 type CronConcurrency int32
@@ -274,11 +337,11 @@ func (x CronConcurrency) String() string {
 }
 
 func (CronConcurrency) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_service_proto_enumTypes[4].Descriptor()
+	return file_seylo_agent_v1_service_proto_enumTypes[5].Descriptor()
 }
 
 func (CronConcurrency) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_service_proto_enumTypes[4]
+	return &file_seylo_agent_v1_service_proto_enumTypes[5]
 }
 
 func (x CronConcurrency) Number() protoreflect.EnumNumber {
@@ -287,7 +350,7 @@ func (x CronConcurrency) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CronConcurrency.Descriptor instead.
 func (CronConcurrency) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_seylo_agent_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 // ServiceSpec is the desired state of one service on one node. The panel
@@ -757,8 +820,18 @@ type ContainerConfig struct {
 	StopSignal string `protobuf:"bytes,5,opt,name=stop_signal,json=stopSignal,proto3" json:"stop_signal,omitempty"`
 	// Time between the stop signal and SIGKILL, default 10s.
 	StopGracePeriod *durationpb.Duration `protobuf:"bytes,6,opt,name=stop_grace_period,json=stopGracePeriod,proto3" json:"stop_grace_period,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Whether the container runs Docker's init (docker run --init:
+	// docker-init, which is Tini, as PID 1, forwarding signals to the main
+	// process and reaping zombies). Unspecified means no init: what agents
+	// and panels before 0.2.14 do, and what the specs of generations
+	// deployed before then keep, so they still match the containers that
+	// run them. Panels from 0.2.14 send it for app services, compose
+	// members and cron services from their next deploy (never for
+	// databases, Boxes or the panel). Agents before 0.2.14 ignore it. It is
+	// part of the spec hash, so a change makes new containers.
+	Init          InitMode `protobuf:"varint,7,opt,name=init,proto3,enum=seylo.agent.v1.InitMode" json:"init,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContainerConfig) Reset() {
@@ -831,6 +904,13 @@ func (x *ContainerConfig) GetStopGracePeriod() *durationpb.Duration {
 		return x.StopGracePeriod
 	}
 	return nil
+}
+
+func (x *ContainerConfig) GetInit() InitMode {
+	if x != nil {
+		return x.Init
+	}
+	return InitMode_INIT_MODE_UNSPECIFIED
 }
 
 type EnvVar struct {
@@ -2287,7 +2367,7 @@ const file_seylo_agent_v1_service_proto_rawDesc = "" +
 	"\fRegistryAuth\x12\x16\n" +
 	"\x06server\x18\x01 \x01(\tR\x06server\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x03 \x01(\tR\bpassword\"\xe8\x01\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\"\x96\x02\n" +
 	"\x0fContainerConfig\x12\x18\n" +
 	"\acommand\x18\x01 \x03(\tR\acommand\x12\x1e\n" +
 	"\n" +
@@ -2298,7 +2378,8 @@ const file_seylo_agent_v1_service_proto_rawDesc = "" +
 	"\x04user\x18\x04 \x01(\tR\x04user\x12\x1f\n" +
 	"\vstop_signal\x18\x05 \x01(\tR\n" +
 	"stopSignal\x12E\n" +
-	"\x11stop_grace_period\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\x0fstopGracePeriod\"J\n" +
+	"\x11stop_grace_period\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\x0fstopGracePeriod\x12,\n" +
+	"\x04init\x18\a \x01(\x0e2\x18.seylo.agent.v1.InitModeR\x04init\"J\n" +
 	"\x06EnvVar\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x16\n" +
@@ -2403,7 +2484,12 @@ const file_seylo_agent_v1_service_proto_rawDesc = "" +
 	"\x1bSERVICE_KIND_COMPOSE_MEMBER\x10\x02\x12\x19\n" +
 	"\x15SERVICE_KIND_DATABASE\x10\x03\x12\x14\n" +
 	"\x10SERVICE_KIND_BOX\x10\x04\x12\x15\n" +
-	"\x11SERVICE_KIND_CRON\x10\x05*[\n" +
+	"\x11SERVICE_KIND_CRON\x10\x05*^\n" +
+	"\bInitMode\x12\x19\n" +
+	"\x15INIT_MODE_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eINIT_MODE_AUTO\x10\x01\x12\x10\n" +
+	"\fINIT_MODE_ON\x10\x02\x12\x11\n" +
+	"\rINIT_MODE_OFF\x10\x03*[\n" +
 	"\fPortProtocol\x12\x1d\n" +
 	"\x19PORT_PROTOCOL_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11PORT_PROTOCOL_TCP\x10\x01\x12\x15\n" +
@@ -2436,95 +2522,97 @@ func file_seylo_agent_v1_service_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_service_proto_rawDescData
 }
 
-var file_seylo_agent_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_seylo_agent_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_seylo_agent_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_seylo_agent_v1_service_proto_goTypes = []any{
 	(ServiceKind)(0),              // 0: seylo.agent.v1.ServiceKind
-	(PortProtocol)(0),             // 1: seylo.agent.v1.PortProtocol
-	(PublicPortMode)(0),           // 2: seylo.agent.v1.PublicPortMode
-	(DeployMode)(0),               // 3: seylo.agent.v1.DeployMode
-	(CronConcurrency)(0),          // 4: seylo.agent.v1.CronConcurrency
-	(*ServiceSpec)(nil),           // 5: seylo.agent.v1.ServiceSpec
-	(*ImageRef)(nil),              // 6: seylo.agent.v1.ImageRef
-	(*RegistryAuth)(nil),          // 7: seylo.agent.v1.RegistryAuth
-	(*ContainerConfig)(nil),       // 8: seylo.agent.v1.ContainerConfig
-	(*EnvVar)(nil),                // 9: seylo.agent.v1.EnvVar
-	(*VolumeMount)(nil),           // 10: seylo.agent.v1.VolumeMount
-	(*FileMount)(nil),             // 11: seylo.agent.v1.FileMount
-	(*PortSpec)(nil),              // 12: seylo.agent.v1.PortSpec
-	(*PublicPort)(nil),            // 13: seylo.agent.v1.PublicPort
-	(*HealthCheck)(nil),           // 14: seylo.agent.v1.HealthCheck
-	(*TcpProbe)(nil),              // 15: seylo.agent.v1.TcpProbe
-	(*HttpProbe)(nil),             // 16: seylo.agent.v1.HttpProbe
-	(*CommandProbe)(nil),          // 17: seylo.agent.v1.CommandProbe
-	(*ImageProbe)(nil),            // 18: seylo.agent.v1.ImageProbe
-	(*ImageHealthCheck)(nil),      // 19: seylo.agent.v1.ImageHealthCheck
-	(*CrashPolicy)(nil),           // 20: seylo.agent.v1.CrashPolicy
-	(*Resources)(nil),             // 21: seylo.agent.v1.Resources
-	(*LoadBalancer)(nil),          // 22: seylo.agent.v1.LoadBalancer
-	(*RemoteUpstream)(nil),        // 23: seylo.agent.v1.RemoteUpstream
-	(*DeployStrategy)(nil),        // 24: seylo.agent.v1.DeployStrategy
-	(*ComposeMemberSpec)(nil),     // 25: seylo.agent.v1.ComposeMemberSpec
-	(*BoxSpec)(nil),               // 26: seylo.agent.v1.BoxSpec
-	(*CronSpec)(nil),              // 27: seylo.agent.v1.CronSpec
-	(*CronJob)(nil),               // 28: seylo.agent.v1.CronJob
-	(*Routing)(nil),               // 29: seylo.agent.v1.Routing
-	(*DevAccess)(nil),             // 30: seylo.agent.v1.DevAccess
-	(*DatabaseSpec)(nil),          // 31: seylo.agent.v1.DatabaseSpec
-	(*durationpb.Duration)(nil),   // 32: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 33: google.protobuf.Timestamp
+	(InitMode)(0),                 // 1: seylo.agent.v1.InitMode
+	(PortProtocol)(0),             // 2: seylo.agent.v1.PortProtocol
+	(PublicPortMode)(0),           // 3: seylo.agent.v1.PublicPortMode
+	(DeployMode)(0),               // 4: seylo.agent.v1.DeployMode
+	(CronConcurrency)(0),          // 5: seylo.agent.v1.CronConcurrency
+	(*ServiceSpec)(nil),           // 6: seylo.agent.v1.ServiceSpec
+	(*ImageRef)(nil),              // 7: seylo.agent.v1.ImageRef
+	(*RegistryAuth)(nil),          // 8: seylo.agent.v1.RegistryAuth
+	(*ContainerConfig)(nil),       // 9: seylo.agent.v1.ContainerConfig
+	(*EnvVar)(nil),                // 10: seylo.agent.v1.EnvVar
+	(*VolumeMount)(nil),           // 11: seylo.agent.v1.VolumeMount
+	(*FileMount)(nil),             // 12: seylo.agent.v1.FileMount
+	(*PortSpec)(nil),              // 13: seylo.agent.v1.PortSpec
+	(*PublicPort)(nil),            // 14: seylo.agent.v1.PublicPort
+	(*HealthCheck)(nil),           // 15: seylo.agent.v1.HealthCheck
+	(*TcpProbe)(nil),              // 16: seylo.agent.v1.TcpProbe
+	(*HttpProbe)(nil),             // 17: seylo.agent.v1.HttpProbe
+	(*CommandProbe)(nil),          // 18: seylo.agent.v1.CommandProbe
+	(*ImageProbe)(nil),            // 19: seylo.agent.v1.ImageProbe
+	(*ImageHealthCheck)(nil),      // 20: seylo.agent.v1.ImageHealthCheck
+	(*CrashPolicy)(nil),           // 21: seylo.agent.v1.CrashPolicy
+	(*Resources)(nil),             // 22: seylo.agent.v1.Resources
+	(*LoadBalancer)(nil),          // 23: seylo.agent.v1.LoadBalancer
+	(*RemoteUpstream)(nil),        // 24: seylo.agent.v1.RemoteUpstream
+	(*DeployStrategy)(nil),        // 25: seylo.agent.v1.DeployStrategy
+	(*ComposeMemberSpec)(nil),     // 26: seylo.agent.v1.ComposeMemberSpec
+	(*BoxSpec)(nil),               // 27: seylo.agent.v1.BoxSpec
+	(*CronSpec)(nil),              // 28: seylo.agent.v1.CronSpec
+	(*CronJob)(nil),               // 29: seylo.agent.v1.CronJob
+	(*Routing)(nil),               // 30: seylo.agent.v1.Routing
+	(*DevAccess)(nil),             // 31: seylo.agent.v1.DevAccess
+	(*DatabaseSpec)(nil),          // 32: seylo.agent.v1.DatabaseSpec
+	(*durationpb.Duration)(nil),   // 33: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 34: google.protobuf.Timestamp
 }
 var file_seylo_agent_v1_service_proto_depIdxs = []int32{
 	0,  // 0: seylo.agent.v1.ServiceSpec.kind:type_name -> seylo.agent.v1.ServiceKind
-	6,  // 1: seylo.agent.v1.ServiceSpec.image:type_name -> seylo.agent.v1.ImageRef
-	8,  // 2: seylo.agent.v1.ServiceSpec.container:type_name -> seylo.agent.v1.ContainerConfig
-	9,  // 3: seylo.agent.v1.ServiceSpec.env:type_name -> seylo.agent.v1.EnvVar
-	10, // 4: seylo.agent.v1.ServiceSpec.volumes:type_name -> seylo.agent.v1.VolumeMount
-	11, // 5: seylo.agent.v1.ServiceSpec.files:type_name -> seylo.agent.v1.FileMount
-	12, // 6: seylo.agent.v1.ServiceSpec.ports:type_name -> seylo.agent.v1.PortSpec
-	14, // 7: seylo.agent.v1.ServiceSpec.health_check:type_name -> seylo.agent.v1.HealthCheck
-	20, // 8: seylo.agent.v1.ServiceSpec.crash_policy:type_name -> seylo.agent.v1.CrashPolicy
-	21, // 9: seylo.agent.v1.ServiceSpec.resources:type_name -> seylo.agent.v1.Resources
-	29, // 10: seylo.agent.v1.ServiceSpec.routing:type_name -> seylo.agent.v1.Routing
-	22, // 11: seylo.agent.v1.ServiceSpec.load_balancer:type_name -> seylo.agent.v1.LoadBalancer
-	30, // 12: seylo.agent.v1.ServiceSpec.dev_access:type_name -> seylo.agent.v1.DevAccess
-	24, // 13: seylo.agent.v1.ServiceSpec.deploy:type_name -> seylo.agent.v1.DeployStrategy
-	28, // 14: seylo.agent.v1.ServiceSpec.cron_jobs:type_name -> seylo.agent.v1.CronJob
-	25, // 15: seylo.agent.v1.ServiceSpec.compose_member:type_name -> seylo.agent.v1.ComposeMemberSpec
-	31, // 16: seylo.agent.v1.ServiceSpec.database:type_name -> seylo.agent.v1.DatabaseSpec
-	26, // 17: seylo.agent.v1.ServiceSpec.box:type_name -> seylo.agent.v1.BoxSpec
-	27, // 18: seylo.agent.v1.ServiceSpec.cron:type_name -> seylo.agent.v1.CronSpec
-	7,  // 19: seylo.agent.v1.ImageRef.auth:type_name -> seylo.agent.v1.RegistryAuth
-	32, // 20: seylo.agent.v1.ContainerConfig.stop_grace_period:type_name -> google.protobuf.Duration
-	1,  // 21: seylo.agent.v1.PortSpec.protocol:type_name -> seylo.agent.v1.PortProtocol
-	13, // 22: seylo.agent.v1.PortSpec.public:type_name -> seylo.agent.v1.PublicPort
-	2,  // 23: seylo.agent.v1.PublicPort.mode:type_name -> seylo.agent.v1.PublicPortMode
-	33, // 24: seylo.agent.v1.PublicPort.close_at:type_name -> google.protobuf.Timestamp
-	15, // 25: seylo.agent.v1.HealthCheck.tcp:type_name -> seylo.agent.v1.TcpProbe
-	16, // 26: seylo.agent.v1.HealthCheck.http:type_name -> seylo.agent.v1.HttpProbe
-	17, // 27: seylo.agent.v1.HealthCheck.command:type_name -> seylo.agent.v1.CommandProbe
-	18, // 28: seylo.agent.v1.HealthCheck.image:type_name -> seylo.agent.v1.ImageProbe
-	32, // 29: seylo.agent.v1.HealthCheck.interval:type_name -> google.protobuf.Duration
-	32, // 30: seylo.agent.v1.HealthCheck.timeout:type_name -> google.protobuf.Duration
-	32, // 31: seylo.agent.v1.HealthCheck.start_period:type_name -> google.protobuf.Duration
-	32, // 32: seylo.agent.v1.ImageHealthCheck.interval:type_name -> google.protobuf.Duration
-	32, // 33: seylo.agent.v1.ImageHealthCheck.timeout:type_name -> google.protobuf.Duration
-	32, // 34: seylo.agent.v1.ImageHealthCheck.start_period:type_name -> google.protobuf.Duration
-	32, // 35: seylo.agent.v1.ImageHealthCheck.start_interval:type_name -> google.protobuf.Duration
-	32, // 36: seylo.agent.v1.CrashPolicy.restart_delay:type_name -> google.protobuf.Duration
-	23, // 37: seylo.agent.v1.LoadBalancer.remote_upstreams:type_name -> seylo.agent.v1.RemoteUpstream
-	3,  // 38: seylo.agent.v1.DeployStrategy.mode:type_name -> seylo.agent.v1.DeployMode
-	32, // 39: seylo.agent.v1.DeployStrategy.health_timeout:type_name -> google.protobuf.Duration
-	32, // 40: seylo.agent.v1.BoxSpec.idle_timeout:type_name -> google.protobuf.Duration
-	32, // 41: seylo.agent.v1.CronSpec.timeout:type_name -> google.protobuf.Duration
-	4,  // 42: seylo.agent.v1.CronSpec.concurrency:type_name -> seylo.agent.v1.CronConcurrency
-	32, // 43: seylo.agent.v1.CronJob.timeout:type_name -> google.protobuf.Duration
-	4,  // 44: seylo.agent.v1.CronJob.concurrency:type_name -> seylo.agent.v1.CronConcurrency
-	45, // [45:45] is the sub-list for method output_type
-	45, // [45:45] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	7,  // 1: seylo.agent.v1.ServiceSpec.image:type_name -> seylo.agent.v1.ImageRef
+	9,  // 2: seylo.agent.v1.ServiceSpec.container:type_name -> seylo.agent.v1.ContainerConfig
+	10, // 3: seylo.agent.v1.ServiceSpec.env:type_name -> seylo.agent.v1.EnvVar
+	11, // 4: seylo.agent.v1.ServiceSpec.volumes:type_name -> seylo.agent.v1.VolumeMount
+	12, // 5: seylo.agent.v1.ServiceSpec.files:type_name -> seylo.agent.v1.FileMount
+	13, // 6: seylo.agent.v1.ServiceSpec.ports:type_name -> seylo.agent.v1.PortSpec
+	15, // 7: seylo.agent.v1.ServiceSpec.health_check:type_name -> seylo.agent.v1.HealthCheck
+	21, // 8: seylo.agent.v1.ServiceSpec.crash_policy:type_name -> seylo.agent.v1.CrashPolicy
+	22, // 9: seylo.agent.v1.ServiceSpec.resources:type_name -> seylo.agent.v1.Resources
+	30, // 10: seylo.agent.v1.ServiceSpec.routing:type_name -> seylo.agent.v1.Routing
+	23, // 11: seylo.agent.v1.ServiceSpec.load_balancer:type_name -> seylo.agent.v1.LoadBalancer
+	31, // 12: seylo.agent.v1.ServiceSpec.dev_access:type_name -> seylo.agent.v1.DevAccess
+	25, // 13: seylo.agent.v1.ServiceSpec.deploy:type_name -> seylo.agent.v1.DeployStrategy
+	29, // 14: seylo.agent.v1.ServiceSpec.cron_jobs:type_name -> seylo.agent.v1.CronJob
+	26, // 15: seylo.agent.v1.ServiceSpec.compose_member:type_name -> seylo.agent.v1.ComposeMemberSpec
+	32, // 16: seylo.agent.v1.ServiceSpec.database:type_name -> seylo.agent.v1.DatabaseSpec
+	27, // 17: seylo.agent.v1.ServiceSpec.box:type_name -> seylo.agent.v1.BoxSpec
+	28, // 18: seylo.agent.v1.ServiceSpec.cron:type_name -> seylo.agent.v1.CronSpec
+	8,  // 19: seylo.agent.v1.ImageRef.auth:type_name -> seylo.agent.v1.RegistryAuth
+	33, // 20: seylo.agent.v1.ContainerConfig.stop_grace_period:type_name -> google.protobuf.Duration
+	1,  // 21: seylo.agent.v1.ContainerConfig.init:type_name -> seylo.agent.v1.InitMode
+	2,  // 22: seylo.agent.v1.PortSpec.protocol:type_name -> seylo.agent.v1.PortProtocol
+	14, // 23: seylo.agent.v1.PortSpec.public:type_name -> seylo.agent.v1.PublicPort
+	3,  // 24: seylo.agent.v1.PublicPort.mode:type_name -> seylo.agent.v1.PublicPortMode
+	34, // 25: seylo.agent.v1.PublicPort.close_at:type_name -> google.protobuf.Timestamp
+	16, // 26: seylo.agent.v1.HealthCheck.tcp:type_name -> seylo.agent.v1.TcpProbe
+	17, // 27: seylo.agent.v1.HealthCheck.http:type_name -> seylo.agent.v1.HttpProbe
+	18, // 28: seylo.agent.v1.HealthCheck.command:type_name -> seylo.agent.v1.CommandProbe
+	19, // 29: seylo.agent.v1.HealthCheck.image:type_name -> seylo.agent.v1.ImageProbe
+	33, // 30: seylo.agent.v1.HealthCheck.interval:type_name -> google.protobuf.Duration
+	33, // 31: seylo.agent.v1.HealthCheck.timeout:type_name -> google.protobuf.Duration
+	33, // 32: seylo.agent.v1.HealthCheck.start_period:type_name -> google.protobuf.Duration
+	33, // 33: seylo.agent.v1.ImageHealthCheck.interval:type_name -> google.protobuf.Duration
+	33, // 34: seylo.agent.v1.ImageHealthCheck.timeout:type_name -> google.protobuf.Duration
+	33, // 35: seylo.agent.v1.ImageHealthCheck.start_period:type_name -> google.protobuf.Duration
+	33, // 36: seylo.agent.v1.ImageHealthCheck.start_interval:type_name -> google.protobuf.Duration
+	33, // 37: seylo.agent.v1.CrashPolicy.restart_delay:type_name -> google.protobuf.Duration
+	24, // 38: seylo.agent.v1.LoadBalancer.remote_upstreams:type_name -> seylo.agent.v1.RemoteUpstream
+	4,  // 39: seylo.agent.v1.DeployStrategy.mode:type_name -> seylo.agent.v1.DeployMode
+	33, // 40: seylo.agent.v1.DeployStrategy.health_timeout:type_name -> google.protobuf.Duration
+	33, // 41: seylo.agent.v1.BoxSpec.idle_timeout:type_name -> google.protobuf.Duration
+	33, // 42: seylo.agent.v1.CronSpec.timeout:type_name -> google.protobuf.Duration
+	5,  // 43: seylo.agent.v1.CronSpec.concurrency:type_name -> seylo.agent.v1.CronConcurrency
+	33, // 44: seylo.agent.v1.CronJob.timeout:type_name -> google.protobuf.Duration
+	5,  // 45: seylo.agent.v1.CronJob.concurrency:type_name -> seylo.agent.v1.CronConcurrency
+	46, // [46:46] is the sub-list for method output_type
+	46, // [46:46] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_service_proto_init() }
@@ -2553,7 +2641,7 @@ func file_seylo_agent_v1_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_service_proto_rawDesc), len(file_seylo_agent_v1_service_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,

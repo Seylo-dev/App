@@ -114,6 +114,34 @@ message ContainerConfig {
   string stop_signal = 5;
   // Time between the stop signal and SIGKILL, default 10s.
   google.protobuf.Duration stop_grace_period = 6;
+  // Whether the container runs Docker's init (docker run --init:
+  // docker-init, which is Tini, as PID 1, forwarding signals to the main
+  // process and reaping zombies). Unspecified means no init: what agents
+  // and panels before 0.2.14 do, and what the specs of generations
+  // deployed before then keep, so they still match the containers that
+  // run them. Panels from 0.2.14 send it for app services, compose
+  // members and cron services from their next deploy (never for
+  // databases, Boxes or the panel). Agents before 0.2.14 ignore it. It is
+  // part of the spec hash, so a change makes new containers.
+  InitMode init = 7;
+}
+
+// InitMode is ContainerConfig.init.
+enum InitMode {
+  // No init (as before 0.2.14).
+  INIT_MODE_UNSPECIFIED = 0;
+  // Docker's init, unless the image runs an init of its own as PID 1: the
+  // main program (the spec's entrypoint when set, else the image's;
+  // without an entrypoint, the command's first word, the spec's else the
+  // image's) has the base name init (s6-overlay's /init in linuxserver.io
+  // images, /sbin/init), systemd, tini or tini-*, dumb-init, docker-init,
+  // catatonit, or s6-*. Those must be PID 1 themselves (s6-overlay and
+  // systemd refuse to start otherwise) or already do what docker-init does.
+  INIT_MODE_AUTO = 1;
+  // Docker's init, whatever the image runs.
+  INIT_MODE_ON = 2;
+  // No init.
+  INIT_MODE_OFF = 3;
 }
 
 message EnvVar {

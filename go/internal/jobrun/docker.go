@@ -55,6 +55,10 @@ type Spec struct {
 	// leave it off: their output is streamed and a multi-GB dump must not
 	// be written to disk twice.
 	KeepLogs bool
+	// Init is the service's ContainerConfig.init for runs of its image
+	// (cron runs): Docker's init as PID 1, decided by docker.InitFor. The
+	// zero value leaves it to the daemon, as for every other helper.
+	Init agentv1.InitMode
 }
 
 // IO is the stdio of a one-off run. Nil fields are not attached.
@@ -218,6 +222,7 @@ func (d *Docker) create(ctx context.Context, spec Spec, stdin bool) (string, err
 		limit := int64(spec.PidsLimit)
 		host.PidsLimit = &limit
 	}
+	host.Init = d.initFor(ctx, spec)
 	if spec.KeepLogs {
 		// Helpers run for weeks; keep their log small.
 		host.LogConfig = container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "1m", "max-file": "2"}}
@@ -244,6 +249,19 @@ func (d *Docker) create(ctx context.Context, spec Spec, stdin bool) (string, err
 		}
 	}
 	return res.ID, nil
+}
+
+// initFor is HostConfig.Init for spec (docker.InitFor); Auto reads the
+// image's entrypoint and command, and an image that cannot be read counts
+// as one without an init of its own.
+func (d *Docker) initFor(ctx context.Context, spec Spec) *bool {
+	var img docker.Image
+	if spec.Init == agentv1.InitMode_INIT_MODE_AUTO {
+		if res, err := d.cli.ImageInspect(ctx, spec.Image); err == nil && res.Config != nil {
+			img.Entrypoint, img.Cmd = res.Config.Entrypoint, res.Config.Cmd
+		}
+	}
+	return docker.InitFor(spec.Init, spec.Entrypoint, spec.Cmd, img)
 }
 
 // cpuShares maps a cgroup v2 weight to Docker's CPU shares (1024 = weight

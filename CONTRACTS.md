@@ -806,6 +806,25 @@ Summary; the full rules are in `proto/README.md` and the comments of
   container is made, so switching between a check of its own and none would
   need new containers, while health checks stay out of `SpecHash`. Older
   agents read `HealthCheck.image` as no probe: the TCP default.
+- The init process (`ContainerConfig.init`, `InitMode`, since 0.2.14;
+  `docker/init.go`, `reconcile/init.go`): service containers and cron
+  runs (`jobrun.Spec.Init`, `cron/local.go` `runSpec`) get
+  `HostConfig.Init` from `docker.InitFor`: ON true, OFF false, AUTO true
+  unless the image runs its own init as PID 1 (`docker.OwnInit` on
+  `docker.MainProgram`: the first word of the spec's entrypoint, else the
+  image's, else of the spec's command, else the image's CMD; its base name
+  is init (s6-overlay's `/init`, `/sbin/init`), systemd, tini or tini-*,
+  dumb-init, docker-init, catatonit, or s6-*), then false. AUTO reads the
+  image's ENTRYPOINT and CMD (`docker.Image.Entrypoint`/`Cmd`); an image
+  that cannot be read counts as one without an init. UNSPECIFIED (every
+  spec from before 0.2.14) sends no `Init` at all: the daemon's default,
+  as before. The mode is part of `SpecHash` (it is in ContainerConfig) and
+  its zero value is not encoded, so a spec from before hashes exactly as
+  under 0.2.13 (`TestInitModeSpecHash`, golden value) and an agent update
+  adopts the running containers; a mode applies from the deploy that
+  brings it, with new containers. Older agents ignore the field (no init)
+  and hash it with the rest of ContainerConfig, so a node that updates
+  later keeps those containers until the next deploy.
 
 ## Conventions
 
@@ -963,7 +982,9 @@ local API, join and resume. The areas:
   managed): `docker run --rm` for under a second, and the check itself
   removes one a cut-off run left behind.
 - Every container gets `traefik.enable=false` and `--cgroup-parent=seylo.slice`
-  and Docker restart policy `no`.
+  and Docker restart policy `no`. Service containers and cron runs also
+  get `--init` by their spec's `ContainerConfig.init` (since 0.2.14, see
+  "The init process" under Protocol); other helpers leave it to the daemon.
 - Names: containers `seylo-<service>-<generation>[-<replica>]`, networks
   `seylo-p-<project>` and `seylo-edge`, route files `seylo-<service>.yml`,
   service volumes `seylo-v-<owner service>-<volume>` (bind-backed by
@@ -4297,6 +4318,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the rollout deadline is the longer of the setting and that wait, plus
   5 minutes, and `services.get` returns `imageHealthCheck` from the live
   deployment (else the target), which the health check card shows.
+  The init process is `container.init` (`services.InitProcess`: auto, on,
+  off; optional in `ContainerSettings`, so stored rows and export files
+  from before validate; `services.get` always says, "auto" when unset;
+  `services.update` sets it, the Advanced tab's Container card). A
+  snapshot from 0.2.14 writes it out (`runSettingsOf`: "auto" when unset)
+  and `serviceSpecFor` sends it for apps, compose members and cron
+  services (`initModeOf`); a snapshot without it (from before, or none)
+  sends UNSPECIFIED, and so do databases, Boxes and the panel. A compose
+  member takes the file's `init:` (true on, false off) and auto without
+  one (the key stays out of the plan, so `fingerprint` of members from
+  before is unchanged); members' container settings stay read-only.
 - `deployments/queue.ts` `queueDeploy(deps, { serviceId, trigger, actor, waitFor?, ... })`:
   the only way to deploy. The runner (`deployments/engine.ts`) is a state
   machine on the deployment row, kicked by ops, agent events and the

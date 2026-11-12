@@ -100,6 +100,13 @@ export default {
     user: "User",
     stopSignal: "Stop signal",
     grace: "Stop timeout (seconds)",
+    init: "Init process",
+    inits: { auto: "Auto", on: "On", off: "Off" },
+    initHints: {
+      auto: "Tini runs as PID 1: it passes the stop signal to the app and reaps zombie processes. Not for images that run their own init as PID 1 (s6-overlay's /init, tini, dumb-init, s6).",
+      on: "Tini runs as PID 1, also in front of an image's own init.",
+      off: "The app is PID 1 and handles signals and child processes itself.",
+    },
     ports: "Ports",
     portsHint: "Ports the app listens on inside the container. Domains and IP:port access route to these.",
     protocol: "Protocol",

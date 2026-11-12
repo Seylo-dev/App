@@ -16116,6 +16116,23 @@
                               "minimum": 1,
                               "maximum": 3600,
                               "type": "integer"
+                            },
+                            "init": {
+                              "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                              "anyOf": [
+                                {
+                                  "const": "auto",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "on",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "off",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         },
@@ -27549,6 +27566,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -40290,6 +40324,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -43383,6 +43434,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -63618,6 +63686,23 @@
                               "minimum": 1,
                               "maximum": 3600,
                               "type": "integer"
+                            },
+                            "init": {
+                              "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                              "anyOf": [
+                                {
+                                  "const": "auto",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "on",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "off",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         },
@@ -66018,6 +66103,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -67621,6 +67723,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -71521,6 +71640,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -72629,7 +72765,7 @@
       "post": {
         "operationId": "services.update",
         "summary": "Change a service's general settings",
-        "description": "Renames a service or changes its container settings, ports or cron schedule. Omitted fields keep their value. Changes to what runs apply on the next deploy; a rename updates the network alias on the next deploy too.",
+        "description": "Renames a service or changes its container settings (command, entrypoint, working directory, user, stop signal and timeout, init process), ports or cron schedule. Omitted fields keep their value. container.init: auto (default) runs Docker's init (Tini) as PID 1 to forward stop signals and reap zombies, unless the image runs its own init (s6-overlay's /init, tini, dumb-init, s6); on always; off never. Changes to what runs apply on the next deploy; a rename updates the network alias on the next deploy too.",
         "tags": [
           "services"
         ],
@@ -72700,6 +72836,23 @@
                         "minimum": 1,
                         "maximum": 3600,
                         "type": "integer"
+                      },
+                      "init": {
+                        "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                        "anyOf": [
+                          {
+                            "const": "auto",
+                            "type": "string"
+                          },
+                          {
+                            "const": "on",
+                            "type": "string"
+                          },
+                          {
+                            "const": "off",
+                            "type": "string"
+                          }
+                        ]
                       }
                     }
                   },
@@ -73553,6 +73706,23 @@
                           "minimum": 1,
                           "maximum": 3600,
                           "type": "integer"
+                        },
+                        "init": {
+                          "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                          "anyOf": [
+                            {
+                              "const": "auto",
+                              "type": "string"
+                            },
+                            {
+                              "const": "on",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            }
+                          ]
                         }
                       }
                     },
@@ -76174,6 +76344,23 @@
                               "minimum": 1,
                               "maximum": 3600,
                               "type": "integer"
+                            },
+                            "init": {
+                              "description": "Init process. auto (default): Docker's init (Tini) as PID 1, forwarding stop signals to the app and reaping zombies, unless the image runs its own init as PID 1 (its entrypoint, or command without one, is s6-overlay's /init, another init or systemd, tini, dumb-init, docker-init, catatonit or s6-*). on: always. off: never. Applies on the next deploy.",
+                              "anyOf": [
+                                {
+                                  "const": "auto",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "on",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "off",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         },

@@ -489,6 +489,7 @@ function ResourcesCard({ service }: { service: ServiceDetail }) {
 }
 
 type Port = ServiceDetail["ports"][number];
+type InitProcess = NonNullable<ServiceDetail["container"]["init"]>;
 
 function ContainerCard({ service }: { service: ServiceDetail }) {
   const c = service.container;
@@ -498,6 +499,7 @@ function ContainerCard({ service }: { service: ServiceDetail }) {
   const [user, setUser] = useState(c.user);
   const [stopSignal, setStopSignal] = useState(c.stopSignal);
   const [grace, setGrace] = useState(String(c.stopGraceSeconds));
+  const [init, setInit] = useState<InitProcess>(c.init ?? "auto");
   const [ports, setPorts] = useState<Port[]>(service.ports);
   const save = useOpMutation(services.update, { onSuccess: useSaved() });
   const input: OpInput<typeof services.update> = {
@@ -509,6 +511,7 @@ function ContainerCard({ service }: { service: ServiceDetail }) {
       user: user.trim(),
       stopSignal: stopSignal.trim().toUpperCase(),
       stopGraceSeconds: parseIntOrNull(grace) ?? 10,
+      init,
     },
     ports: ports.filter((p) => p.containerPort > 0),
   };
@@ -550,6 +553,20 @@ function ContainerCard({ service }: { service: ServiceDetail }) {
         </Field>
         <Field label={t("serviceAdvanced.container.grace")} htmlFor="ct-grace">
           <Input id="ct-grace" inputMode="numeric" value={grace} onChange={(e) => setGrace(e.target.value)} />
+        </Field>
+        <Field label={t("serviceAdvanced.container.init")} hint={t(`serviceAdvanced.container.initHints.${init}`)}>
+          <Select value={init} onValueChange={(v) => setInit(v as InitProcess)}>
+            <SelectTrigger aria-label={t("serviceAdvanced.container.init")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["auto", "on", "off"] as const).map((m) => (
+                <SelectItem key={m} value={m}>
+                  {t(`serviceAdvanced.container.inits.${m}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
       </div>
       <div className="flex flex-col gap-2 border-t border-divider pt-4">

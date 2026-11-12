@@ -164,6 +164,12 @@ type ContainerSpec struct {
 	StopSignal string
 	// StopGrace is the default grace for a stop (0 = Docker's 10s).
 	StopGrace time.Duration
+	// Init true runs Docker's init (docker-init, Tini) as PID 1: it
+	// forwards signals to the main process and reaps zombies (docker run
+	// --init). False runs none, whatever the daemon's default; nil leaves
+	// it to the daemon (no init unless daemon.json says "init": true), as
+	// before 0.2.14. InitFor decides it for a service.
+	Init *bool
 	// OpenStdin keeps stdin open so the Console can write to it.
 	OpenStdin bool
 	Tty       bool
@@ -305,6 +311,10 @@ type Image struct {
 	// Healthcheck is the image's HEALTHCHECK, nil when it declares none.
 	// Only InspectImage fills it.
 	Healthcheck *HealthConfig
+	// Entrypoint and Cmd are the image's ENTRYPOINT and CMD. Only
+	// InspectImage fills them.
+	Entrypoint []string
+	Cmd        []string
 }
 
 // Network is a managed network.
