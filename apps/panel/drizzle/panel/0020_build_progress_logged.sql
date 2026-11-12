@@ -1,0 +1,1 @@
+ALTER TABLE `builds` ADD `progress_logged` text DEFAULT '[]' NOT NULL;

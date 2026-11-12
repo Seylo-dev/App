@@ -175,6 +175,14 @@ export const builds = sqliteTable(
      * archive takes longer for one build than for another. Null until then.
      */
     handedOverAt: timestamp("handed_over_at"),
+    /**
+     * The progress lines of the build already in its deployment's log, as
+     * "<stage>:<message>". The agent sends every stage on the build's
+     * stream and as an event, and a re-attached stream replays them from
+     * the start, so each one is logged once, whichever comes first
+     * (deployments/engine.ts recordBuildProgress).
+     */
+    progressLogged: json<string[]>("progress_logged").notNull().default(sql`'[]'`),
     createdAt: createdAt(),
   },
   (t) => [

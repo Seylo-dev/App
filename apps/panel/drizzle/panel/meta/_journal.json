@@ -141,6 +141,13 @@
       "when": 1794527837639,
       "tag": "0019_build_handed_over",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794527889148,
+      "tag": "0020_build_progress_logged",
+      "breakpoints": true
     }
   ]
 }

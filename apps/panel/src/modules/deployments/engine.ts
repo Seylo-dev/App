@@ -57,7 +57,7 @@ import { loadService } from "../services/rows";
 import { assertImageAllowed } from "../services/source-guard";
 import { needsBuild, readSpec, runSettingsOf } from "../services/spec";
 import { reportedHealth, reportedWaitMs } from "./image-health";
-import { appendLog, LineSplitter } from "./logs";
+import { appendLog, LineSplitter, maxLineLength } from "./logs";
 import { registryGcJobType } from "./registry-gc";
 import { pickBuildNode, resolveBuild, sourceBranch } from "./source";
 import { closeSteps, type DeploymentRow, initialSteps, isFinal, publishBuildQueue, publishDeploymentChange, setStep } from "./store";
@@ -74,6 +74,8 @@ export const buildTimeoutMs = 90 * 60_000;
 export const queuedBuildTimeoutMs = 4 * buildTimeoutMs;
 /** Extra time on top of the health timeout for pulling and switching. */
 const rolloutGraceMs = 5 * 60_000;
+/** Progress lines a build remembers as logged (builds.progress_logged); an agent sends about five. */
+const maxProgressLogged = 64;
 
 export interface Engine {
   /** Advances a deployment as far as it can go now. Never throws. */
@@ -420,9 +422,10 @@ async function readBuildStream(
 }
 
 /**
- * Applies a BuildProgress (from the stream or the durable report) to the
- * build row and the deployment's steps. Idempotent: a final state is never
- * overwritten.
+ * Applies a BuildProgress (from the stream, an event or the durable report)
+ * to the build row, the deployment's steps and its log. Idempotent: a final
+ * state is never overwritten, and a progress line already in the log (the
+ * same stage and message of the build) is not logged again.
  */
 export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string, progress: BuildProgress): string | null {
   const { db } = s.deps;
@@ -503,15 +506,24 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
     .set({ ...patch, steps })
     .where(eq(deployments.id, d.id))
     .run();
-  if (progress.message && progress.stage !== BuildStage.SUCCEEDED) {
-    appendLog(
-      s.deps,
-      d.serviceId,
-      d.id,
-      progress.stage === BuildStage.FETCHING_SOURCE || progress.stage === BuildStage.QUEUED ? "clone" : "build",
-      [progress.message],
-      progress.stage === BuildStage.FAILED,
-    );
+  // The agent sends every stage on the build's stream and as an event, and a re-attached stream replays them
+  // from the start: each line is logged once, whichever comes first, also after a panel restart.
+  const key = `${progress.stage}:${progress.message.slice(0, maxLineLength)}`;
+  if (progress.message && progress.stage !== BuildStage.SUCCEEDED && !build.progressLogged.includes(key)) {
+    db.transaction((tx) => {
+      tx.update(builds)
+        .set({ progressLogged: [...build.progressLogged, key].slice(-maxProgressLogged) })
+        .where(eq(builds.id, build.id))
+        .run();
+      appendLog(
+        s.deps,
+        d.serviceId,
+        d.id,
+        progress.stage === BuildStage.FETCHING_SOURCE || progress.stage === BuildStage.QUEUED ? "clone" : "build",
+        [progress.message],
+        progress.stage === BuildStage.FAILED,
+      );
+    });
   }
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   // The builds behind it on the node moved up (or one of them now has the free slot).

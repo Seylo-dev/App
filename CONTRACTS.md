@@ -4579,7 +4579,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   build's stages from its start: a FETCHING_SOURCE when the clone step is
   already done leaves it done with its time (before, the replay started
   it again and the clone of a build that ran across a panel restart read
-  0s). Timeouts (`engine.ts`
+  0s). Progress lines (since 0.2.15): the agent sends every stage on the
+  build's stream and also as an event (a final one as its durable
+  report), and a re-attached stream replays them, so `recordBuildProgress`
+  logs a stage's message once per build, the first time it arrives either
+  way, and keeps the `<stage>:<message>` keys it logged in
+  `builds.progress_logged` (migration 0019, at most 64), so a panel
+  restart does not log them again; the same message from another build or
+  in another stage is a new line. DeployProgress has one path per stage
+  (progress as events, finals as durable reports, deduped by outbox id),
+  so its `<node>: <message>` lines are logged as they come. Timeouts (`engine.ts`
   `buildTimeout`): a running build fails 90 minutes after its start; a
   queued one waits while its node's queue moves and fails once no build
   started or ended on that node for 90 minutes (the node lost it), and in

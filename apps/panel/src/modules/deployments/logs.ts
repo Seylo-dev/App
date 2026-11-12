@@ -11,7 +11,7 @@ import { publishDeploymentEvent } from "./store";
 /** Most lines kept per deployment; later lines are dropped with one notice. */
 export const maxLinesPerDeployment = 20_000;
 /** Longest stored line; longer ones are cut. */
-const maxLineLength = 4000;
+export const maxLineLength = 4000;
 const publishEveryMs = 400;
 
 type LogDeps = Pick<Deps, "db" | "live">;

@@ -48,6 +48,16 @@ export type BuildScript = (build: FakeBuild) => {
    */
   queued?: boolean;
   queuedMessage?: string;
+  /** Messages of the stages after the slot, like the agent's ("Fetching the source"). Left out: none. */
+  stageMessages?: Partial<Record<BuildStage, string>>;
+  /**
+   * Like the agent, which sends every stage on the build's stream and also
+   * as an event (a final stage as its durable report): the event reaches
+   * the panel "before" or "after" the stream's copy. Only when the stage
+   * happens: a stream opened again replays the stages without events.
+   * Left out: the stream only.
+   */
+  events?: "before" | "after";
 };
 
 const allCapabilities = new Set([
@@ -99,6 +109,8 @@ export class FakeFleet {
   private readonly endGates = new Map<string, Set<(result: "succeeded" | "failed") => void>>();
   /** Builds whose slot was granted: a stream opened again for one does not wait again. */
   private readonly granted = new Set<string>();
+  /** Per build, how many of its stream's messages happened (were sent as events too, with events set). */
+  private readonly happened = new Map<string, number>();
   /** Uploaded archives whose UploadBuildContext answers only once released, by upload id. */
   private readonly uploadGates = new Map<string, { gate: Promise<void>; open: () => void }>();
   readonly hub: AgentHub;
@@ -186,7 +198,12 @@ export class FakeFleet {
     const script = this.buildScript(build);
     const buildId = build.request.buildId;
     const progress = (stage: BuildStage, extra: Record<string, unknown> = {}) =>
-      ({ output: { case: "progress", value: create(BuildProgressSchema, { buildId, stage, ...extra }) } }) as const;
+      ({
+        output: {
+          case: "progress",
+          value: create(BuildProgressSchema, { buildId, stage, message: script.stageMessages?.[stage] ?? "", ...extra }),
+        },
+      }) as const;
     const messages: unknown[] = [progress(BuildStage.FETCHING_SOURCE)];
     if (script.sourceInfo) {
       messages.push({
@@ -230,23 +247,32 @@ export class FakeFleet {
       rejectDone = rej;
     });
     done.catch(() => undefined);
+    let index = 0;
+    /** One stream message, with its event when it happens now (not when a stream opened again replays it). */
+    const send = async function* (m: unknown) {
+      const i = index++;
+      const output = (m as { output: { case: string; value: unknown } }).output;
+      const live = script.events !== undefined && output.case === "progress" && i >= (fleet.happened.get(buildId) ?? 0);
+      if (live) fleet.happened.set(buildId, i + 1);
+      const event = () =>
+        fleet.emit(build.nodeId, { case: "buildProgress", value: output.value as ReturnType<typeof progress>["output"]["value"] });
+      if (live && script.events === "before") event();
+      await Bun.sleep(0);
+      yield m;
+      if (live && script.events === "after") event();
+    };
     const iterator = async function* () {
       if (script.queued) {
-        await Bun.sleep(0);
-        yield progress(BuildStage.QUEUED, { message: script.queuedMessage ?? "Waiting for 1 build(s) on this node" });
+        yield* send(progress(BuildStage.QUEUED, { message: script.queuedMessage ?? "Waiting for 1 build(s) on this node" }));
         if (!fleet.granted.has(buildId) && !cancelled) await wait(fleet.slotGates, undefined);
       }
       for (const m of cancelled ? [] : messages) {
         if (cancelled) break;
-        await Bun.sleep(0);
-        yield m;
+        yield* send(m);
       }
       if (script.result === "held" && !cancelled) {
         const result = await wait(fleet.endGates, "succeeded" as const);
-        for (const m of cancelled ? [] : ending(result)) {
-          await Bun.sleep(0);
-          yield m;
-        }
+        for (const m of cancelled ? [] : ending(result)) yield* send(m);
       }
       if (script.result === "hang" && !cancelled) await new Promise<void>((res) => (hang = res));
       if (cancelled) {
