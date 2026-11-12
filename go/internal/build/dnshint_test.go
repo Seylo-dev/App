@@ -115,3 +115,8 @@ func TestJobRecentKeepsTheEnd(t *testing.T) {
 		t.Fatal("a lookup error 192 KiB before the end got the hint")
 	}
 }
+
+// failureHint is the hints without secret ARGs, one per line.
+func failureHint(err error, output string) string {
+	return strings.Join(failureHints(err, output, nil), "\n")
+}

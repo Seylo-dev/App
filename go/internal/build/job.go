@@ -38,6 +38,10 @@ type Job struct {
 	done    chan struct{}
 	// finishedAt is written once, before final is set under mu.
 	finishedAt time.Time
+	// secretArgs are the Dockerfile's ARG names that are secret variables
+	// (they stay empty in the build). Only the build's own goroutine
+	// writes and reads them.
+	secretArgs []string
 }
 
 func newJob(id, serviceID string, cancel context.CancelFunc) *Job {

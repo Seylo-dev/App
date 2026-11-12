@@ -279,7 +279,7 @@ func (s *Service) run(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
 		final.Message = failureMessage(err)
 	}
 	fmt.Fprintf(j, "\n--> %s\n", final.Message)
-	if hint := failureHint(err, j.recent()); hint != "" {
+	for _, hint := range failureHints(err, j.recent(), j.secretArgs) {
 		fmt.Fprintf(j, "--> %s\n", hint)
 	}
 	log.Info("build finished", "stage", final.Stage.String(), "duration", final.Duration.AsDuration(), "err", err)
@@ -331,15 +331,23 @@ const DNSHint = "A name lookup (DNS) failed in the build worker - if the name is
 var dnsLookupRe = regexp.MustCompile(`lookup \S+ on \S+:53\b|dial tcp: lookup |no such host|` +
 	`Temporary failure in name resolution|Temporary failure resolving|Could not resolve host|getaddrinfo EAI_AGAIN`)
 
-// failureHint is a line for the log after the failure message, "" when
-// none fits: a builder that failed (the lines above say why) on a name
-// lookup gets DNSHint.
-func failureHint(err error, output string) string {
+// failureHints are lines for the log after the failure message, none when
+// none fits. A builder that failed (the lines above say why) on a name
+// lookup gets DNSHint; one whose output mentions an ARG of the Dockerfile
+// that is a secret variable (secretArgs) gets that ARG's note again, last.
+func failureHints(err error, output string, secretArgs []string) []string {
 	var exit *ExitError
-	if errors.As(err, &exit) && dnsLookupRe.MatchString(output) {
-		return DNSHint
+	if !errors.As(err, &exit) {
+		return nil
 	}
-	return ""
+	var out []string
+	if dnsLookupRe.MatchString(output) {
+		out = append(out, DNSHint)
+	}
+	for _, name := range mentionedSecretArgs(output, secretArgs) {
+		out = append(out, secretArgNote(name))
+	}
+	return out
 }
 
 // execute fetches, builds and pushes, returning the pushed digest.
@@ -462,7 +470,7 @@ func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 	inline := req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != ""
 	switch {
 	case inline || req.GetBuilder() == agentv1.Builder_BUILDER_DOCKERFILE:
-		if err := s.dockerfileSpec(req, &spec, src, contextDir, work); err != nil {
+		if err := s.dockerfileSpec(j, req, &spec, src, contextDir, work); err != nil {
 			return err
 		}
 	case req.GetBuilder() == agentv1.Builder_BUILDER_NIXPACKS:
@@ -485,7 +493,7 @@ func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 	return err
 }
 
-func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, spec *buildSpec, src, contextDir, work string) error {
+func (s *Service) dockerfileSpec(j *Job, req *agentv1.BuildRequest, spec *buildSpec, src, contextDir, work string) error {
 	switch {
 	case req.GetSource().GetInlineDockerfile() != "":
 		spec.Dockerfile = filepath.Join(src, "Dockerfile")
@@ -512,6 +520,11 @@ func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, spec *buildSpec, src
 		return err
 	}
 	spec.Secrets, spec.BuildArgs = secrets, args
+	// An ARG named like a secret variable stays empty: say so before the build output.
+	j.secretArgs = secretArgs(spec.Dockerfile, req.GetEnv())
+	for _, name := range j.secretArgs {
+		fmt.Fprintf(j, "--> %s\n", secretArgNote(name))
+	}
 	return nil
 }
 

@@ -11,8 +11,11 @@
 // built by the pinned BuildKit frontend), Nixpacks (pinned, generates a
 // Dockerfile) and plain Dockerfiles (path, target stage, build args).
 // Every variable is a BuildKit secret file for Railpack and Dockerfile
-// builds; only non-secret ones are also Dockerfile build args. Nixpacks
-// bakes what it sees into the image, so it only gets non-secret ones.
+// builds; only non-secret ones are also Dockerfile build args, and the log
+// names every ARG of the Dockerfile that is a secret variable (it stays
+// empty), before the build and again after a failure that mentions it.
+// Nixpacks bakes what it sees into the image, so it only gets non-secret
+// ones.
 //
 // Every build runs on one docker-container buildx builder per node, capped
 // at a quarter of the machine (2-8 cores, 4-16 GB) under seylo.slice, and
