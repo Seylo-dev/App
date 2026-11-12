@@ -12,9 +12,13 @@
 // skipped and only the HTTPS probe through Cloudflare decides. An active
 // domain that gets proxied later stays active while that probe passes.
 // The certificate still comes from the node's Traefik over HTTP-01 on
-// port 80, which Cloudflare's "Always Use HTTPS" redirect breaks (it sends
-// Let's Encrypt to port 443, where Traefik does not answer the challenge),
-// so the message says what to set in Cloudflare.
+// port 80. Cloudflare's "Always Use HTTPS" leaves the challenge path on
+// http, and SSL/TLS Full (strict) does not touch a plain-http request;
+// what stops Let's Encrypt is Cloudflare's security answering in the
+// node's place, or a Redirect Rule or Page Rule for every path, which sends
+// it to port 443 (nodes on 0.2.12 answer the challenge there too) where
+// Full (strict) refuses the node's temporary certificate. So the message
+// says what to set in Cloudflare.
 //
 // As a private path (private-paths.ts) the domain is debounced: once it
 // worked it counts as down only after 2 failed checks in a row, at least 4
@@ -259,19 +263,24 @@ export async function checkDomain(
 
 /**
  * What to set in Cloudflare while a proxied domain does not answer over
- * HTTPS. Traefik gets the certificate over HTTP-01 on port 80; with
- * "Always Use HTTPS" Cloudflare redirects Let's Encrypt to port 443, where
- * the challenge is not answered (and Full (strict) refuses the origin
- * until it has a certificate), so the first certificate and every renewal
- * fail. Turning the proxy off only gets the first one. The panel's route
- * redirects HTTP to HTTPS itself, so nothing is lost without the setting.
- * Flexible loops on that redirect, so the mode is Full (strict).
+ * HTTPS. Traefik gets the certificate over HTTP-01 at
+ * http://<domain>/.well-known/acme-challenge/ on port 80, which Always Use
+ * HTTPS leaves on http. The check here is HTTPS through Cloudflare, which
+ * under Full (strict) refuses the node's temporary certificate until Let's
+ * Encrypt issued the real one, so it waits for the certificate there; Full
+ * passes at once. Let's Encrypt itself is stopped by Cloudflare's security
+ * answering in the node's place, or by a Redirect Rule or Page Rule that
+ * sends every path to https: that reaches the node on 443 (nodes on 0.2.12
+ * answer the challenge there too), where Full (strict) refuses it the
+ * same way. Flexible loops on the panel's own redirect to HTTPS.
  */
 export function cloudflareWaitMessage(domain: string, panel: string | null): string {
   return (
     `${domain} is proxied by Cloudflare, and https://${domain} does not answer through it yet. ` +
-    `In Cloudflare, point the record at ${panel ?? "the panel node"}, set SSL/TLS to Full (strict) and turn off Always Use HTTPS: ` +
-    `Let's Encrypt gets the certificate over http://${domain}/.well-known/acme-challenge/, and the panel redirects to HTTPS itself.`
+    `In Cloudflare, point the record at ${panel ?? "the panel node"} and set SSL/TLS to Full or Full (strict), not Flexible: the panel redirects to HTTPS itself. ` +
+    `Let's Encrypt gets the certificate over http://${domain}/.well-known/acme-challenge/, which Always Use HTTPS leaves alone: Cloudflare's security must let /.well-known/ through, ` +
+    `and a Redirect Rule or Page Rule that sends every request to https needs Full, not Full (strict), until the certificate is issued. ` +
+    `Under Full (strict) this check passes once it is.`
   );
 }
 

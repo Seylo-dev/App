@@ -150,8 +150,14 @@ describe("domains ops", () => {
       expected: [{ type: "A", name: "shop", value: "203.0.113.10" }],
       found: [{ type: "A", name: "shop", value: "104.16.1.1" }],
     });
-    // Let's Encrypt checks over plain HTTP, so the message says what Cloudflare needs for the certificate.
-    expect(proxied.body.dns.message).toContain("point it at 203.0.113.10, set SSL/TLS to Full (strict) and turn off Always Use HTTPS");
+    // Let's Encrypt checks over plain HTTP, so the message says what Cloudflare needs for the certificate. Not to turn
+    // off Always Use HTTPS (it leaves the challenge path on http) or to use Full (strict), which plain http never meets:
+    // what stops it is Cloudflare's security, or a redirect of every path to https under Full (strict).
+    expect(proxied.body.dns.message).toContain("point it at 203.0.113.10.");
+    expect(proxied.body.dns.message).toContain(
+      "Let's Encrypt checks http://shop.example.com/.well-known/acme-challenge/, which Always Use HTTPS leaves alone: Cloudflare's security must let /.well-known/ through, and a Redirect Rule or Page Rule that sends every request to https needs SSL/TLS on Full, not Full (strict), until the certificate is issued.",
+    );
+    expect(proxied.body.dns.message).not.toContain("turn off Always Use HTTPS");
 
     const ok = await callOp(
       panel,

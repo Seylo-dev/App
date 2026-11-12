@@ -41,7 +41,7 @@ export default {
   certSlowHint:
     "Still no certificate. Let's Encrypt checks http://{host} on port 80 at {ip}: a firewall or another proxy in front of the node can stop it. Regenerate certificate in the menu tries again.",
   certProxiedSlowHint:
-    "Still no certificate, though requests through Cloudflare reach this node. In Cloudflare, set SSL/TLS to Full (strict) and turn off Always Use HTTPS, so Let's Encrypt reaches http://{host}. Regenerate certificate in the menu tries again.",
+    "Still no certificate, though requests through Cloudflare reach this node. Let's Encrypt checks http://{host}/.well-known/acme-challenge/, which Always Use HTTPS leaves alone: in Cloudflare, let /.well-known/ through its security (Bot Fight Mode, Under Attack mode, WAF rules), and with a Redirect Rule or Page Rule that sends every request to https, set SSL/TLS to Full, not Full (strict), until the certificate is issued. Regenerate certificate in the menu tries again.",
   certWaiting: "Certificate waits for DNS",
   certWaitingCloudflare: "Certificate waits for Cloudflare",
   certWaitsProxiedHint:

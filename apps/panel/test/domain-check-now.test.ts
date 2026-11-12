@@ -72,9 +72,12 @@ test("a proxied domain without HTTPS waits with what to set in Cloudflare", asyn
   expect(status).toMatchObject({ state: "issuing_certificate", proxied: true, working: false });
   expect(status?.message).toContain(`${domain} is proxied by Cloudflare`);
   expect(status?.message).toContain(`point the record at ${nodeIp}`);
-  expect(status?.message).toContain("Full (strict)");
-  expect(status?.message).toContain("turn off Always Use HTTPS");
-  expect(status?.message).toContain(`http://${domain}/.well-known/acme-challenge/`);
+  // Always Use HTTPS leaves Let's Encrypt's path alone, so turning it off is no advice; Flexible loops on the panel's redirect.
+  expect(status?.message).toContain("set SSL/TLS to Full or Full (strict), not Flexible");
+  expect(status?.message).not.toContain("turn off Always Use HTTPS");
+  expect(status?.message).toContain(`http://${domain}/.well-known/acme-challenge/, which Always Use HTTPS leaves alone`);
+  expect(status?.message).toContain("Cloudflare's security must let /.well-known/ through");
+  expect(status?.message).toContain("a Redirect Rule or Page Rule that sends every request to https needs Full, not Full (strict)");
   // The Cloudflare addresses never count as wrong: the HTTPS probe ran.
   expect(probes.https).toBe(1);
 });

@@ -139,7 +139,7 @@ test("the domain's state: when it was checked, Check now and Cloudflare's proxy"
   expect(active).not.toContain("Proxied by Cloudflare");
 
   const message =
-    "panel.acme.dev is proxied by Cloudflare, and https://panel.acme.dev does not answer through it yet. In Cloudflare, point the record at 203.0.113.10, set SSL/TLS to Full (strict) and turn off Always Use HTTPS: Let's Encrypt gets the certificate over http://panel.acme.dev/.well-known/acme-challenge/, and the panel redirects to HTTPS itself.";
+    "panel.acme.dev is proxied by Cloudflare, and https://panel.acme.dev does not answer through it yet. In Cloudflare, point the record at 203.0.113.10 and set SSL/TLS to Full or Full (strict), not Flexible: the panel redirects to HTTPS itself. Let's Encrypt gets the certificate over http://panel.acme.dev/.well-known/acme-challenge/, which Always Use HTTPS leaves alone: Cloudflare's security must let /.well-known/ through, and a Redirect Rule or Page Rule that sends every request to https needs Full, not Full (strict), until the certificate is issued. Under Full (strict) this check passes once it is.";
   const proxied = text(
     await render(access(), {
       ...general,
@@ -149,7 +149,7 @@ test("the domain's state: when it was checked, Check now and Cloudflare's proxy"
   expect(proxied).toContain("Getting a certificate");
   expect(proxied).toContain("Proxied by Cloudflare");
   expect(proxied).toContain("Checked just now");
-  expect(proxied).toContain("set SSL/TLS to Full (strict) and turn off Always Use HTTPS");
+  expect(proxied).toContain("set SSL/TLS to Full or Full (strict), not Flexible");
 
   // Nothing to check without a domain, and no time before the first check.
   const none = text(

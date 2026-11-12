@@ -152,3 +152,12 @@ test("once the origin check reached the node and the certificate is new, no note
   expect(shown).toContain("Generating SSL certificate");
   expect(shown).not.toContain("Check again");
 });
+
+test("a slow certificate behind Cloudflare names what stops Let's Encrypt, not Always Use HTTPS or Full (strict)", async () => {
+  const shown = text(await render(domain({ origin: "node", ...checkedNow })));
+  expect(shown).toContain(
+    "Let's Encrypt checks http://verifly.cc/.well-known/acme-challenge/, which Always Use HTTPS leaves alone: in Cloudflare, let /.well-known/ through its security",
+  );
+  expect(shown).toContain("with a Redirect Rule or Page Rule that sends every request to https, set SSL/TLS to Full, not Full (strict)");
+  expect(shown).not.toContain("turn off Always Use HTTPS");
+});

@@ -189,8 +189,11 @@ function dnsMessage(status: DnsStatus | "unknown", host: string, expected: DnsRe
     case "missing":
       return `No A record for ${host} yet. Create one pointing at ${target}.`;
     case "proxied":
-      // Let's Encrypt checks over plain HTTP: Always Use HTTPS sends it to port 443, where the challenge is not answered.
-      return `${host} is proxied by Cloudflare, so the panel cannot see where it points. In Cloudflare, point it at ${target}, set SSL/TLS to Full (strict) and turn off Always Use HTTPS so Let's Encrypt can reach the node. Turn the proxy off (DNS only) to check the record here.`;
+      // Let's Encrypt asks http://<host>/.well-known/acme-challenge/ on port 80. Always Use HTTPS leaves that path on http,
+      // and SSL/TLS Full (strict) does not touch a plain-http request. What stops it: Cloudflare's security answering in the
+      // node's place, or a Redirect Rule or Page Rule that sends every path to https, which reaches the node on 443 (nodes
+      // on 0.2.12 answer the challenge there too) where Full (strict) refuses its temporary certificate.
+      return `${host} is proxied by Cloudflare, so the panel cannot see where it points. In Cloudflare, point it at ${target}. Let's Encrypt checks http://${host}/.well-known/acme-challenge/, which Always Use HTTPS leaves alone: Cloudflare's security must let /.well-known/ through, and a Redirect Rule or Page Rule that sends every request to https needs SSL/TLS on Full, not Full (strict), until the certificate is issued. Turn the proxy off (DNS only) to check the record here.`;
     case "wrongTarget":
       return `${host} points somewhere else. Change its A record to ${target}.`;
     case "unknown":
