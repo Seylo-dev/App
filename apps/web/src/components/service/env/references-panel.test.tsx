@@ -216,6 +216,40 @@ test("a value the caller may not see is not empty: it keeps its chip, with or wi
   expect(hasValue({ ...url, value: null })).toBe(true);
 });
 
+test("without databases.credentials, a database not exposed still has no EXPOSED_URL chip", async () => {
+  // env.references nulls PASSWORD and the URLs for this caller, EXPOSED_URL also while it is empty;
+  // EXPOSED_HOST and EXPOSED_PORT are not credentials and come as "".
+  const hidden = {
+    INTERNAL_URL: null,
+    INTERNAL_HOST: "db",
+    INTERNAL_PORT: "5432",
+    EXPOSED_URL: null,
+    USER: "postgres",
+    PASSWORD: null,
+    DATABASE: "shop",
+  };
+  const kept = ["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "USER", "PASSWORD", "DATABASE"];
+  const db = service("db", builtins(hidden, databaseVariables), { serviceKind: "postgres" });
+  expect(chipsOf(await render(context({}, [db])), "db")).toEqual(kept);
+  // The database's own tab: its "this service" group too.
+  const own = await render(context({ name: "db", builtins: builtins(hidden, databaseVariables) }, []), "postgres");
+  expect(chipsOf(own, "db")).toEqual(kept);
+  // Exposed: EXPOSED_HOST has a value, so the null EXPOSED_URL is hidden, not empty, and keeps its chip.
+  const exposedValues = { ...hidden, EXPOSED_HOST: "203.0.113.10", EXPOSED_PORT: "15432" };
+  const exposed = service("db", builtins(exposedValues, databaseVariables), { serviceKind: "postgres", exposed: true });
+  expect(chipsOf(await render(context({}, [exposed])), "db")).toEqual(databaseVariables.map((v) => v.name));
+  // Only a database's: an app's own EXPOSED_URL the caller may not see keeps its chip next to an empty EXPOSED_HOST.
+  const ownVariable = (name: string, value: string | null): ReferenceVariable => ({
+    name,
+    value,
+    scope: "plain",
+    sensitive: true,
+    description: "variable of this service",
+  });
+  const app = service("app", [...builtins({ INTERNAL_HOST: "app" }), ownVariable("EXPOSED_URL", null), ownVariable("EXPOSED_HOST", "")]);
+  expect(chipsOf(await render(context({}, [app])), "app")).toEqual(["INTERNAL_HOST", "EXPOSED_URL"]);
+});
+
 test("a group with no chip left is not shown", async () => {
   const empty = service("empty", builtins({}));
   const out = await render(context({}, [empty, api, shared({ SMTP_HOST: "", SMTP_USER: "" })]));

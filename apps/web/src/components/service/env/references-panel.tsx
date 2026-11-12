@@ -13,7 +13,9 @@
 // with none is not shown; a reference to it is still valid (the editor
 // completes it) and resolves once it has a value. A null value is one the
 // caller may not see or that is not known yet, not an empty one: it keeps
-// its chip.
+// its chip. The one exception is a database's EXPOSED_URL: it carries the
+// password, so it is null for a caller without databases.credentials also
+// while the database is not exposed; EXPOSED_HOST (never hidden) says that.
 
 import type { AnalyzeContext, ReferenceTarget, ReferenceVariable } from "@seylo/env-analyzer";
 import { formatReference, missingNodes, pickPublicVariable } from "@seylo/env-analyzer";
@@ -39,10 +41,10 @@ export function ReferencesPanel({
   onInsert: (text: string) => void;
 }) {
   const selfNodes = context.self.nodes.map((n) => n.name).join(", ");
-  const own = context.self.name ? (context.self.builtins ?? []).filter(hasValue) : [];
+  const own = context.self.name ? withValue(context.self.builtins ?? [], isDatabaseKind(serviceKind)) : [];
   // Each group with only the chips it shows, so whether it is reachable and what its tips suggest go by those.
   const targets = context.targets
-    .map((target) => ({ ...target, variables: target.variables.filter(hasValue) }))
+    .map((target) => ({ ...target, variables: withValue(target.variables, isDatabaseKind(target.serviceKind ?? "")) }))
     .filter((target) => target.variables.length > 0);
   return (
     <aside
@@ -198,6 +200,17 @@ function GroupHeader({ kind, name, meta }: { kind: string | null; name: string; 
  */
 export function hasValue(variable: ReferenceVariable): boolean {
   return variable.value !== "";
+}
+
+/**
+ * The variables of one group that get a chip (hasValue). A database's
+ * EXPOSED_URL is null for a caller without databases.credentials, also while
+ * the database is not exposed and it is empty: an empty EXPOSED_HOST, which
+ * nobody is refused, means it is empty too.
+ */
+export function withValue(variables: ReferenceVariable[], database: boolean): ReferenceVariable[] {
+  const notExposed = database && variables.some((v) => v.name === "EXPOSED_HOST" && v.value === "");
+  return variables.filter((v) => hasValue(v) && !(notExposed && v.name === "EXPOSED_URL" && v.value === null));
 }
 
 /** The value line of a variable's tip: its value, or why it is not shown. Empty ones have no chip (hasValue). */

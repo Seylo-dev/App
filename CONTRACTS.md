@@ -5721,7 +5721,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   variable), and a group left with no chip is not shown, so the empty-state
   text shows when nothing is left; a `null` value, hidden from the caller
   (no `env.view` on the target, a database credential without
-  `databases.credentials`) or not known yet, keeps its chip. Whether a group
+  `databases.credentials`) or not known yet, keeps its chip, except a
+  database's `null` `EXPOSED_URL` next to an empty `EXPOSED_HOST` (`withValue`:
+  the database is not exposed, and the URL is nulled only because it carries
+  the password). Whether a group
   is reachable and the exposed variable a struck-through tip names go by the
   chips shown. References to an empty variable stay valid in the editor and
   resolve once it has a value), `terminal/xterm-view.tsx` +
