@@ -26,6 +26,9 @@ type Env struct {
 	PanelPin string
 	// ProcDir, SysDir and EtcDir default to /proc, /sys and /etc.
 	ProcDir, SysDir, EtcDir string
+	// RunDir defaults to /var/run, where dockerd keeps its pid file
+	// (docker.pid, dockerd's default --pidfile).
+	RunDir string
 	// Docker talks to the Docker Engine API. Default: the local socket.
 	Docker DockerAPI
 	// Wings finds Pelican Wings; nil means "not checked".
@@ -61,6 +64,9 @@ func (e *Env) defaults() {
 	}
 	if e.EtcDir == "" {
 		e.EtcDir = "/etc"
+	}
+	if e.RunDir == "" {
+		e.RunDir = "/var/run"
 	}
 	if e.Docker == nil {
 		e.Docker = NewDockerSocket("")

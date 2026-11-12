@@ -37,8 +37,16 @@ type DockerContainer struct {
 	State  string            `json:"State"`
 	Status string            `json:"Status"`
 	Labels map[string]string `json:"Labels"`
+	// Created is when the container was created, in Unix seconds.
+	Created int64 `json:"Created"`
 	// Ports are the ports a running container publishes on the host.
 	Ports []DockerPort `json:"Ports"`
+	// HostConfig is the part of the container's host config the list has.
+	HostConfig struct {
+		// NetworkMode is "bridge" or "default" (Docker's default bridge),
+		// a network's name, "host", "none" or "container:<id>".
+		NetworkMode string `json:"NetworkMode"`
+	} `json:"HostConfig"`
 }
 
 // DockerPort is one entry of a container's Ports in GET /containers/json.

@@ -36,6 +36,11 @@ const (
 	// 0.2.0-rc.2) and is replaced once by one that runs as PanelUser.
 	LabelUser = LabelPrefix + "user"
 
+	// LabelDNSCheck marks the Container DNS node check's test container
+	// (nodecheck): a run cut off between docker create and start leaves it
+	// behind, and the next run removes it by this label.
+	LabelDNSCheck = LabelPrefix + "dnscheck"
+
 	// LabelTraefikEnable is set to "false" on every container we create so
 	// a Traefik with the Docker provider (Wings) ignores it.
 	LabelTraefikEnable = "traefik.enable"

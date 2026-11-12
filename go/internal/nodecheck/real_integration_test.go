@@ -9,12 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/build"
+	seylodocker "github.com/seylo-dev/app/go/internal/docker"
 )
 
 // TestRealMachine runs every check against the Linux machine and its Docker
@@ -101,6 +104,12 @@ func TestRealContainerDNS(t *testing.T) {
 	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || !strings.Contains(r.GetDetail(), "a test container on Docker's default bridge") {
 		t.Fatalf("the VM's Docker: %v %q", r.GetStatus(), r.GetDetail())
 	}
+	// dockerd is found through its pid file.
+	if pid, err := os.ReadFile("/var/run/docker.pid"); err != nil {
+		t.Fatal(err)
+	} else if _, from := e.dockerdArgs(context.Background()); from != "dockerd's command line (pid "+strings.TrimSpace(string(pid))+")" {
+		t.Fatalf("dockerd read from %q, its pid file says %s", from, pid)
+	}
 
 	var b [3]byte
 	_, _ = rand.Read(b[:])
@@ -136,5 +145,48 @@ func TestRealContainerDNS(t *testing.T) {
 	}
 	if r = e.containerDNS(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
 		t.Fatalf("after the restart: %v %q", r.GetStatus(), r.GetDetail())
+	}
+
+	// A container of ours on a project network asks Docker's embedded DNS:
+	// Docker's ExtServers note says where that forwards, in the form the
+	// check reads. One whose note says what the real node's setting gives
+	// (as after a live-restore restart, which keeps it) fails by name until
+	// it is restarted.
+	network := "seylo-dnsit-" + hex.EncodeToString(b[:])
+	app := network + "-app"
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", app).Run()
+		_ = exec.Command("docker", "network", "rm", network).Run()
+	})
+	docker("network", "create", network)
+	docker("run", "-d", "--name", app, "--network", network, "--label", "seylo.managed=true", "--label", "seylo.role=dnsit",
+		"--label", "traefik.enable=false", "busybox:1.37", "sleep", "600")
+	path = docker("inspect", "--format", "{{.ResolvConfPath}}", app)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := parseResolvConf(string(data))
+	if works, known := rc.lookupsWork(); !works || !known || !slices.Equal(rc.Servers, []string{embeddedDNS}) {
+		t.Fatalf("a project network container's file reads as %+v (works %v, known %v):\n%s", rc, works, known, data)
+	}
+	broken := regexp.MustCompile(`(?m)^# ExtServers: .*$`).ReplaceAllString(string(data), "# ExtServers: [invalid IP invalid IP]")
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r = e.containerDNS(context.Background())
+	t.Logf("%v | %s | %s", r.GetStatus(), r.GetDetail(), r.GetFixHint())
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL || !strings.Contains(r.GetDetail(), "the container "+app+" still has no DNS server") ||
+		!strings.Contains(r.GetFixHint(), "`docker restart "+app+"`") {
+		t.Fatalf("an app with the real node's servers: %v %q %q", r.GetStatus(), r.GetDetail(), r.GetFixHint())
+	}
+	docker("restart", "-t", "0", app)
+	if r = e.containerDNS(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
+		t.Fatalf("after the app's restart: %v %q", r.GetStatus(), r.GetDetail())
+	}
+
+	// No test container is left behind.
+	if left := docker("ps", "-aq", "--filter", "label="+seylodocker.LabelDNSCheck); left != "" {
+		t.Fatalf("test containers left: %s", left)
 	}
 }

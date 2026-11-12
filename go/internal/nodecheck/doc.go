@@ -16,8 +16,9 @@
 //	network.dns       public registries and the panel host resolve
 //	docker.dns        Docker gives containers DNS servers they can use: a
 //	                  test container on the default bridge (an image
-//	                  already here, never pulled), the build workers'
-//	                  resolv.conf, daemon.json's "dns" and dockerd --dns
+//	                  already here, never pulled), our running containers'
+//	                  resolv.conf (build workers, apps), daemon.json's
+//	                  "dns" and the host dockerd's --dns
 //	network.firewall  ufw or firewalld allow 80 and 443
 //	time.sync         NTP state and skew against the panel's clock
 //	panel.reachable   GET <panel>/api/health and its latency

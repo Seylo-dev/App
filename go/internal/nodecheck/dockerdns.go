@@ -3,6 +3,8 @@ package nodecheck
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,9 +31,10 @@ import (
 // the host has 127.0.0.53, Google's when only loopback ones are left); a
 // "dns" setting (daemon.json or dockerd --dns) replaces them for every
 // container. Docker does not check the entries well: Docker 29 starts
-// with an empty "" entry (dockerd --validate accepts it too) and writes
-// "nameserver invalid IP" for it (seen on Docker 29.5 in the test VM, as
-// on the real node); Docker 28 refuses to start the container ("bad
+// with an empty "" entry in daemon.json (dockerd --validate accepts it
+// too) and writes "nameserver invalid IP" for it (Docker 29.5 in the test
+// VM; the real node's containers got the same two lines, from a setting
+// nobody read there); Docker 28 refuses to start the container ("bad
 // nameserver address <nil>"). A container on the default bridge, where
 // the build worker runs, then has no server, and BuildKit (Go) falls back
 // to [::1]:53:
@@ -41,17 +44,24 @@ import (
 //
 // What the check reads, most reliable first:
 //
-//   - a test container on the default bridge (`docker run --rm --pull
-//     never --network bridge --entrypoint cat <image> /etc/resolv.conf`):
-//     what Docker gives a new container now, where new build workers run.
-//     Only an image already on the node is used (probeRepos); none is
-//     pulled, like every other check. It runs with every health check
-//     (hourly, and Run checks now) and is gone in well under a second.
-//   - the running build workers' resolv.conf, read from the file Docker
-//     mounts into them (<DockerRootDir>/containers/<id>/resolv.conf):
-//     they keep the servers they started with, also after a fix.
-//   - to say where the servers come from: the running dockerd's command
-//     line (/proc, else docker.service's ExecStart) for --dns and
+//   - a test container on the default bridge (`docker run --rm --name
+//     seylo-dnscheck-<random> --pull never --network bridge --label
+//     seylo.dnscheck=true --entrypoint cat <image> /etc/resolv.conf`): what
+//     Docker gives a new container now, where new build workers run. Only
+//     an image already on the node is used (probeRepos); none is pulled,
+//     like every other check. It runs with every health check (hourly, and
+//     Run checks now) and is gone in well under a second; one a cut-off
+//     run left behind is removed by its label.
+//   - our running containers' resolv.conf, read from the file Docker
+//     mounts into each (<DockerRootDir>/containers/<id>/resolv.conf): the
+//     build workers and every seylo.managed container (apps, Traefik, the
+//     panel). A container keeps the servers it started with, also after a
+//     fix and through a Docker restart with live-restore on; on a project
+//     network the file's "# ExtServers:" note (Docker 25 and later) names
+//     the servers the embedded DNS forwards to.
+//   - to say where the servers come from: the host dockerd's command line
+//     (its pid file, docker.service's MainPID, else a dockerd in this PID
+//     and user namespace, else docker.service's ExecStart) for --dns and
 //     --config-file, and daemon.json at that path (an edit there applies
 //     at Docker's next restart). GET /info has no DNS field.
 //
@@ -152,6 +162,46 @@ type resolvConf struct {
 	// Override is Docker's "# Overrides: [nameservers]" note: the servers
 	// come from its "dns" setting, not from the host.
 	Override bool
+	// ExtServers are the servers Docker's embedded DNS forwards to for a
+	// container on a user-defined network (nameserver 127.0.0.11), from
+	// Docker's "# ExtServers: [...]" note (Docker 25 and later):
+	// host(<address>) for one asked from the host's network namespace.
+	// Nil without the note.
+	ExtServers []string
+}
+
+// embeddedDNS is Docker's embedded DNS server, the only nameserver of a
+// container on a user-defined network.
+const embeddedDNS = "127.0.0.11"
+
+// invalidIP is how Docker writes a server that is no address (netip's
+// zero Addr).
+const invalidIP = "invalid IP"
+
+// lookupsWork reports whether a container with this file has a server
+// for outside names; known is false when the file does not say (the
+// embedded DNS without Docker's ExtServers note).
+func (rc resolvConf) lookupsWork() (works, known bool) {
+	if len(rc.Servers) != 1 || rc.Servers[0] != embeddedDNS {
+		return judgeServers(rc.Servers, true) != dnsNone, true
+	}
+	if rc.ExtServers == nil {
+		return false, false
+	}
+	for _, s := range rc.ExtServers {
+		if inner, ok := strings.CutPrefix(s, "host("); ok {
+			// Asked from the host's network namespace, where a loopback
+			// address is the host's own server.
+			if _, err := netip.ParseAddr(strings.TrimSuffix(inner, ")")); err == nil {
+				return true, true
+			}
+			continue
+		}
+		if classifyNS(s) == nsUsable {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func parseResolvConf(data string) resolvConf {
@@ -166,6 +216,17 @@ func parseResolvConf(data string) resolvConf {
 		}
 		if rest, ok := strings.CutPrefix(line, "# Overrides:"); ok {
 			rc.Override = strings.Contains(rest, "nameservers")
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "# ExtServers:"); ok {
+			rest = strings.TrimSpace(rest)
+			rest = strings.TrimSuffix(strings.TrimPrefix(rest, "["), "]")
+			// "invalid IP" has a space: keep it one entry.
+			rest = strings.ReplaceAll(rest, invalidIP, strings.ReplaceAll(invalidIP, " ", "\x00"))
+			rc.ExtServers = []string{}
+			for _, f := range strings.Fields(rest) {
+				rc.ExtServers = append(rc.ExtServers, strings.ReplaceAll(f, "\x00", " "))
+			}
 			continue
 		}
 		if f := strings.Fields(line); len(f) > 0 && f[0] == "nameserver" {
@@ -430,25 +491,30 @@ func parseDockerdFlags(args []string) dockerdFlags {
 	return f
 }
 
-// dockerdArgs is the running dockerd's command line (/proc/<pid>/cmdline),
-// or docker.service's ExecStart when no dockerd process is visible (/proc
-// with hidepid, for a run without root). from says which; "" when neither
-// could be read.
+// dockerdArgs is the host dockerd's command line, from where it is surest
+// to be the host's own daemon and not a second dockerd (a docker:dind
+// container's, another user's rootless one: /proc shows them all, and
+// their pids may sort first): the pid in dockerd's pid file
+// (/var/run/docker.pid), docker.service's MainPID, else a dockerd process
+// in this PID and user namespace, else docker.service's ExecStart when no
+// dockerd process can be read (/proc with hidepid, a run without root).
+// from says which; "" when none could be read.
 func (e *Env) dockerdArgs(ctx context.Context) (args []string, from string) {
-	entries, _ := os.ReadDir(e.ProcDir)
-	for _, entry := range entries {
-		pid := entry.Name()
-		if _, err := strconv.Atoi(pid); err != nil {
-			continue
+	fromPID := func(pid string) string { return "dockerd's command line (pid " + pid + ")" }
+	if data, err := e.read(filepath.Join(e.RunDir, "docker.pid")); err == nil {
+		pid := strings.TrimSpace(data)
+		if args, ok := e.dockerdCmdline(pid); ok {
+			return args, fromPID(pid)
 		}
-		if comm, err := e.read(filepath.Join(e.ProcDir, pid, "comm")); err != nil || strings.TrimSpace(comm) != "dockerd" {
-			continue
+	}
+	if out, err := e.output(ctx, "systemctl", "show", "--property=MainPID", "--value", "docker.service"); err == nil {
+		pid := strings.TrimSpace(out)
+		if args, ok := e.dockerdCmdline(pid); ok {
+			return args, fromPID(pid)
 		}
-		cmdline, err := e.read(filepath.Join(e.ProcDir, pid, "cmdline"))
-		if err != nil || strings.Trim(cmdline, "\x00") == "" {
-			continue
-		}
-		return strings.Split(strings.TrimRight(cmdline, "\x00"), "\x00"), "dockerd's command line (pid " + pid + ")"
+	}
+	if pid, args := e.findDockerd(); pid != "" {
+		return args, fromPID(pid)
 	}
 	out, err := e.output(ctx, "systemctl", "show", "--property=ExecStart", "docker.service")
 	if err != nil {
@@ -458,6 +524,81 @@ func (e *Env) dockerdArgs(ctx context.Context) (args []string, from string) {
 		return args, "docker.service's ExecStart"
 	}
 	return nil, ""
+}
+
+// dockerdCmdline is process pid's command line when it is a dockerd (a
+// stale pid file can name another process).
+func (e *Env) dockerdCmdline(pid string) ([]string, bool) {
+	if n, err := strconv.Atoi(pid); err != nil || n <= 0 {
+		return nil, false
+	}
+	if comm, err := e.read(filepath.Join(e.ProcDir, pid, "comm")); err != nil || strings.TrimSpace(comm) != "dockerd" {
+		return nil, false
+	}
+	cmdline, err := e.read(filepath.Join(e.ProcDir, pid, "cmdline"))
+	if err != nil || strings.Trim(cmdline, "\x00") == "" {
+		return nil, false
+	}
+	return strings.Split(strings.TrimRight(cmdline, "\x00"), "\x00"), true
+}
+
+// findDockerd looks through /proc for a dockerd. One in another PID or
+// user namespace than this process is not the host's; of the rest, one
+// known to share both comes first, then the lowest pid (the host's daemon
+// starts with the server).
+func (e *Env) findDockerd() (pid string, args []string) {
+	entries, _ := os.ReadDir(e.ProcDir)
+	self := e.namespaces("self")
+	bestPID, bestSame := 0, -1
+	for _, entry := range entries {
+		n, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		a, ok := e.dockerdCmdline(entry.Name())
+		if !ok {
+			continue
+		}
+		same := sameNamespaces(self, e.namespaces(entry.Name()))
+		if same < 0 {
+			continue
+		}
+		if same > bestSame || (same == bestSame && n < bestPID) {
+			pid, args, bestPID, bestSame = entry.Name(), a, n, same
+		}
+	}
+	return pid, args
+}
+
+// namespaces are a process's PID and user namespaces as /proc/<pid>/ns
+// links name them ("pid:[4026531836]"), "" where one cannot be read (it
+// needs root for another user's process).
+func (e *Env) namespaces(pid string) [2]string {
+	var ns [2]string
+	for i, kind := range []string{"pid", "user"} {
+		ns[i], _ = os.Readlink(filepath.Join(e.ProcDir, pid, "ns", kind))
+	}
+	return ns
+}
+
+// sameNamespaces is 1 when both processes are known to share their PID
+// and user namespaces, -1 when one is known to differ, 0 when it cannot be
+// told.
+func sameNamespaces(a, b [2]string) int {
+	known := 0
+	for i := range a {
+		if a[i] == "" || b[i] == "" {
+			continue
+		}
+		if a[i] != b[i] {
+			return -1
+		}
+		known++
+	}
+	if known == len(a) {
+		return 1
+	}
+	return 0
 }
 
 // parseExecStart reads `systemctl show --property=ExecStart`:
@@ -511,8 +652,16 @@ func (e *Env) dockerCLI(ctx context.Context, args ...string) (string, error) {
 	return e.output(ctx, "env", append([]string{"DOCKER_CONFIG=" + e.layout().BuildsDockerConfig(), "DOCKER_CLI_HINTS=false", "docker"}, args...)...)
 }
 
+// probeTimeout bounds the test container's run, and probeLeftoverAge is
+// how old a test container must be before a later run removes it (older
+// than any run, so never another run's that is still going).
+const (
+	probeTimeout     = 30 * time.Second
+	probeLeftoverAge = 2 * time.Minute
+)
+
 func (e *Env) probeDNS(ctx context.Context) dnsProbe {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	list, err := e.dockerCLI(ctx, "image", "ls", "--format", "{{.Repository}}:{{.Tag}}")
 	if err != nil {
@@ -523,11 +672,21 @@ func (e *Env) probeDNS(ctx context.Context) dnsProbe {
 		return dnsProbe{Skipped: "no test container: no " + strings.Join(probeRepos[:len(probeRepos)-1], ", ") + " or " + probeRepos[len(probeRepos)-1] +
 			" image on this node, and the check pulls none"}
 	}
+	e.removeLeftoverProbes(ctx)
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	name := brand.Slug + "-dnscheck-" + hex.EncodeToString(b[:])
 	// Like every container we create, out of a Docker-provider Traefik's
 	// sight (Wings').
-	out, err := e.dockerCLI(ctx, "run", "--rm", "--pull", "never", "--network", "bridge", "--label", docker.LabelTraefikEnable+"=false",
-		"--entrypoint", "cat", image, "/etc/resolv.conf")
+	out, err := e.dockerCLI(ctx, "run", "--rm", "--name", name, "--pull", "never", "--network", "bridge",
+		"--label", docker.LabelDNSCheck+"=true", "--label", docker.LabelTraefikEnable+"=false", "--entrypoint", "cat", image, "/etc/resolv.conf")
 	if err != nil {
+		// --rm removes a container only after it ran: one cut off between
+		// create and start (the timeout, a stuck Docker) or refused at
+		// start stays. ctx may be the one that expired.
+		rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		_, _ = e.dockerCLI(rmCtx, "rm", "-f", name)
+		rmCancel()
 		msg := commandMessage(err)
 		if strings.Contains(msg, "nameserver") {
 			return dnsProbe{Image: image, Refused: msg}
@@ -536,6 +695,25 @@ func (e *Env) probeDNS(ctx context.Context) dnsProbe {
 	}
 	rc := parseResolvConf(out)
 	return dnsProbe{Image: image, RC: &rc}
+}
+
+// removeLeftoverProbes removes test containers earlier runs left behind
+// (docker.LabelDNSCheck), any state, once they are older than any run.
+func (e *Env) removeLeftoverProbes(ctx context.Context) {
+	list, err := e.Docker.Containers(ctx, map[string][]string{"label": {docker.LabelDNSCheck}})
+	if err != nil {
+		return
+	}
+	var ids []string
+	for _, c := range list {
+		if c.Labels[docker.LabelDNSCheck] == "" || c.ID == "" || e.Now().Sub(time.Unix(c.Created, 0)) < probeLeftoverAge {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	if len(ids) > 0 {
+		_, _ = e.dockerCLI(ctx, append([]string{"rm", "-f"}, ids...)...)
+	}
 }
 
 // commandMessage is the command's own message in a Runner error (after
@@ -554,47 +732,69 @@ func commandMessage(err error) string {
 	return msg
 }
 
-// buildWorker is a running build worker container and its resolv.conf.
-type buildWorker struct {
-	Container, Builder string
-	RC                 resolvConf
+// ownContainer is a running container of ours and its resolv.conf.
+type ownContainer struct {
+	Name string
+	// Builder is a build worker's buildx builder; "" for any other.
+	Builder string
+	// Service: an app's container (reconcile's), restarted from the panel.
+	Service bool
+	RC      resolvConf
 }
 
-// buildWorkers reads the running build workers' resolv.conf from the file
+// stale: the container is known to have no server for outside names.
+func (c ownContainer) stale() bool {
+	works, known := c.RC.lookupsWork()
+	return known && !works
+}
+
+// ownContainers reads our running containers' resolv.conf from the file
 // Docker mounts into each (under info's DockerRootDir), so nothing runs in
-// them.
-func (e *Env) buildWorkers(ctx context.Context, info *DockerInfo) []buildWorker {
+// them: the build workers and every seylo.managed container with a network
+// of its own (not host, none or another container's, whose file is not
+// Docker's).
+func (e *Env) ownContainers(ctx context.Context, info *DockerInfo) []ownContainer {
 	if info == nil || info.DockerRootDir == "" {
 		return nil
 	}
-	prefix := buildWorkerPrefix()
-	list, err := e.Docker.Containers(ctx, map[string][]string{"name": {prefix}, "status": {"running"}})
+	list, err := e.Docker.Containers(ctx, map[string][]string{"status": {"running"}})
 	if err != nil {
 		return nil
 	}
-	var out []buildWorker
+	prefix := buildWorkerPrefix()
+	var out []ownContainer
 	for _, c := range list {
 		name := c.Name()
-		if c.State != "running" || !strings.HasPrefix(name, prefix) || c.ID == "" || strings.ContainsAny(c.ID, `/\.`) {
+		worker := strings.HasPrefix(name, prefix)
+		if c.State != "running" || c.ID == "" || strings.ContainsAny(c.ID, `/\.`) || (!worker && !docker.IsManaged(c.Labels)) {
+			continue
+		}
+		if mode := c.HostConfig.NetworkMode; mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(info.DockerRootDir, "containers", c.ID, "resolv.conf"))
 		if err != nil {
 			continue
 		}
-		// Builder <name> runs in container buildx_buildkit_<name>0.
-		builder := strings.TrimRight(strings.TrimPrefix(name, "buildx_buildkit_"), "0123456789")
-		out = append(out, buildWorker{Container: name, Builder: builder, RC: parseResolvConf(string(data))})
+		oc := ownContainer{Name: name, RC: parseResolvConf(string(data))}
+		if worker {
+			// Builder <name> runs in container buildx_buildkit_<name>0.
+			oc.Builder = strings.TrimRight(strings.TrimPrefix(name, "buildx_buildkit_"), "0123456789")
+		} else {
+			oc.Service = docker.IsServiceInstance(c.Labels)
+		}
+		out = append(out, oc)
 	}
-	slices.SortFunc(out, func(a, b buildWorker) int { return strings.Compare(a.Container, b.Container) })
+	slices.SortFunc(out, func(a, b ownContainer) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 
 // dnsFindings is everything the check read.
 type dnsFindings struct {
-	Config  daemonDNS
-	Probe   dnsProbe
-	Workers []buildWorker
+	Config daemonDNS
+	Probe  dnsProbe
+	// Containers are our running containers: build workers, apps, Traefik.
+	Containers []ownContainer
 	// LiveRestore is Docker's live-restore, nil when Docker is not
 	// reachable.
 	LiveRestore *bool
@@ -611,7 +811,7 @@ func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
 	f := dnsFindings{
 		Config:       e.daemonDNS(ctx),
 		Probe:        e.probeDNS(ctx),
-		Workers:      e.buildWorkers(ctx, info),
+		Containers:   e.ownContainers(ctx, info),
 		Wings:        e.wingsInfo(ctx) != nil,
 		BuildsConfig: e.layout().BuildsDockerConfig(),
 	}
@@ -621,13 +821,42 @@ func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
 	return f.result()
 }
 
+// workers are the build workers among the containers; stale only those
+// without a server.
+func (f dnsFindings) workers(stale bool) []ownContainer {
+	return slices.DeleteFunc(slices.Clone(f.Containers), func(c ownContainer) bool { return c.Builder == "" || (stale && !c.stale()) })
+}
+
+// staleApps are the other containers of ours without a server.
+func (f dnsFindings) staleApps() []ownContainer {
+	return slices.DeleteFunc(slices.Clone(f.Containers), func(c ownContainer) bool { return c.Builder != "" || !c.stale() })
+}
+
+func names(list []ownContainer) []string {
+	out := make([]string, len(list))
+	for i, c := range list {
+		out[i] = c.Name
+	}
+	return out
+}
+
 const dnsEffect = "builds cannot pull images (the build worker runs on Docker's default bridge) and apps cannot look up names outside this server"
 
-// staleText says which build workers kept servers they cannot use.
-func staleText(stale []string) string {
-	n := len(stale)
-	return fmt.Sprintf("%s %s still %s no DNS server %s can use, from before, so builds there cannot pull images",
-		plural(n, "the build worker", "the build workers"), strings.Join(stale, ", "), plural(n, "has", "have"), plural(n, "it", "they"))
+// staleText says which of our containers kept servers they cannot use,
+// "" when none did.
+func (f dnsFindings) staleText() string {
+	var parts []string
+	if stale := names(f.workers(true)); len(stale) > 0 {
+		n := len(stale)
+		parts = append(parts, fmt.Sprintf("%s %s still %s no DNS server %s can use, from before, so builds there cannot pull images",
+			plural(n, "the build worker", "the build workers"), strings.Join(stale, ", "), plural(n, "has", "have"), plural(n, "it", "they")))
+	}
+	if stale := names(f.staleApps()); len(stale) > 0 {
+		n := len(stale)
+		parts = append(parts, fmt.Sprintf("%s %s still %s no DNS server %s can use, from before, so %s cannot look up names outside this server",
+			plural(n, "the container", "the containers"), strings.Join(stale, ", "), plural(n, "has", "have"), plural(n, "it", "they"), plural(n, "it", "they")))
+	}
+	return strings.Join(parts, ", and ")
 }
 
 func (f dnsFindings) result() *agentv1.NodeCheckResult {
@@ -667,8 +896,8 @@ func (f dnsFindings) result() *agentv1.NodeCheckResult {
 		case dnsSome:
 			return warn(what+"; containers use the servers that work, but the others should be fixed or removed", f.fix())
 		}
-		if stale := f.staleWorkers(); len(stale) > 0 {
-			return fail(what+", but "+staleText(stale), f.workerFix())
+		if stale := f.staleText(); stale != "" {
+			return fail(what+", but "+stale, f.staleFix())
 		}
 		if why := cfg.why(); pending != "" && why != "" {
 			return warn(what+", but "+pending+": "+why, f.fix())
@@ -729,26 +958,15 @@ func (f dnsFindings) result() *agentv1.NodeCheckResult {
 		return warn(cfg.cause()+"; containers use the servers that work, but the others should be fixed or removed"+suffix, f.fix())
 	}
 	given := "Docker gives containers " + serversText(cfg.servers()) + " (" + cfg.place() + ")"
-	if stale := f.staleWorkers(); len(stale) > 0 {
-		return fail(given+", but "+staleText(stale), f.workerFix())
+	if stale := f.staleText(); stale != "" {
+		return fail(given+", but "+stale, f.staleFix())
 	}
 	return pass("%s%s", given, suffix)
 }
 
-// staleWorkers are the running build workers without a usable server.
-func (f dnsFindings) staleWorkers() []string {
-	var out []string
-	for _, w := range f.Workers {
-		if judgeServers(w.RC.Servers, true) == dnsNone {
-			out = append(out, w.Container)
-		}
-	}
-	return out
-}
-
 // fix is the hint for a "dns" setting that gives containers no usable
-// server: the setting, Docker's restart and what it stops, the build
-// workers.
+// server: the setting, Docker's restart and what it stops, the containers
+// that keep the old servers.
 func (f dnsFindings) fix() string {
 	cfg := f.Config
 	var b strings.Builder
@@ -761,25 +979,33 @@ func (f dnsFindings) fix() string {
 		fmt.Fprintf(&b, `Put IP addresses in %s ("dns": ["1.1.1.1", "8.8.4.4"]) or remove its "dns" key so containers get the host's servers, and check the file with `+"`dockerd --validate --config-file %s`. ", cfg.File, cfg.File)
 	}
 	b.WriteString("Docker reads its settings only when it starts: restart it with `systemctl restart docker`. ")
-	games := ""
+	games, gamesToo := "", ""
 	if f.Wings {
 		games = ", Wings' game servers included"
+		gamesToo = ", a Wings game server from Wings' panel"
 	}
+	// Docker restores a container that runs through its restart as it was,
+	// DNS servers included (its resolv.conf, and the embedded DNS's list for
+	// one on a project network): only a container's own restart gives it
+	// the new ones.
+	kept := "A container that keeps running through the restart keeps its old servers until it is restarted itself (an app with Restart on its page in the panel" + gamesToo + "); this check names ours that still have them. "
 	switch {
 	case f.LiveRestore == nil:
-		b.WriteString(`A Docker restart stops every container on this server` + games + `, unless "live-restore": true is set. `)
+		b.WriteString(`A Docker restart stops every container on this server` + games + `, unless "live-restore": true is set. ` + kept)
 	case *f.LiveRestore:
-		b.WriteString("Live-restore is on, so containers keep running through the restart. ")
+		b.WriteString("Live-restore is on, so containers keep running through the restart. " + kept)
 	default:
 		b.WriteString("Live-restore is off, so the restart stops every container on this server" + games)
 		fmt.Fprintf(&b, `: to keep them running, first add "live-restore": true to %s and run `+"`systemctl reload docker`"+` (restarts nothing). `, cfg.File)
+		b.WriteString(kept)
 	}
-	if len(f.Workers) == 0 {
+	workers := f.workers(false)
+	if len(workers) == 0 {
 		b.WriteString("The next build starts its build worker with the new servers.")
 		return b.String()
 	}
-	b.WriteString(plural(len(f.Workers), "A build worker that still runs afterwards keeps the old servers: ", "Build workers that still run afterwards keep the old servers: "))
-	b.WriteString(f.workerCommands(f.Workers))
+	b.WriteString(plural(len(workers), "A build worker that still runs afterwards keeps the old servers: ", "Build workers that still run afterwards keep the old servers: "))
+	b.WriteString(f.workerCommands(workers))
 	return b.String()
 }
 
@@ -788,22 +1014,39 @@ func (f dnsFindings) fileFix() string {
 	return fmt.Sprintf("Fix %s and check it with `dockerd --validate --config-file %s`: Docker reads it only when it starts, and a broken file keeps it from starting.", f.Config.File, f.Config.File)
 }
 
-// workerFix is the hint for build workers that kept the old servers.
-func (f dnsFindings) workerFix() string {
-	var stale []buildWorker
-	for _, w := range f.Workers {
-		if judgeServers(w.RC.Servers, true) == dnsNone {
-			stale = append(stale, w)
-		}
+// staleFix is the hint for containers of ours that kept the old servers.
+func (f dnsFindings) staleFix() string {
+	var parts []string
+	if stale := f.workers(true); len(stale) > 0 {
+		parts = append(parts, "A build worker keeps the DNS servers it started with: "+f.workerCommands(stale))
 	}
-	return "A build worker keeps the DNS servers it started with: " + f.workerCommands(stale)
+	if stale := f.staleApps(); len(stale) > 0 {
+		var services, others []string
+		for _, c := range stale {
+			if c.Service {
+				services = append(services, c.Name)
+			} else {
+				others = append(others, c.Name)
+			}
+		}
+		var how []string
+		if len(services) > 0 {
+			how = append(how, "Restart on the app's page in the panel for "+strings.Join(services, ", ")+" (it restarts the app's containers in place, no deploy)")
+		}
+		if len(others) > 0 {
+			how = append(how, "`docker restart "+strings.Join(others, " ")+"`")
+		}
+		parts = append(parts, "A container keeps the DNS servers it started with, also through a Docker restart with live-restore on: restart "+
+			plural(len(stale), "it", "them")+" with "+strings.Join(how, ", and ")+".")
+	}
+	return strings.Join(parts, " ")
 }
 
-func (f dnsFindings) workerCommands(workers []buildWorker) string {
+func (f dnsFindings) workerCommands(workers []ownContainer) string {
 	containers := make([]string, len(workers))
 	builders := make([]string, len(workers))
 	for i, w := range workers {
-		containers[i], builders[i] = w.Container, w.Builder
+		containers[i], builders[i] = w.Name, w.Builder
 	}
 	return fmt.Sprintf("restart %s (`docker restart %s`, which keeps the build cache) or remove %s (`DOCKER_CONFIG=%s docker buildx rm %s`; the next build makes a new one).",
 		plural(len(workers), "it", "them"), strings.Join(containers, " "), plural(len(workers), "it", "them"), f.BuildsConfig, strings.Join(builders, " "))

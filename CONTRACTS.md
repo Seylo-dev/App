@@ -106,51 +106,83 @@ Container DNS check (`docker.dns`, since 0.2.12;
 `go/internal/nodecheck/dockerdns.go`): Docker gives containers DNS
 servers they can use. A "dns" setting (daemon.json or `dockerd --dns`)
 replaces the host's servers for every container, and Docker hardly checks
-it: Docker 29 starts with an empty `""` entry (`dockerd --validate`
-accepts it too) and writes `nameserver invalid IP` (seen on a real
-Pelican/Wings node and on Docker 29.5 in the test VM); Docker 28 refuses to
-start the container. The build worker then has no server and BuildKit
-falls back to `[::1]:53`, and apps' outside lookups through Docker's
-embedded DNS fail the same way. Reads, most reliable first:
+it: Docker 29 starts with an empty `""` entry in daemon.json (`dockerd
+--validate` accepts it too) and writes `nameserver invalid IP` for it
+(reproduced on Docker 29.5 in the test VM; a real Pelican/Wings node's
+containers got the same two lines and `# Overrides: [nameservers]`, from a
+setting nobody read there); Docker 28 refuses to start the container. The
+build worker then has no server and BuildKit falls back to `[::1]:53`, and
+apps' outside lookups through Docker's embedded DNS fail the same way.
+Reads, most reliable first:
 
-- a test container on the default bridge, `docker run --rm --pull never
-  --network bridge --label traefik.enable=false --entrypoint cat <image>
-  /etc/resolv.conf`, from an image already on the node (the first of
-  `moby/buildkit`, `traefik`, `alpine`, `busybox`; none is ever pulled),
+- a test container on the default bridge, `docker run --rm --name
+  seylo-dnscheck-<8 hex> --pull never --network bridge --label
+  seylo.dnscheck=true --label traefik.enable=false --entrypoint cat
+  <image> /etc/resolv.conf`, from an image already on the node (the first
+  of `moby/buildkit`, `traefik`, `alpine`, `busybox`; none is ever pulled),
   run with the builds' DOCKER_CONFIG like the buildx check, with every
-  health check (hourly and on "Run checks now");
-- the running build workers' resolv.conf, read from
+  health check (hourly and on "Run checks now"), within 30 seconds.
+  `--rm` removes a container only after it ran, so a run that fails
+  removes its own with `docker rm -f` (a context of its own, the run's may
+  have expired), and every run first removes `seylo.dnscheck` containers
+  older than two minutes (any state: one cut off between create and
+  start), never a younger one that may be another run's;
+- our running containers' resolv.conf, read from
   `<DockerRootDir>/containers/<id>/resolv.conf` (nothing runs in them):
-  a worker keeps the servers it started with, also after a fix;
-- for the cause: the running dockerd's command line from `/proc` (else
-  `systemctl show --property=ExecStart docker.service`) for `--dns` and
-  `--config-file`, and that daemon.json (default `/etc/docker/daemon.json`)
-  for `"dns"` and `"ipv6"`. `GET /info` has no DNS field.
+  the build workers and every `seylo.managed=true` container (apps,
+  Traefik, the panel) except those on host, none or another container's
+  network. A container keeps the servers it started with, also after a fix
+  and through a Docker restart with live-restore on (Docker restores its
+  resolv.conf and the embedded DNS's list as they were). One on a project
+  network has `nameserver 127.0.0.11` and Docker's `# ExtServers: [...]`
+  note (Docker 25 and later; checked in the VM) naming where the embedded
+  DNS forwards: `host(<ip>)` entries are asked from the host and always
+  count, the others count like nameserver lines, and without the note the
+  container is not judged;
+- for the cause: the host dockerd's command line for `--dns` and
+  `--config-file`, from the pid in `/var/run/docker.pid`, else
+  `systemctl show --property=MainPID docker.service`, else a `dockerd` in
+  `/proc` that is in this process's PID and user namespaces (a dind
+  container's or another user's rootless dockerd is skipped; one known to
+  share both comes first, then the lowest pid), else `systemctl show
+  --property=ExecStart docker.service`; and that daemon.json (default
+  `/etc/docker/daemon.json`) for `"dns"` and `"ipv6"`. `GET /info` has no
+  DNS field.
 
 An entry counts when it is an IP address that is neither loopback nor
 unspecified (no ports, no host names, no `""`). Fail: no usable server (the
 real node's file, no nameserver line, loopback only, Docker refusing the
 container, or the setting alone when no test container could run), or a
-running build worker without one. Warn: usable servers next to unusable
-ones, only IPv6 servers while the bridge has no IPv6, a setting changed
-since Docker started that breaks it at the next restart, a daemon.json that
-does not parse, or nothing readable at all. The fail detail names the
-entries and where they are and says builds cannot pull images and apps
-cannot look up outside names; the hint says to put IP addresses in the file
-(`"dns": ["1.1.1.1", "8.8.4.4"]`) or remove the key (or fix the `--dns`
-flags with `systemctl edit docker`), check it with `dockerd --validate
---config-file <file>`, restart Docker with `systemctl restart docker`, what
-that restart stops (from Docker's live-restore: everything, Wings' game
-servers included when Wings is detected, unless live-restore is turned on
-first with a reload), and which build workers to `docker restart` (keeps
-the cache) or `DOCKER_CONFIG=<datadir>/builds/docker docker buildx rm`.
-The check never changes daemon.json or restarts Docker. The panel and the
-web app show its title, detail and hint like every other check's. VM tests:
-`TestRealContainerDNS` (the test container on the VM's Docker, and a build
-worker with the real node's resolv.conf failing until `docker restart`
+running container of ours without one (a build worker, or an app, Traefik
+or the panel). Warn: usable servers next to unusable ones, only IPv6
+servers while the bridge has no IPv6, a setting changed since Docker
+started that breaks it at the next restart, a daemon.json that does not
+parse, or nothing readable at all. The fail detail names the entries and
+where they are and says builds cannot pull images and apps cannot look up
+outside names; the hint says to put IP addresses in the file (`"dns":
+["1.1.1.1", "8.8.4.4"]`) or remove the key (or fix the `--dns` flags with
+`systemctl edit docker`), check it with `dockerd --validate --config-file
+<file>`, restart Docker with `systemctl restart docker`, what that restart
+stops (from Docker's live-restore: everything, Wings' game servers
+included when Wings is detected, unless live-restore is turned on first
+with a reload), that a container which keeps running through the restart
+keeps its old servers until it is restarted itself (an app with Restart on
+its page in the panel, a Wings game server from Wings' panel), and which
+build workers to `docker restart` (keeps the cache) or
+`DOCKER_CONFIG=<datadir>/builds/docker docker buildx rm`. For our
+containers that kept the old servers it names them: build workers as
+above, apps with the panel's Restart (in place, no deploy), others with
+`docker restart`. The check never changes daemon.json or restarts Docker.
+The panel and the web app show its title, detail and hint like every other
+check's. VM tests: `TestRealContainerDNS` (the test container on the VM's
+Docker, dockerd found through its pid file, no `seylo.dnscheck` container
+left; a build worker with the real node's resolv.conf, and a
+`seylo.managed` container on its own network whose ExtServers note says
+`[invalid IP invalid IP]`, each failing by name until `docker restart`
 gives it fresh servers) and build's `TestFailedLookupPointsAtContainerDNS`
 (real BuildKit lookup output gets the log line); a broken "dns" on the
-VM's own Docker is not tested there, since it needs a Docker restart.
+VM's own Docker and a live-restore restart are not tested there, since
+both need a Docker restart.
 
 Find every unfinished feature with:
 
@@ -797,7 +829,10 @@ local API, join and resume. The areas:
   labels from `docker.InstanceLabels` (`seylo.service`, `seylo.project`,
   `seylo.kind`, `seylo.generation`, `seylo.replica`, `seylo.protected`,
   `seylo.role`). Cleanup and pruning only touch resources with
-  `seylo.managed=true`.
+  `seylo.managed=true`. The one exception is the Container DNS check's
+  test container (`seylo-dnscheck-<hex>`, `seylo.dnscheck=true`, not
+  managed): `docker run --rm` for under a second, and the check itself
+  removes one a cut-off run left behind.
 - Every container gets `traefik.enable=false` and `--cgroup-parent=seylo.slice`
   and Docker restart policy `no`.
 - Names: containers `seylo-<service>-<generation>[-<replica>]`, networks
