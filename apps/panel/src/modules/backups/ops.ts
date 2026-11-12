@@ -9,13 +9,15 @@ import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import type { Access } from "../../auth/access";
 import type { PanelDb } from "../../db/client";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../../db/schema";
+import type { BackupSelection } from "../../db/schema/backups";
 import { implement, type OpContext } from "../../ops/implement";
-import { findDatabase } from "../databases/info";
-import { getService, invalidateService } from "../domains/lookup";
+import { findDatabase, loadDatabase } from "../databases/info";
+import { getService, invalidateService, serviceNodes } from "../domains/lookup";
 import { assertNoTransfer } from "../services/copies";
 import { presign } from "./presign";
 import {
   applyRetention,
+  assertSelectable,
   checkTarget,
   nextRun,
   objectExtension,
@@ -25,6 +27,9 @@ import {
   queuePrune,
   type RunRow,
   runningBackup,
+  scopeOf,
+  selectableEngines,
+  selectCapability,
   startBackup,
   toRun,
   toRuns,
@@ -208,12 +213,86 @@ function toPolicies(ctx: OpContext, rows: PolicyRow[]): Policy[] {
       schedule: row.schedule,
       keepLast: row.keepLast,
       stopService: row.stopService,
+      selection: row.selection ?? null,
       enabled: row.enabled,
       nextRunAt: row.enabled ? (row.nextRunAt?.toISOString() ?? null) : null,
       lastRun: run ? { id: run.id, status: run.status, finishedAt: run.finishedAt?.toISOString() ?? null } : null,
       createdAt: row.createdAt.toISOString(),
     };
   });
+}
+
+/** Databases a backup never holds by choice: the engines' own. */
+const systemDatabases: Record<string, readonly string[]> = {
+  postgres: ["template0", "template1"],
+  mysql: ["mysql", "information_schema", "performance_schema", "sys"],
+  mariadb: ["mysql", "information_schema", "performance_schema", "sys"],
+  mongo: ["admin", "local", "config"],
+};
+
+/**
+ * Checks a schedule's selection and returns it as stored: null (or left
+ * out) is everything. Only for a database of an engine that has
+ * databases and tables, never a system database, tables only with
+ * exactly one database (PostgreSQL ones with a schema, "public" when left
+ * out), no name twice, and a node whose agent backs up selections (an
+ * unknown one, offline, is let through: the run says it then). The names
+ * are not checked against the server: it may be stopped.
+ */
+function checkSelection(
+  ctx: OpContext,
+  serviceId: string,
+  target: "database" | "volume",
+  selection: BackupSelection | null | undefined,
+): BackupSelection | null {
+  if (!selection) return null;
+  if (target !== "database") throw new OpError("BAD_REQUEST", "Only database backups hold chosen databases.", { field: "selection" });
+  const engine = findDatabase(ctx.db, serviceId)?.engine ?? "";
+  if (!selectableEngines.has(engine)) {
+    throw new OpError(
+      "BAD_REQUEST",
+      "Only PostgreSQL, MySQL, MariaDB and MongoDB backups can hold chosen databases; this one backs up everything.",
+      {
+        field: "selection",
+      },
+    );
+  }
+  const names = new Set<string>();
+  for (const d of selection.databases) {
+    if (names.has(d.name)) throw new OpError("BAD_REQUEST", `${d.name} is chosen twice.`, { field: "selection" });
+    names.add(d.name);
+    if (systemDatabases[engine]?.includes(d.name)) {
+      throw new OpError("BAD_REQUEST", `${d.name} is a system database; it is in backups of everything on the server.`, {
+        field: "selection",
+      });
+    }
+  }
+  const tables = selection.databases.flatMap((d) => d.tables ?? []);
+  if (tables.length > 0 && selection.databases.length > 1) {
+    throw new OpError("BAD_REQUEST", "Tables can be chosen only when one database is.", { field: "selection" });
+  }
+  if (engine !== "postgres" && tables.some((t) => t.schema !== undefined)) {
+    throw new OpError("BAD_REQUEST", "Only PostgreSQL tables have a schema.", { field: "selection" });
+  }
+  const seen = new Set<string>();
+  for (const t of tables) {
+    const key = `${t.schema ?? ""}\u0000${t.name}`;
+    if (seen.has(key))
+      throw new OpError("BAD_REQUEST", `${t.schema ? `${t.schema}.` : ""}${t.name} is chosen twice.`, { field: "selection" });
+    seen.add(key);
+  }
+  const node = serviceNodes(ctx.db, serviceId)[0];
+  if (node) assertSelectable(ctx.agents, node.id, node.name, "back up");
+  return {
+    databases: selection.databases.map((d) =>
+      d.tables?.length
+        ? {
+            name: d.name,
+            tables: d.tables.map((t) => (engine === "postgres" ? { schema: t.schema ?? "public", name: t.name } : { name: t.name })),
+          }
+        : { name: d.name },
+    ),
+  };
 }
 
 function requirePolicy(ctx: OpContext, serviceId: string, policyId: string): PolicyRow {
@@ -246,6 +325,7 @@ export const createPolicy = implement(backupOps.createPolicy, (input, ctx) => {
   getService(ctx.db, input.serviceId);
   checkTarget(ctx.db, input.serviceId, input.target, input.volumeId);
   requireDestination(ctx, input.destinationId);
+  const selection = checkSelection(ctx, input.serviceId, input.target, input.selection);
   const enabled = input.enabled ?? true;
   const row = ctx.db
     .insert(backupPolicies)
@@ -257,6 +337,7 @@ export const createPolicy = implement(backupOps.createPolicy, (input, ctx) => {
       schedule: input.schedule,
       keepLast: input.keepLast ?? 7,
       stopService: input.target === "volume" && (input.stopService ?? false),
+      selection,
       enabled,
       nextRunAt: enabled ? nextRun(input.schedule) : null,
     })
@@ -271,6 +352,8 @@ export const updatePolicy = implement(backupOps.updatePolicy, (input, ctx) => {
   if (input.destinationId) requireDestination(ctx, input.destinationId);
   const schedule = input.schedule ?? current.schedule;
   const enabled = input.enabled ?? current.enabled;
+  const selection =
+    input.selection === undefined ? current.selection : checkSelection(ctx, input.serviceId, current.target, input.selection);
   const row = ctx.db
     .update(backupPolicies)
     .set({
@@ -278,6 +361,7 @@ export const updatePolicy = implement(backupOps.updatePolicy, (input, ctx) => {
       schedule,
       keepLast: input.keepLast ?? current.keepLast,
       stopService: current.target === "volume" && (input.stopService ?? current.stopService),
+      selection,
       enabled,
       nextRunAt: enabled ? nextRun(schedule) : null,
     })
@@ -451,6 +535,9 @@ export const restore = implement(backupOps.restore, (input, ctx) => {
       kind: "restore",
       target: source.target,
       volumeId: source.volumeId,
+      // What it replaces, shown on the restore's row.
+      selection: source.selection,
+      contents: source.contents,
       sourceRunId: source.id,
       policyId: source.policyId,
       serviceId: input.serviceId,
@@ -583,3 +670,66 @@ export const downloadUrl = implement(
   // Checked by the pipeline before a model's call waits for approval, and for the requester again on approve.
   { guard: (input, { db, access }) => downloadAllowed(db, access, input.serviceId) },
 );
+
+/** What the agent's listing errors mean for the dialog: a refused sign-in, or anything else. */
+const signInRefused = /password authentication failed|access denied for user|authentication failed|sasl/i;
+
+export const listDatabases = implement(backupOps.listDatabases, async (input, ctx) => {
+  const info = loadDatabase(ctx, input.serviceId);
+  if (!selectableEngines.has(info.row.engine)) {
+    throw new OpError("BAD_REQUEST", `${info.engine.label} backups always hold everything; there is nothing to choose.`, {
+      field: "serviceId",
+    });
+  }
+  const none = { databases: [], tables: null, truncated: false };
+  if (!info.node) return { state: "offline" as const, message: "The database is not placed on a node.", ...none };
+  if (info.service.stopped)
+    return { state: "stopped" as const, message: "The database is stopped. Start it to choose databases.", ...none };
+  if (!ctx.agents.isOnline(info.node.id)) return { state: "offline" as const, message: `${info.node.name} is not connected.`, ...none };
+  if (!ctx.agents.capabilities(info.node.id)?.has(selectCapability)) {
+    return { state: "agentTooOld" as const, message: `Update ${info.node.name} to choose databases.`, ...none };
+  }
+  let contents: Awaited<ReturnType<typeof inspect>>;
+  try {
+    contents = await inspect(ctx, info.node.id, input.serviceId, input.database ?? "");
+  } catch (error) {
+    const said = error instanceof OpError ? error.message : "";
+    if (signInRefused.test(said)) {
+      return {
+        state: "signInFailed" as const,
+        message: `${info.engine.label} refused Seylo's sign-in as ${info.admin.user}: the stored password no longer works (a restored backup or a change made in the shell). Set it again on the Users tab.`,
+        ...none,
+      };
+    }
+    ctx.logger.warn(
+      { serviceId: input.serviceId, code: error instanceof OpError ? error.code : "unknown" },
+      "listing a database for backups failed",
+    );
+    return { state: "failed" as const, message: said ? `Listing failed: ${said.slice(0, 300)}` : "Listing failed on the node.", ...none };
+  }
+  const databases = contents.databases.map((d) => ({ name: d.name, sizeBytes: Number(d.sizeBytes), tableCount: d.tableCount }));
+  if (!input.database) return { state: "ok" as const, message: null, databases, tables: null, truncated: false };
+  const one = contents.databases[0];
+  return {
+    state: "ok" as const,
+    message: null,
+    databases,
+    tables: (one?.tables ?? []).map((t) => ({
+      schema: t.schema,
+      name: t.name,
+      sizeBytes: Number(t.sizeBytes),
+      approxRows: Math.max(-1, Number(t.approxRows)),
+    })),
+    truncated: one?.tablesTruncated ?? false,
+  };
+});
+
+async function inspect(ctx: OpContext, nodeId: string, serviceId: string, database: string) {
+  const res = await ctx.agents.call(nodeId, "inspectDatabase", { serviceId, database }, { timeoutMs: 90_000 });
+  return { databases: res.contents?.databases ?? [] };
+}
+
+export const runContents = implement(backupOps.runContents, (input, ctx) => {
+  const row = requireRun(ctx, input.serviceId, input.runId);
+  return { scope: scopeOf(row), contents: row.contents ?? null, warnings: row.warnings ?? [] };
+});

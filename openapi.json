@@ -9690,7 +9690,7 @@
       "post": {
         "operationId": "backups.createPolicy",
         "summary": "Add a backup schedule",
-        "description": "Schedules backups of a service's database or one of its volumes to a destination, keeping the newest keepLast. Database services back up with the engine's dump tool; volumes as a tar.zst archive.",
+        "description": "Schedules backups of a service's database or one of its volumes to a destination, keeping the newest keepLast. Database services back up with the engine's dump tool; volumes as a tar.gz archive. selection (PostgreSQL, MySQL, MariaDB, MongoDB; needs nodes from 0.2.15) backs up only the chosen databases, or with exactly one database only some of its tables or collections (PostgreSQL tables with their schema); left out or null backs up everything on the server, for PostgreSQL the users and roles too. List the names with backups.listDatabases. A chosen name that no longer exists at backup time is skipped with a warning on the run; when nothing is left the run fails.",
         "tags": [
           "backups"
         ],
@@ -9759,6 +9759,64 @@
                   },
                   "enabled": {
                     "type": "boolean"
+                  },
+                  "selection": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "databases"
+                        ],
+                        "properties": {
+                          "databases": {
+                            "minItems": 1,
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                  "type": "string"
+                                },
+                                "tables": {
+                                  "maxItems": 200,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "schema": {
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -9783,6 +9841,7 @@
                     "schedule",
                     "keepLast",
                     "stopService",
+                    "selection",
                     "enabled",
                     "nextRunAt",
                     "lastRun",
@@ -9854,6 +9913,64 @@
                     },
                     "stopService": {
                       "type": "boolean"
+                    },
+                    "selection": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "databases"
+                          ],
+                          "properties": {
+                            "databases": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                    "type": "string"
+                                  },
+                                  "tables": {
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "schema": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "enabled": {
                       "type": "boolean"
@@ -10112,7 +10229,11 @@
                     "error",
                     "deletedAt",
                     "startedAt",
-                    "finishedAt"
+                    "finishedAt",
+                    "selection",
+                    "scope",
+                    "contents",
+                    "warnings"
                   ],
                   "properties": {
                     "id": {
@@ -10290,6 +10411,145 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "selection": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "databases"
+                          ],
+                          "properties": {
+                            "databases": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                    "type": "string"
+                                  },
+                                  "tables": {
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "schema": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "scope": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "everything",
+                              "type": "string"
+                            },
+                            {
+                              "const": "databases",
+                              "type": "string"
+                            },
+                            {
+                              "const": "tables",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contents": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "wholeServer",
+                            "databases"
+                          ],
+                          "properties": {
+                            "wholeServer": {
+                              "type": "boolean"
+                            },
+                            "databases": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "sizeBytes",
+                                  "approxRows",
+                                  "tableCount",
+                                  "tablesTruncated"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "sizeBytes": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "approxRows": {
+                                    "minimum": -1,
+                                    "type": "integer"
+                                  },
+                                  "tableCount": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "tablesTruncated": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -10382,6 +10642,175 @@
         },
         "x-op-kind": "mutation",
         "x-permission": "service:backups.restore",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/backups.listDatabases": {
+      "get": {
+        "operationId": "backups.listDatabases",
+        "summary": "List what a database backup can hold",
+        "description": "Lists a running database's databases with their sizes (PostgreSQL: not the templates; MySQL and MariaDB: not mysql, sys and the schema databases; MongoDB: not admin, local and config), or with database set that database's tables (PostgreSQL schema.table, partitions counted in their table) or collections, with sizes and approximate rows: the names backups.createPolicy takes in selection. Read live through the node, which must be 0.2.15 or later. state says why there is nothing to list: stopped, offline (the node is not connected), agentTooOld, signInFailed (the stored login no longer signs in) or failed; message says what to do.",
+        "tags": [
+          "backups"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "message",
+                    "databases",
+                    "tables",
+                    "truncated"
+                  ],
+                  "properties": {
+                    "state": {
+                      "anyOf": [
+                        {
+                          "const": "ok",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stopped",
+                          "type": "string"
+                        },
+                        {
+                          "const": "offline",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agentTooOld",
+                          "type": "string"
+                        },
+                        {
+                          "const": "signInFailed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "failed",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "message": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "databases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "sizeBytes",
+                          "tableCount"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "sizeBytes": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "tableCount": {
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "tables": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "schema",
+                              "name",
+                              "sizeBytes",
+                              "approxRows"
+                            ],
+                            "properties": {
+                              "schema": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "sizeBytes": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "approxRows": {
+                                "minimum": -1,
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:databases.credentials",
         "x-mcp": true
       }
     },
@@ -10626,6 +11055,7 @@
                           "schedule",
                           "keepLast",
                           "stopService",
+                          "selection",
                           "enabled",
                           "nextRunAt",
                           "lastRun",
@@ -10697,6 +11127,64 @@
                           },
                           "stopService": {
                             "type": "boolean"
+                          },
+                          "selection": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "databases"
+                                ],
+                                "properties": {
+                                  "databases": {
+                                    "minItems": 1,
+                                    "maxItems": 50,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "tables": {
+                                          "maxItems": 200,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "name"
+                                            ],
+                                            "properties": {
+                                              "schema": {
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                                "type": "string"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "enabled": {
                             "type": "boolean"
@@ -10773,7 +11261,7 @@
       "get": {
         "operationId": "backups.listRuns",
         "summary": "List backup runs",
-        "description": "Lists a service's backup and restore runs, newest first, 50 per page. Pass the last run's startedAt as before for the next page.",
+        "description": "Lists a service's backup and restore runs, newest first, 50 per page. Pass the last run's startedAt as before for the next page. Database runs say what they hold: scope, and contents per database (size inside the database, approximate rows, table count; sizeBytes is the compressed file). Tables per backup come from backups.runContents.",
         "tags": [
           "backups"
         ],
@@ -10860,7 +11348,11 @@
                           "error",
                           "deletedAt",
                           "startedAt",
-                          "finishedAt"
+                          "finishedAt",
+                          "selection",
+                          "scope",
+                          "contents",
+                          "warnings"
                         ],
                         "properties": {
                           "id": {
@@ -11038,6 +11530,145 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "selection": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "databases"
+                                ],
+                                "properties": {
+                                  "databases": {
+                                    "minItems": 1,
+                                    "maxItems": 50,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "tables": {
+                                          "maxItems": 200,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "name"
+                                            ],
+                                            "properties": {
+                                              "schema": {
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                                "type": "string"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "scope": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "const": "everything",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "databases",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "tables",
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "contents": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "wholeServer",
+                                  "databases"
+                                ],
+                                "properties": {
+                                  "wholeServer": {
+                                    "type": "boolean"
+                                  },
+                                  "databases": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "sizeBytes",
+                                        "approxRows",
+                                        "tableCount",
+                                        "tablesTruncated"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "sizeBytes": {
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "approxRows": {
+                                          "minimum": -1,
+                                          "type": "integer"
+                                        },
+                                        "tableCount": {
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "tablesTruncated": {
+                                          "type": "boolean"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "warnings": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         }
                       }
@@ -11063,7 +11694,7 @@
       "post": {
         "operationId": "backups.restore",
         "summary": "Restore a backup",
-        "description": "Restores a successful backup over the service's current data (database or volume). Current data is replaced and cannot be recovered unless backed up first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
+        "description": "Restores a successful backup over the service's current data (database or volume). What the backup holds is replaced and cannot be recovered unless backed up first: everything for a whole-server backup; only its databases, or only its tables or collections, for a backup of chosen ones (other databases, tables and users stay). backupFirst backs up the same selection first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
         "tags": [
           "backups"
         ],
@@ -11134,7 +11765,11 @@
                     "error",
                     "deletedAt",
                     "startedAt",
-                    "finishedAt"
+                    "finishedAt",
+                    "selection",
+                    "scope",
+                    "contents",
+                    "warnings"
                   ],
                   "properties": {
                     "id": {
@@ -11312,6 +11947,145 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "selection": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "databases"
+                          ],
+                          "properties": {
+                            "databases": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                    "type": "string"
+                                  },
+                                  "tables": {
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "schema": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "scope": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "everything",
+                              "type": "string"
+                            },
+                            {
+                              "const": "databases",
+                              "type": "string"
+                            },
+                            {
+                              "const": "tables",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contents": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "wholeServer",
+                            "databases"
+                          ],
+                          "properties": {
+                            "wholeServer": {
+                              "type": "boolean"
+                            },
+                            "databases": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "sizeBytes",
+                                  "approxRows",
+                                  "tableCount",
+                                  "tablesTruncated"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "sizeBytes": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "approxRows": {
+                                    "minimum": -1,
+                                    "type": "integer"
+                                  },
+                                  "tableCount": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "tablesTruncated": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -11397,7 +12171,11 @@
                           "error",
                           "deletedAt",
                           "startedAt",
-                          "finishedAt"
+                          "finishedAt",
+                          "selection",
+                          "scope",
+                          "contents",
+                          "warnings"
                         ],
                         "properties": {
                           "id": {
@@ -11575,6 +12353,145 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "selection": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "databases"
+                                ],
+                                "properties": {
+                                  "databases": {
+                                    "minItems": 1,
+                                    "maxItems": 50,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "tables": {
+                                          "maxItems": 200,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "name"
+                                            ],
+                                            "properties": {
+                                              "schema": {
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                                "type": "string"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "scope": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "const": "everything",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "databases",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "tables",
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "contents": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "wholeServer",
+                                  "databases"
+                                ],
+                                "properties": {
+                                  "wholeServer": {
+                                    "type": "boolean"
+                                  },
+                                  "databases": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "sizeBytes",
+                                        "approxRows",
+                                        "tableCount",
+                                        "tablesTruncated"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "sizeBytes": {
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "approxRows": {
+                                          "minimum": -1,
+                                          "type": "integer"
+                                        },
+                                        "tableCount": {
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "tablesTruncated": {
+                                          "type": "boolean"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "warnings": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         }
                       }
@@ -11629,11 +12546,187 @@
         "x-mcp": true
       }
     },
+    "/api/v1/backups.runContents": {
+      "get": {
+        "operationId": "backups.runContents",
+        "summary": "What a backup holds",
+        "description": "The full contents of one backup run: per database its tables or collections with sizes inside the database and approximate rows, as the node measured them right before the dump (at most 500 per database and 2000 per backup; tablesTruncated says when more were there), and the warnings. contents is null for volume backups and backups made by nodes older than 0.2.15.",
+        "tags": [
+          "backups"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "scope",
+                    "contents",
+                    "warnings"
+                  ],
+                  "properties": {
+                    "scope": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "everything",
+                              "type": "string"
+                            },
+                            {
+                              "const": "databases",
+                              "type": "string"
+                            },
+                            {
+                              "const": "tables",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contents": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "wholeServer",
+                            "databases"
+                          ],
+                          "properties": {
+                            "wholeServer": {
+                              "type": "boolean"
+                            },
+                            "databases": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "sizeBytes",
+                                  "approxRows",
+                                  "tableCount",
+                                  "tablesTruncated",
+                                  "tables"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "sizeBytes": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "approxRows": {
+                                    "minimum": -1,
+                                    "type": "integer"
+                                  },
+                                  "tableCount": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "tablesTruncated": {
+                                    "type": "boolean"
+                                  },
+                                  "tables": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "schema",
+                                        "name",
+                                        "sizeBytes",
+                                        "approxRows"
+                                      ],
+                                      "properties": {
+                                        "schema": {
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "sizeBytes": {
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "approxRows": {
+                                          "minimum": -1,
+                                          "type": "integer"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:backups.view",
+        "x-mcp": true
+      }
+    },
     "/api/v1/backups.runNow": {
       "post": {
         "operationId": "backups.runNow",
         "summary": "Back up now",
-        "description": "Starts one backup right away: of one schedule (policyId; also a disabled one, counted toward its keepLast; refused with CONFLICT, reason running and the runId, while a backup of that schedule is still running), or a one-off of the database or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
+        "description": "Starts one backup right away: of one schedule (policyId, with its selection; also a disabled one, counted toward its keepLast; refused with CONFLICT, reason running and the runId, while a backup of that schedule is still running), or a one-off of the database (everything on the server) or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
         "tags": [
           "backups"
         ],
@@ -11717,7 +12810,11 @@
                     "error",
                     "deletedAt",
                     "startedAt",
-                    "finishedAt"
+                    "finishedAt",
+                    "selection",
+                    "scope",
+                    "contents",
+                    "warnings"
                   ],
                   "properties": {
                     "id": {
@@ -11895,6 +12992,145 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "selection": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "databases"
+                          ],
+                          "properties": {
+                            "databases": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                    "type": "string"
+                                  },
+                                  "tables": {
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "schema": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "scope": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "everything",
+                              "type": "string"
+                            },
+                            {
+                              "const": "databases",
+                              "type": "string"
+                            },
+                            {
+                              "const": "tables",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contents": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "wholeServer",
+                            "databases"
+                          ],
+                          "properties": {
+                            "wholeServer": {
+                              "type": "boolean"
+                            },
+                            "databases": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "sizeBytes",
+                                  "approxRows",
+                                  "tableCount",
+                                  "tablesTruncated"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "sizeBytes": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "approxRows": {
+                                    "minimum": -1,
+                                    "type": "integer"
+                                  },
+                                  "tableCount": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "tablesTruncated": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -12292,7 +13528,7 @@
       "post": {
         "operationId": "backups.updatePolicy",
         "summary": "Change a backup schedule",
-        "description": "Changes a schedule's destination, timing, retention or on/off state. Fields left out keep their value.",
+        "description": "Changes a schedule's destination, timing, retention, on/off state or selection (what a database backup holds, as in backups.createPolicy; null backs up everything). Fields left out keep their value.",
         "tags": [
           "backups"
         ],
@@ -12347,6 +13583,64 @@
                   },
                   "enabled": {
                     "type": "boolean"
+                  },
+                  "selection": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "databases"
+                        ],
+                        "properties": {
+                          "databases": {
+                            "minItems": 1,
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                  "type": "string"
+                                },
+                                "tables": {
+                                  "maxItems": 200,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "schema": {
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -12371,6 +13665,7 @@
                     "schedule",
                     "keepLast",
                     "stopService",
+                    "selection",
                     "enabled",
                     "nextRunAt",
                     "lastRun",
@@ -12442,6 +13737,64 @@
                     },
                     "stopService": {
                       "type": "boolean"
+                    },
+                    "selection": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "databases"
+                          ],
+                          "properties": {
+                            "databases": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "name"
+                                ],
+                                "properties": {
+                                  "name": {
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                    "type": "string"
+                                  },
+                                  "tables": {
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name"
+                                      ],
+                                      "properties": {
+                                        "schema": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "enabled": {
                       "type": "boolean"

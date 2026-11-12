@@ -44,6 +44,63 @@ export const DestinationChoice = Type.Object({ id: Id, name: Type.String(), prov
 
 export const BackupTarget = Type.Union([Type.Literal("database"), Type.Literal("volume")]);
 
+/** A database, table or collection name: 1 to 128 characters, no control characters. */
+const ObjectName = Type.String({ minLength: 1, maxLength: 128, pattern: "^[^\\x00-\\x1f\\x7f]+$" });
+
+/** A table (PostgreSQL: with its schema, "public" when left out) or a MongoDB collection. */
+export const BackupTableRef = Type.Object({ schema: Type.Optional(ObjectName), name: ObjectName });
+
+/**
+ * What a database backup holds, by name (PostgreSQL, MySQL, MariaDB and
+ * MongoDB). Null means everything on the server: every database, and for
+ * PostgreSQL the users and roles too. Tables only with exactly one
+ * database; none means the whole database.
+ */
+export const BackupSelection = Type.Object({
+  databases: Type.Array(
+    Type.Object({
+      name: ObjectName,
+      tables: Type.Optional(Type.Array(BackupTableRef, { maxItems: 200 })),
+    }),
+    { minItems: 1, maxItems: 50 },
+  ),
+});
+
+/** everything: the whole server; databases: chosen databases; tables: some tables of one database. */
+export const BackupScope = Type.Union([Type.Literal("everything"), Type.Literal("databases"), Type.Literal("tables")]);
+
+/** Sizes are inside the database (the engine's numbers at backup time), not the compressed file; rows are the engine's estimate, -1 when it has none. */
+export const BackupTable = Type.Object({
+  /** PostgreSQL only; "" elsewhere. */
+  schema: Type.String(),
+  name: Type.String(),
+  sizeBytes: Type.Integer({ minimum: 0 }),
+  approxRows: Type.Integer({ minimum: -1 }),
+});
+
+const BackupDatabaseFields = {
+  name: Type.String(),
+  sizeBytes: Type.Integer({ minimum: 0 }),
+  approxRows: Type.Integer({ minimum: -1 }),
+  /** Tables or collections it holds of this database. */
+  tableCount: Type.Integer({ minimum: 0 }),
+  /** Only the biggest 500 tables per database (2000 per backup) were recorded; the totals count all. */
+  tablesTruncated: Type.Boolean(),
+};
+
+export const BackupDatabaseSummary = Type.Object(BackupDatabaseFields);
+
+/** What a backup holds, as the node measured it right before the dump. */
+export const BackupContents = Type.Object({
+  wholeServer: Type.Boolean(),
+  databases: Type.Array(BackupDatabaseSummary),
+});
+
+export const BackupContentsWithTables = Type.Object({
+  wholeServer: Type.Boolean(),
+  databases: Type.Array(Type.Object({ ...BackupDatabaseFields, tables: Type.Array(BackupTable) })),
+});
+
 /** Five-field cron expression in UTC, for example "0 3 * * *". */
 export const CronSchedule = Type.String({ minLength: 9, maxLength: 100, pattern: "^\\S+( \\S+){4}$" });
 
@@ -61,6 +118,8 @@ export const Policy = Type.Object({
   keepLast: Type.Integer({ minimum: 1, maximum: 1000 }),
   /** Volume backups only: stop the service while copying. */
   stopService: Type.Boolean(),
+  /** Database backups: the chosen databases or tables; null backs up everything on the server. */
+  selection: Type.Union([BackupSelection, Type.Null()]),
   enabled: Type.Boolean(),
   nextRunAt: Type.Union([Timestamp, Type.Null()]),
   lastRun: Type.Union([Type.Object({ id: Id, status: Type.String(), finishedAt: Type.Union([Timestamp, Type.Null()]) }), Type.Null()]),
@@ -93,6 +152,14 @@ export const Run = Type.Object({
   deletedAt: Type.Union([Timestamp, Type.Null()]),
   startedAt: Timestamp,
   finishedAt: Type.Union([Timestamp, Type.Null()]),
+  /** Database runs: what was asked for (a restore: what its backup was asked for); null is everything. */
+  selection: Type.Union([BackupSelection, Type.Null()]),
+  /** Database runs: everything, chosen databases or some tables of one; null for volumes. */
+  scope: Type.Union([BackupScope, Type.Null()]),
+  /** What the backup holds per database (restores: their backup's); tables come from backups.runContents. Null for volumes, nodes older than 0.2.15 and runs before it. */
+  contents: Type.Union([BackupContents, Type.Null()]),
+  /** Chosen databases or tables that were skipped because they no longer existed, or why the contents could not be measured. */
+  warnings: Type.Array(Type.String()),
 });
 
 const serviceScope = (action: `${string}.${string}`) => permission.service(action, (input: { serviceId: string }) => input.serviceId);
@@ -205,6 +272,7 @@ const PolicyFields = {
   keepLast: Type.Integer({ minimum: 1, maximum: 1000 }),
   stopService: Type.Boolean(),
   enabled: Type.Boolean(),
+  selection: Type.Union([BackupSelection, Type.Null()]),
 };
 
 export const createPolicy = defineOp({
@@ -212,7 +280,7 @@ export const createPolicy = defineOp({
   kind: "mutation",
   summary: "Add a backup schedule",
   description:
-    "Schedules backups of a service's database or one of its volumes to a destination, keeping the newest keepLast. Database services back up with the engine's dump tool; volumes as a tar.zst archive.",
+    "Schedules backups of a service's database or one of its volumes to a destination, keeping the newest keepLast. Database services back up with the engine's dump tool; volumes as a tar.gz archive. selection (PostgreSQL, MySQL, MariaDB, MongoDB; needs nodes from 0.2.15) backs up only the chosen databases, or with exactly one database only some of its tables or collections (PostgreSQL tables with their schema); left out or null backs up everything on the server, for PostgreSQL the users and roles too. List the names with backups.listDatabases. A chosen name that no longer exists at backup time is skipped with a warning on the run; when nothing is left the run fails.",
   input: Type.Object({
     serviceId: Id,
     target: BackupTarget,
@@ -223,6 +291,7 @@ export const createPolicy = defineOp({
     keepLast: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
     stopService: Type.Optional(Type.Boolean()),
     enabled: Type.Optional(Type.Boolean()),
+    selection: Type.Optional(Type.Union([BackupSelection, Type.Null()])),
   }),
   output: Policy,
   permission: serviceScope("backups.edit"),
@@ -234,7 +303,8 @@ export const updatePolicy = defineOp({
   id: "backups.updatePolicy",
   kind: "mutation",
   summary: "Change a backup schedule",
-  description: "Changes a schedule's destination, timing, retention or on/off state. Fields left out keep their value.",
+  description:
+    "Changes a schedule's destination, timing, retention, on/off state or selection (what a database backup holds, as in backups.createPolicy; null backs up everything). Fields left out keep their value.",
   input: Type.Object({
     serviceId: Id,
     policyId: Id,
@@ -263,7 +333,7 @@ export const runNow = defineOp({
   kind: "mutation",
   summary: "Back up now",
   description:
-    "Starts one backup right away: of one schedule (policyId; also a disabled one, counted toward its keepLast; refused with CONFLICT, reason running and the runId, while a backup of that schedule is still running), or a one-off of the database or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
+    "Starts one backup right away: of one schedule (policyId, with its selection; also a disabled one, counted toward its keepLast; refused with CONFLICT, reason running and the runId, while a backup of that schedule is still running), or a one-off of the database (everything on the server) or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
   input: Type.Object({
     serviceId: Id,
     policyId: Type.Optional(Id),
@@ -309,7 +379,7 @@ export const listRuns = defineOp({
   kind: "query",
   summary: "List backup runs",
   description:
-    "Lists a service's backup and restore runs, newest first, 50 per page. Pass the last run's startedAt as before for the next page.",
+    "Lists a service's backup and restore runs, newest first, 50 per page. Pass the last run's startedAt as before for the next page. Database runs say what they hold: scope, and contents per database (size inside the database, approximate rows, table count; sizeBytes is the compressed file). Tables per backup come from backups.runContents.",
   input: Type.Object({
     serviceId: Id,
     policyId: Type.Optional(Id),
@@ -327,7 +397,7 @@ export const restore = defineOp({
   kind: "destructive",
   summary: "Restore a backup",
   description:
-    "Restores a successful backup over the service's current data (database or volume). Current data is replaced and cannot be recovered unless backed up first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
+    "Restores a successful backup over the service's current data (database or volume). What the backup holds is replaced and cannot be recovered unless backed up first: everything for a whole-server backup; only its databases, or only its tables or collections, for a backup of chosen ones (other databases, tables and users stay). backupFirst backs up the same selection first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
   input: Type.Object({
     serviceId: Id,
     runId: Id,
@@ -373,4 +443,51 @@ export const downloadUrl = defineOp({
   modelApproval: true,
   mcp: true,
   audit: true,
+});
+
+export const listDatabases = defineOp({
+  id: "backups.listDatabases",
+  kind: "query",
+  summary: "List what a database backup can hold",
+  description:
+    "Lists a running database's databases with their sizes (PostgreSQL: not the templates; MySQL and MariaDB: not mysql, sys and the schema databases; MongoDB: not admin, local and config), or with database set that database's tables (PostgreSQL schema.table, partitions counted in their table) or collections, with sizes and approximate rows: the names backups.createPolicy takes in selection. Read live through the node, which must be 0.2.15 or later. state says why there is nothing to list: stopped, offline (the node is not connected), agentTooOld, signInFailed (the stored login no longer signs in) or failed; message says what to do.",
+  input: Type.Object({ serviceId: Id, database: Type.Optional(ObjectName) }),
+  output: Type.Object({
+    state: Type.Union([
+      Type.Literal("ok"),
+      Type.Literal("stopped"),
+      Type.Literal("offline"),
+      Type.Literal("agentTooOld"),
+      Type.Literal("signInFailed"),
+      Type.Literal("failed"),
+    ]),
+    message: Type.Union([Type.String(), Type.Null()]),
+    databases: Type.Array(
+      Type.Object({ name: Type.String(), sizeBytes: Type.Integer({ minimum: 0 }), tableCount: Type.Integer({ minimum: 0 }) }),
+    ),
+    /** With database: its tables, the biggest first (at most 5000); null without. */
+    tables: Type.Union([Type.Array(BackupTable), Type.Null()]),
+    /** More tables than listed. */
+    truncated: Type.Boolean(),
+  }),
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: false,
+});
+
+export const runContents = defineOp({
+  id: "backups.runContents",
+  kind: "query",
+  summary: "What a backup holds",
+  description:
+    "The full contents of one backup run: per database its tables or collections with sizes inside the database and approximate rows, as the node measured them right before the dump (at most 500 per database and 2000 per backup; tablesTruncated says when more were there), and the warnings. contents is null for volume backups and backups made by nodes older than 0.2.15.",
+  input: Type.Object({ serviceId: Id, runId: Id }),
+  output: Type.Object({
+    scope: Type.Union([BackupScope, Type.Null()]),
+    contents: Type.Union([BackupContentsWithTables, Type.Null()]),
+    warnings: Type.Array(Type.String()),
+  }),
+  permission: serviceScope("backups.view"),
+  mcp: true,
+  audit: false,
 });

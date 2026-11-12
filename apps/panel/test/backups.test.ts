@@ -1,16 +1,17 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { ai as aiOps, allOps, approvals as approvalOps, backups as backupOps, databases as dbOps } from "@seylo/ops";
+import { ai as aiOps, allOps, approvals as approvalOps, backups as backupOps, databases as dbOps, OpError } from "@seylo/ops";
 import { buildAiTools } from "@seylo/ops/generators";
 import { EventSchema } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
 import { authenticate } from "../src/auth/authenticate";
-import { approvals, auditLog, backupDestinations, backupPolicies, backupRuns, grants, volumes } from "../src/db/schema";
+import { approvals, auditLog, backupDestinations, backupPolicies, backupRuns, grants, services, volumes } from "../src/db/schema";
 import { setModelProvider } from "../src/modules/ai/client";
 import { backupFileName } from "../src/modules/backups/ops";
 import { presign } from "../src/modules/backups/presign";
 import { ownObjectKey } from "../src/modules/backups/runs";
 import { runDueBackups } from "../src/modules/backups/schedule";
+import { expiredObjects } from "../src/modules/backups/signing";
 import { storageConfig } from "../src/modules/backups/storage";
 import { callTool } from "../src/modules/mcp/tools";
 import { scriptedModel, settled } from "./ai-fake";
@@ -1156,5 +1157,374 @@ describe("download links", () => {
     expect(backupFileName("vault-warden", "web-vault", at, ".tar.gz")).toBe("vault-warden-web-vault-2026-11-13_0300.tar.gz");
     expect(backupFileName("my app", 'a"b/../c', at, ".dump")).toBe("my-app-a-b-..-c-2026-11-13_0300.dump");
     expect(backupFileName("..", "", at, ".sql.gz")).toBe("backup-backup-2026-11-13_0300.sql.gz");
+  });
+});
+
+/** A BackupResult with what the node measured. */
+function measuredResult(nodeId: string, runId: string, value: Record<string, unknown>) {
+  panel.deps.agents.emitEvent(nodeId, create(EventSchema, { payload: { case: "backupResult", value: { runId, ...value } as never } }));
+}
+
+const shopContents = {
+  wholeServer: false,
+  databases: [
+    {
+      name: "shop",
+      sizeBytes: 380_000_000n,
+      approxRows: 14_200n,
+      tableCount: 2,
+      tables: [
+        { schema: "public", name: "orders", sizeBytes: 1_200_000n, approxRows: 14_000n },
+        { schema: "public", name: "items", sizeBytes: 40_000n, approxRows: -1n },
+      ],
+    },
+  ],
+};
+
+type Subject = { subject: { what: { value: { database: string; selections: unknown[] } } } };
+
+describe("chosen databases", () => {
+  test("a schedule's selection is checked, stored and sent; the run keeps what the node measured", async () => {
+    const { node, dbId, destinationId } = await setup();
+    const requests: Subject[] = [];
+    const agent = fakeAgent(
+      panel,
+      node.id,
+      { runBackup: (req) => void requests.push(req as never) },
+      ["restoreBackup", "inspectDatabase"],
+      [signed],
+    );
+    const policy = (selection: unknown) =>
+      callOp(
+        panel,
+        backupOps.createPolicy,
+        { serviceId: dbId, target: "database", destinationId, schedule: "0 3 * * *", selection } as never,
+        {
+          cookie,
+        },
+      );
+
+    for (const [bad, why] of [
+      [{ databases: [{ name: "a", tables: [{ name: "t" }] }, { name: "b" }] }, "only when one database"],
+      [{ databases: [{ name: "template1" }] }, "system database"],
+      [{ databases: [{ name: "a" }, { name: "a" }] }, "chosen twice"],
+      [{ databases: [] }, ""],
+      [{ databases: [{ name: "bad\nname" }] }, ""],
+    ] as const) {
+      const res = await policy(bad);
+      expect(res.status).toBe(400);
+      if (why) expect(res.body.error.message).toContain(why);
+    }
+    // Tables without a schema are in public.
+    const tables = await policy({ databases: [{ name: "shop", tables: [{ name: "orders" }, { schema: "billing", name: "items" }] }] });
+    expect(tables.status).toBe(200);
+    expect(tables.body.selection).toEqual({
+      databases: [
+        {
+          name: "shop",
+          tables: [
+            { schema: "public", name: "orders" },
+            { schema: "billing", name: "items" },
+          ],
+        },
+      ],
+    });
+    const two = await policy({ databases: [{ name: "shop" }, { name: "crm" }] });
+    expect(two.body.selection).toEqual({ databases: [{ name: "shop" }, { name: "crm" }] });
+    // Back to everything, and to the two again.
+    const changed = await callOp(panel, backupOps.updatePolicy, { serviceId: dbId, policyId: two.body.id, selection: null }, { cookie });
+    expect(changed.body.selection).toBeNull();
+    await callOp(
+      panel,
+      backupOps.updatePolicy,
+      { serviceId: dbId, policyId: two.body.id, selection: { databases: [{ name: "shop" }, { name: "crm" }] } },
+      { cookie },
+    );
+
+    // The run copies the selection and sends it: one database also as database.
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: tables.body.id }, { cookie });
+    expect(run.body).toMatchObject({ scope: "tables", selection: tables.body.selection, contents: null, warnings: [] });
+    expect(requests[0]?.subject.what.value).toMatchObject({
+      database: "shop",
+      selections: [
+        {
+          database: "shop",
+          tables: [
+            { schema: "public", name: "orders" },
+            { schema: "billing", name: "items" },
+          ],
+        },
+      ],
+    });
+    const many = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: two.body.id }, { cookie });
+    expect(many.body.scope).toBe("databases");
+    expect(requests[1]?.subject.what.value).toMatchObject({ database: "", selections: [{ database: "shop" }, { database: "crm" }] });
+    // A one-off backs up everything, as before.
+    const oneOff = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    expect(oneOff.body.scope).toBe("everything");
+    expect(requests[2]?.subject.what.value).toMatchObject({ database: "", selections: [] });
+
+    // What the node measured, and what it skipped.
+    measuredResult(node.id, run.body.id, {
+      success: true,
+      sizeBytes: 96_000_000n,
+      objectKey: keyFor(run.body.id),
+      contents: shopContents,
+      warnings: ['The table "billing.items" in "shop" no longer exists, so it was skipped.'],
+    });
+    measuredResult(node.id, many.body.id, {
+      success: false,
+      error: 'none of the chosen databases exist any more: "shop", "crm"',
+      warnings: ['The database "shop" no longer exists, so it was skipped.', 'The database "crm" no longer exists, so it was skipped.'],
+    });
+    const runs = (await callOp(panel, backupOps.listRuns, { serviceId: dbId }, { cookie })).body.runs as Record<string, unknown>[];
+    const byId = new Map(runs.map((r) => [r.id, r]));
+    expect(byId.get(run.body.id)).toMatchObject({
+      status: "succeeded",
+      sizeBytes: 96_000_000,
+      contents: {
+        wholeServer: false,
+        databases: [{ name: "shop", sizeBytes: 380_000_000, approxRows: 14_200, tableCount: 2, tablesTruncated: false }],
+      },
+      warnings: ['The table "billing.items" in "shop" no longer exists, so it was skipped.'],
+    });
+    // The list carries no tables; runContents does.
+    const listed = byId.get(run.body.id) as { contents: { databases: object[] } };
+    expect(listed.contents.databases[0]).not.toHaveProperty("tables");
+    expect(byId.get(many.body.id)).toMatchObject({ status: "failed", error: 'none of the chosen databases exist any more: "shop", "crm"' });
+    expect((byId.get(many.body.id) as { warnings: string[] }).warnings).toHaveLength(2);
+    const full = await callOp(panel, backupOps.runContents, { serviceId: dbId, runId: run.body.id }, { cookie });
+    expect(full.body).toMatchObject({
+      scope: "tables",
+      contents: {
+        databases: [
+          {
+            name: "shop",
+            tables: [
+              { schema: "public", name: "orders", sizeBytes: 1_200_000, approxRows: 14_000 },
+              { name: "items", approxRows: -1 },
+            ],
+          },
+        ],
+      },
+    });
+    // An older agent's result: no contents, the total only.
+    backupResult(node.id, oneOff.body.id);
+    const old = await callOp(panel, backupOps.runContents, { serviceId: dbId, runId: oneOff.body.id }, { cookie });
+    expect(old.body).toEqual({ scope: "everything", contents: null, warnings: [] });
+    agent.disconnect();
+  });
+
+  test("selections need an agent that has them; Redis has none", async () => {
+    const { project, node, dbId, destinationId } = await setup();
+    const requests: unknown[] = [];
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void requests.push(req) }, ["restoreBackup"], [signed]);
+    const refused = await callOp(
+      panel,
+      backupOps.createPolicy,
+      { serviceId: dbId, target: "database", destinationId, schedule: "0 3 * * *", selection: { databases: [{ name: "shop" }] } },
+      { cookie },
+    );
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.message).toContain("to back up chosen databases");
+    // Saved while the node had them, run after it went back: the run fails saying why, nothing is sent.
+    const everything = await callOp(
+      panel,
+      backupOps.createPolicy,
+      { serviceId: dbId, target: "database", destinationId, schedule: "0 3 * * *" },
+      { cookie },
+    );
+    panel.deps.db
+      .update(backupPolicies)
+      .set({ selection: { databases: [{ name: "shop" }] } })
+      .where(eq(backupPolicies.id, everything.body.id))
+      .run();
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: everything.body.id }, { cookie });
+    expect(run.status).toBe(409);
+    const row = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.policyId, everything.body.id)).get();
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toContain("to back up chosen databases");
+    expect(requests).toEqual([]);
+    agent.disconnect();
+
+    const redis = await callOp(panel, dbOps.create, { projectId: project.id, name: "cache", engine: "redis", nodeId: node.id }, { cookie });
+    const onRedis = await callOp(
+      panel,
+      backupOps.createPolicy,
+      {
+        serviceId: redis.body.serviceId,
+        target: "database",
+        destinationId,
+        schedule: "0 3 * * *",
+        selection: { databases: [{ name: "0" }] },
+      },
+      { cookie },
+    );
+    expect(onRedis.status).toBe(400);
+    expect((await callOp(panel, backupOps.listDatabases, { serviceId: redis.body.serviceId }, { cookie })).status).toBe(400);
+  });
+
+  test("a restore replaces what the backup holds, backs the same up first, and needs an agent that has selections", async () => {
+    const { node, dbId, destinationId } = await setup();
+    const runRequests: (Subject & { runId: string })[] = [];
+    const restores: Subject[] = [];
+    let agent = fakeAgent(
+      panel,
+      node.id,
+      {
+        runBackup: (req) => void runRequests.push(req as never),
+        restoreBackup: (req) => {
+          restores.push(req as never);
+          return { restoredBytes: 5n };
+        },
+      },
+      ["inspectDatabase"],
+      [signed],
+    );
+    const policy = await callOp(
+      panel,
+      backupOps.createPolicy,
+      {
+        serviceId: dbId,
+        target: "database",
+        destinationId,
+        schedule: "0 3 * * *",
+        selection: { databases: [{ name: "shop", tables: [{ name: "orders" }, { name: "items" }, { name: "gone" }] }] },
+      },
+      { cookie },
+    );
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: policy.body.id }, { cookie });
+    measuredResult(node.id, run.body.id, { success: true, sizeBytes: 10n, objectKey: keyFor(run.body.id), contents: shopContents });
+
+    const restore = await callOp(
+      panel,
+      backupOps.restore,
+      { serviceId: dbId, runId: run.body.id, confirmName: "db", backupFirst: true },
+      { cookie },
+    );
+    // The restore's row shows what it replaces.
+    expect(restore.body).toMatchObject({ kind: "restore", scope: "tables", contents: { databases: [{ name: "shop", tableCount: 2 }] } });
+    const job = panel.runner.runDue(panel.deps);
+    for (let i = 0; i < 200 && runRequests.length < 2; i++) await Bun.sleep(10);
+    // The safety backup takes what the backup holds (not the gone table); the restore sends the same.
+    const held = [
+      {
+        database: "shop",
+        tables: [
+          { schema: "public", name: "orders" },
+          { schema: "public", name: "items" },
+        ],
+      },
+    ];
+    const safety = runRequests[1];
+    expect(safety?.subject.what.value).toMatchObject({ database: "shop", selections: held });
+    measuredResult(node.id, safety?.runId as string, {
+      success: true,
+      sizeBytes: 10n,
+      objectKey: keyFor(safety?.runId as string),
+      contents: shopContents,
+    });
+    await job;
+    expect(restores[0]?.subject.what.value).toMatchObject({ database: "shop", selections: held });
+    expect(panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, restore.body.id)).get()?.status).toBe("succeeded");
+    agent.disconnect();
+
+    // The node went back to an agent without selections: the restore fails before the call.
+    agent = fakeAgent(panel, node.id, { restoreBackup: () => ({ restoredBytes: 1n }) }, ["runBackup"], [signed]);
+    const again = await callOp(panel, backupOps.restore, { serviceId: dbId, runId: run.body.id, confirmName: "db" }, { cookie });
+    await panel.runner.runDue(panel.deps);
+    const failed = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, again.body.id)).get();
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toContain("to restore this backup");
+    expect(agent.calls.filter((c) => c.method === "restoreBackup")).toEqual([]);
+    agent.disconnect();
+  });
+
+  test("listDatabases answers with a state the dialog shows", async () => {
+    const { node, dbId } = await setup();
+    const list = () => callOp(panel, backupOps.listDatabases, { serviceId: dbId }, { cookie }).then((r) => r.body);
+    expect(await list()).toMatchObject({ state: "offline", message: expect.stringContaining("is not connected"), databases: [] });
+    let agent = fakeAgent(panel, node.id, {}, ["runBackup"], [signed]);
+    expect(await list()).toMatchObject({ state: "agentTooOld", message: expect.stringContaining("Update") });
+    agent.disconnect();
+
+    let answer: () => unknown = () => ({
+      contents: {
+        databases: [
+          { name: "app", sizeBytes: 7_500_000n, tableCount: 3 },
+          { name: "shop", sizeBytes: 9_100_000n, tableCount: 2 },
+        ],
+      },
+    });
+    const asked: { database: string }[] = [];
+    agent = fakeAgent(panel, node.id, {
+      inspectDatabase: (req) => {
+        asked.push(req);
+        return answer() as never;
+      },
+    });
+    expect(await list()).toEqual({
+      state: "ok",
+      message: null,
+      databases: [
+        { name: "app", sizeBytes: 7_500_000, tableCount: 3 },
+        { name: "shop", sizeBytes: 9_100_000, tableCount: 2 },
+      ],
+      tables: null,
+      truncated: false,
+    });
+    answer = () => ({
+      contents: {
+        databases: [
+          {
+            name: "shop",
+            sizeBytes: 9_100_000n,
+            tableCount: 2,
+            tablesTruncated: true,
+            tables: [{ schema: "public", name: "orders", sizeBytes: 1_200_000n, approxRows: -1n }],
+          },
+        ],
+      },
+    });
+    const tables = await callOp(panel, backupOps.listDatabases, { serviceId: dbId, database: "shop" }, { cookie });
+    expect(tables.body).toMatchObject({
+      state: "ok",
+      tables: [{ schema: "public", name: "orders", sizeBytes: 1_200_000, approxRows: -1 }],
+      truncated: true,
+    });
+    expect(asked.at(-1)?.database).toBe("shop");
+    answer = () => {
+      throw new OpError(
+        "CONFLICT",
+        'listing the databases exited with code 2: psql: error: FATAL:  password authentication failed for user "postgres"',
+      );
+    };
+    expect(await list()).toMatchObject({ state: "signInFailed", message: expect.stringContaining("refused Seylo's sign-in") });
+    answer = () => {
+      throw new OpError("CONFLICT", "listing the databases took longer than 1m0s");
+    };
+    expect(await list()).toMatchObject({ state: "failed", message: expect.stringContaining("took longer") });
+    panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, dbId)).run();
+    expect(await list()).toMatchObject({ state: "stopped", message: "The database is stopped. Start it to choose databases." });
+
+    // Like the Users tab: database credentials.
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", dbId, ["services.view", "backups.view", "backups.edit"]);
+    expect((await callOp(panel, backupOps.listDatabases, { serviceId: dbId }, { cookie: member.cookie })).status).toBe(403);
+    agent.disconnect();
+  });
+
+  test("a .bundle of several databases is one run's object, signed, kept and pruned like the others", () => {
+    const run = { id: "r1", serviceId: "s1" };
+    expect(ownObjectKey(run, "seylo/s1/p1/20260101T030000Z-r1.bundle")).toBe(true);
+    expect(ownObjectKey(run, "seylo/s1/p1/20260101T030000Z-r2.bundle")).toBe(false);
+    const folder = "seylo/s1/p1/";
+    const keys = [
+      `${folder}20260101T030000Z-a.bundle`,
+      `${folder}20260102T030000Z-b.dump`,
+      `${folder}20260103T030000Z-c.bundle`,
+      `${folder}notes.bundle`,
+    ];
+    expect(expiredObjects(folder, keys, 2)).toEqual([`${folder}20260101T030000Z-a.bundle`]);
   });
 });

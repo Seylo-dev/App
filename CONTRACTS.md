@@ -87,7 +87,7 @@ packages use. "Built" means implemented and tested.
 | `console`, `shell` | Attach to the main process with history replay; PTY shells, database clients (via `dbtools`) and one-shot Exec through docker exec, with a marker-based process sweep; `ConsoleInfo` and the first `ShellResponse.info` carry user and working directory; `console/dockerapi` is the small Docker client the observe area shares (kept apart from `docker.Engine` on purpose, see Not built yet) | Built (verified in the VM) |
 | `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract. No write, chmod or extract leaves setuid/setgid (FsChmod and FsWrite keep the permission and sticky bits only; replacing or appending to a setuid file drops the bits first). New files and folders take their folder's owner, except that a root-owned (or unreadable) folder gives them to nobody (65534:65534), so the file manager never makes a root-owned entry; a replaced file keeps its owner. `VolumeRoots.Open` never creates folders: the agent's resolver makes a missing volume folder with `datadir.MakeServiceVolume` (service folders 0700) | Built (escape fuzzing run as root in the VM) |
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
-| `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO: with URLs the panel presigns for the run when the destination comes without keys (`SignedStore`, `signing_id`; the panel makes the multipart create/complete/abort steps and retention), else with the keys through minio-go and `keep_last` retention (older panels), restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, MongoDB 7.0, 8.0 and 9.0, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
+| `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO: with URLs the panel presigns for the run when the destination comes without keys (`SignedStore`, `signing_id`; the panel makes the multipart create/complete/abort steps and retention), else with the keys through minio-go and `keep_last` retention (older panels), restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. Since 0.2.15 (`backup.select.v1`): `inspect.go` lists a Postgres, MySQL, MariaDB or MongoDB server through the dump's own helper and sign-in (databases with sizes, tables or collections with `pg_total_relation_size`/`reltuples`, `information_schema` with `information_schema_stats_expiry = 0` on MySQL, `$collStats` with a `collStats` fallback; partitions folded into their partitioned table) for `InspectDatabase` and right before every dump (`BackupResult.contents`); `selection.go` matches `DatabaseDump.selections` against that list and builds the dump: `pg_dump --format=custom` with one literal `--table="schema"."name"` per table and its partitions, `--databases -- <names>` or `-- <db> <tables>` (no routines or events, a `CREATE DATABASE IF NOT EXISTS`/`USE` header) for MySQL, `mongodump --db` with `--excludeCollection` for every other name (mongodump has no namespace filter), several Postgres or MongoDB databases as one pg_dump or mongodump each framed into a `.bundle` (`bundle.go`: magic, JSON manifest, length-prefixed data frames, an end frame per member and one for the bundle; a cut bundle is refused), restored member by member with the bytes through a pipe the agent owns; names only ever as arguments or env. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, MongoDB 7.0, 8.0 and 9.0, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were; 0.2.15 chosen databases and tables on Postgres 17, MySQL 8.4, MariaDB 11.4 and MongoDB 9.0 in the VM: listing, contents, a restore of two tables that leaves the other tables and databases alone, a serial sequence and a partitioned table with its partition, several databases in one object, a whole-server backup afterwards; a table another one references cannot be restored alone on Postgres and changes nothing) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
 | `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services (never within 24 h of a volume import into the folder: `ImportVolume` keeps `services/<id>/.incoming`, a move or clone copies before the service is placed; the desired state is read again right before each folder or volume goes, and imports into a folder wait while it is removed), orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun`; an expression it cannot read is one failed `CleanupRun` per changed schedule | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
 | `hostshell` | Root login shells on the node itself for HostShell: a PTY from /dev/ptmx (`golang.org/x/sys/unix`), the agent user's login shell from /etc/passwd in a new session with a clean environment, `Manager` with the `Allowed` gate, at most 2, 15 minutes idle, `CloseAll` when the setting turns off, hang-up of the process group on close; Linux only | Built (PTY, cap, idle and close-all verified as root in the VM) |
@@ -344,7 +344,10 @@ builds queued or running at the update) and `0020_build_progress_logged`
 (`builds.progress_logged`, default '[]'); for 0.2.16
 `0021_project_dashboard_collapsed` (`project_prefs.dashboard_collapsed`,
 default false, set to `collapsed` on existing rows, so nobody's home page
-changes on the update)), which the panel applies at start, also
+changes on the update), `0022_deployment_port_move`
+(`deployments.port_move`, nullable JSON text) and `0023_backup_contents`
+(`backup_policies.selection`, `backup_runs.selection`, `contents` and
+`warnings`, all nullable JSON text, no backfill)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -2986,6 +2989,7 @@ or the method descriptor's options (TS). Current names:
 | `metrics.read.v1` | GetMetrics, WatchMetrics |
 | `tunnel.tcp.v1` | Tunnel |
 | `backup.run.v1` | RunBackup, RestoreBackup |
+| `backup.select.v1` | InspectDatabase (0.2.15); also says the agent takes `DatabaseDump.selections`, writes `.bundle` objects and reports `BackupResult.contents` |
 | `node.prune.v1`, `node.update.v1`, `node.healthcheck.v1`, `node.troubleshoot.v1`, `node.reboot.v1`, `node.docker-update.v1` | Prune, UpdateAgent, RunHealthCheck, Troubleshoot, Reboot, UpdateDocker |
 | `node.host-shell.v1` | HostShell |
 | `node.agent-logs.v1` | AgentLogs |
@@ -4672,7 +4676,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   service is stopped) they move at once. With one, its containers listen
   on the old port: the move (also one with nothing to move, for the port)
   is stored on the new deployment (`deployments.port_move`, migration
-  0021: `fromPort`, `toPort`, `domainIds`, `exposureIds`, `tunnel`,
+  0022: `fromPort`, `toPort`, `domainIds`, `exposureIds`, `tunnel`,
   `applied`) and `rollout()` applies it in the transaction that makes the
   deployment the target, so the routes and listeners reach the agent with
   the new generation and switch with its containers; if that deployment
@@ -5213,6 +5217,51 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   MinIO behind an https panel may be refused as an insecure download).
   The row menu shows Download only for a backup that is there to restore
   (`runMenu`: Restore, Download, Remove).
+- What a database backup holds (0.2.15, PostgreSQL, MySQL, MariaDB and
+  MongoDB; Redis-likes, Dragonfly and ClickHouse always back up
+  everything): `backup_policies.selection` (JSON, null = everything on the
+  server, for PostgreSQL the roles too) names chosen databases, or with
+  exactly one database some of its tables (PostgreSQL `schema` + `name`,
+  "public" when left out) or collections. `createPolicy`/`updatePolicy`
+  check it (1-50 databases, at most 200 tables, names 1-128 characters
+  without control characters, no system database, no name twice, tables
+  only with one database) and refuse it with CONFLICT `agentTooOld` when
+  the node's agent lacks `backup.select.v1`; the names are not checked
+  against the server (it may be stopped). A run copies the policy's
+  selection (`backup_runs.selection`; one-off "Back up now" is always
+  everything) and sends it as `DatabaseDump.selections`, plus `database`
+  when it names exactly one; on an agent without the capability the run
+  fails with "Update <node> to back up chosen databases". The agent lists
+  the server right before the dump (`backup/inspect.go`, the same helper
+  and sign-in as the dump) and matches the names: a gone database or
+  table is skipped with a line in `BackupResult.warnings`, nothing left
+  fails the run ("none of the chosen ... exist any more"), and a database
+  whose chosen tables are all gone is never dumped whole. Every database
+  backup of a 0.2.15 agent reports `BackupResult.contents` (per database
+  name, size and approximate rows as the engine reports them, table
+  count, the biggest 500 tables per database and 2000 per result); for a
+  backup of everything a failed measurement is a warning, never a failed
+  backup. The panel stores them (`backup_runs.contents`, `warnings`;
+  restores copy their source's) and derives `scope` (everything,
+  databases, tables; null for volumes); `listRuns` carries the
+  per-database summary, `backups.runContents` the tables. Several
+  PostgreSQL or MongoDB databases go into one `.bundle` object (one
+  pg_dump or mongodump per database, `backup/bundle.go`), so one run is
+  still one object for retention, signing and deletion. A restore of a
+  backup with a selection sends what it holds (`heldSelection`: the
+  recorded contents, else the selection) and replaces only that: PostgreSQL
+  `pg_restore --clean --if-exists --single-transaction` per database
+  (created when missing), MySQL the dump as is (a dump of some tables
+  starts with its own `CREATE DATABASE IF NOT EXISTS` and `USE`), MongoDB
+  `mongorestore --drop --nsInclude` of those namespaces; "Back up the
+  current data first" backs up the same selection. Such a restore (or any
+  `.bundle`) on an agent without `backup.select.v1` fails before the call.
+  Backups of everything and every backup made before 0.2.15 (null
+  contents, shown as "Everything on this server") restore exactly as
+  before. `backups.listDatabases` (permission `databases.credentials`,
+  like the Users tab) lists live through `InspectDatabase` and answers a
+  `state` (ok, stopped, offline, agentTooOld, signInFailed, failed)
+  instead of throwing, so the schedule dialog can show it.
 - Database engines (`modules/databases/engines.ts`, listed by the
   `databases.engines` op): Postgres 18 (default, data at
   `/var/lib/postgresql`), 17, 16, 15 and the `pgvector` variant of each

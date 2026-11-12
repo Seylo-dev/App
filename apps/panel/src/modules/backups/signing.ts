@@ -41,7 +41,7 @@ export const signedUrlSeconds = 3600;
 export const maxSignedRequests = 32;
 /** Backup id of one-off runs (runs.ts manualBackupId). */
 const manualBackupId = "manual";
-const objectExtensions = [".clickhouse.zip", ".tar.gz", ".sql.gz", ".archive.gz", ".rdb.gz", ".dump"];
+const objectExtensions = [".clickhouse.zip", ".tar.gz", ".sql.gz", ".archive.gz", ".rdb.gz", ".dump", ".bundle"];
 const keyTime = /^\d{8}T\d{6}Z$/;
 const maxUploadId = 2048;
 /** S3's limit on the parts of one multipart upload. */

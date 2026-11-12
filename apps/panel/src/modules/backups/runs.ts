@@ -4,12 +4,13 @@
 // restores, which run as a job because they can take a long time.
 
 import { backups as backupOps, OpError } from "@seylo/ops";
-import type { BackupResult } from "@seylo/proto";
+import type { BackupResult, BackupContents as ContentsMessage } from "@seylo/proto";
 import type { Static } from "@sinclair/typebox";
 import { Cron } from "croner";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { backupDestinations, backupPolicies, backupRuns, services, volumes } from "../../db/schema";
+import type { BackupContents, BackupSelection } from "../../db/schema/backups";
 import type { Deps } from "../../deps";
 import { findDatabase } from "../databases/info";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
@@ -25,6 +26,71 @@ export type Run = Static<typeof backupOps.Run>;
 export const restoreTimeoutMs = 6 * 60 * 60 * 1000;
 /** Backup id of one-off runs; scheduled runs use their policy id. */
 export const manualBackupId = "manual";
+
+/** Agents that back up chosen databases and tables, write .bundle objects and report contents (0.2.15). */
+export const selectCapability = "backup.select.v1";
+
+/** The engines whose backups can hold chosen databases and tables. */
+export const selectableEngines: ReadonlySet<string> = new Set(["postgres", "mysql", "mariadb", "mongo"]);
+
+/** What a database run covers: everything, chosen databases, or some tables of one; null for volumes. */
+export function scopeOf(row: Pick<RunRow, "target" | "selection">): Run["scope"] {
+  if (row.target !== "database") return null;
+  const databases = row.selection?.databases ?? [];
+  if (databases.length === 0) return "everything";
+  return databases.length === 1 && (databases[0]?.tables?.length ?? 0) > 0 ? "tables" : "databases";
+}
+
+/** A run's contents without the tables, for the run list. */
+function contentsSummary(contents: BackupContents | null): Run["contents"] {
+  if (!contents) return null;
+  return {
+    wholeServer: contents.wholeServer,
+    databases: contents.databases.map(({ tables: _tables, ...d }) => d),
+  };
+}
+
+/** BackupResult.contents as the panel stores it. */
+export function contentsOf(message: ContentsMessage | undefined): BackupContents | null {
+  if (!message) return null;
+  return {
+    wholeServer: message.wholeServer,
+    databases: message.databases.map((d) => ({
+      name: d.name,
+      sizeBytes: Number(d.sizeBytes),
+      approxRows: Math.max(-1, Number(d.approxRows)),
+      tableCount: d.tableCount,
+      tablesTruncated: d.tablesTruncated,
+      tables: d.tables.map((t) => ({
+        schema: t.schema,
+        name: t.name,
+        sizeBytes: Number(t.sizeBytes),
+        approxRows: Math.max(-1, Number(t.approxRows)),
+      })),
+    })),
+  };
+}
+
+/**
+ * The selection that names what a backup holds, for restoring it or
+ * backing up the same first: its recorded contents (what was really
+ * dumped), else what was asked for. Null for a backup of everything.
+ */
+export function heldSelection(row: Pick<RunRow, "target" | "selection" | "contents">): BackupSelection | null {
+  const scope = scopeOf(row);
+  if (scope === null || scope === "everything") return null;
+  const asked = row.selection as BackupSelection;
+  const held = row.contents && !row.contents.wholeServer && row.contents.databases.length > 0 ? row.contents.databases : null;
+  if (scope === "databases") return { databases: (held ?? asked.databases).map((d) => ({ name: d.name })) };
+  const only = held?.[0];
+  // Tables past the cap are not recorded: then the asked list (the agent skipped the gone ones while dumping).
+  if (only && !only.tablesTruncated && only.tables.length > 0) {
+    return {
+      databases: [{ name: only.name, tables: only.tables.map((t) => (t.schema ? { schema: t.schema, name: t.name } : { name: t.name })) }],
+    };
+  }
+  return { databases: asked.databases.slice(0, 1) };
+}
 
 /**
  * Runs as the ops return them, with what each one is about: the volume's
@@ -72,6 +138,10 @@ export function toRuns(db: PanelDb, rows: readonly RunRow[]): Run[] {
     deletedAt: row.deletedAt?.toISOString() ?? null,
     startedAt: row.startedAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    selection: row.selection ?? null,
+    scope: scopeOf(row),
+    contents: contentsSummary(row.contents ?? null),
+    warnings: row.warnings ?? [],
   }));
 }
 
@@ -93,7 +163,7 @@ export function nextRun(schedule: string, from = new Date()): Date {
 }
 
 /** The extensions go/internal/backup/keys.go gives the objects it writes. */
-const objectExtensions = [".clickhouse.zip", ".tar.gz", ".sql.gz", ".archive.gz", ".rdb.gz", ".dump"];
+const objectExtensions = [".clickhouse.zip", ".tar.gz", ".sql.gz", ".archive.gz", ".rdb.gz", ".dump", ".bundle"];
 const keySegment = /^[A-Za-z0-9_-]{1,64}$/;
 const keyTime = /^\d{8}T\d{6}Z$/;
 
@@ -134,6 +204,8 @@ export interface BackupWhat {
   policy: PolicyRow | null;
   stopService: boolean;
   keepLast: number;
+  /** Database backups: what to back up; left out, the policy's (none: everything). */
+  selection?: BackupSelection | null;
 }
 
 /** A schedule's backup, as the scheduler, Back up now on its menu and backups.runAll start it. */
@@ -197,15 +269,57 @@ function assertSignedBackups(agents: Pick<Deps["agents"], "capabilities">, nodeI
   }
 }
 
+/** A backup or restore of chosen databases needs an agent that has selections (0.2.15). */
+export function assertSelectable(
+  agents: Pick<Deps["agents"], "capabilities">,
+  nodeId: string,
+  nodeName: string,
+  what: "back up" | "restore",
+) {
+  const capabilities = agents.capabilities(nodeId);
+  if (capabilities && !capabilities.has(selectCapability)) {
+    throw new OpError(
+      "CONFLICT",
+      what === "back up"
+        ? `Update ${nodeName} to back up chosen databases: its agent backs up only everything on the server.`
+        : `Update ${nodeName} to restore this backup: it holds chosen databases, which its agent cannot restore.`,
+      { reason: "agentTooOld" },
+    );
+  }
+}
+
 function destinationRow(db: PanelDb, destinationId: string) {
   const row = db.select().from(backupDestinations).where(eq(backupDestinations.id, destinationId)).get();
   if (!row) throw new OpError("NOT_FOUND", "That backup destination does not exist.", { field: "destinationId" });
   return row;
 }
 
-/** A BackupSubject for the agent. */
-function subjectOf(db: PanelDb, what: { serviceId: string; target: "database" | "volume"; volumeId: string | null }) {
-  if (what.target === "database") return { serviceId: what.serviceId, what: { case: "database" as const, value: { database: "" } } };
+/**
+ * A BackupSubject for the agent. A selection goes as selections, and as
+ * database too when it names exactly one, so an agent that does not know
+ * selections would still touch only that database (the panel never sends
+ * one to such an agent: assertSelectable).
+ */
+function subjectOf(
+  db: PanelDb,
+  what: { serviceId: string; target: "database" | "volume"; volumeId: string | null; selection?: BackupSelection | null },
+) {
+  if (what.target === "database") {
+    const databases = what.selection?.databases ?? [];
+    return {
+      serviceId: what.serviceId,
+      what: {
+        case: "database" as const,
+        value: {
+          database: databases.length === 1 ? (databases[0]?.name ?? "") : "",
+          selections: databases.map((d) => ({
+            database: d.name,
+            tables: (d.tables ?? []).map((t) => ({ schema: t.schema ?? "", name: t.name })),
+          })),
+        },
+      },
+    };
+  }
   const volume = checkTarget(db, what.serviceId, "volume", what.volumeId);
   return { serviceId: what.serviceId, what: { case: "volume" as const, value: volume?.name ?? "" } };
 }
@@ -221,12 +335,14 @@ export async function startBackup(deps: Pick<Deps, "db" | "secrets" | "agents" |
   const destination = destinationRow(deps.db, what.destinationId);
   const node = serviceNodes(deps.db, service.id)[0];
   if (!node) throw new OpError("CONFLICT", "The service is not placed on a node.", { reason: "noNode" });
+  const selection = what.target === "database" ? (what.selection !== undefined ? what.selection : (what.policy?.selection ?? null)) : null;
   const run = deps.db
     .insert(backupRuns)
     .values({
       kind: "backup",
       target: what.target,
       volumeId: what.volumeId,
+      selection,
       policyId: what.policy?.id ?? null,
       serviceId: service.id,
       destinationId: destination.id,
@@ -239,10 +355,11 @@ export async function startBackup(deps: Pick<Deps, "db" | "secrets" | "agents" |
   invalidateService(deps, service.id, [backupOps.listRuns.id, backupOps.listPolicies.id]);
   try {
     assertSignedBackups(deps.agents, node.id, node.name);
+    if (selection) assertSelectable(deps.agents, node.id, node.name, "back up");
     await deps.agents.call(node.id, "runBackup", {
       backupId: what.policy?.id ?? manualBackupId,
       runId: run.id,
-      subject: subjectOf(deps.db, what),
+      subject: subjectOf(deps.db, { ...what, selection }),
       destination: signedDestination(destination, run.id),
       stopService: what.target === "volume" && what.stopService,
       // The node cannot list or delete in the bucket: the panel prunes (pruneBackups).
@@ -281,12 +398,22 @@ export function recordBackupResult(deps: Pick<Deps, "db" | "live" | "jobs">, nod
   // A node could name another service's object here, which the owner would
   // later restore or delete with the panel's keys.
   const succeeded = result.success && ownObjectKey(run, result.objectKey);
+  // Warnings say what a failed run skipped too ("the database is gone").
+  const warnings = result.warnings.length > 0 ? result.warnings.slice(0, 200).map((w) => w.slice(0, 500)) : null;
   deps.db
     .update(backupRuns)
     .set(
       succeeded
-        ? { status: "succeeded", objectKey: result.objectKey, sizeBytes: Number(result.sizeBytes), error: null, finishedAt }
-        : { status: "failed", error: result.success ? foreignKeyError : result.error || "The backup failed.", finishedAt },
+        ? {
+            status: "succeeded",
+            objectKey: result.objectKey,
+            sizeBytes: Number(result.sizeBytes),
+            error: null,
+            finishedAt,
+            contents: run.target === "database" ? contentsOf(result.contents) : null,
+            warnings,
+          }
+        : { status: "failed", error: result.success ? foreignKeyError : result.error || "The backup failed.", finishedAt, warnings },
     )
     .where(eq(backupRuns.id, run.id))
     .run();
@@ -425,9 +552,19 @@ export async function runRestore(
   if (!destination) return fail("The backup's destination was deleted.");
   const node = serviceNodes(deps.db, restore.serviceId)[0];
   if (!node) return fail("The service is not placed on a node.");
+  // What the backup holds is what the restore replaces.
+  const held = heldSelection(source);
+  if (held || source.objectKey.endsWith(".bundle")) {
+    try {
+      assertSelectable(deps.agents, node.id, node.name, "restore");
+    } catch (error) {
+      return fail((error as Error).message);
+    }
+  }
 
   if (payload.backupFirst) {
     try {
+      // The same selection: a copy of what is about to be replaced.
       const safety = await startBackup(deps, {
         serviceId: restore.serviceId,
         target: source.target,
@@ -436,6 +573,7 @@ export async function runRestore(
         policy: null,
         stopService: false,
         keepLast: 0,
+        selection: held,
       });
       const done = await waitForRun(deps.db, safety.id, restoreTimeoutMs);
       if (done?.status !== "succeeded") return fail("The backup before the restore did not succeed, so nothing was restored.");
@@ -450,7 +588,7 @@ export async function runRestore(
       node.id,
       "restoreBackup",
       {
-        subject: subjectOf(deps.db, { serviceId: restore.serviceId, target: source.target, volumeId: source.volumeId }),
+        subject: subjectOf(deps.db, { serviceId: restore.serviceId, target: source.target, volumeId: source.volumeId, selection: held }),
         destination: signedDestination(destination, restore.id),
         objectKey: source.objectKey,
       },
