@@ -106,7 +106,7 @@ func (w *worker) syncRoutes(ctx context.Context, spec *agentv1.ServiceSpec, live
 	if routed && len(ups) > 0 {
 		w.r.attachProxy(ctx, spec.GetProjectId())
 	}
-	key := keyOf(spec.GetRouting(), spec.GetLoadBalancer(), spec.GetStopped(), w.rec.Sleeping, fmt.Sprint(ups))
+	key := keyOf(spec.GetRouting(), spec.GetLoadBalancer(), spec.GetStopped(), w.rec.Sleeping, fmt.Sprint(ups), databaseRouteInputs(spec))
 	if !force && key == w.lastSync.route {
 		return nil
 	}
@@ -121,6 +121,25 @@ func (w *worker) syncRoutes(ctx context.Context, spec *agentv1.ServiceSpec, live
 	}
 	w.lastSync.route = key
 	return nil
+}
+
+// databaseRouteInputs is the part of a database's spec its route file is
+// built from (proxy.HasRouteFile): the certificate router of an exposed
+// TLS host name and the web UI's tool host. Changing them keeps the
+// container and the generation (SpecHash leaves the database spec out), so
+// without them in the route key a running database never gets the router
+// and Traefik is never asked for its Let's Encrypt certificate. Allowed
+// sources and the host port are the portgate's and stay out.
+func databaseRouteInputs(spec *agentv1.ServiceSpec) string {
+	db := spec.GetDatabase()
+	if db == nil {
+		return ""
+	}
+	host := ""
+	if exp := db.GetExposure(); exp.GetEnabled() {
+		host = strings.ToLower(exp.GetTlsHostname())
+	}
+	return fmt.Sprintf("tls=%s ui=%t", host, db.GetTools().GetWebUi())
 }
 
 func (w *worker) syncTunnel(ctx context.Context, spec *agentv1.ServiceSpec, live []liveInstance) {

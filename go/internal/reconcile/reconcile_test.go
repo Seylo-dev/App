@@ -890,6 +890,67 @@ func TestDatabaseWebUIGetsARouteFile(t *testing.T) {
 	}
 }
 
+// A running database that gets a TLS host name (or its web UI) later needs
+// its route file then: the certificate router is how Traefik is asked for
+// the Let's Encrypt certificate. The change keeps the generation and the
+// container (the database spec is not in SpecHash), so nothing forces a
+// route sync; the route key has to notice it.
+func TestDatabaseRouteFileFollowsExposureAndWebUI(t *testing.T) {
+	h := newHarness(t)
+	s := appSpec("db", 1, "postgres:17")
+	s.Routing = nil
+	s.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
+	s.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{}}
+	h.apply(1, s)
+	h.deployResult("db", 1)
+	h.settle()
+	routed := func() (bool, int) {
+		h.router.mu.Lock()
+		defer h.router.mu.Unlock()
+		_, ok := h.router.upstreams["db"]
+		return ok, h.router.applies
+	}
+	if ok, _ := routed(); ok {
+		t.Fatal("route file for a database without a TLS host name or web UI")
+	}
+	container := h.names("db")
+
+	exposed := cloneSpec(s, 1, func(s *agentv1.ServiceSpec) {
+		s.GetDatabase().Exposure = &agentv1.DatabaseExposure{Enabled: true, TlsHostname: "db.example.com"}
+	})
+	h.apply(2, exposed)
+	h.waitFor("a route file for the certificate router", func() bool { ok, _ := routed(); return ok })
+	if got := h.names("db"); !slices.Equal(got, container) {
+		t.Fatalf("containers = %v, want %v untouched", got, container)
+	}
+
+	// A new host name rewrites it.
+	_, before := routed()
+	h.apply(3, cloneSpec(exposed, 1, func(s *agentv1.ServiceSpec) { s.GetDatabase().GetExposure().TlsHostname = "db2.example.com" }))
+	h.waitFor("the route file rewritten for the new host name", func() bool { _, n := routed(); return n > before })
+
+	// The web UI turned on later too.
+	_, before = routed()
+	h.apply(4, cloneSpec(exposed, 1, func(s *agentv1.ServiceSpec) {
+		s.GetDatabase().GetExposure().TlsHostname = "db2.example.com"
+		s.GetDatabase().Tools = &agentv1.DatabaseTools{WebUi: true}
+	}))
+	h.waitFor("the route file rewritten for the web UI", func() bool { _, n := routed(); return n > before })
+
+	// Allowed sources are the portgate's business: no route file rewrite.
+	h.settle()
+	_, before = routed()
+	h.apply(5, cloneSpec(exposed, 1, func(s *agentv1.ServiceSpec) {
+		s.GetDatabase().GetExposure().TlsHostname = "db2.example.com"
+		s.GetDatabase().GetExposure().AllowedSourceCidrs = []string{"203.0.113.0/24"}
+		s.GetDatabase().Tools = &agentv1.DatabaseTools{WebUi: true}
+	}))
+	h.settle()
+	if _, n := routed(); n != before {
+		t.Fatalf("route file rewritten %d times for an allowed-sources change", n-before)
+	}
+}
+
 // TestSameGenerationChangeIsHealthGated: the panel sends a changed spec at
 // the generation that is running (e2e check 7). The new container runs
 // next to the old one under a temporary name and only replaces it once
