@@ -153,7 +153,7 @@ export const LogRetention = Type.Object({
 });
 
 const parallelBuildsAutoText =
-  "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.";
+  "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.";
 
 /** One row of the Nodes table and the dashboard node chips. */
 export const Node = Type.Object({
