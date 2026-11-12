@@ -2164,6 +2164,57 @@
               "enabled": {
                 "type": "boolean"
               },
+              "selection": {
+                "type": "object",
+                "required": [
+                  "databases"
+                ],
+                "properties": {
+                  "databases": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                          "type": "string"
+                        },
+                        "tables": {
+                          "maxItems": 200,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "name"
+                            ],
+                            "properties": {
+                              "schema": {
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                "type": "string"
+                              },
+                              "name": {
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
               "destination": {
                 "type": "object",
                 "required": [

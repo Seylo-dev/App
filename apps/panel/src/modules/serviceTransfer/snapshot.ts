@@ -448,6 +448,8 @@ export function snapshotService(ctx: OpContext, svc: ServiceRow, options: { sour
           keepLast: p.keepLast,
           stopService: p.stopService,
           enabled: p.enabled,
+          // Only when set, so an export of a schedule of everything stays as before.
+          ...(p.target === "database" && p.selection ? { selection: p.selection } : {}),
           destination: { name: d.name, provider: d.provider, bucket: d.bucket },
         },
       ];

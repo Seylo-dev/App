@@ -813,6 +813,50 @@ describe("backups", () => {
     const newVolume = b.panel.deps.db.select().from(volumes).where(eq(volumes.serviceId, done.body.service.id)).get();
     expect([policy?.destinationId, policy?.volumeId, policy?.enabled]).toEqual([onB, newVolume?.id, true]);
   });
+
+  test("a database schedule of chosen databases keeps them; one of everything exports as before", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const dest = (s: Side) =>
+      s.panel.deps.db
+        .insert(backupDestinations)
+        .values({
+          name: "s3-main",
+          provider: "s3",
+          endpoint: "https://s3.example.com",
+          bucket: "bk",
+          accessKeyId: "AK",
+          secretAccessKeySealed: s.panel.deps.secrets.seal("SK", "backup.destination"),
+        })
+        .returning()
+        .get().id;
+    await callOp(a.panel, dbOps.create, { projectId: a.projectId, name: "pg", engine: "postgres", nodeId: a.nodeId }, { cookie: a.cookie });
+    const svcId = a.panel.deps.db.select().from(services).where(eq(services.name, "pg")).get()?.id as string;
+    const onA = dest(a);
+    const selection = { databases: [{ name: "shop", tables: [{ schema: "public", name: "orders" }] }] };
+    a.panel.deps.db
+      .insert(backupPolicies)
+      .values([
+        { serviceId: svcId, destinationId: onA, target: "database", schedule: "0 4 * * *", selection },
+        { serviceId: svcId, destinationId: onA, target: "database", schedule: "0 5 * * *" },
+      ])
+      .run();
+    dest(b);
+    const begun = await begin(b, (await exportZip(a, svcId)).bytes);
+    const ref = { projectId: b.projectId, importId: begun.body.importId };
+    await callOp(b.panel, transferOps.setChoices, { ...ref, choices: { backups: "mapByName" } }, { cookie: b.cookie });
+    const done = await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie });
+    const policies = b.panel.deps.db
+      .select()
+      .from(backupPolicies)
+      .where(eq(backupPolicies.serviceId, done.body.service.id))
+      .all()
+      .sort((x, y) => x.schedule.localeCompare(y.schedule));
+    expect(policies.map((p) => [p.schedule, p.selection])).toEqual([
+      ["0 4 * * *", selection],
+      ["0 5 * * *", null],
+    ]);
+  });
 });
 
 describe("watch paths", () => {

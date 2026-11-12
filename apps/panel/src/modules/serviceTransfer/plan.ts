@@ -832,6 +832,8 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
           schedule: policy.schedule,
           keepLast: policy.keepLast,
           stopService: policy.target === "volume" && policy.stopService,
+          // A node without chosen databases fails such a run saying so; the schedule stays as exported.
+          selection: policy.target === "database" ? (policy.selection ?? null) : null,
           enabled,
           nextRunAt,
         });

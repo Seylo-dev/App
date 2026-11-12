@@ -4418,6 +4418,9 @@ members never hold them. Every op is `mcp: false`.
   uptime checks and backups arrive switched off; channels and backup
   destinations (by name, kind and bucket) are used on the same panel and
   skipped from another one; database listeners open to anyone are skipped.
+  A database schedule of chosen databases carries `selection` (0.2.15,
+  only when set, so exports of schedules of everything are unchanged;
+  panels before 0.2.15 ignore it and back up everything).
   Sections the caller may not write here (`env.edit`, `files.write`,
   `domains.edit`, `services.cron`, `services.alerts`, `services.edit`,
   `backups.edit`, `databases.expose`, `tunnels.edit`, `services.update`)

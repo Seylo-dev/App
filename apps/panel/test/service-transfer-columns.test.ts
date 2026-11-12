@@ -170,6 +170,7 @@ const columns: Record<string, Record<string, Decision>> = {
     schedule: "exported",
     keep_last: "exported",
     stop_service: "exported",
+    selection: "exported",
     enabled: "exported",
     next_run_at: runtime,
     created_at: time,
