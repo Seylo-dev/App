@@ -1,5 +1,5 @@
 // The Exposed card's note while the port serves a self-signed certificate
-// (databases.get exposure.selfSignedReason, 0.2.12): what it means, why
+// (databases.get exposure.selfSignedReason, 0.2.13): what it means, why
 // (no TLS host name, no Let's Encrypt certificate for it yet with the
 // node's last ACME error, or MariaDB's own), how to get a trusted one, the
 // client settings that connect meanwhile for the engine, and the

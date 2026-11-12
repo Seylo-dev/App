@@ -83,7 +83,7 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
     certificate,
     // An agent from before 0.2.8 ignores it and asks Let's Encrypt at once, as before the hold.
     acmeHold: held,
-    // Let's Encrypt's challenge on 443 too, unless DNS goes straight to the node (acme-hold.ts); ignored before 0.2.12.
+    // Let's Encrypt's challenge on 443 too, unless DNS goes straight to the node (acme-hold.ts); ignored before 0.2.13.
     acmeChallengeOnHttps: https === HttpsMode.ACME && acmeChallengeOnHttps(row),
     redirectToHttps: !held && row.https !== "off" && row.redirectToHttps,
     redirects,

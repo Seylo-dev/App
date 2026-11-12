@@ -111,7 +111,7 @@ export default {
     pinnedCommand: "Join command over the panel's IP",
     setPanelTitle: "Already joined? Point it here",
     setPanelHint:
-      "For a node that joined over the domain and went offline when its network began decrypting HTTPS: run this on it instead. It checks that the address is this panel, then keeps the node and its services and only changes the address it connects to. No token needed. Needs agent 0.2.12 or newer.",
+      "For a node that joined over the domain and went offline when its network began decrypting HTTPS: run this on it instead. It checks that the address is this panel, then keeps the node and its services and only changes the address it connects to. No token needed. Needs agent 0.2.13 or newer.",
     setPanelCommand: "Command that points a joined node at the panel's IP",
     otherOpen: { one: "{count} other unused join command is still valid.", other: "{count} other unused join commands are still valid." },
     step2: "2. Optional: automatic domains for this node",

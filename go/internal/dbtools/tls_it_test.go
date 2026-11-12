@@ -178,7 +178,7 @@ func withHostname(spec *agentv1.ServiceSpec, host string) *agentv1.ServiceSpec {
 		Exposure: &agentv1.DatabaseExposure{Enabled: true, TlsHostname: host}}}}
 }
 
-// oldFallback makes a certificate the way agents before 0.2.12 made their
+// oldFallback makes a certificate the way agents before 0.2.13 made their
 // fallback: digitalSignature only.
 func oldFallback(t *testing.T) (certPEM, keyPEM []byte) {
 	t.Helper()

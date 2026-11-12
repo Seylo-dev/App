@@ -734,7 +734,7 @@ export function versionChoicesOf(serviceId: string) {
   };
 }
 
-/** The self-signed certificate the demo's exposed databases serve (no TLS host name: CN database, CA:FALSE, name-constrained), as a node from 0.2.12 reports it. */
+/** The self-signed certificate the demo's exposed databases serve (no TLS host name: CN database, CA:FALSE, name-constrained), as a node from 0.2.13 reports it. */
 export const demoCertificatePem = `-----BEGIN CERTIFICATE-----
 MIIBoDCCAUagAwIBAgIIGOcpdwb69MgwCgYIKoZIzj0EAwIwEzERMA8GA1UEAxMI
 ZGF0YWJhc2UwHhcNMjYxMTEyMDA1NjA3WhcNMzYxMTEyMDE1NjA3WjATMREwDwYD

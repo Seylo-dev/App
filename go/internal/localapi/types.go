@@ -23,7 +23,7 @@ type NodeStatus struct {
 	// RouteErrors are the services whose route file the agent cannot write
 	// now (ServiceStatus.route_write_error), oldest first: At is the first
 	// failure, Source "routes of <service>". Their domains have no route on
-	// this node until it is written (added in 0.2.12).
+	// this node until it is written (added in 0.2.13).
 	RouteErrors []ErrorEntry `json:"routeErrors,omitempty"`
 	// Busy names the node operation in progress ("agent update", "panel
 	// update", "Docker update", "reboot"), or "" (added in 0.2.1: an older

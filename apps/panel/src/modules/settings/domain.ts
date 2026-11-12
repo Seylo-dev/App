@@ -16,7 +16,7 @@
 // http, and SSL/TLS Full (strict) does not touch a plain-http request;
 // what stops Let's Encrypt is Cloudflare's security answering in the
 // node's place, or a Redirect Rule or Page Rule for every path, which sends
-// it to port 443 (nodes on 0.2.12 answer the challenge there too) where
+// it to port 443 (nodes on 0.2.13 answer the challenge there too) where
 // Full (strict) refuses the node's temporary certificate. So the message
 // says what to set in Cloudflare.
 //
@@ -270,7 +270,7 @@ export async function checkDomain(
  * Encrypt issued the real one, so it waits for the certificate there; Full
  * passes at once. Let's Encrypt itself is stopped by Cloudflare's security
  * answering in the node's place, or by a Redirect Rule or Page Rule that
- * sends every path to https: that reaches the node on 443 (nodes on 0.2.12
+ * sends every path to https: that reaches the node on 443 (nodes on 0.2.13
  * answer the challenge there too), where Full (strict) refuses it the
  * same way. Flexible loops on the panel's own redirect to HTTPS.
  */

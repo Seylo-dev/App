@@ -1,7 +1,7 @@
 // The certificate of a database's exposed port as databases.get shows it:
 // its state, why it is self-signed (which clients that check certificates
 // refuse) and that certificate's PEM, from what the node reports about the
-// port (OpenPort.certificate_*, 0.2.12). The agent serves its self-signed
+// port (OpenPort.certificate_*, 0.2.13). The agent serves its self-signed
 // fallback while the exposure has no TLS host name or the edge has no
 // Let's Encrypt certificate for it; MariaDB always serves its own.
 
@@ -16,7 +16,7 @@ export interface ServedCertificate {
   /** Shown name of the issuer (issuerName), null until the node reports one. */
   issuer: string | null;
   expiresAt: Date | null;
-  /** The agent's self-signed fallback (nodes from 0.2.12; false before). */
+  /** The agent's self-signed fallback (nodes from 0.2.13; false before). */
   selfSigned: boolean;
   /** The edge's last ACME error for the TLS host name, "" for none. */
   error: string;

@@ -54,7 +54,7 @@ func strictSelfSigned(c *x509.Certificate) error {
 	return nil
 }
 
-// oldSelfSigned makes a fallback the way agents before 0.2.12 did: a leaf
+// oldSelfSigned makes a fallback the way agents before 0.2.13 did: a leaf
 // with digitalSignature only.
 func oldSelfSigned(t *testing.T, host string) (certPEM, keyPEM []byte) {
 	t.Helper()
@@ -188,7 +188,7 @@ func TestCertForMakesAnOldFallbackAgainOnce(t *testing.T) {
 	x := NewExposedTLS(nil, nil, dir, t.TempDir(), nil)
 	spec := dbSpec("db1", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false)
 	spec.GetDatabase().Exposure = &agentv1.DatabaseExposure{Enabled: true, TlsHostname: "db.example.com"}
-	// What an agent before 0.2.12 installed.
+	// What an agent before 0.2.13 installed.
 	x.applied["db1"] = tlsMaterial{certPEM: oldCert, keyPEM: oldKey, selfSigned: true}.fingerprint()
 
 	m, err := x.material(spec)
@@ -268,7 +268,7 @@ func TestCertForMakesAStaleFallbackAgain(t *testing.T) {
 		cert       func(t *testing.T) ([]byte, []byte)
 		again      bool
 	}{
-		{"CA (0.2.12 drafts)", "", func(t *testing.T) ([]byte, []byte) {
+		{"CA (0.2.13 drafts)", "", func(t *testing.T) ([]byte, []byte) {
 			return fallbackLike(t, func(c *x509.Certificate) {
 				c.IsCA, c.MaxPathLenZero, c.PermittedDNSDomains, c.PermittedDNSDomainsCritical = true, true, nil, false
 			})

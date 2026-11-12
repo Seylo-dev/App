@@ -82,7 +82,7 @@ export function acmeHeld(row: HoldFacts): boolean {
 
 /**
  * Whether the domain's route answers Let's Encrypt's HTTP-01 challenge on
- * HTTPS too (Route.acme_challenge_on_https, 0.2.12): unless its last DNS
+ * HTTPS too (Route.acme_challenge_on_https, 0.2.13): unless its last DNS
  * check saw it point straight at the node. In front of the node, a redirect
  * to https that takes every path (a Cloudflare Redirect Rule or Page Rule;
  * Always Use HTTPS itself leaves the challenge path alone) sends the CA's

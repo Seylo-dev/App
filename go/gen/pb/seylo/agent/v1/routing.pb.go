@@ -177,7 +177,7 @@ type Route struct {
 	AcmeHold bool `protobuf:"varint,13,opt,name=acme_hold,json=acmeHold,proto3" json:"acme_hold,omitempty"`
 	// With HTTPS_MODE_ACME: answer Let's Encrypt's HTTP-01 challenge
 	// (/.well-known/acme-challenge/) on HTTPS too, with Traefik's own
-	// handler, since 0.2.12. Traefik answers it on plain HTTP by itself, which
+	// handler, since 0.2.13. Traefik answers it on plain HTTP by itself, which
 	// is enough when the host's DNS points straight at the node. In front of
 	// the node, a redirect to https that takes every path (a Cloudflare
 	// Redirect Rule or Page Rule; Cloudflare's Always Use HTTPS itself leaves
@@ -189,7 +189,7 @@ type Route struct {
 	// unless the domain's last DNS check saw it point straight at the node
 	// (apps/panel/src/modules/domains/acme-hold.ts acmeChallengeOnHttps), so
 	// an app there keeps the path on 443. false, or an agent from before
-	// 0.2.12, answers the challenge on plain HTTP only, as before.
+	// 0.2.13, answers the challenge on plain HTTP only, as before.
 	AcmeChallengeOnHttps bool `protobuf:"varint,14,opt,name=acme_challenge_on_https,json=acmeChallengeOnHttps,proto3" json:"acme_challenge_on_https,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache

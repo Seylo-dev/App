@@ -17,7 +17,7 @@
 //
 // The fourth comes from the node: routeWriteFailed, its agent could not
 // write the service's route file (ServiceStatus.route_write_error, agents
-// from 0.2.12), so it serves the routes of the file it wrote last, and a
+// from 0.2.13), so it serves the routes of the file it wrote last, and a
 // domain missing from the routes it reports has none there.
 //
 // domains.add, addAuto and update refuse a stack or a cron service, and

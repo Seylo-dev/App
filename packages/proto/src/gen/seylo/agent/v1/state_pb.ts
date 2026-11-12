@@ -209,7 +209,7 @@ export type ServiceStatus = Message<"seylo.agent.v1.ServiceStatus"> & {
    * failed was taken back) or need no file.
    * Meanwhile the node serves the routes of the file it last wrote (none
    * when it never wrote one), so `routes` lists only those, and a domain
-   * added since has no route there. Agents from 0.2.12; older ones only
+   * added since has no route there. Agents from 0.2.13; older ones only
    * log it.
    *
    * @generated from field: seylo.agent.v1.RouteWriteError route_write_error = 12;
@@ -426,7 +426,7 @@ export type OpenPort = Message<"seylo.agent.v1.OpenPort"> & {
 
   /**
    * Certificate the port serves when tls is set: same rules as
-   * RouteStatus.certificate_*. Agents from 0.2.12 also fill these for an
+   * RouteStatus.certificate_*. Agents from 0.2.13 also fill these for an
    * exposed Postgres or MySQL: the certificate the agent installs in the
    * database (dbtools.ExposedTLS). MariaDB serves its own, so its port
    * reports none.
@@ -443,7 +443,7 @@ export type OpenPort = Message<"seylo.agent.v1.OpenPort"> & {
   /**
    * The certificate is the agent's self-signed fallback, not an ACME one:
    * the exposure has no tls_hostname, or the edge has no certificate for
-   * it (yet). Agents from 0.2.12.
+   * it (yet). Agents from 0.2.13.
    *
    * @generated from field: bool certificate_self_signed = 7;
    */

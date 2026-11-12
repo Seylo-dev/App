@@ -93,7 +93,7 @@ test("the panel node gets the reserved rows and a spec the agent adopts as is", 
   expect(spec?.routing?.routes).toEqual([]);
 
   // With a panel domain, the domain routes to the panel. It answers Let's Encrypt's challenge on 443 too
-  // (0.2.12): the panel's domain may be behind Cloudflare's proxy with a redirect to https for every path,
+  // (0.2.13): the panel's domain may be behind Cloudflare's proxy with a redirect to https for every path,
   // and the panel answers no challenge itself.
   setSetting(panel.deps.db, "panelDomain", "panel.example.com");
   expect(compile(nodeId)?.routing?.routes).toMatchObject([

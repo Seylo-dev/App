@@ -1,4 +1,4 @@
-// Why an exposed database serves a self-signed certificate (0.2.12):
+// Why an exposed database serves a self-signed certificate (0.2.13):
 // databases.get says the reason (no TLS host name, no Let's Encrypt
 // certificate for it yet with the node's ACME error, or MariaDB's own),
 // and carries the PEM the node reports so a client can trust it. The
@@ -91,7 +91,7 @@ test("a self-signed Mongo port with a host name is not counted valid", async () 
   const { serviceId, nodeId } = await exposedDb("mongo");
   await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, tlsHostname: "mongo.example.com" }, { cookie });
   const agent = fakeAgent(panel, nodeId, {}, [], [enginesCapability, exposureCapability]);
-  // The fallback's issuer is its own name and it lasts ten years: before 0.2.12 that read as valid.
+  // The fallback's issuer is its own name and it lasts ten years: before 0.2.13 that read as valid.
   agent.snapshot({
     epoch: 1n,
     services: [

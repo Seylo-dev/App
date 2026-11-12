@@ -315,7 +315,7 @@ describe("what never waits", () => {
 });
 
 /**
- * Let's Encrypt's challenge on 443 (Route.acme_challenge_on_https, 0.2.12):
+ * Let's Encrypt's challenge on 443 (Route.acme_challenge_on_https, 0.2.13):
  * behind Cloudflare's proxy with a redirect to https for every path (a
  * Redirect Rule or Page Rule) the CA's http:// request is redirected to
  * https and reaches the node on 443, so the route answers it there too, for

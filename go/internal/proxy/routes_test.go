@@ -615,7 +615,7 @@ func TestBuildHeldAcmeRoute(t *testing.T) {
 // would refuse the CA), sits above every other router of the hosts but the
 // origin ones (another path), in every mode, and is shared by the routes
 // of a host. Without the field (DNS straight to the node, or a panel from
-// before 0.2.12) the app keeps the path on 443: Traefik's handler answers
+// before 0.2.13) the app keeps the path on 443: Traefik's handler answers
 // only its own tokens and never falls through, so an app that answers
 // challenges itself over https would lose them. Custom certificates, HTTPS
 // off and the LB file get none; the tool host always has it.

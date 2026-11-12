@@ -560,7 +560,7 @@ type ServiceStatus struct {
 	// failed was taken back) or need no file.
 	// Meanwhile the node serves the routes of the file it last wrote (none
 	// when it never wrote one), so `routes` lists only those, and a domain
-	// added since has no route there. Agents from 0.2.12; older ones only
+	// added since has no route there. Agents from 0.2.13; older ones only
 	// log it.
 	RouteWriteError *RouteWriteError `protobuf:"bytes,12,opt,name=route_write_error,json=routeWriteError,proto3" json:"route_write_error,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -1007,7 +1007,7 @@ type OpenPort struct {
 	// "database.exposure.v2" refuse their clients that do not ask for TLS.
 	Tls bool `protobuf:"varint,4,opt,name=tls,proto3" json:"tls,omitempty"`
 	// Certificate the port serves when tls is set: same rules as
-	// RouteStatus.certificate_*. Agents from 0.2.12 also fill these for an
+	// RouteStatus.certificate_*. Agents from 0.2.13 also fill these for an
 	// exposed Postgres or MySQL: the certificate the agent installs in the
 	// database (dbtools.ExposedTLS). MariaDB serves its own, so its port
 	// reports none.
@@ -1015,7 +1015,7 @@ type OpenPort struct {
 	CertificateExpiresAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=certificate_expires_at,json=certificateExpiresAt,proto3" json:"certificate_expires_at,omitempty"`
 	// The certificate is the agent's self-signed fallback, not an ACME one:
 	// the exposure has no tls_hostname, or the edge has no certificate for
-	// it (yet). Agents from 0.2.12.
+	// it (yet). Agents from 0.2.13.
 	CertificateSelfSigned bool `protobuf:"varint,7,opt,name=certificate_self_signed,json=certificateSelfSigned,proto3" json:"certificate_self_signed,omitempty"`
 	// With certificate_self_signed and a tls_hostname: the edge's last ACME
 	// error for that host, as Traefik logged it (the CA's message, for

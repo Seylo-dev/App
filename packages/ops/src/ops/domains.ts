@@ -96,7 +96,7 @@ export const OriginReason = Type.Union([
  * its own; the domain belongs on the stack member that serves it.
  * cronService: a cron service runs on its schedule and serves no requests.
  * routeWriteFailed: a node of the service could not write the service's
- * route file (nodes on 0.2.12 report it): it still serves the routes of
+ * route file (nodes on 0.2.13 report it): it still serves the routes of
  * the file it wrote last, which do not have this domain.
  */
 export const NoRouteReason = Type.Union([

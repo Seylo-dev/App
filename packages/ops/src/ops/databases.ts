@@ -88,7 +88,7 @@ export const DatabaseExposure = Type.Object({
    * "selfSigned" without tlsHostname (and for MariaDB, which serves its
    * own); with one "pending" until the node reports its Let's Encrypt
    * certificate, then "valid", or "failed" while the node serves the
-   * self-signed one and reports an ACME error for it (0.2.12).
+   * self-signed one and reports an ACME error for it (0.2.13).
    */
   certificate: Type.Union([
     Type.Literal("none"),
@@ -101,10 +101,10 @@ export const DatabaseExposure = Type.Object({
   certificateIssuer: Type.Union([Type.String(), Type.Null()]),
   certificateExpiresAt: Type.Union([Timestamp, Type.Null()]),
   /**
-   * Why the exposed port serves a self-signed certificate (0.2.12), which
+   * Why the exposed port serves a self-signed certificate (0.2.13), which
    * clients that check certificates refuse: "noHostname" (no tlsHostname),
    * "acmeMissing" (the node has no Let's Encrypt certificate for
-   * tlsHostname yet, as nodes from 0.2.12 report; certificateError says why
+   * tlsHostname yet, as nodes from 0.2.13 report; certificateError says why
    * when the node knows), "engine" (MariaDB serves the one it makes itself,
    * whatever tlsHostname says). Null while the port serves an ACME
    * certificate, while exposure is off, or when the node does not say.
@@ -117,7 +117,7 @@ export const DatabaseExposure = Type.Object({
    */
   certificateError: Type.Union([Type.String(), Type.Null()]),
   /**
-   * The self-signed certificate the port serves, PEM, as nodes from 0.2.12
+   * The self-signed certificate the port serves, PEM, as nodes from 0.2.13
    * report it (it is public: every client sees it), so a client can trust
    * that file; null otherwise.
    */
@@ -469,7 +469,7 @@ export const resetPassword = defineOp({
      */
     warning: Type.Union([Type.String(), Type.Null()]),
     /**
-     * The deploy that restarts the database with the new password (0.2.12):
+     * The deploy that restarts the database with the new password (0.2.13):
      * ClickHouse and Dragonfly read it at start, and Redis, Valkey and KeyDB
      * would start with the old one again. Null for the other engines.
      */

@@ -44,7 +44,7 @@ export const maxAgentVersionLength = 64;
  * deploy (32 replicas, old and new).
  */
 /**
- * An open port's self-signed certificate (0.2.12): PEM, about 700
+ * An open port's self-signed certificate (0.2.13): PEM, about 700
  * characters for the agent's P-256 one and under 2000 with a 253-character
  * host name. A PEM cut short would be useless: the panel drops one that
  * does not end whole (databases `servedPem`).

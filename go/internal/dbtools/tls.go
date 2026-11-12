@@ -99,7 +99,7 @@ func writeFile(path string, data []byte, mode os.FileMode) error {
 }
 
 // staleFallback reports a kept self-signed certificate to make again:
-//   - one from agents before 0.2.12, a leaf without keyCertSign. BoringSSL
+//   - one from agents before 0.2.13, a leaf without keyCertSign. BoringSSL
 //     (Bun) and OpenSSL 1.1 do not take it as self-signed, so their clients
 //     (node-postgres on Bun) refused it with "unable to verify the first
 //     certificate" instead of "self-signed certificate", and LibreSSL did
