@@ -354,6 +354,36 @@ func TestCacheMountsStayInTheirProject(t *testing.T) {
 	}
 }
 
+// A base image whose registry name does not resolve fails in the build
+// worker with BuildKit's own lookup error, and the log's last line points
+// at the node's Container DNS check (build.DNSHint): the hint's patterns
+// match what a real BuildKit prints.
+func TestFailedLookupPointsAtContainerDNS(t *testing.T) {
+	e := setup(t)
+	job, err := e.svc.Start(&agentv1.BuildRequest{
+		BuildId: "dns1", ServiceId: e.prefix + "-dns", ImageReference: e.repo("dns") + ":1",
+		Source: &agentv1.BuildSource{Source: &agentv1.BuildSource_InlineDockerfile{InlineDockerfile: "FROM " + e.prefix + ".invalid/none:1\n"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := job.Watch(ctx, func(r *agentv1.BuildResponse) error { log.Write(r.GetLog()); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("log ends:\n%s", tail(log.String(), 8))
+	if final := job.Final(); final.GetStage() != agentv1.BuildStage_BUILD_STAGE_FAILED {
+		t.Fatalf("final %v", final)
+	}
+	if !strings.Contains(log.String(), "lookup "+e.prefix+".invalid") ||
+		!strings.HasSuffix(log.String(), "the lines above say why\n--> "+build.DNSHint+"\n") {
+		t.Fatalf("log:\n%s", tail(log.String(), 30))
+	}
+	<-e.reports
+}
+
 func TestImageSourceMirror(t *testing.T) {
 	e := setup(t)
 	repo := e.repo("img")

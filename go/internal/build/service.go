@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
 )
@@ -277,6 +279,9 @@ func (s *Service) run(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
 		final.Message = failureMessage(err)
 	}
 	fmt.Fprintf(j, "\n--> %s\n", final.Message)
+	if hint := failureHint(err, j.recent()); hint != "" {
+		fmt.Fprintf(j, "--> %s\n", hint)
+	}
 	log.Info("build finished", "stage", final.Stage.String(), "duration", final.Duration.AsDuration(), "err", err)
 
 	j.finishedAt = time.Now()
@@ -308,6 +313,33 @@ func failureMessage(err error) string {
 	default:
 		return "The build failed: " + err.Error()
 	}
+}
+
+// DNSHint follows a failed build whose output shows a name lookup failing
+// in the build worker. The worker's DNS servers are the ones Docker gives
+// every container, and a broken "dns" setting of Docker's (for example
+// empty entries in daemon.json) shows only as BuildKit's lookup error, so
+// the line points at the node check that says what Docker gives
+// containers and how to fix it (nodecheck's Container DNS).
+const DNSHint = "A name lookup (DNS) failed in the build worker - if the name is right, the Container DNS check on the node's Health tab (or `" +
+	brand.Slug + " health` on the node) says why and how to fix it"
+
+// dnsLookupRe matches failed name lookups in build output: BuildKit's Go
+// resolver ("dial tcp: lookup registry-1.docker.io on [::1]:53: ...
+// connection refused", "no such host") and the C resolvers of RUN steps
+// (apt, curl and git, pip, npm), which use the same servers.
+var dnsLookupRe = regexp.MustCompile(`lookup \S+ on \S+:53\b|dial tcp: lookup |no such host|` +
+	`Temporary failure in name resolution|Temporary failure resolving|Could not resolve host|getaddrinfo EAI_AGAIN`)
+
+// failureHint is a line for the log after the failure message, "" when
+// none fits: a builder that failed (the lines above say why) on a name
+// lookup gets DNSHint.
+func failureHint(err error, output string) string {
+	var exit *ExitError
+	if errors.As(err, &exit) && dnsLookupRe.MatchString(output) {
+		return DNSHint
+	}
+	return ""
 }
 
 // execute fetches, builds and pushes, returning the pushed digest.

@@ -14,6 +14,10 @@ import (
 // reconnected mid-build). Older output is dropped first.
 const maxJobOutput = 8 << 20
 
+// tailKeep is how much of the last output a job keeps for the hints after
+// a failure (failureHint): BuildKit ends a failed build with the error.
+const tailKeep = 64 << 10
+
 // Job is one queued or running build. Its output is kept so any number of
 // watchers can replay it and follow along; the build itself does not
 // depend on anyone watching.
@@ -28,6 +32,7 @@ type Job struct {
 	first   int // sequence number of items[0]
 	bytes   int
 	pending []byte // log bytes not yet turned into an item
+	tail    []byte // the last log bytes, for recent (up to twice tailKeep)
 	changed chan struct{}
 	final   *agentv1.BuildProgress
 	done    chan struct{}
@@ -58,7 +63,22 @@ func (j *Job) Write(b []byte) (int, error) {
 	if len(j.pending) >= 16<<10 {
 		j.flushLocked()
 	}
+	j.tail = append(j.tail, b...)
+	if len(j.tail) > 2*tailKeep {
+		j.tail = append([]byte(nil), j.tail[len(j.tail)-tailKeep:]...)
+	}
 	return len(b), nil
+}
+
+// recent returns the last output, up to tailKeep bytes.
+func (j *Job) recent() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	t := j.tail
+	if len(t) > tailKeep {
+		t = t[len(t)-tailKeep:]
+	}
+	return string(t)
 }
 
 // flush turns pending log bytes into an item. The job's ticker calls it so

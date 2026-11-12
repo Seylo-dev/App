@@ -16,7 +16,8 @@ import (
 // tests can point them at a fake tree.
 type Env struct {
 	// DataDir is the node data dir (disk checks run on its file system, and
-	// the buildx check uses the builds' docker config under it).
+	// the buildx and Container DNS checks use the builds' docker config
+	// under it).
 	DataDir string
 	// PanelURL is the panel's base URL; empty before the node joined.
 	PanelURL string
@@ -109,6 +110,7 @@ func Default(env Env) []Check {
 		check{"proxy.running", "Proxy", e.proxyRunning},
 		check{"proxy.routes", "Route files", e.routeFiles},
 		check{"network.dns", "DNS resolution", e.dns},
+		check{"docker.dns", containerDNSTitle, e.containerDNS},
 		check{"network.firewall", "Firewall", e.firewall},
 		check{"time.sync", "Clock", e.clock},
 		check{"panel.reachable", "Panel connection", e.panel},

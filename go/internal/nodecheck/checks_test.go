@@ -55,6 +55,8 @@ func healthyFiles() map[string]string {
 		"proc/net/tcp":                     "  sl local\n",
 		"sys/fs/cgroup/cgroup.controllers": "cpuset cpu io memory hugetlb pids rdma misc\n",
 		"etc/os-release":                   "ID=ubuntu\nVERSION_ID=\"24.04\"\nPRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\n",
+		"proc/812/comm":                    "dockerd\n",
+		"proc/812/cmdline":                 "/usr/bin/dockerd\x00-H\x00fd://\x00--containerd=/run/containerd/containerd.sock\x00",
 	}
 }
 
@@ -97,7 +99,7 @@ func TestHealthyMachine(t *testing.T) {
 		ResolveNames: []string{"localhost"},
 	}
 	results := byID(Run(context.Background(), Default(env)))
-	for _, id := range []string{"system.kernel", "system.os", "system.memory", "docker.engine", "docker.cgroup", "docker.live-restore", "network.ports", "network.dns", "network.firewall", "time.sync", "panel.reachable", "wings.detected", "panel.files"} {
+	for _, id := range []string{"system.kernel", "system.os", "system.memory", "docker.engine", "docker.cgroup", "docker.live-restore", "network.ports", "network.dns", "docker.dns", "network.firewall", "time.sync", "panel.reachable", "wings.detected", "panel.files"} {
 		r := results[id]
 		if r == nil || r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
 			t.Errorf("%s = %v", id, r)
@@ -263,6 +265,7 @@ func TestProblems(t *testing.T) {
 	files["proc/4242/comm"] = "nginx\n"
 	files["etc/os-release"] = "ID=arch\nPRETTY_NAME=\"Arch Linux\"\n"
 	files["etc/ufw/ufw.conf"] = "ENABLED=yes\n"
+	files["etc/docker/daemon.json"] = `{"dns": ["", ""]}` // what a real node's builds failed on
 	delete(files, "sys/fs/cgroup/cgroup.controllers")
 	proc, sys, etc := machine(t, files)
 	_ = os.MkdirAll(filepath.Join(proc, "4242", "fd"), 0o755)
@@ -298,6 +301,7 @@ func TestProblems(t *testing.T) {
 		"docker.cgroup":    agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL,
 		"network.ports":    agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL,
 		"network.dns":      agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL,
+		"docker.dns":       agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL,
 		"network.firewall": agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN,
 		"panel.reachable":  agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL,
 		"wings.detected":   agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN,

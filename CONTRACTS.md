@@ -65,7 +65,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 19 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 20 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.12, see "Container DNS check"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, since 0.2.12 `set-panel`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -101,6 +101,56 @@ packages use. "Built" means implemented and tested.
 
 Naming note: the node health check package is `nodecheck` (not `doctor`)
 because `health` is the per-service probe package.
+
+Container DNS check (`docker.dns`, since 0.2.12;
+`go/internal/nodecheck/dockerdns.go`): Docker gives containers DNS
+servers they can use. A "dns" setting (daemon.json or `dockerd --dns`)
+replaces the host's servers for every container, and Docker hardly checks
+it: Docker 29 starts with an empty `""` entry (`dockerd --validate`
+accepts it too) and writes `nameserver invalid IP` (seen on a real
+Pelican/Wings node and on Docker 29.5 in the test VM); Docker 28 refuses to
+start the container. The build worker then has no server and BuildKit
+falls back to `[::1]:53`, and apps' outside lookups through Docker's
+embedded DNS fail the same way. Reads, most reliable first:
+
+- a test container on the default bridge, `docker run --rm --pull never
+  --network bridge --label traefik.enable=false --entrypoint cat <image>
+  /etc/resolv.conf`, from an image already on the node (the first of
+  `moby/buildkit`, `traefik`, `alpine`, `busybox`; none is ever pulled),
+  run with the builds' DOCKER_CONFIG like the buildx check, with every
+  health check (hourly and on "Run checks now");
+- the running build workers' resolv.conf, read from
+  `<DockerRootDir>/containers/<id>/resolv.conf` (nothing runs in them):
+  a worker keeps the servers it started with, also after a fix;
+- for the cause: the running dockerd's command line from `/proc` (else
+  `systemctl show --property=ExecStart docker.service`) for `--dns` and
+  `--config-file`, and that daemon.json (default `/etc/docker/daemon.json`)
+  for `"dns"` and `"ipv6"`. `GET /info` has no DNS field.
+
+An entry counts when it is an IP address that is neither loopback nor
+unspecified (no ports, no host names, no `""`). Fail: no usable server (the
+real node's file, no nameserver line, loopback only, Docker refusing the
+container, or the setting alone when no test container could run), or a
+running build worker without one. Warn: usable servers next to unusable
+ones, only IPv6 servers while the bridge has no IPv6, a setting changed
+since Docker started that breaks it at the next restart, a daemon.json that
+does not parse, or nothing readable at all. The fail detail names the
+entries and where they are and says builds cannot pull images and apps
+cannot look up outside names; the hint says to put IP addresses in the file
+(`"dns": ["1.1.1.1", "8.8.4.4"]`) or remove the key (or fix the `--dns`
+flags with `systemctl edit docker`), check it with `dockerd --validate
+--config-file <file>`, restart Docker with `systemctl restart docker`, what
+that restart stops (from Docker's live-restore: everything, Wings' game
+servers included when Wings is detected, unless live-restore is turned on
+first with a reload), and which build workers to `docker restart` (keeps
+the cache) or `DOCKER_CONFIG=<datadir>/builds/docker docker buildx rm`.
+The check never changes daemon.json or restarts Docker. The panel and the
+web app show its title, detail and hint like every other check's. VM tests:
+`TestRealContainerDNS` (the test container on the VM's Docker, and a build
+worker with the real node's resolv.conf failing until `docker restart`
+gives it fresh servers) and build's `TestFailedLookupPointsAtContainerDNS`
+(real BuildKit lookup output gets the log line); a broken "dns" on the
+VM's own Docker is not tested there, since it needs a Docker restart.
 
 Find every unfinished feature with:
 
@@ -876,7 +926,17 @@ local API, join and resume. The areas:
   removed with its cache; the one shared builder of older agents
   (`seylo-builder-<cores>c-<gb>g`) and builders of another size are
   removed on the first build or cache sweep. Pinned Railpack/Nixpacks
-  binaries live in `<datadir>/tools`.
+  binaries live in `<datadir>/tools`. A builder's container
+  (`buildx_buildkit_<builder>0`) runs on Docker's default bridge, so it
+  gets the DNS servers Docker gives every container. A build that failed
+  with a name lookup error in its output (BuildKit's "lookup <name> on
+  <server>:53", "dial tcp: lookup", "no such host", and the resolver
+  messages of RUN steps: "Temporary failure in name resolution",
+  "Temporary failure resolving", "Could not resolve host", "getaddrinfo
+  EAI_AGAIN"; the last 64 KiB of output are read) gets one more log line
+  after "The build failed - the lines above say why" (`build.DNSHint`),
+  pointing at the node's Container DNS check (Health tab, or `seylo
+  health`). The failure message itself stays the same.
 - Networking: the own Traefik `seylo-traefik` (`traefik:v3.7.15`,
   file provider only, restart unless-stopped, `seylo.role=traefik`) reads
   `<datadir>/traefik/dynamic` and keeps `acme.json` in

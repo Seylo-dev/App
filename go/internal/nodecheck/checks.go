@@ -43,6 +43,14 @@ func (e *Env) read(path string) (string, error) {
 	return string(data), err
 }
 
+// layout is the data dir's layout (the default one when DataDir is empty).
+func (e *Env) layout() datadir.Layout {
+	if e.DataDir != "" {
+		return datadir.New(e.DataDir)
+	}
+	return datadir.Default()
+}
+
 func (e *Env) output(ctx context.Context, name string, args ...string) (string, error) {
 	var out bytes.Buffer
 	err := e.Run(ctx, &out, name, args...)
@@ -324,12 +332,7 @@ func (e *Env) buildx(ctx context.Context) *agentv1.NodeCheckResult {
 	if !e.CanBuild() {
 		return skipped("builds are off on this node")
 	}
-	layout := datadir.Default()
-	if e.DataDir != "" {
-		layout = datadir.New(e.DataDir)
-	}
-	// Run takes no environment, so env(1) sets it.
-	out, err := e.output(ctx, "env", "DOCKER_CONFIG="+layout.BuildsDockerConfig(), "DOCKER_CLI_HINTS=false", "docker", "buildx", "version")
+	out, err := e.dockerCLI(ctx, "buildx", "version")
 	if err != nil {
 		return fail("docker buildx is not installed: every build on this node fails",
 			"Install the docker-buildx-plugin package (Docker from get.docker.com has it), then run the checks again. "+
