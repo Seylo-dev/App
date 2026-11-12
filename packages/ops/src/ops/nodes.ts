@@ -292,6 +292,14 @@ export const createJoinToken = defineOp({
      * otherwise. Only one of the two can be used: the token is single use.
      */
     pinnedCommand: Type.Union([Type.String(), Type.Null()]),
+    /**
+     * With pinnedCommand: the command that points a node that already
+     * joined over the domain at the same IP address and pinned key
+     * (`sudo seylo set-panel '<url>' --pin '<pin>'`), for one that went
+     * offline when its network began decrypting HTTPS. It keeps the node
+     * and needs no token. Null otherwise.
+     */
+    setPanelCommand: Type.Union([Type.String(), Type.Null()]),
     expiresAt: Timestamp,
     /**
      * True when the command makes the agent dial the panel over plain HTTP

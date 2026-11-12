@@ -109,6 +109,10 @@ export default {
     pinnedHint:
       "For a server whose network replaces the domain's certificate (a firewall doing TLS inspection; the agent refuses it) or that cannot reach the domain: this joins over the panel's IP address and agents' port with the panel's pinned key. Run one command or the other: the token works once.",
     pinnedCommand: "Join command over the panel's IP",
+    setPanelTitle: "Already joined? Point it here",
+    setPanelHint:
+      "For a node that joined over the domain and went offline when its network began decrypting HTTPS: run this on it instead. It checks that the address is this panel, then keeps the node and its services and only changes the address it connects to. No token needed. Needs agent 0.2.12 or newer.",
+    setPanelCommand: "Command that points a joined node at the panel's IP",
     otherOpen: { one: "{count} other unused join command is still valid.", other: "{count} other unused join commands are still valid." },
     step2: "2. Optional: automatic domains for this node",
     dnsBefore: "Add",

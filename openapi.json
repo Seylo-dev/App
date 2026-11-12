@@ -48100,6 +48100,7 @@
                     "token",
                     "command",
                     "pinnedCommand",
+                    "setPanelCommand",
                     "expiresAt",
                     "insecureTransport",
                     "canBuild"
@@ -48117,6 +48118,16 @@
                       "type": "string"
                     },
                     "pinnedCommand": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "setPanelCommand": {
                       "anyOf": [
                         {
                           "type": "string"

@@ -30,9 +30,20 @@ export interface AddNodeHandle {
 /**
  * The same token over the panel's IP and its pinned key, behind a toggle:
  * for a server whose network decrypts HTTPS (TLS inspection re-signs the
- * domain's certificate, so the domain command cannot connect).
+ * domain's certificate, so the domain command cannot connect). Under it,
+ * for a node that already joined over the domain and went offline that
+ * way, the `seylo set-panel` command to the same IP and pin, which keeps
+ * the node.
  */
-export function PinnedJoin({ command, initiallyOpen = false }: { command: string; initiallyOpen?: boolean }) {
+export function PinnedJoin({
+  command,
+  setPanelCommand = null,
+  initiallyOpen = false,
+}: {
+  command: string;
+  setPanelCommand?: string | null;
+  initiallyOpen?: boolean;
+}) {
   const [open, setOpen] = useState(initiallyOpen);
   if (!open) {
     return (
@@ -49,6 +60,13 @@ export function PinnedJoin({ command, initiallyOpen = false }: { command: string
     <div className="flex flex-col gap-[7px]">
       <span className="text-xs text-muted-foreground">{t("nodes.addCard.pinnedHint")}</span>
       <CopyField value={command} tone="terminal" aria-label={t("nodes.addCard.pinnedCommand")} />
+      {setPanelCommand && (
+        <>
+          <span className="mt-1 text-[12.5px] font-medium text-ink-strong">{t("nodes.addCard.setPanelTitle")}</span>
+          <span className="text-xs text-muted-foreground">{t("nodes.addCard.setPanelHint")}</span>
+          <CopyField value={setPanelCommand} tone="terminal" aria-label={t("nodes.addCard.setPanelCommand")} />
+        </>
+      )}
     </div>
   );
 }
@@ -138,7 +156,9 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
                 {t("nodes.addCard.insecure")}
               </span>
             )}
-            {token.pinnedCommand && <PinnedJoin key={token.tokenId} command={token.pinnedCommand} />}
+            {token.pinnedCommand && (
+              <PinnedJoin key={token.tokenId} command={token.pinnedCommand} setPanelCommand={token.setPanelCommand} />
+            )}
           </>
         ) : (
           <>

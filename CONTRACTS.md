@@ -66,7 +66,7 @@ packages use. "Built" means implemented and tested.
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
 | `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 19 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
-| `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
+| `cli` | Cobra command tree: node (`agent --join`, `join`, since 0.2.12 `set-panel`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
 | `panelapi` | Laptop CLI client for the panel op API (hand-written over the contracts, not generated), saved logins in `~/.config/seylo/config.json`, `SEYLO_PANEL_URL` + `SEYLO_TOKEN` for CI | Built (tested against a fake panel) |
@@ -511,6 +511,40 @@ Summary; the full rules are in `proto/README.md` and the comments of
   loopback (the panel's node) never moves. The node checks and troubleshoot reports follow the current
   address (`Deps.PanelAddress`). Go reads the system trust store once per
   process: a CA added to it later needs an agent restart.
+- Pointing a joined node at another address by hand (`seylo set-panel
+  <panel-url> [--pin sha256:<hex>] [--insecure]`, since 0.2.12,
+  `agent/set_panel.go`, `cli/setpanel.go`): for a node that joined over
+  the panel's domain and went offline when its network began decrypting
+  HTTPS, without a join token (a `join --force` needs one and forgets the
+  recorded panel identity). Root only (`run it as root`). It refuses a
+  node without `node_id` (join again) and plain `http://` to another host
+  without `--insecure` (join's rule; `--pin` needs `https://`); the same
+  address and pin as `panel_url` changes nothing. Before writing anything it dials the address (the pin, else the
+  system roots), resumes as the node with `agent.key` (a ClientHello
+  without facts, so the panel keeps the facts it has) and checks the
+  recorded identity like every connect (`checkPanelID`,
+  `verifyPanelIdentity`, and HelloAccepted.node_id); an accepted session is
+  closed at once (the panel sees the node online for a moment). A
+  HelloRejected counts only when it verifies with `panel_key` (or the node
+  has nothing to check it against: no key, or a panel that never signed;
+  `unsignedRejection`, the pin is no proof here since the owner typed it):
+  ALREADY_CONNECTED (the agent is connected through the old address),
+  AGENT_TOO_OLD and NODE_DISABLED still change the address, any other
+  reason (UNKNOWN_NODE: removed) is refused with the panel's message.
+  Another panel, a wrong pin (`ErrPinMismatch`) or no connection leaves
+  config.yml as it was ("config.yml was not changed"). Then it copies
+  config.yml to `config.yml.bak` (0600), writes it the way a move does
+  (`movedConfig`: new `panel_url`/`panel_pin`, the old address as the
+  fallback for one cycle, `insecure_transport` only for an `--insecure`
+  plain URL, `trust_on_first_use` dropped; `node_id`, `panel_id`,
+  `panel_key`, `panel_proves`, `staged` and every other key stay), restarts
+  `seylo.service` and prints the restarted agent's `Panel:` line (and
+  `Error:`) once it connected or was refused, or after 30 s, with how to
+  go back. At a pinned IP the agent then tries the domain the panel names
+  and keeps the pinned address when its certificate is refused
+  (`untrustedMoveRetryAfter`, under `pinnedCommand`). Add node prints the
+  command (`setPanelCommand`, under `pinnedCommand`), and the dial error
+  for an untrusted issuer names it (`conn.certificateHint`).
 - Deadlines: `Call.timeout` / `Open.timeout` (relative) win over the
   absolute `deadline`, which is read on the callee's clock; senders set
   both. A callee that gets only a deadline that already passed on arrival
@@ -2304,7 +2338,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`; the chat bubble and the Assistant page against the demo world's scripted replies only) | Works as tested |
 | Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of copies: a failed request is sent to the next copy per request (a copy that cannot be reached: every method; a 502-504: GET/HEAD/OPTIONS only, so a POST to a copy on another node that just died fails). With sticky sessions a client pinned to a copy on the balancing node that died gets errors until that copy is back (about 5s with the crash policy) | Covered by unit, fake-agent and VM package tests |
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
-| Removing or changing the panel domain while nodes dial it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node that joined over the domain (every node added once a domain is set: Add node prints the unpinned domain) or whose address before the move was an unpinned https:// address (another domain) has no fallback and cannot reach the panel until it rejoins (`seylo join --force`). The panel cannot tell these apart, so since 0.2.1 the change is refused (CONFLICT `nodesOnDomain`, `details.nodeIds`) while enabled nodes dial `https://<domain>` (`settings.general.domainNodes`, from `nodeDialedUrls`), unless the call passes `acknowledgeNodesOffline: true`; Settings > General and Lock to Tailscale name the nodes and ask first, and Lock to Tailscale then leaves the agents' port open. Plain-HTTP nodes never move, so this does not reach them | Acknowledged nodes go offline after a domain removal or change; the node offline alert fires |
+| Removing or changing the panel domain while nodes dial it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node that joined over the domain (every node added once a domain is set: Add node prints the unpinned domain) or whose address before the move was an unpinned https:// address (another domain) has no fallback and cannot reach the panel until it rejoins (`seylo join --force`, with a new token) or, since 0.2.12, is pointed at the agents' port with `sudo seylo set-panel '<IP URL>' --pin '<pin>'` (no token). The panel cannot tell these apart, so since 0.2.1 the change is refused (CONFLICT `nodesOnDomain`, `details.nodeIds`) while enabled nodes dial `https://<domain>` (`settings.general.domainNodes`, from `nodeDialedUrls`), unless the call passes `acknowledgeNodesOffline: true`; Settings > General and Lock to Tailscale name the nodes and ask first, and Lock to Tailscale then leaves the agents' port open. Plain-HTTP nodes never move, so this does not reach them | Acknowledged nodes go offline after a domain removal or change; the node offline alert fires |
 | The panel node's own agent dialing a public address (joined again with an Add node command instead of the installer's `http://127.0.0.1:<port>`): closing IP access would cut it off (Docker's loopback publish does not take a dial to the server's own public address), and with the panel node offline nothing reopens it from Settings or `seylo panel ip-access on` | Since 0.2.1 closing is refused (`panelNodeNotLoopback`, with the loopback join command) while it dials plain `http://` that is not loopback, and closing the agents' port while it dials anything but loopback or `https://<domain>`; `decidePanelIpAccess` keeps them open in that case too |
 | The panel on a real tailnet (0.2.1): the agent's tailnet area ran against an httptest LocalAPI with recorded tailscaled 1.104.x answers, the panel's tailnet listener and ops in the panel's tests, the cards in Playwright. Not run yet: HTTPS Serve (the certificate, the first-load delay, the `__Host-` cookie, no HSTS on the ts.net name), a real login.tailscale.com sign-in link and tailnet name, key expiry and the Disable key expiry link, the grant snippet in the real policy editor, Serve with `--netfilter-mode=off`. Whether Docker older than 28 lets the local network reach ports published on 127.0.0.1 (route_localnet) is from Docker's docs, not tested | The owner's check on a real Tailscale account before the release; the card and the Docker Engine check warn below 28 |
 | Not in 0.2.1: nodes over the tailnet (a Serve TCP forward of the agents' port, "Connect over Tailscale" in Add node), apps on the tailnet, passkeys on the ts.net name, signing in with the Tailscale identity, an installer `--tailscale` flag, a node-side veto on builds (`no_builds`) | Nodes connect over the domain or the agents' port; passkeys need the panel domain; join commands made on the tailnet URL use the domain or the agents' port |
@@ -3128,11 +3162,20 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   the same token over `https://<panel IP address>:<agents' port>` with
   `--pin` (`join-target.ts` `agentPinnedTarget`, `panelIpUrl`), for a
   server whose network decrypts HTTPS (TLS inspection re-signs the
-  domain's certificate) or cannot reach the domain; null otherwise. The
+  domain's certificate) or cannot reach the domain; null otherwise. With
+  it, since 0.2.12, `setPanelCommand`: `sudo seylo set-panel '<that
+  url>' --pin '<pin>'` (`join-command.ts` `setPanelCommand`, no token, not
+  sensitive), which Add node shows under it as "Already joined? Point it
+  here" for a node that joined over the domain and went offline that way
+  (Protocol, "Pointing a joined node at another address by hand"). The
+  panel has no node page with the agent's last connection error (an agent
+  that cannot connect reports nothing), so no node page shows it. The
   agent's dial error names the refused certificate's issuer
-  (`conn.certificateHint`: TLS inspection, or Traefik's own certificate
-  when the panel's server has none for the name), a pin mismatch too, and
-  the installer shows that hint instead of the ports one. A join on a node
+  (`conn.certificateHint`: TLS inspection, with exempting the domain,
+  joining with the IP and `--pin`, or since 0.2.12 `seylo set-panel` as
+  the ways out, or Traefik's own certificate when the panel's server has
+  none for the name), a pin mismatch too, and the installer shows that
+  hint instead of the ports one. A join on a node
   already joined to the same `panel_url` joins again with the token (as
   `--force`) only when `seylo status` (read from its `Panel:` line and the
   start of its `Error:` line, never text a peer chose) proves the earlier

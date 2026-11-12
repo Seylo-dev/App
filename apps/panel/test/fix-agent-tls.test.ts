@@ -64,6 +64,7 @@ test("join commands use the TLS port with --pin; plain HTTP is flagged", async (
   expect(pinned.body.command).not.toContain("--insecure");
   // Over the IP with the pin already: no second command.
   expect(pinned.body.pinnedCommand).toBeNull();
+  expect(pinned.body.setPanelCommand).toBeNull();
 
   // An active panel domain: the command joins over it with public roots, and the same token over the
   // IP and the pinned key comes along, for a network that decrypts HTTPS (TLS inspection).
@@ -75,11 +76,18 @@ test("join commands use the TLS port with --pin; plain HTTP is flagged", async (
   expect(both.body.pinnedCommand).toContain("--panel 'https://203.0.113.9:3443'");
   expect(both.body.pinnedCommand).toContain(`--pin '${tls.pin}'`);
   expect(both.body.pinnedCommand).toContain(`--token '${both.body.token}'`);
+  // A node that joined over the domain and went offline behind TLS inspection is pointed at the same
+  // IP and pin instead, keeping the node: no token in it.
+  expect(both.body.setPanelCommand).toBe(`sudo seylo set-panel 'https://203.0.113.9:3443' --pin '${tls.pin}'`);
   // With the agents' port closed the IP command could not connect: none.
   setSetting(secured.deps.db, "panelIpAccessApplied", { closed: true, agentPortClosed: true, at: 1, reason: "test" });
-  expect((await callOp(secured, nodeOps.createJoinToken, {}, { cookie: admin.cookie })).body.pinnedCommand).toBeNull();
+  const closed = await callOp(secured, nodeOps.createJoinToken, {}, { cookie: admin.cookie });
+  expect(closed.body.pinnedCommand).toBeNull();
+  expect(closed.body.setPanelCommand).toBeNull();
   // No agents' TLS port at all: none either.
-  expect((await callOp(plain, nodeOps.createJoinToken, {}, { cookie: owner.cookie })).body.pinnedCommand).toBeNull();
+  const none = await callOp(plain, nodeOps.createJoinToken, {}, { cookie: owner.cookie });
+  expect(none.body.pinnedCommand).toBeNull();
+  expect(none.body.setPanelCommand).toBeNull();
 });
 
 test("join commands install the running panel's own release through the verified install host", async () => {

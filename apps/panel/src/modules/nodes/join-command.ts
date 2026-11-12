@@ -2,7 +2,7 @@
 // "join"). Kept apart from ops.ts so scripts/rotate-master-key.ts prints
 // the same command without loading the panel's modules.
 
-import { installUrl } from "@seylo/brand";
+import { installUrl, slug } from "@seylo/brand";
 
 /**
  * Release tags as the release workflow cuts them (0.2.0, 0.2.0-rc.2).
@@ -51,4 +51,15 @@ export function installerSource(panelVersion: string): InstallerSource {
 export function joinCommand(panelVersion: string, url: string, token: string, pin: string | null = null, insecure = false): string {
   const installer = installerSource(panelVersion);
   return `curl -fsSL ${installer.url} | sudo sh -s -- join --panel '${url}' --token '${token}'${installer.version ? ` --version '${installer.version}'` : ""}${pin ? ` --pin '${pin}'` : ""}${insecure ? " --insecure" : ""}`;
+}
+
+/**
+ * The command that points a node that already joined at another address of
+ * this panel and keeps the node (`seylo set-panel`, go/internal/agent
+ * set_panel.go): for one that joined over the domain and went offline when
+ * its network began decrypting HTTPS. No token: the node resumes with its
+ * own key.
+ */
+export function setPanelCommand(url: string, pin: string): string {
+  return `sudo ${slug} set-panel '${url}' --pin '${pin}'`;
 }

@@ -17,7 +17,7 @@ import { privateIpv4Of } from "../domains/lookup";
 import { metricsFor } from "../metrics/ingest";
 import { blockedReason } from "../uptime/targets";
 import { checksDocker, recordUpdateDockerAnswer } from "./docker-check";
-import { joinCommand } from "./join-command";
+import { joinCommand, setPanelCommand } from "./join-command";
 import { agentJoinTarget, agentPinnedTarget } from "./join-target";
 import { forgetNodeCertificate, refreshLbPeers } from "./lb-tls";
 import { nodeLive } from "./live";
@@ -111,6 +111,8 @@ const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
     // The install host's verified installer, pinned to this panel's release with --version (join-command.ts).
     command: joinCommand(ctx.config.version, target.url, token, target.pin, target.insecureTransport),
     pinnedCommand: pinned ? joinCommand(ctx.config.version, pinned.url, token, pinned.pin) : null,
+    // A node that joined over the domain and went offline behind TLS inspection keeps its node with this.
+    setPanelCommand: pinned?.pin ? setPanelCommand(pinned.url, pinned.pin) : null,
     expiresAt: expiresAt.toISOString(),
     insecureTransport: target.insecureTransport,
     canBuild,

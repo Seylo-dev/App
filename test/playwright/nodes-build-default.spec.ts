@@ -58,6 +58,7 @@ test.describe("Add node: build images by default", () => {
     const token = "seylo_join_DomainAndPin01";
     const pin = `sha256:${"ab".repeat(32)}`;
     const pinnedCommand = `curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token '${token}' --version '0.2.0' --pin '${pin}'`;
+    const setPanelCommand = `sudo seylo set-panel 'https://203.0.113.10:3443' --pin '${pin}'`;
     await installDemo(page, {
       overrides: {
         "nodes.createJoinToken": () => ({
@@ -65,6 +66,7 @@ test.describe("Add node: build images by default", () => {
           token,
           command: `curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://panel.acme.dev' --token '${token}' --version '0.2.0'`,
           pinnedCommand,
+          setPanelCommand,
           insecureTransport: false,
           expiresAt: new Date(Date.now() + 58 * 60_000).toISOString(),
           canBuild: true,
@@ -82,8 +84,41 @@ test.describe("Add node: build images by default", () => {
     await expect(card.getByText(/a firewall doing TLS inspection; the agent refuses it/)).toBeVisible();
     await expect(card.getByText(/Run one command or the other: the token works once\./)).toBeVisible();
     await expect(card.getByLabel("Join command over the panel's IP")).toContainText("--pin");
+    // A node that already joined over the domain and went offline that way keeps its node: the
+    // set-panel command to the same IP and pin, with its own copy button and no token.
+    await expect(card.getByText("Already joined? Point it here")).toBeVisible();
+    await expect(card.getByText(/keeps the node and its services and only changes the address it connects to/)).toBeVisible();
+    const pointHere = card.getByLabel("Command that points a joined node at the panel's IP");
+    await expect(pointHere).toContainText(setPanelCommand);
+    await expect(pointHere).not.toContainText(token);
+    await expect(card.getByRole("button", { name: "Copy: Command that points a joined node at the panel's IP", exact: true })).toBeVisible();
     await page.screenshot({ path: `${shots}/pinned-command.png` });
     expect(errors).toEqual([]);
+  });
+
+  test("a pinned command without a set-panel command shows no point-it-here line", async ({ page }) => {
+    const token = "seylo_join_DomainAndPin02";
+    const pin = `sha256:${"cd".repeat(32)}`;
+    await installDemo(page, {
+      overrides: {
+        "nodes.createJoinToken": () => ({
+          tokenId: "token00000000003",
+          token,
+          command: `curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://panel.acme.dev' --token '${token}' --version '0.2.0'`,
+          pinnedCommand: `curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token '${token}' --version '0.2.0' --pin '${pin}'`,
+          setPanelCommand: null,
+          insecureTransport: false,
+          expiresAt: new Date(Date.now() + 58 * 60_000).toISOString(),
+          canBuild: true,
+        }),
+      },
+    });
+    await page.goto("/nodes");
+    const card = page.getByRole("region", { name: "Add a node" });
+    await card.getByRole("button", { name: "Create join command" }).click();
+    await card.getByRole("button", { name: "Network decrypts HTTPS? Join over the panel's IP instead" }).click();
+    await expect(card.getByLabel("Join command over the panel's IP")).toBeVisible();
+    await expect(card.getByText("Already joined? Point it here")).toHaveCount(0);
   });
 
   test("an IP command with the pin already shows no second command", async ({ page }) => {
