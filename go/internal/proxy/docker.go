@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,9 @@ type ContainerInfo struct {
 	Labels  map[string]string
 	// IPs by network name (IPv4).
 	IPs map[string]string
+	// Networks are all the networks it is on, IPv6-only ones included
+	// (those have no entry in IPs).
+	Networks []string
 	// Image and Cmd the container was created with, so a recreate can say
 	// what changed. Empty when Docker did not report them.
 	Image string
@@ -136,10 +140,12 @@ func (d *MobyDocker) InspectContainer(ctx context.Context, name string) (Contain
 	}
 	if c.NetworkSettings != nil {
 		for name, ep := range c.NetworkSettings.Networks {
+			info.Networks = append(info.Networks, name)
 			if ep != nil && ep.IPAddress.IsValid() {
 				info.IPs[name] = ep.IPAddress.String()
 			}
 		}
+		slices.Sort(info.Networks)
 	}
 	return info, nil
 }
@@ -244,6 +250,51 @@ func (d *MobyDocker) EnsureNetwork(ctx context.Context, name string, labels map[
 	}
 	return NetworkInfo{}, fmt.Errorf("network %s has no IPv4 subnet", name)
 }
+
+// minIPv6NetworkDocker is the first Docker major release with IPv6-only
+// networks, and with a container's IPv6 port mappings set up on the
+// network that gives it IPv6 (before, every mapping stayed on one network).
+const minIPv6NetworkDocker = 28
+
+// EnsureIPv6Network implements DualStackDocker: an IPv6-only bridge
+// network, its subnet from Docker's default pools (a ULA /64), and the
+// bridge named after it like EnsureNetwork's. It takes no IPv4 subnet
+// from the pools and never becomes a container's IPv4 gateway.
+func (d *MobyDocker) EnsureIPv6Network(ctx context.Context, name string, labels map[string]string) error {
+	res, err := d.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+	if err == nil {
+		if !res.Network.EnableIPv6 {
+			return fmt.Errorf("network %s exists without IPv6", name)
+		}
+		return nil
+	}
+	if !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("inspecting network %s: %w", name, err)
+	}
+	v, err := d.cli.ServerVersion(ctx, client.ServerVersionOptions{})
+	if err != nil {
+		return fmt.Errorf("docker version: %w", err)
+	}
+	if major, _, _ := strings.Cut(v.Version, "."); atoiOr(major, 0) < minIPv6NetworkDocker {
+		return fmt.Errorf("visitors over IPv6 keep their address only with Docker %d or later, this node runs %s", minIPv6NetworkDocker, v.Version)
+	}
+	no, yes := false, true
+	opts := client.NetworkCreateOptions{Driver: "bridge", EnableIPv4: &no, EnableIPv6: &yes, Labels: labels, Options: docker.NetworkOptions(name)}
+	if _, err := d.cli.NetworkCreate(ctx, name, opts); err != nil && !cerrdefs.IsConflict(err) && !cerrdefs.IsAlreadyExists(err) {
+		return fmt.Errorf("creating IPv6 network %s: %w", name, err)
+	}
+	return nil
+}
+
+func atoiOr(s string, fallback int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+var _ DualStackDocker = (*MobyDocker)(nil)
 
 // ConnectNetwork implements Docker.
 func (d *MobyDocker) ConnectNetwork(ctx context.Context, networkName, containerName string) error {

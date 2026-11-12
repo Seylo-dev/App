@@ -79,6 +79,9 @@ type networkParts struct {
 	// traefikDown raises TRAEFIK_DOWN while Traefik keeps failing to start
 	// (port 80/443 taken), which the supervisor alone only logs.
 	traefikDown failureAlert
+	// ipv6Problem is the last reason Traefik could not join its IPv6
+	// network, logged when it changes.
+	ipv6Problem string
 }
 
 // Tools is the edge tool registry (Box, database web UI). Until Deps has
@@ -124,6 +127,9 @@ func provideNetwork(d *Deps) error {
 		CACertFile:   acmeCACertFile(log, cmp.Or(os.Getenv(acmeCACertsEnv), d.Config.AcmeCACertificates)),
 		CAServerName: cmp.Or(os.Getenv(acmeCAServerNameEnv), d.Config.AcmeCAServerName),
 		CgroupParent: docker.CgroupParent,
+	}
+	if !p.shared {
+		p.traefik.IPv6Network = visitorIPv6Network(log, "/proc")
 	}
 	p.certs = proxy.NewCertFailures()
 	routerCfg := proxy.FileConfig{
@@ -443,6 +449,7 @@ func (p *networkParts) runTraefik(ctx context.Context, d *Deps) error {
 			// Routed sites drop for a second or two; say why.
 			p.log.Info("Traefik recreated", "reason", st.Recreated, "container", cfg.Name)
 		}
+		p.noteIPv6(st.IPv6Problem)
 		p.setGateway(st.Gateway)
 		if st.IP != "" {
 			p.router.SetProbe(net.JoinHostPort(st.IP, "80"), st.Gateway)
@@ -456,6 +463,33 @@ func (p *networkParts) runTraefik(ctx context.Context, d *Deps) error {
 		case <-p.traefikWake:
 		case <-time.After(30 * time.Second):
 		}
+	}
+}
+
+// visitorIPv6Network is the IPv6-only network the agent's Traefik joins so
+// visitors over IPv6 keep their address (proxy.VisitorIPv6 says when),
+// or "" without one.
+func visitorIPv6Network(log *slog.Logger, procDir string) string {
+	if ok, why := proxy.VisitorIPv6(procDir); !ok {
+		log.Info("visitors over IPv6 reach apps from the edge network's gateway", "reason", why)
+		return ""
+	}
+	return docker.EdgeIPv6Network
+}
+
+// noteIPv6 logs why Traefik is not on its IPv6 network when the reason
+// changes (Ensure runs every 30 seconds).
+func (p *networkParts) noteIPv6(problem string) {
+	if p.traefik.IPv6Network == "" {
+		return
+	}
+	p.mu.Lock()
+	changed := problem != p.ipv6Problem
+	p.ipv6Problem = problem
+	p.mu.Unlock()
+	if changed && problem != "" {
+		p.log.Warn("Traefik is not on its IPv6 network: visitors over IPv6 reach apps from the edge network's gateway",
+			"network", p.traefik.IPv6Network, "reason", problem)
 	}
 }
 

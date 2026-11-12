@@ -163,7 +163,7 @@ func (e *itEnv) cleanup() {
 			_ = e.docker.RemoveContainer(ctx, c.ID)
 		}
 	}
-	for _, n := range []string{e.projNet, e.edgeNet, e.prefix + "-wnet", e.prefix + "-va"} {
+	for _, n := range []string{e.projNet, e.edgeNet, e.prefix + "-wnet", e.prefix + "-va", e.prefix + "-e6"} {
 		_, _ = e.docker.Client().NetworkRemove(ctx, n, networkRemoveOptions())
 	}
 }

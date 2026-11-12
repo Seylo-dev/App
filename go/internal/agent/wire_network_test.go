@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -325,6 +326,29 @@ func TestEdgeBridgeProblem(t *testing.T) {
 	// A name too long for an interface never gets a bridge name: nothing to say.
 	if msg := edgeBridgeProblem("a-network-name-longer-than-15", proxy.NetworkInfo{}); msg != "" {
 		t.Fatalf("long name: %q", msg)
+	}
+}
+
+// The agent's Traefik joins seylo-edge6 on a host with a public IPv6
+// address where IPv6 forwarding costs nothing, and no network otherwise.
+func TestVisitorIPv6Network(t *testing.T) {
+	proc := func(inet6, forwarding string) string {
+		dir := t.TempDir()
+		if inet6 != "" {
+			_ = os.MkdirAll(filepath.Join(dir, "net"), 0o755)
+			_ = os.WriteFile(filepath.Join(dir, "net", "if_inet6"), []byte(inet6+"\n"), 0o644)
+		}
+		_ = os.MkdirAll(filepath.Join(dir, "sys", "net", "ipv6", "conf", "all"), 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "sys", "net", "ipv6", "conf", "all", "forwarding"), []byte(forwarding+"\n"), 0o644)
+		return dir
+	}
+	const public = "2a0102b8000000000000000000000002 02 40 00 80     eth0"
+	log := slog.New(slog.DiscardHandler)
+	if got := visitorIPv6Network(log, proc(public, "1")); got != docker.EdgeIPv6Network {
+		t.Fatalf("public IPv6, forwarding on: %q", got)
+	}
+	if got := visitorIPv6Network(log, proc("", "0")); got != "" {
+		t.Fatalf("IPv6 off: %q", got)
 	}
 }
 

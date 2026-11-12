@@ -14,6 +14,7 @@ func TestNames(t *testing.T) {
 		ProjectNetwork("p1"):       "seylo-p-p1",
 		RouteFile("abc"):           "seylo-abc.yml",
 		EdgeNetwork:                "seylo-edge",
+		EdgeIPv6Network:            "seylo-edge6",
 		CgroupParent:               "seylo.slice",
 	}
 	for got, want := range tests {

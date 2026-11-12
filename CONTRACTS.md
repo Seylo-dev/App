@@ -986,7 +986,7 @@ local API, join and resume. The areas:
   get `--init` by their spec's `ContainerConfig.init` (since 0.2.14, see
   "The init process" under Protocol); other helpers leave it to the daemon.
 - Names: containers `seylo-<service>-<generation>[-<replica>]`, networks
-  `seylo-p-<project>` and `seylo-edge`, route files `seylo-<service>.yml`,
+  `seylo-p-<project>`, `seylo-edge` and `seylo-edge6`, route files `seylo-<service>.yml`,
   service volumes `seylo-v-<owner service>-<volume>` (bind-backed by
   `<datadir>/services/<owner>/volumes/<volume>`). These are on-node
   contracts: changing one orphans existing resources.
@@ -1143,7 +1143,30 @@ local API, join and resume. The areas:
   peer asks for); copies on nodes `peers` does not list are not dialed;
   without a complete `lb_tls` no route file has a router on `seylo-lb`, so
   the entry point, published on every interface, answers 404 to everyone
-  instead of taking any client. The panel issues each node's certificate
+  instead of taking any client. Forwarded headers: `web` and `websecure`
+  keep Traefik's default (they drop the X-Forwarded-* and X-Real-Ip a
+  visitor sends and set their own from the connection), and `seylo-lb`
+  (also in `seylo-traefik-lb`) keeps what the forwarding node set
+  (`forwardedHeaders.insecure`: only a current node's certificate reaches
+  a router there) without appending that node
+  (`forwardedHeaders.notAppendXForwardedFor`), so an app sees the visitor as
+  the last X-Forwarded-For hop and as X-Real-Ip, and the scheme the visitor
+  used as X-Forwarded-Proto, also through another node (from 0.2.14;
+  before, the forwarding node's address and `https`). IPv6 visitors: on a
+  host with a public IPv6 address where turning on IPv6 forwarding does not
+  stop the kernel taking router advertisements (`proxy.VisitorIPv6`: no
+  interface with `accept_ra=1` and a route from one while forwarding is
+  off), `seylo-traefik` joins `seylo-edge6` after its start (IPv6 only, a
+  ULA /64 from Docker's default pools, `seylo.role=edge`, Docker 28 or
+  later), so Docker forwards IPv6 connections to the published ports to
+  Traefik's own IPv6 address with the visitor's; without it Docker's userland
+  proxy takes them and every IPv6 visitor arrives from the `seylo-edge`
+  gateway. `seylo-edge` stays IPv4 only. Entry point timeouts are Traefik's
+  defaults (readTimeout 60s, idleTimeout 180s, writeTimeout 0); verified in
+  the VM: event streams stay open and unbuffered (65 s and 185 s quiet,
+  HTTP/1.1 and HTTP/2, through retry and failover services and another
+  node), while a connection that sends nothing or not all its headers, and
+  an upload that takes longer, are closed after 60 s. The panel issues each node's certificate
   on connect, for 30 days, signed by a one-off issuer (a CA with path length
   0 the LB CA signs; its key is thrown away) and valid for `lb.seylo.internal`
   and `<node id>.lb.seylo.internal`; the hourly prune job renews it for

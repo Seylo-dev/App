@@ -14,6 +14,10 @@ import (
 const (
 	// EdgeNetwork connects Traefik to every routed container.
 	EdgeNetwork = brand.Slug + "-edge"
+	// EdgeIPv6Network is an IPv6-only network only the agent's Traefik
+	// joins, so visitors over IPv6 reach it with their own address
+	// (proxy.TraefikConfig.IPv6Network). EdgeNetwork stays IPv4 only.
+	EdgeIPv6Network = brand.Slug + "-edge6"
 	// CgroupParent is the systemd slice all our containers run under.
 	CgroupParent = brand.Slug + ".slice"
 	// TraefikContainer is the agent-owned Traefik (not used next to Wings,

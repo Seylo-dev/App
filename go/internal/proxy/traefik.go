@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/seylo-dev/app/go/gen/brand"
@@ -71,6 +72,13 @@ type TraefikConfig struct {
 	// entry point (LBPort), no web/websecure, no ACME. The fork's Traefik
 	// serves everything else.
 	LBOnly bool
+	// IPv6Network is an IPv6-only network Traefik joins next to Network
+	// (IPv4 only), so Docker forwards visitors over IPv6 to Traefik's own
+	// IPv6 address there and Traefik sees their address. Without it
+	// Docker's userland proxy takes IPv6 connections to the published
+	// ports and every IPv6 visitor arrives from Network's gateway. Empty
+	// leaves it out (VisitorIPv6 says when a node gets it).
+	IPv6Network string
 }
 
 // LBTraefikContainer is the LB-only Traefik next to the Wings fork.
@@ -90,7 +98,7 @@ func (c TraefikConfig) AcmeFile() string { return filepath.Join(c.DataDir, "acme
 // dashboard, no Docker provider.
 func (c TraefikConfig) Args() []string {
 	if c.LBOnly {
-		return []string{
+		args := []string{
 			"--providers.file.directory=" + containerDynamicDir,
 			"--providers.file.watch=true",
 			"--providers.providersThrottleDuration=500ms",
@@ -100,6 +108,7 @@ func (c TraefikConfig) Args() []string {
 			"--global.sendanonymoususage=false",
 			"--log.level=INFO",
 		}
+		return append(args, lbEntryPointArgs()...)
 	}
 	args := []string{
 		"--providers.file.directory=" + containerDynamicDir,
@@ -119,6 +128,7 @@ func (c TraefikConfig) Args() []string {
 			"--entrypoints."+EntryPointLB+".address=:"+fmt.Sprint(DefaultLBPort),
 			"--entrypoints."+EntryPointLB+".http.tls=true",
 		)
+		args = append(args, lbEntryPointArgs()...)
 	}
 	if c.AcmeEmail != "" {
 		args = append(args, "--certificatesresolvers."+CertResolver+".acme.email="+c.AcmeEmail)
@@ -127,6 +137,23 @@ func (c TraefikConfig) Args() []string {
 		args = append(args, "--certificatesresolvers."+CertResolver+".acme.caserver="+c.AcmeCAServer)
 	}
 	return args
+}
+
+// lbEntryPointArgs are the LB entry point's own settings, the same in the
+// LB-only Traefik. Only other nodes reach its routers (a client
+// certificate the panel issued to a current node, lbtls.go; without one
+// no router matches), and the node a visitor came in through already set
+// X-Forwarded-For, X-Real-Ip and X-Forwarded-Proto from what it saw (it
+// drops what the visitor sent). So the headers are kept as they come
+// (insecure: the peers' addresses are not known up front), and the
+// forwarding node's address is not appended: the app sees the visitor as
+// the last X-Forwarded-For hop and the scheme the visitor used, not the
+// LB entry point's https.
+func lbEntryPointArgs() []string {
+	return []string{
+		"--entrypoints." + EntryPointLB + ".forwardedHeaders.insecure=true",
+		"--entrypoints." + EntryPointLB + ".forwardedHeaders.notAppendXForwardedFor=true",
+	}
 }
 
 // Spec is the container the config asks for. Pure, for tests.
@@ -197,6 +224,10 @@ type TraefikState struct {
 	// matched the config, for example "ACME contact email changed". Empty
 	// when it kept the container or created a missing one.
 	Recreated string
+	// IPv6Problem says why Traefik is not on IPv6Network (visitors over
+	// IPv6 still arrive from the edge gateway). Not an error: IPv4 and
+	// routing work without it.
+	IPv6Problem string
 }
 
 // Ensure creates the edge network and the Traefik container when missing,
@@ -223,6 +254,12 @@ func (t *Traefik) Ensure(ctx context.Context) (TraefikState, error) {
 		if existing.Labels[docker.LabelManaged] != "true" {
 			return TraefikState{}, fmt.Errorf("a container named %s exists and is not managed by %s", c.Name, brand.DisplayName)
 		}
+		// A new image is pulled while the old Traefik still serves: the
+		// sites are down only from the removal to the new one's start
+		// (about half a second in the test VM).
+		if err := t.Docker.EnsureImage(ctx, spec.Image); err != nil {
+			return TraefikState{}, err
+		}
 		if err := t.Docker.RemoveContainer(ctx, existing.ID); err != nil {
 			return TraefikState{}, err
 		}
@@ -248,7 +285,38 @@ func (t *Traefik) Ensure(ctx context.Context) (TraefikState, error) {
 	if err != nil {
 		return TraefikState{}, err
 	}
-	return TraefikState{ContainerID: info.ID, IP: info.IPs[c.Network], Gateway: netInfo.Gateway, Recreated: recreated}, nil
+	return TraefikState{ContainerID: info.ID, IP: info.IPs[c.Network], Gateway: netInfo.Gateway, Recreated: recreated,
+		IPv6Problem: t.joinIPv6(ctx, info)}, nil
+}
+
+// DualStackDocker is implemented by a Docker that can make the network
+// for visitors over IPv6 (MobyDocker).
+type DualStackDocker interface {
+	// EnsureIPv6Network creates an IPv6-only bridge network when missing.
+	EnsureIPv6Network(ctx context.Context, name string, labels map[string]string) error
+}
+
+// joinIPv6 connects the running Traefik to IPv6Network (made when
+// missing) and returns why it could not, "" when it is on it. After the
+// start, not before: a network Docker cannot find at start would keep the
+// container from starting, and Docker moves the IPv6 port mappings to the
+// new network at once. IPv4 stays on Network: IPv6Network has no IPv4.
+func (t *Traefik) joinIPv6(ctx context.Context, info ContainerInfo) string {
+	c := t.Config
+	if c.IPv6Network == "" || slices.Contains(info.Networks, c.IPv6Network) {
+		return ""
+	}
+	dual, ok := t.Docker.(DualStackDocker)
+	if !ok {
+		return "this Docker client cannot create IPv6 networks"
+	}
+	if err := dual.EnsureIPv6Network(ctx, c.IPv6Network, map[string]string{docker.LabelManaged: "true", docker.LabelRole: "edge"}); err != nil {
+		return err.Error()
+	}
+	if err := t.Docker.ConnectNetwork(ctx, c.IPv6Network, c.Name); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // recreateReason says what differs between a container and the spec that
