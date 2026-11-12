@@ -188,6 +188,42 @@ containers that kept the old servers it names them: build workers as
 above, apps with the panel's Restart (in place, no deploy), others with
 `docker restart`. The check never changes daemon.json or restarts Docker.
 
+Stale build workers heal themselves (since 0.2.14): a build worker is the
+agent's own container and a restart keeps its build cache (the builder's
+state volume), so the agent restarts one without a usable server itself,
+judged by this check's own code (`nodecheck.WorkerDNS`, the worker's
+resolv.conf read as above, listed by name; the test container runs only
+for a worker without one). It restarts only when the test container gets a
+usable server (a restarted worker gets the same), never while one gets
+none, Docker refuses it or no test container could run, never a builder a
+build of this agent runs on (`build.Service` counts the builds per
+builder), and only builders of ours in the builds' DOCKER_CONFIG (`docker
+buildx stop <builder>`, then `docker buildx inspect --bootstrap <builder>`,
+which starts the same container again and waits for BuildKit). A restart
+after which the worker still has no server is not repeated for that
+builder for 10 minutes. Two places do it: before a build uses an existing
+builder (`build.Options.WorkerDNS`), with one line in the build log, "-->
+The build worker had no DNS server it could use (it started while Docker's
+DNS setting was lost or broken); restarted it, which keeps the build
+cache" (or that restarting it did not help, or failed with its error),
+and in the agent's run of this check (`Env.RestartWorkers` =
+`build.Service.RestartStaleWorkers`; nil in `seylo health` and
+troubleshoot, which keep the hint): the check reads our containers again
+afterwards and appends "restarted the build worker <container>, which had
+no DNS server it could use, from before: it now has the servers new
+containers get, and keeps its build cache" to its detail (plus, when a
+reload on Docker 29.0 to 29.2 explained it, that this Docker loses its
+"dns" setting when reloaded, so restart Docker instead), so the result
+passes when nothing else is wrong; the next check passes as before. A
+worker it could not restart keeps the fail and the hint, which in the
+agent's run adds that the agent restarts such a worker by itself once
+Docker gives new containers servers and no build runs on it (before the
+next build there, and at the next check). VM test: build's
+`TestStaleWorkerRestartedBeforeTheBuild` (a real worker with il-ra's
+resolv.conf written into it, a lookup in it failing, then the next build
+restarting the same container with the cache kept and lookups working, and
+the agent's check doing the same).
+
 The reload case: on Docker 29.0 to 29.2, when the test container's
 servers come from the setting and are all `invalid IP`, and the setting
 read now has as many entries, all usable addresses, the detail says the
@@ -1139,7 +1175,11 @@ local API, join and resume. The areas:
   removed on the first build or cache sweep. Pinned Railpack/Nixpacks
   binaries live in `<datadir>/tools`. A builder's container
   (`buildx_buildkit_<builder>0`) runs on Docker's default bridge, so it
-  gets the DNS servers Docker gives every container. A build that failed
+  gets the DNS servers Docker gives every container, and keeps the ones it
+  started with: since 0.2.14 a build first restarts an existing builder's
+  worker that has none it can use while new containers get some (see
+  "Stale build workers heal themselves" under the Container DNS check),
+  never one another build runs on. A build that failed
   with a name lookup error in its output (BuildKit's "lookup <name> on
   <server>:53", "dial tcp: lookup", "no such host", and the resolver
   messages of RUN steps: "Temporary failure in name resolution",

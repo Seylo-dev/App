@@ -21,7 +21,9 @@
 // at a quarter of the machine (2-8 cores, 4-16 GB) under seylo.slice, and
 // waits in a FIFO queue sized by NodeSettings.max_parallel_builds. Builds
 // are detached jobs: output is kept for re-attaching watchers, the final
-// result is queued in the durable outbox, and CancelBuild stops one. Local
+// result is queued in the durable outbox, and CancelBuild stops one. A
+// worker that lost its DNS servers (WorkerDNS) is restarted before a build
+// uses it, never while another build does. Local
 // images beyond keep_images per service are removed after each build and
 // BuildKit cache unused for a week is pruned.
 //
@@ -32,4 +34,6 @@
 //
 //   - Builder (Service): the RPC handlers for Build, CancelBuild and
 //     UploadBuildContext call it.
+//   - Service.RestartStaleWorkers: the node's Container DNS check
+//     (nodecheck.Env.RestartWorkers) restarts stale workers through it.
 package build

@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,6 +85,13 @@ import (
 // too, so the fix hint says how and leaves it to the person. On Docker
 // 29.0 to 29.2 with a "dns" setting it never suggests a reload without
 // the restart right after it.
+//
+// Build workers are the agent's own, and a restart keeps their cache: in
+// the agent's run (Env.RestartWorkers) the check restarts one that has no
+// usable server while the test container gets one, when no build runs on
+// it, and says so. Before each build the build service does the same with
+// this code (WorkerDNS). While new containers get no server either,
+// neither restarts anything.
 
 // containerDNSTitle is the check's title. The build log names it after a
 // failed name lookup (build.DNSHint).
@@ -759,6 +768,16 @@ func (e *Env) probeDNS(ctx context.Context) dnsProbe {
 	return dnsProbe{Image: image, RC: &rc}
 }
 
+// gives: the test container got a DNS server it can use, so a container
+// started now (a restarted build worker too) gets one.
+func (p dnsProbe) gives() bool {
+	if p.RC == nil {
+		return false
+	}
+	works, _ := p.RC.lookupsWork()
+	return works
+}
+
 // removeLeftoverProbes removes test containers earlier runs left behind
 // (docker.LabelDNSCheck), any state, once they are older than any run.
 func (e *Env) removeLeftoverProbes(ctx context.Context) {
@@ -814,12 +833,14 @@ func (c ownContainer) stale() bool {
 // Docker mounts into each (under info's DockerRootDir), so nothing runs in
 // them: the build workers and every seylo.managed container with a network
 // of its own (not host, none or another container's, whose file is not
-// Docker's).
-func (e *Env) ownContainers(ctx context.Context, info *DockerInfo) []ownContainer {
+// Docker's). filters narrow Docker's list further (a name).
+func (e *Env) ownContainers(ctx context.Context, info *DockerInfo, filters map[string][]string) []ownContainer {
 	if info == nil || info.DockerRootDir == "" {
 		return nil
 	}
-	list, err := e.Docker.Containers(ctx, map[string][]string{"status": {"running"}})
+	query := map[string][]string{"status": {"running"}}
+	maps.Copy(query, filters)
+	list, err := e.Docker.Containers(ctx, query)
 	if err != nil {
 		return nil
 	}
@@ -840,7 +861,8 @@ func (e *Env) ownContainers(ctx context.Context, info *DockerInfo) []ownContaine
 		}
 		oc := ownContainer{Name: name, RC: parseResolvConf(string(data))}
 		if worker {
-			// Builder <name> runs in container buildx_buildkit_<name>0.
+			// Builder <name> runs in container buildx_buildkit_<name>0
+			// (build.WorkerContainer).
 			oc.Builder = strings.TrimRight(strings.TrimPrefix(name, "buildx_buildkit_"), "0123456789")
 		} else {
 			oc.Service = docker.IsServiceInstance(c.Labels)
@@ -849,6 +871,46 @@ func (e *Env) ownContainers(ctx context.Context, info *DockerInfo) []ownContaine
 	}
 	slices.SortFunc(out, func(a, b ownContainer) int { return strings.Compare(a.Name, b.Name) })
 	return out
+}
+
+// WorkerDNS judges a build worker's DNS servers with this check's code,
+// for the build service (build.Options.WorkerDNS), which restarts a stale
+// one before a build uses it.
+type WorkerDNS struct{ env *Env }
+
+var _ build.WorkerDNS = (*WorkerDNS)(nil)
+
+// NewWorkerDNS reads Docker the way the checks do (env's Docker, and its
+// DataDir for the builds' DOCKER_CONFIG the test container runs with).
+func NewWorkerDNS(env Env) *WorkerDNS {
+	env.defaults()
+	return &WorkerDNS{env: &env}
+}
+
+// Worker implements build.WorkerDNS: builder's running worker without a
+// usable server (its resolv.conf, as the check reads ours) is stale when
+// the check's test container gets one, and Docker gives none when the test
+// container does not either or Docker refuses it. The test container runs
+// only for a worker without a server.
+func (w *WorkerDNS) Worker(ctx context.Context, builder string) build.WorkerDNSState {
+	e := w.env
+	info, err := e.Docker.Info(ctx)
+	if err != nil {
+		return build.WorkerDNSOK
+	}
+	name := build.WorkerContainer(builder)
+	list := e.ownContainers(ctx, info, map[string][]string{"name": {"^/" + regexp.QuoteMeta(name) + "$"}})
+	if i := slices.IndexFunc(list, func(c ownContainer) bool { return c.Name == name }); i < 0 || !list[i].stale() {
+		return build.WorkerDNSOK
+	}
+	switch p := e.probeDNS(ctx); {
+	case p.gives():
+		return build.WorkerDNSStale
+	case p.RC != nil || p.Refused != "":
+		return build.WorkerDNSNoServers
+	}
+	// No test container ran: whether a restart helps is not known.
+	return build.WorkerDNSOK
 }
 
 // dnsFindings is everything the check read.
@@ -865,6 +927,14 @@ type dnsFindings struct {
 	Wings   bool
 	// BuildsConfig is the builds' DOCKER_CONFIG, where the builders are.
 	BuildsConfig string
+	// Heals: the agent restarts our stale build workers itself
+	// (Env.RestartWorkers is set).
+	Heals bool
+	// Restarted are the build workers the check restarted that have usable
+	// servers now; RestartedReload: a reload on this Docker explained what
+	// they had (staleReloadLost before the restart).
+	Restarted       []string
+	RestartedReload bool
 }
 
 func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
@@ -875,15 +945,47 @@ func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
 	f := dnsFindings{
 		Config:       e.daemonDNS(ctx),
 		Probe:        e.probeDNS(ctx),
-		Containers:   e.ownContainers(ctx, info),
+		Containers:   e.ownContainers(ctx, info, nil),
 		Wings:        e.wingsInfo(ctx) != nil,
 		BuildsConfig: e.layout().BuildsDockerConfig(),
+		Heals:        e.RestartWorkers != nil,
 	}
 	if info != nil {
 		f.LiveRestore = &info.LiveRestoreEnabled
 		f.Version = info.ServerVersion
 	}
+	e.restartStaleWorkers(ctx, info, &f)
 	return f.result()
+}
+
+// restartStaleWorkers restarts our build workers without a usable server
+// through Env.RestartWorkers when the test container got one (a restart
+// gives them that), then reads our containers again. While the test
+// container gets none, or none ran, nothing is restarted.
+func (e *Env) restartStaleWorkers(ctx context.Context, info *DockerInfo, f *dnsFindings) {
+	stale := f.workers(true)
+	if e.RestartWorkers == nil || len(stale) == 0 || !f.Probe.gives() {
+		return
+	}
+	builders := make([]string, len(stale))
+	for i, w := range stale {
+		builders[i] = w.Builder
+	}
+	restarted := e.RestartWorkers(ctx, builders)
+	if len(restarted) == 0 {
+		return
+	}
+	reload := f.staleReloadLost()
+	f.Containers = e.ownContainers(ctx, info, nil)
+	for _, w := range stale {
+		if !slices.Contains(restarted, w.Builder) {
+			continue
+		}
+		if i := slices.IndexFunc(f.Containers, func(c ownContainer) bool { return c.Name == w.Name }); i < 0 || !f.Containers[i].stale() {
+			f.Restarted = append(f.Restarted, w.Name)
+		}
+	}
+	f.RestartedReload = reload && len(f.Restarted) > 0
 }
 
 // reloadRisk: there is a "dns" setting and a reload on this Docker
@@ -966,7 +1068,23 @@ func (f dnsFindings) staleText() string {
 	return strings.Join(parts, ", and ")
 }
 
+// result is the check's result, with the build workers the check
+// restarted at the end of the detail.
 func (f dnsFindings) result() *agentv1.NodeCheckResult {
+	r := f.judge()
+	if n := len(f.Restarted); n > 0 {
+		note := fmt.Sprintf("restarted %s %s, which had no DNS server %s could use, from before: %s now %s the servers new containers get, and %s %s build cache",
+			plural(n, "the build worker", "the build workers"), strings.Join(f.Restarted, ", "), plural(n, "it", "they"),
+			plural(n, "it", "they"), plural(n, "has", "have"), plural(n, "keeps", "keep"), plural(n, "its", "their"))
+		if f.RestartedReload {
+			note += "; " + f.reloadText() + ", so restart Docker instead of reloading it"
+		}
+		r.Detail += "; " + note
+	}
+	return r
+}
+
+func (f dnsFindings) judge() *agentv1.NodeCheckResult {
 	cfg := f.Config
 	if rc := f.Probe.RC; rc != nil {
 		what := fmt.Sprintf("a test container on Docker's default bridge (%s) gets %s", f.Probe.Image, serversText(rc.Servers))
@@ -1124,7 +1242,18 @@ func (f dnsFindings) fix() string {
 	}
 	b.WriteString(plural(len(workers), "A build worker that still runs afterwards keeps the old servers: ", "Build workers that still run afterwards keep the old servers: "))
 	b.WriteString(f.workerCommands(workers))
+	b.WriteString(f.healsText())
 	return b.String()
+}
+
+// healsText says, in the agent's run, that the agent restarts a stale
+// build worker itself (the check and the build service, restartStaleWorkers
+// and build.WorkerDNS), "" elsewhere.
+func (f dnsFindings) healsText() string {
+	if !f.Heals {
+		return ""
+	}
+	return " The agent restarts a build worker like this by itself once Docker gives new containers servers they can use and no build runs on it: before the next build there, and at the next check."
 }
 
 // restartText says what `systemctl restart docker` stops, from Docker's
@@ -1181,7 +1310,7 @@ func (f dnsFindings) fileFix() string {
 func (f dnsFindings) staleFix() string {
 	var parts []string
 	if stale := f.workers(true); len(stale) > 0 {
-		parts = append(parts, "A build worker keeps the DNS servers it started with: "+f.workerCommands(stale))
+		parts = append(parts, "A build worker keeps the DNS servers it started with: "+f.workerCommands(stale)+f.healsText())
 	}
 	if stale := f.staleApps(); len(stale) > 0 {
 		var services, others []string

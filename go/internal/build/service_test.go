@@ -31,6 +31,8 @@ type fakeRunner struct {
 	// noBuildx plays a node without the buildx plugin: `buildx` fails and
 	// the legacy `docker build` refuses buildx's flags, like the real CLI.
 	noBuildx bool
+	// restarted is called for `buildx stop <builder>`.
+	restarted func(builder string)
 }
 
 func (f *fakeRunner) Run(ctx context.Context, c Cmd) error {
@@ -53,12 +55,16 @@ func (f *fakeRunner) Run(ctx context.Context, c Cmd) error {
 	case strings.HasPrefix(args, "build "):
 		fmt.Fprintln(out, "unknown flag: --progress")
 		return &ExitError{Cmd: "docker", Code: 125}
-	case strings.HasPrefix(args, "buildx inspect"):
+	case strings.HasPrefix(args, "buildx inspect"), strings.HasPrefix(args, "buildx stop"):
+		// buildx inspect [--bootstrap] <name>, buildx stop <name>
 		f.mu.Lock()
-		found := slices.Contains(f.builders, c.Args[2])
+		found := slices.Contains(f.builders, c.Args[len(c.Args)-1])
 		f.mu.Unlock()
 		if !found {
 			return &ExitError{Cmd: "docker", Code: 1}
+		}
+		if f.restarted != nil && strings.HasPrefix(args, "buildx stop") {
+			f.restarted(c.Args[len(c.Args)-1])
 		}
 	case strings.HasPrefix(args, "buildx ls --format json"):
 		if f.noJSON {

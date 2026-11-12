@@ -71,6 +71,11 @@ type Options struct {
 	// Git is what the node's config.yml says about git fetches
 	// (git_proxy_resolves).
 	Git GitNodeConfig
+	// WorkerDNS judges a project's build worker before a build uses it: one
+	// without a DNS server it can use, while new containers get one, is
+	// restarted first. Nil skips that (nodecheck.NewWorkerDNS in the
+	// agent).
+	WorkerDNS WorkerDNS
 }
 
 // Service is the node's Builder: a queue of detached build jobs.
@@ -120,7 +125,7 @@ func New(opts Options) *Service {
 		opts:    opts,
 		log:     opts.Logger,
 		cli:     cli,
-		buildx:  &buildxEnv{cli: cli, size: size},
+		buildx:  &buildxEnv{cli: cli, size: size, dns: opts.WorkerDNS},
 		queue:   NewQueue(opts.Parallel),
 		uploads: uploads{dir: filepath.Join(opts.Dir, "uploads")},
 		tools:   tools,
@@ -132,6 +137,23 @@ func New(opts Options) *Service {
 
 // SetParallel follows NodeSettings.max_parallel_builds (0 means 1).
 func (s *Service) SetParallel(n int) { s.queue.SetLimit(n) }
+
+// RestartStaleWorkers is for the Container DNS check: it restarts the
+// workers of these builders that have no DNS server they can use while a
+// new container gets one (Options.WorkerDNS judges each again), when no
+// build uses them. Only the agent's own builders (BuilderPrefix, in the
+// builds' DOCKER_CONFIG) are touched, and the build cache stays. It
+// returns the builders it restarted.
+func (s *Service) RestartStaleWorkers(ctx context.Context, builders []string) []string {
+	restarted, errs := s.buildx.restartStale(ctx, builders)
+	for _, name := range restarted {
+		s.log.Info("restarted a build worker without a DNS server it could use", "builder", name)
+	}
+	for name, err := range errs {
+		s.log.Warn("restarting a build worker without a DNS server it could use", "builder", name, "err", err)
+	}
+	return restarted
+}
 
 // Queue exposes running and waiting counts.
 func (s *Service) Queue() *Queue { return s.queue }
@@ -461,10 +483,11 @@ func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 	if err != nil {
 		return err
 	}
-	name, err := s.buildx.builder(ctx, j, buildScope(req))
+	name, release, err := s.buildx.builder(ctx, j, buildScope(req))
 	if err != nil {
 		return err
 	}
+	defer release()
 	spec := buildSpec{Builder: name, ContextDir: contextDir, Tag: req.GetImageReference(), Target: req.GetTargetStage(), Labels: imageLabels(req)}
 
 	inline := req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != ""

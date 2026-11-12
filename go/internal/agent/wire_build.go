@@ -13,6 +13,7 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/build"
 	"github.com/seylo-dev/app/go/internal/compose"
+	"github.com/seylo-dev/app/go/internal/nodecheck"
 	"github.com/seylo-dev/app/go/internal/registry"
 	"github.com/seylo-dev/app/go/internal/rpc"
 )
@@ -28,6 +29,9 @@ func provideBuild(d *Deps) error {
 		Logger:   d.Logger.With("component", "build"),
 		Parallel: 1,
 		Git:      build.GitNodeConfig{ProxyResolves: d.Config.GitProxyResolves, ConfigFile: d.Layout.ConfigFile()},
+		// A worker that lost its DNS servers is restarted before a build
+		// uses it, judged by the Container DNS check's code.
+		WorkerDNS: nodecheck.NewWorkerDNS(nodecheck.Env{DataDir: d.Layout.Root()}),
 	}
 	if d.Events != nil {
 		opts.Emit = d.Events.Emit

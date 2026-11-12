@@ -20,6 +20,7 @@ import (
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/build"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/nodecheck"
@@ -455,6 +456,11 @@ func nodeChecks(d *Deps) []nodecheck.Check {
 	// The portgate's IP:port listeners need allow rules in a host firewall.
 	if g, ok := d.Gate.(interface{ Listening() []uint32 }); ok {
 		env.GatePorts = g.Listening
+	}
+	// Container DNS restarts the agent's own build workers that lost their
+	// DNS servers, when no build runs on them.
+	if svc, ok := d.Builder.(*build.Service); ok {
+		env.RestartWorkers = svc.RestartStaleWorkers
 	}
 	return nodecheck.Default(env)
 }

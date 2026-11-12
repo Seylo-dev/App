@@ -52,7 +52,14 @@ type Env struct {
 	// sends builds or config.yml's can_build): builds need the docker
 	// buildx plugin. Nil: not checked.
 	CanBuild func() bool
-	Now      func() time.Time
+	// RestartWorkers restarts the build workers of these builders that have
+	// no DNS server they can use while new containers get one, when no
+	// build runs on them, and returns the ones it restarted
+	// (build.Service.RestartStaleWorkers). The Container DNS check calls it
+	// for the stale workers it finds. Nil: the check only says how (the
+	// CLI's and troubleshoot's runs).
+	RestartWorkers func(ctx context.Context, builders []string) []string
+	Now            func() time.Time
 }
 
 func (e *Env) defaults() {

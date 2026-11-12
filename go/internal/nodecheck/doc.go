@@ -18,7 +18,9 @@
 //	                  test container on the default bridge (an image
 //	                  already here, never pulled), our running containers'
 //	                  resolv.conf (build workers, apps), daemon.json's
-//	                  "dns" and the host dockerd's --dns
+//	                  "dns" and the host dockerd's --dns; in the agent's
+//	                  run it restarts our build workers that lost theirs
+//	                  (Env.RestartWorkers)
 //	network.firewall  ufw or firewalld allow 80 and 443
 //	time.sync         NTP state and skew against the panel's clock
 //	panel.reachable   GET <panel>/api/health and its latency
@@ -37,4 +39,7 @@
 //     `seylo troubleshoot` call Run(ctx, Default(env)).
 //   - DockerAPI / DockerSocket: a read-only Engine client (GET /info and
 //     /containers/json) that troubleshoot reuses.
+//   - WorkerDNS (NewWorkerDNS): the Container DNS check's reading of one
+//     build worker, which the build service (build.Options.WorkerDNS) asks
+//     before a build uses the worker.
 package nodecheck

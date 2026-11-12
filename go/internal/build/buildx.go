@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -124,11 +125,67 @@ func (d dockerCLI) stream(ctx context.Context, log io.Writer, env []string, args
 	return d.run.Run(ctx, c)
 }
 
+// WorkerContainer is the container buildx runs a docker-container
+// builder in: buildx_buildkit_<builder>0.
+func WorkerContainer(builder string) string { return "buildx_buildkit_" + builder + "0" }
+
+// WorkerDNS judges a build worker's DNS servers. The node check's
+// Container DNS code implements it (nodecheck.NewWorkerDNS), so a build and
+// the check read a worker the same way.
+type WorkerDNS interface {
+	// Worker reads builder's running container (WorkerContainer).
+	Worker(ctx context.Context, builder string) WorkerDNSState
+}
+
+// WorkerDNSState is what WorkerDNS found.
+type WorkerDNSState int
+
+const (
+	// WorkerDNSOK: the worker has a DNS server it can use, does not run, or
+	// nothing could be told.
+	WorkerDNSOK WorkerDNSState = iota
+	// WorkerDNSStale: the worker has no DNS server it can use while a new
+	// container on Docker's default bridge gets one. It started while
+	// Docker's "dns" setting was lost (a reload on Docker 29.0 to 29.2,
+	// moby#52060) or broken, and a container keeps the servers it started
+	// with: a restart gives it the ones new containers get.
+	WorkerDNSStale
+	// WorkerDNSNoServers: a new container gets no DNS server it can use
+	// either. Docker hands out none now, and a restart would not help.
+	WorkerDNSNoServers
+)
+
+// dnsRestartPause: a builder whose restart for its DNS servers did not
+// help (or failed) is not restarted for them again before this, so it
+// never turns into a loop.
+const dnsRestartPause = 10 * time.Minute
+
+// Build log lines of a DNS restart.
+const (
+	dnsRestartedLine    = "--> The build worker had no DNS server it could use (it started while Docker's DNS setting was lost or broken); restarted it, which keeps the build cache"
+	dnsNotHelpedLine    = "--> The build worker had no DNS server it could use, and restarting it did not help"
+	dnsRestartErrorLine = "--> The build worker has no DNS server it can use, and restarting it failed: %v"
+)
+
+// dnsRestart is what restartForDNS did.
+type dnsRestart int
+
+const (
+	dnsUntouched dnsRestart = iota
+	dnsRestarted
+	dnsNotHelped
+	dnsRestartFailed
+)
+
 // buildxEnv finds and creates the builders, one per project, and
-// remembers which exist and when each was last used.
+// remembers which exist, when each was last used and which builds use
+// each now.
 type buildxEnv struct {
 	cli  dockerCLI
 	size Sizing
+	// dns judges a worker's DNS servers before a build uses it; nil reads
+	// nothing.
+	dns WorkerDNS
 
 	mu      sync.Mutex
 	checked bool
@@ -136,6 +193,10 @@ type buildxEnv struct {
 	cleaned bool // builders of another size and the old shared one are gone
 	ready   map[string]bool
 	used    map[string]time.Time
+	// busy counts the builds that use each builder now; dnsRestarts is
+	// when a restart for its DNS servers last did not help.
+	busy        map[string]int
+	dnsRestarts map[string]time.Time
 }
 
 // ErrNoBuildx is the build failure on a node without docker buildx. Every
@@ -145,39 +206,127 @@ type buildxEnv struct {
 var ErrNoBuildx = &InvalidError{Msg: "docker buildx is not installed on this node, and builds need it. Install the docker-buildx-plugin package (Docker from get.docker.com has it) and build again."}
 
 // builder returns the builder name to build with for scope, creating it
-// on first use. Without buildx it fails with ErrNoBuildx.
-func (b *buildxEnv) builder(ctx context.Context, log io.Writer, scope string) (string, error) {
+// on first use, and marks it in use until release is called. An existing
+// builder that no build uses now and whose worker lost its DNS servers is
+// restarted first (restartForDNS). Without buildx it fails with
+// ErrNoBuildx.
+func (b *buildxEnv) builder(ctx context.Context, log io.Writer, scope string) (name string, release func(), err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err := b.check(ctx); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !b.ok {
 		// Checked again on the next build, so installing the plugin is
 		// enough.
 		b.checked = false
-		return "", ErrNoBuildx
+		return "", nil, ErrNoBuildx
 	}
-	name := b.size.BuilderName(scope)
+	name = b.size.BuilderName(scope)
 	b.used[name] = time.Now()
-	if b.ready[name] {
-		return name, nil
+	exists := b.ready[name]
+	if !exists {
+		if _, err := b.cli.out(ctx, "buildx", "inspect", name); err == nil {
+			b.ready[name], exists = true, true
+		}
 	}
-	if _, err := b.cli.out(ctx, "buildx", "inspect", name); err == nil {
+	if !exists {
+		fmt.Fprintf(log, "Creating the build worker for this project (%d cores, %d GB)\n", b.size.Cores, b.size.MemoryGB)
+		args := []string{"buildx", "create", "--name", name, "--driver", "docker-container"}
+		for _, o := range b.driverOpts() {
+			args = append(args, "--driver-opt", o)
+		}
+		args = append(args, "--bootstrap")
+		if err := b.cli.stream(ctx, log, nil, args...); err != nil {
+			return "", nil, fmt.Errorf("creating the build worker: %w", err)
+		}
 		b.ready[name] = true
-		return name, nil
+	} else {
+		// A new worker gets the servers Docker gives containers now.
+		switch r, err := b.restartForDNS(ctx, name); r {
+		case dnsRestarted:
+			fmt.Fprintln(log, dnsRestartedLine)
+		case dnsNotHelped:
+			fmt.Fprintln(log, dnsNotHelpedLine)
+		case dnsRestartFailed:
+			fmt.Fprintf(log, dnsRestartErrorLine+"\n", err)
+		}
 	}
-	fmt.Fprintf(log, "Creating the build worker for this project (%d cores, %d GB)\n", b.size.Cores, b.size.MemoryGB)
-	args := []string{"buildx", "create", "--name", name, "--driver", "docker-container"}
-	for _, o := range b.driverOpts() {
-		args = append(args, "--driver-opt", o)
+	b.initMaps()
+	b.busy[name]++
+	var once sync.Once
+	return name, func() {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.busy[name]--; b.busy[name] <= 0 {
+				delete(b.busy, name)
+			}
+		})
+	}, nil
+}
+
+func (b *buildxEnv) initMaps() {
+	if b.busy == nil {
+		b.busy, b.dnsRestarts = map[string]int{}, map[string]time.Time{}
 	}
-	args = append(args, "--bootstrap")
-	if err := b.cli.stream(ctx, log, nil, args...); err != nil {
-		return "", fmt.Errorf("creating the build worker: %w", err)
+}
+
+// restartForDNS restarts builder name's worker when it has no DNS server
+// it can use while a new container gets one (WorkerDNSStale), and no
+// build uses it: a container keeps the servers it started with, so one
+// that started while Docker's "dns" setting was lost (moby#52060) keeps
+// failing every lookup until it restarts. The build cache is in the
+// builder's state volume and stays. Only builders of ours, never within
+// dnsRestartPause of a restart that did not help, and never while Docker
+// gives new containers no servers either (b.mu is held).
+func (b *buildxEnv) restartForDNS(ctx context.Context, name string) (dnsRestart, error) {
+	b.initMaps()
+	if b.dns == nil || b.busy[name] > 0 || !strings.HasPrefix(name, BuilderPrefix+"-") {
+		return dnsUntouched, nil
 	}
-	b.ready[name] = true
-	return name, nil
+	if at, ok := b.dnsRestarts[name]; ok && time.Since(at) < dnsRestartPause {
+		return dnsUntouched, nil
+	}
+	if b.dns.Worker(ctx, name) != WorkerDNSStale {
+		return dnsUntouched, nil
+	}
+	b.dnsRestarts[name] = time.Now()
+	// buildx stops only a builder in our DOCKER_CONFIG, and the bootstrap
+	// starts the same container again and waits until BuildKit answers.
+	if _, err := b.cli.out(ctx, "buildx", "stop", name); err != nil {
+		return dnsRestartFailed, err
+	}
+	if _, err := b.cli.out(ctx, "buildx", "inspect", "--bootstrap", name); err != nil {
+		return dnsRestartFailed, err
+	}
+	if b.dns.Worker(ctx, name) == WorkerDNSStale {
+		return dnsNotHelped, nil
+	}
+	delete(b.dnsRestarts, name)
+	return dnsRestarted, nil
+}
+
+// restartStale restarts the workers of these builders that lost their DNS
+// servers (restartForDNS) and returns the builders it restarted.
+func (b *buildxEnv) restartStale(ctx context.Context, builders []string) (restarted []string, errs map[string]error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, name := range builders {
+		switch r, err := b.restartForDNS(ctx, name); r {
+		case dnsRestarted:
+			restarted = append(restarted, name)
+		case dnsNotHelped:
+			err = errors.New("restarting it did not help")
+			fallthrough
+		case dnsRestartFailed:
+			if errs == nil {
+				errs = map[string]error{}
+			}
+			errs[name] = err
+		}
+	}
+	return restarted, errs
 }
 
 // check finds out once whether buildx is installed and, when it is,
