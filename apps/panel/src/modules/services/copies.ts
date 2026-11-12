@@ -194,6 +194,16 @@ export function assertNoActiveCopy(db: PanelDb, serviceId: string, options: { an
 }
 
 /**
+ * What the delivery log says about a push to a clone whose data is still
+ * copied (deployments/queue.ts queuePushDeploy refuses it). The copy finds
+ * these deliveries when it is done and deploys the head of the branch
+ * (services/clone.ts settleHeldPushes).
+ */
+export function heldPushMessage(sourceName: string): string {
+  return `Its data is still being copied from ${sourceName}: this push deploys once the copy is done.`;
+}
+
+/**
  * Downloads of service exports and uploads of import data that move bytes
  * right now, in words ("1 export download and 2 import uploads"); null
  * when none. A panel restart (an update, a panel move) or an agent restart

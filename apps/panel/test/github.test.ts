@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac, generateKeyPairSync } from "node:crypto";
-import { deployments as deploymentOps, github, previews as previewOps, projects, services as serviceOps, webhooks } from "@seylo/ops";
+import {
+  deployments as deploymentOps,
+  github,
+  OpError,
+  previews as previewOps,
+  projects,
+  services as serviceOps,
+  webhooks,
+} from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import {
   deploymentLogs,
@@ -15,6 +23,7 @@ import {
 import { engineFor } from "../src/modules/deployments/engine";
 import { resolveBuild } from "../src/modules/deployments/source";
 import { pollBranches } from "../src/modules/github/poll";
+import { cloneDataJob } from "../src/modules/services/clone";
 import { loadService } from "../src/modules/services/rows";
 import { readSpec } from "../src/modules/services/spec";
 import { FakeFleet } from "./fake-fleet";
@@ -236,6 +245,106 @@ describe("GitHub webhooks", () => {
     expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, quiet)).all()).toHaveLength(0);
     const ignored = (await callOp(panel, webhooks.listDeliveries, { serviceId: quiet }, { cookie })).body.deliveries;
     expect(ignored[0]).toMatchObject({ outcome: "ignored", detail: "Deploy on push is off." });
+  });
+
+  describe("a push while a clone's data is copied", () => {
+    const deploysOf = (serviceId: string) => panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, serviceId)).all();
+    const deliveriesOf = async (serviceId: string) =>
+      (await callOp(panel, webhooks.listDeliveries, { serviceId }, { cookie })).body.deliveries as {
+        outcome: string;
+        detail: string;
+        deploymentId: string | null;
+      }[];
+    /** The source (a new one with a volume unless given), cloned with its data; the source keeps running. */
+    async function copying(name: string, source?: string) {
+      let id = source;
+      if (!id) {
+        id = await githubService();
+        const volumes = [{ name: "data", mountPath: "/data" }];
+        expect((await callOp(panel, serviceOps.setVolumes, { serviceId: id, volumes }, { cookie })).status).toBe(200);
+        fleet.volumes.set(nodeA, new Map([[`${id}/data`, new TextEncoder().encode("the bytes")]]));
+      }
+      const res = await callOp(
+        panel,
+        serviceOps.clone,
+        { serviceId: id, projectId, nodeId: nodeA, name, data: "copy", stopSource: false },
+        { cookie },
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.service.sourceConfig).toMatchObject({ type: "github", deployOnPush: true });
+      return { id, cloneId: res.body.service.id as string };
+    }
+    const held = "Its data is still being copied from web: this push deploys once the copy is done.";
+
+    test("is held back, then the clone deploys the head of its branch once the copy is done", async () => {
+      const { id, cloneId } = await copying("web-staging");
+      const sha = "7777777777777777777777777777777777777777";
+      heads.main = sha;
+      // The source deploys at once; the clone's push waits for its data.
+      expect((await post("push", push("main", sha))).body).toMatchObject({ ok: true, deployed: 1 });
+      expect(deploysOf(id)).toEqual([expect.objectContaining({ trigger: "push", commitSha: sha })]);
+      expect(deploysOf(cloneId)).toHaveLength(0);
+      expect(await deliveriesOf(cloneId)).toEqual([expect.objectContaining({ outcome: "failed", detail: held, deploymentId: null })]);
+
+      await panel.runner.runDue(panel.deps);
+      await fleet.settle();
+      expect((await callOp(panel, serviceOps.get, { serviceId: cloneId }, { cookie })).body.dataCopy).toMatchObject({ status: "done" });
+      const deploys = deploysOf(cloneId);
+      expect(deploys).toEqual([expect.objectContaining({ trigger: "push", branch: "main" })]);
+      // The build reads the head of the branch: the pushed commit.
+      expect(fleet.builds.find((b) => b.request.serviceId === cloneId)?.request).toMatchObject({
+        source: { source: { case: "git", value: { commit: sha } } },
+      });
+      expect(await deliveriesOf(cloneId)).toEqual([
+        expect.objectContaining({
+          outcome: "deployed",
+          detail: "Held back while the data was copied; deploying the head of main now.",
+          deploymentId: deploys[0]?.id,
+        }),
+      ]);
+      // A later run of the job finds nothing left to deploy.
+      const copyId = (await callOp(panel, serviceOps.get, { serviceId: cloneId }, { cookie })).body.dataCopy.id as string;
+      await cloneDataJob.run({ copyId }, { ...panel.deps, jobId: `clone-data:${copyId}`, attempt: 1 });
+      expect(deploysOf(cloneId)).toHaveLength(1);
+    });
+
+    test("a copy that failed deploys nothing, and neither does a clone whose Deploy on push was turned off meanwhile", async () => {
+      fleet.volumeScript = () => ({ fail: new OpError("UNAVAILABLE", "The disk is gone.") });
+      const failed = await copying("web-failed");
+      // The branch head is the pushed commit, so polling finds no other push.
+      heads.main = "8888888888888888888888888888888888888888";
+      expect((await post("push", push("main", heads.main))).body).toMatchObject({ deployed: 1 });
+      await panel.runner.runDue(panel.deps);
+      await fleet.settle();
+      expect((await callOp(panel, serviceOps.get, { serviceId: failed.cloneId }, { cookie })).body.dataCopy).toMatchObject({
+        status: "failed",
+      });
+      expect(deploysOf(failed.cloneId)).toHaveLength(0);
+      expect(await deliveriesOf(failed.cloneId)).toEqual([
+        expect.objectContaining({ outcome: "failed", detail: "The data copy from web failed, so this push was not deployed." }),
+      ]);
+
+      fleet.volumeScript = () => ({});
+      const off = await copying("web-off", failed.id);
+      // The clone whose copy failed deploys on push again, like any service.
+      heads.main = "9999999999999999999999999999999999999999";
+      expect((await post("push", push("main", heads.main))).body).toMatchObject({ deployed: 2 });
+      expect(deploysOf(failed.cloneId)).toEqual([expect.objectContaining({ trigger: "push" })]);
+      expect(await deliveriesOf(off.cloneId)).toEqual([expect.objectContaining({ outcome: "failed", detail: held })]);
+      const spec = readSpec(loadService(panel.deps.db, off.cloneId).spec);
+      panel.deps.db
+        .update(services)
+        .set({ spec: { ...spec, source: { ...spec.source, deployOnPush: false } } })
+        .where(eq(services.id, off.cloneId))
+        .run();
+      await panel.runner.runDue(panel.deps);
+      await fleet.settle();
+      expect((await callOp(panel, serviceOps.get, { serviceId: off.cloneId }, { cookie })).body.dataCopy).toMatchObject({ status: "done" });
+      expect(deploysOf(off.cloneId)).toHaveLength(0);
+      expect(await deliveriesOf(off.cloneId)).toEqual([
+        expect.objectContaining({ outcome: "ignored", detail: "Deploy on push was turned off while the data was copied." }),
+      ]);
+    });
   });
 
   test("pull requests open, update and close a preview service with the same env", async () => {

@@ -3475,7 +3475,19 @@ volume ExportVolume -> ImportVolume through the panel (`relayVolume` with
 While a copy runs, `queueDeploy`, `services.start` and `boxes.open` refuse
 the clone and a source it stopped, and `services.move` (to another node)
 refuses the clone and any source it reads (CONFLICT `reason: copying`,
-`copies.ts`); a second copy from the same source is refused. Deleting
+`copies.ts`); a second copy from the same source is refused. A push to
+the clone's branch meanwhile (a webhook, the GitHub App or polling, all
+through `queuePushDeploy`) is held back: its delivery is `failed` with
+"Its data is still being copied from <source>: this push deploys once
+the copy is done." (`copies.ts` `heldPushMessage`). When the copy ends,
+the job settles those deliveries (`clone.ts` `settleHeldPushes`): a copy
+that is `done` queues one push deploy of the head of the clone's branch
+(no commit: the build reads the head, so the newest push wins) and marks
+them `deployed` with it, while a copy that failed deploys nothing into
+its half-copied volumes ("The data copy from <source> failed, so this
+push was not deployed.") and a clone whose Deploy on push was turned off
+meanwhile deploys nothing either (`ignored`). A push to a source the
+copy stopped is still refused, as before. Deleting
 the clone or the source ends a copy that has not ended (`failed`, "The
 clone was deleted." or "The source service was deleted.", in the delete's
 transaction, `services/delete.ts`) and starts a source the copy stopped; a

@@ -22,7 +22,9 @@
 // databases), pipe each volume ExportVolume -> ImportVolume through the
 // panel (move.ts relayVolume), start the source again. The clone cannot
 // deploy, and a stopped source cannot start, until the copy ended
-// (copies.ts).
+// (copies.ts). A push the clone's Deploy on push gets meanwhile is held
+// back and deploys the head of its branch once the copy is done
+// (settleHeldPushes).
 
 import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,6 +47,7 @@ import {
   services,
   sourceUploads,
   volumes,
+  webhookDeliveries,
 } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
@@ -52,6 +55,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { assertEngineRunsOn } from "../databases/capability";
 import { generatePassword } from "../databases/engines";
 import { findDatabase, retiredExposedPasswordSecret } from "../databases/info";
+import { queuePushDeploy } from "../deployments/queue";
 import { appPort } from "../domains/lookup";
 import { primaryDomain } from "../domains/rows";
 import { buildEnvGraph } from "../env/graph";
@@ -62,7 +66,7 @@ import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { accountForSource } from "../github/account";
 import { ensureRepoHook } from "../github/repo-hooks";
 import { ensureHook } from "../gitProviders/hooks";
-import { activeMove, assertNoTransfer, copyRunning, toDataCopy } from "./copies";
+import { activeMove, assertNoTransfer, copyRunning, heldPushMessage, toDataCopy } from "./copies";
 import { withoutCredentials } from "./git-url";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
 import { assertNode, writeSpec } from "./insert";
@@ -523,6 +527,58 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   };
 });
 
+/**
+ * The pushes queuePushDeploy held back from the clone while its data was copied (failed deliveries
+ * saying heldPushMessage), once the copy ended: a copy that is done deploys the head of the clone's
+ * branch, as Deploy on push would have; one that failed deploys nothing into its half-copied
+ * volumes, and neither does a clone whose Deploy on push was turned off meanwhile. The deliveries
+ * say which. A failure here never fails the copy.
+ */
+function settleHeldPushes(deps: Deps, copyId: string): void {
+  try {
+    const copy = deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, copyId)).get();
+    if (!copy?.serviceId || copyRunning.some((s) => s === copy.status)) return;
+    const cloneId = copy.serviceId;
+    const held = deps.db
+      .select({ id: webhookDeliveries.id })
+      .from(webhookDeliveries)
+      .where(
+        and(
+          eq(webhookDeliveries.serviceId, cloneId),
+          eq(webhookDeliveries.outcome, "failed"),
+          eq(webhookDeliveries.detail, heldPushMessage(copy.sourceName)),
+        ),
+      )
+      .all()
+      .map((d) => d.id);
+    if (held.length === 0) return;
+    const settle = (outcome: "deployed" | "ignored" | "failed", detail: string, deploymentId: string | null = null) => {
+      deps.db.update(webhookDeliveries).set({ outcome, detail, deploymentId }).where(inArray(webhookDeliveries.id, held)).run();
+    };
+    if (copy.status !== "done") {
+      settle("failed", `The data copy from ${copy.sourceName} failed, so this push was not deployed.`);
+      return;
+    }
+    const svc = deps.db.select().from(services).where(eq(services.id, cloneId)).get();
+    const source = svc ? readSpec(svc.spec).source : null;
+    if (!source || !isRepoSource(source) || !source.deployOnPush) {
+      settle("ignored", "Deploy on push was turned off while the data was copied.");
+      return;
+    }
+    const queued = queuePushDeploy(deps, {
+      serviceId: cloneId,
+      actor: null,
+      branch: source.branch,
+      notes: [`A push arrived while the data was copied from ${copy.sourceName}: this deploys the head of ${source.branch}.`],
+    });
+    if (queued.kind === "queued")
+      settle("deployed", `Held back while the data was copied; deploying the head of ${source.branch} now.`, queued.deployment.id);
+    else settle("ignored", `A deploy was already queued; it builds the head of ${source.branch}.`, queued.deployment.id);
+  } catch (error) {
+    deps.logger.warn({ err: error, copyId }, "deploying the pushes held back by a clone's data copy failed");
+  }
+}
+
 /** Copies the source's volumes into the clone; resumes after a panel restart (the job runs again). */
 export const cloneDataJob = defineJob<{ copyId: string }>({
   type: cloneDataJobType,
@@ -532,7 +588,8 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
   async run(payload, deps) {
     const load = () => deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, payload.copyId)).get();
     const row = load();
-    if (!row || (row.status !== "queued" && row.status !== "copying")) return;
+    // Ended already (deleting the source ends it): only its held pushes are left to settle.
+    if (!row || (row.status !== "queued" && row.status !== "copying")) return settleHeldPushes(deps, payload.copyId);
     const clone = row.serviceId ? deps.db.select().from(services).where(eq(services.id, row.serviceId)).get() : undefined;
     const source = row.sourceServiceId ? deps.db.select().from(services).where(eq(services.id, row.sourceServiceId)).get() : undefined;
     // Only while the copy has not ended: deleting the clone or the source
@@ -561,7 +618,7 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
     }
     if (!source) {
       save({ status: "failed", error: "The source service was deleted.", finishedAt: new Date() });
-      return;
+      return settleHeldPushes(deps, row.id);
     }
     save({ status: "copying", startedAt: row.startedAt ?? new Date(), error: null });
     try {
@@ -588,6 +645,7 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
       save({ status: "failed", error: error instanceof Error ? error.message : String(error), finishedAt: new Date() });
     } finally {
       startSource();
+      settleHeldPushes(deps, row.id);
     }
   },
 });

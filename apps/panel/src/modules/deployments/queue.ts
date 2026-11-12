@@ -7,7 +7,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { type DeploymentTrigger, deployments, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { panelServiceId } from "../nodes/panel-service";
-import { assertNoActiveCopy } from "../services/copies";
+import { activeCopy, assertNoActiveCopy, heldPushMessage } from "../services/copies";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
 import { engineFor, nextGeneration } from "./engine";
@@ -146,6 +146,10 @@ export type PushDeploy =
  * dropped because a deploy is running.
  */
 export function queuePushDeploy(deps: Deps, input: Omit<QueueDeployInput, "trigger"> & { branch: string }): PushDeploy {
+  // A clone still receiving its data deploys nothing yet; the delivery says so, and the copy
+  // deploys the head of the branch once it is done (services/clone.ts settleHeldPushes).
+  const copy = activeCopy(deps.db, input.serviceId);
+  if (copy?.role === "clone") throw new OpError("CONFLICT", heldPushMessage(copy.row.sourceName), { reason: "copying" });
   const sha = input.commitSha ?? null;
   const waiting = deps.db
     .select()
