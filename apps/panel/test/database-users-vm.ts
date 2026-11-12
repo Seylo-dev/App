@@ -187,10 +187,7 @@ export function vmScenario(engine: VmEngine): VmScenario {
     final = { ...after, user: v.newMain };
   } else if (engine === "mysql" || engine === "mongo") {
     steps.push(
-      step(
-        "switchPrepare",
-        switchPrepareExec(engine, after, { name: v.newMain, password: v.newMainPassword, existing: false }, options),
-      ),
+      step("switchPrepare", switchPrepareExec(engine, after, { name: v.newMain, password: v.newMainPassword, existing: false }, options)),
     );
     steps.push(step("switchProof", proofExec(engine, boss)));
     steps.push(step("switchProofWrong", proofExec(engine, { ...boss, password: v.initial })));
