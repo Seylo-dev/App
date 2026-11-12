@@ -538,7 +538,24 @@ Summary; the full rules are in `proto/README.md` and the comments of
   with jitter (half to full delay); 5 minutes after a rejection that needs
   a person (bad token, unknown node, bad signature, disabled, too old), a
   pin mismatch or another panel (see "Panel identity"); ALREADY_CONNECTED
-  retries normally. AGENT_TOO_OLD also
+  retries normally. A pin mismatch at `panel_url` with a fallback to try
+  next (see "Moving to the panel's new address") waits 1 s instead.
+  Since 0.2.14 the agent keeps what it learned about its panel in
+  `state/panel.json` (`agent/panel_memory.go`, 0600, written only by the
+  agent; missing or unreadable starts empty): the panel's name for the
+  node (`HelloAccepted.node_name`), failed moves that wait for their retry
+  because of an inspected certificate, and the last connect error since
+  the last accepted session, which the next ClientHello carries as
+  `away` (AwayReport: `since`, `last_error` as one printable line of at
+  most 500 runes, `last_error_at`, `failed_attempts`; written when the
+  error changes and at most once a minute otherwise, cleared once a
+  session is accepted; ALREADY_CONNECTED and the dials of a move do not
+  count). `seylo status` (`localapi.NodeStatus.NodeName`, so every CLI
+  line that names the node) shows `NodeSettings.node_name` from the
+  stored desired state, else the stored HelloAccepted name, else
+  config.yml's `node_name`, else the hostname: before the first connect
+  to a 0.2.14 panel it is the hostname, as before, and a node renamed in
+  the panel no longer prints its hostname as its name. AGENT_TOO_OLD also
   makes the agent install the latest signed release itself
   (`update.AgentUpdater.UpdateToLatest`: `<release base>/latest/download/
   manifest.json(.minisig)`, at least `min_agent_version`, at most once an
@@ -624,7 +641,17 @@ Summary; the full rules are in `proto/README.md` and the comments of
   fallback is dialed once `panel_url` failed for 5 minutes (then every 5
   minutes), so a node whose panel domain was removed or changed finds the
   panel again; moving from one domain to the next keeps that pinned
-  address as the fallback. Connected through a fallback, the agent moves
+  address as the fallback. Since 0.2.14 a connect to `panel_url` that
+  fails on a certificate the node will never trust (an issuer it does not
+  trust, as TLS inspection re-signs the domain's certificate, or a key
+  that is not the pinned one: `inspectedCertificate`) dials a standing
+  fallback on the next attempt instead of after 5 minutes; timeouts,
+  refused connections and other certificate errors (expired, another
+  name) keep the 5 minutes, so a panel restart does not flip the node's
+  address. When the panel then names that same address from the
+  fallback's session, the agent records it as a failed move with that
+  error (alert, retry wait, the fallback back as `panel_url`) without
+  dialing it again, which would drop the session just accepted. Connected through a fallback, the agent moves
   to the `panel_url` the panel names, or, when it names none, makes an
   `https://` fallback `panel_url` again (a plain `http://` one, which only
   a hand-written config.yml has, never is and never moves the node: that
@@ -632,8 +659,18 @@ Summary; the full rules are in `proto/README.md` and the comments of
   old address (a move that started from an `https://` fallback puts it
   back as `panel_url`), raises one `PANEL_MOVE_FAILED` node alert per
   address with the reason, and is retried after an hour or an agent
-  restart; every successful move sends the resolve. An agent that dials
-  loopback (the panel's node) never moves. The node checks and troubleshoot reports follow the current
+  restart; every successful move sends the resolve. A move that failed on
+  an inspected certificate (above) sets `NodeAlert.inspected_certificate`
+  when it started from a pinned `https://` address, and since 0.2.14 its
+  wait (24 h from a pinned address, else 1 h) is kept in
+  `state/panel.json`: restarts and updates do not try it again (before,
+  each one dropped the first accepted session for the move and raised the
+  alert again). Every wait goes once an authenticated session's
+  HelloAccepted names no address, or another one (then that one is tried
+  at once), and with every successful move; `seylo set-panel <url>` moves
+  the node by hand. An agent that dials loopback (the panel's node) never
+  moves, and the panel names no address to a node whose Panel address is
+  "stay" (`HelloAccepted.panel_address`, see the panel's handshake). The node checks and troubleshoot reports follow the current
   address (`Deps.PanelAddress`). Go reads the system trust store once per
   process: a CA added to it later needs an agent restart.
 - Pointing a joined node at another address by hand (`seylo set-panel
@@ -644,7 +681,8 @@ Summary; the full rules are in `proto/README.md` and the comments of
   recorded panel identity). Root only (`run it as root`). It refuses a
   node without `node_id` (join again) and plain `http://` to another host
   without `--insecure` (join's rule; `--pin` needs `https://`); the same
-  address and pin as `panel_url` changes nothing. Before writing anything it dials the address (the pin, else the
+  address and pin as `panel_url` changes nothing but, since 0.2.14,
+  `stay_on_address` (below; then it restarts the agent). Before writing anything it dials the address (the pin, else the
   system roots), resumes as the node with `agent.key` (a ClientHello
   without facts: the CLI has only their machine part, and the panel's
   `decideHello` leaves the stored facts and public addresses alone for a
@@ -667,9 +705,16 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `panel_key`, `panel_proves`, `staged` and every other key stay), restarts
   `seylo.service` and prints the restarted agent's `Panel:` line (and
   `Error:`) once it connected or was refused, or after 30 s, with how to
-  go back. At a pinned IP the agent then tries the domain the panel names
-  and keeps the pinned address when its certificate is refused
-  (`untrustedMoveRetryAfter`, under `pinnedCommand`). Add node prints the
+  go back. Since 0.2.14 it also writes `stay_on_address: true`: the agent
+  sends `ClientHello.stay_on_address` on every connect until a
+  HelloAccepted carries `panel_address` (the panel read it), then drops
+  the key, and the panel records Panel address "stay" for the node (by
+  "node"), so it no longer names its domain to it. A join with `--pin` at
+  an IP address (not loopback) writes the key too; a re-join resets it
+  (`TestJoinDecidesEveryConfigKey`: Join replaces it). Before 0.2.14, at a
+  pinned IP the agent tried the domain the panel names and kept the pinned
+  address when its certificate was refused (`untrustedMoveRetryAfter`,
+  under `pinnedCommand`). Add node prints the
   command (`setPanelCommand`, under `pinnedCommand`), and the dial error
   for an untrusted issuer names it (`conn.certificateHint`).
 - Deadlines: `Call.timeout` / `Open.timeout` (relative) win over the
@@ -3358,7 +3403,45 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   (`requestOrigin` of the upgrade: https on the agents' TLS port or from the
   trusted Traefik, http on loopback); `nodes.get` returns it as
   `panelAddress` (null while offline) for the node sheet. A failed move (`NODE_ALERT_KIND_PANEL_MOVE_FAILED`) raises one
-  `node_health_check_failed` alert per streak, resolved by the agent. Test
+  `node_health_check_failed` alert per streak, resolved by the agent; one
+  with `inspected_certificate` gets the key
+  `node-alert:<node>:9:inspected:<ms>`. Panel address (since 0.2.14,
+  `agent-hub/panel-address.ts`, setting `nodePanelAddress` by node id):
+  "follow" (the default) gets the domain as above, "stay" gets no
+  `panel_url` (`agentMoveTarget` null, and `askNodesToMove` skips it).
+  The owner sets it with `nodes.updateSettings { panelAddressChoice }`
+  (`nodes.manage`, audited; CONFLICT `panelNode` for the panel node;
+  "follow" on an online node that does not dial the live domain closes its
+  connection so it moves now). A hello with `stay_on_address` records
+  "stay" before HelloAccepted is built: a resume (after `seylo set-panel`)
+  always, by "node", a join only while the panel has a domain set (Add
+  node then offered the domain's command and the owner took the IP and
+  pin), by "join"; each new record writes an audit event
+  `nodes.panelAddressRequest`. Without a stored choice, a node with an
+  open PANEL_MOVE_FAILED alert whose key carries `inspected:` (or, from
+  agents before 0.2.14, whose message mentions TLS inspection, an unknown
+  authority or the pinned key) counts as "stay", by
+  "inspectedCertificate", until the alert resolves or the owner chooses:
+  naming the domain again would only drop the node's session.
+  HelloAccepted carries `panel_address` (FOLLOW or STAY, so the agent ends
+  its request) and `node_name`; `NodeSettings.node_name` follows renames
+  (`nodes.rename` recompiles the node). `nodes.get` returns
+  `panelAddressChoice`, `panelAddressChoiceBy` (`owner`, `node`, `join`,
+  `inspectedCertificate`, `default`) and `panelAddressChoiceAt`, left out
+  for the panel node. Why a node is offline (since 0.2.14): a refused
+  resume of a known, enabled, offline node is kept in
+  `nodeHelloRejections` (AGENT_TOO_OLD only with the node's valid
+  signature, BAD_SIGNATURE as it is; the same reason within a minute is
+  not written again; cleared when the node connects) and `nodes.list` /
+  `nodes.get` return it as `rejectedHello { reason, message, at }` while
+  the node is offline and the refusal is newer than `lastSeenAt`; the
+  node list shows it under the Offline badge, else "Last seen <when>". A
+  resume with `away` keeps `nodeOfflineReports[node] = { from: since (the
+  reconnect when missing, in the future or older than 90 days), to: the
+  reconnect, reason (one printable line, 300 characters), failedAttempts }`,
+  which `nodes.get` returns as `lastOffline` and the node's overview
+  shows for a week ("Was offline from X to Y: <reason>"). Removing a node
+  drops its entries. Test
   builds only (compiled with the `__TEST_RELEASE_*` defines): the domain's
   HTTPS probe also trusts `<panel data dir>/test-ca.pem` (the e2e's Pebble
   root); a shipped panel never reads it.
@@ -3372,9 +3455,10 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   url>' --pin '<pin>'` (`join-command.ts` `setPanelCommand`, no token, not
   sensitive), which Add node shows under it as "Already joined? Point it
   here" for a node that joined over the domain and went offline that way
-  (Protocol, "Pointing a joined node at another address by hand"). The
-  panel has no node page with the agent's last connection error (an agent
-  that cannot connect reports nothing), so no node page shows it. The
+  (Protocol, "Pointing a joined node at another address by hand"). An
+  agent that cannot connect reports nothing meanwhile; since 0.2.14 it
+  sends its last connect error once it is back (`ClientHello.away`), and
+  the node's page shows it. The
   agent's dial error names the refused certificate's issuer
   (`conn.certificateHint`: TLS inspection, with exempting the domain,
   joining with the IP and `--pin`, or since 0.2.13 `seylo set-panel` as
@@ -3394,8 +3478,9 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   80 runes (`conn.IssuerName`, `conn.PrintableLine`). A node on a pinned
   `https://` address whose move to the domain fails on an untrusted issuer
   or a pin mismatch tries it again after 24 h (`untrustedMoveRetryAfter`)
-  instead of 1 h, keeping its session meanwhile; an agent restart or
-  another address tries at once.
+  instead of 1 h, keeping its session meanwhile; another address tries at
+  once, and since 0.2.14 an agent restart no longer does (the wait is in
+  `state/panel.json`), and the open alert keeps the node on "stay" anyway.
 - PanelService (`agent-hub/panel-service.ts`): ReportCrash stores
   `crash_reports`, ReportEvent stores a capped copy in `agent_reports` (30
   days), both with capped fields, deduped by (node, outbox id) and within
