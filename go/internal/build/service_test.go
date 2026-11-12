@@ -371,6 +371,8 @@ func TestServiceWaitingBuildSendsOnlyQueuedUntilItsSlot(t *testing.T) {
 		}
 	}
 	waitFor(t, func() bool { _, w := svc.Queue().Stats(); return w == 2 })
+	// QUEUED goes out right after a build joins the waiters, outside the queue's lock.
+	waitFor(t, func() bool { return len(rep.stagesOf("w2")) > 0 && len(rep.stagesOf("w3")) > 0 })
 	queued := []agentv1.BuildStage{agentv1.BuildStage_BUILD_STAGE_QUEUED}
 	for _, id := range []string{"w2", "w3"} {
 		if got := rep.stagesOf(id); !slices.Equal(got, queued) {
