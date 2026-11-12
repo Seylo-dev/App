@@ -89,7 +89,10 @@ type BuildRequest struct {
 	// Default "Dockerfile".
 	DockerfilePath string `protobuf:"bytes,6,opt,name=dockerfile_path,json=dockerfilePath,proto3" json:"dockerfile_path,omitempty"`
 	// Build-time variables. Secret ones are passed as BuildKit secrets, not
-	// build args, so they never end up in image layers.
+	// build args, so they never end up in image layers. For a git source,
+	// agents from 0.2.14 add GIT_SHA (not secret) with the full id of the
+	// commit they checked out (BuildSourceInfo.commit), unless env already
+	// has GIT_SHA: the panel's value wins, also an empty one.
 	Env []*EnvVar `protobuf:"bytes,7,rep,name=env,proto3" json:"env,omitempty"`
 	// Push target, for example "127.0.0.1:5755/<service id>:<generation>".
 	ImageReference string `protobuf:"bytes,8,opt,name=image_reference,json=imageReference,proto3" json:"image_reference,omitempty"`

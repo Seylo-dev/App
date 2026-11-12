@@ -27,6 +27,7 @@ export {
   type ClassifyOptions,
   classifyEntries,
   classifySecret,
+  isPublicName,
   isSecretEntry,
   isSecretName,
   looksSecret,

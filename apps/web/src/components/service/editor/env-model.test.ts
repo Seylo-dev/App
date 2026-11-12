@@ -186,6 +186,22 @@ describe("env editor model", () => {
     );
     expect(chips[1]?.hover[2]).toBe("Not a secret? Put `# @public` on the line above it.");
   });
+
+  test("chips: a commit id set as GIT_SHA is Public, as builds pass it; # @secret or a secret reference still make it a Secret", () => {
+    const sha = "ff9410c96aa507f27425f3c5dbb8e6bf8c4c37f9";
+    const env = analyzeEnv([`GIT_SHA=${sha}`, `COMMIT=${sha}`, "# @secret", `GIT_SHA=${sha}`, "GIT_SHA=${{db.INTERNAL_URL}}", ""].join("\n"), context);
+    const chips = secretChips(env.parsed, context, "worker");
+    expect(chips.map((c) => [c.line, c.secret])).toEqual([
+      [1, false],
+      [2, true],
+      [4, true],
+      [5, true],
+    ]);
+    expect(chips[0]?.hover[0]).toBe("**`GIT_SHA` is public** - `GIT_SHA` holds a commit id, never a credential, whatever it looks like.");
+    expect(chips[0]?.hover[1]).toBe("Builds get it as a build arg too (`ARG GIT_SHA`), and crash reports show its value.");
+    // A GIT_SHA that does not look like a token needs no chip.
+    expect(secretChips(analyzeEnv("GIT_SHA=main\n", context).parsed, context, "worker")).toEqual([]);
+  });
 });
 
 describe("hardcoded service URLs", () => {

@@ -10,6 +10,7 @@ import { durationFromMs, timestampNow } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
 import {
   BuildProgressSchema,
+  BuildSourceInfoSchema,
   BuildStage,
   DeployProgressSchema,
   type DeployStage,
@@ -37,6 +38,8 @@ export type BuildScript = (build: FakeBuild) => {
   result: "succeeded" | "failed" | "hang";
   digest?: string;
   message?: string;
+  /** The commit the node says it checked out (BuildSourceInfo, sent for git sources once fetched). */
+  sourceInfo?: { commit: string; subject?: string; author?: string };
 };
 
 const allCapabilities = new Set([
@@ -138,7 +141,16 @@ export class FakeFleet {
     const script = this.buildScript(build);
     const progress = (stage: BuildStage, extra: Record<string, unknown> = {}) =>
       ({ output: { case: "progress", value: create(BuildProgressSchema, { buildId: build.request.buildId, stage, ...extra }) } }) as const;
-    const messages: unknown[] = [progress(BuildStage.FETCHING_SOURCE), progress(BuildStage.BUILDING)];
+    const messages: unknown[] = [progress(BuildStage.FETCHING_SOURCE)];
+    if (script.sourceInfo) {
+      messages.push({
+        output: {
+          case: "sourceInfo",
+          value: create(BuildSourceInfoSchema, { subject: "", author: "", ...script.sourceInfo }),
+        },
+      });
+    }
+    messages.push(progress(BuildStage.BUILDING));
     for (const line of script.logs ?? []) messages.push({ output: { case: "log", value: new TextEncoder().encode(`${line}\n`) } });
     let hang: (() => void) | null = null;
     if (script.result === "succeeded") {

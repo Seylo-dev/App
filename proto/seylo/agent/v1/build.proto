@@ -21,7 +21,10 @@ message BuildRequest {
   // Default "Dockerfile".
   string dockerfile_path = 6;
   // Build-time variables. Secret ones are passed as BuildKit secrets, not
-  // build args, so they never end up in image layers.
+  // build args, so they never end up in image layers. For a git source,
+  // agents from 0.2.14 add GIT_SHA (not secret) with the full id of the
+  // commit they checked out (BuildSourceInfo.commit), unless env already
+  // has GIT_SHA: the panel's value wins, also an empty one.
   repeated EnvVar env = 7;
   // Push target, for example "127.0.0.1:5755/<service id>:<generation>".
   string image_reference = 8;

@@ -254,7 +254,7 @@ export interface SecretChip {
   hover: string[];
 }
 
-const reasonKeys: Record<Exclude<SecretVerdict["reason"], "publicPrefix" | "comment" | "none">, MessageKey> = {
+const reasonKeys: Record<Exclude<SecretVerdict["reason"], "publicPrefix" | "publicName" | "comment" | "none">, MessageKey> = {
   name: "serviceEnv.secret.whyName",
   value: "serviceEnv.secret.whyValue",
   reference: "serviceEnv.secret.whyReference",
@@ -283,7 +283,9 @@ export function secretHover(key: string, verdict: SecretVerdict): string[] {
   const why =
     verdict.reason === "publicPrefix"
       ? t("serviceEnv.secret.whyPrefix", { prefix: code(verdict.detail ?? "") })
-      : t("serviceEnv.secret.whyPublicComment", { comment: code("# @public") });
+      : verdict.reason === "publicName"
+        ? t("serviceEnv.secret.whyPublicName", { key: code(key) })
+        : t("serviceEnv.secret.whyPublicComment", { comment: code("# @public") });
   return [
     `**${t("serviceEnv.secret.publicTitle", { key: code(key) })}** - ${why}`,
     t("serviceEnv.secret.publicEffect", { arg: code(`ARG ${key}`) }),
@@ -295,8 +297,8 @@ export function secretHover(key: string, verdict: SecretVerdict): string[] {
  * Chips for the variables builds and crash reports treat as secrets
  * (env-analyzer classifyEntries with the panel's context, so references
  * to secrets count), and for public ones whose name or value looks secret
- * (a framework public prefix or a "# @public" comment). Plain variables
- * get none.
+ * (a framework public prefix, a "# @public" comment, or GIT_SHA set to a
+ * commit id). Plain variables get none.
  */
 export function secretChips(parsed: ParsedEnv, context: AnalyzeContext | null, selfName: string): SecretChip[] {
   const ctx: AnalyzeContext = context ?? { self: { serviceId: null, name: selfName, nodes: [] }, targets: [] };

@@ -394,7 +394,7 @@ func TestNixpacksLeavesSecretsOut(t *testing.T) {
 	}}
 	j := newJob("b1", "svc1", func() {})
 	var spec buildSpec
-	must(svc.nixpacksSpec(context.Background(), j, req, &spec, contextDir))
+	must(svc.nixpacksSpec(context.Background(), j, req, req.GetEnv(), &spec, contextDir))
 
 	for _, c := range toolCalls {
 		all := strings.Join(append(append([]string{}, c.Args...), c.Env...), " ")

@@ -55,6 +55,12 @@ export interface ProjectMove {
   removedGrants: { userId: string; actions: string[]; createdBy: string | null }[];
   /** Pending invites that named the service, with the grant entry the move took out. */
   removedInviteGrants: { inviteId: string; actions: string[] }[];
+  /**
+   * The live deployment whose image the switch runs again (0.2.14), for the
+   * GIT_SHA its image was built with (env/git-sha.ts). Moves queued by an
+   * older panel have none.
+   */
+  fromDeploymentId?: string;
 }
 
 /** A release of a service. Rollback deploys an older row's image digest again. */

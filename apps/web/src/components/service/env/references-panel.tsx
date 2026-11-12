@@ -16,6 +16,8 @@
 // its chip. The one exception is a database's EXPOSED_URL: it carries the
 // password, so it is null for a caller without databases.credentials also
 // while the database is not exposed; EXPOSED_HOST (never hidden) says that.
+// A service built from a repository is told that each deploy also sets
+// GIT_SHA (panel env/git-sha.ts).
 
 import type { AnalyzeContext, ReferenceTarget, ReferenceVariable } from "@seylo/env-analyzer";
 import { formatReference, missingNodes, pickPublicVariable } from "@seylo/env-analyzer";
@@ -26,11 +28,17 @@ import { t } from "../../../i18n/t";
 import { badgeTones } from "../kind-badge";
 import { isDatabaseKind, kindLook, type ServiceKind } from "../status";
 
+/** Sources whose deploys build a commit of a repository: their deployments get GIT_SHA. */
+export function buildsFromRepository(source: { type: string }): boolean {
+  return source.type === "github" || source.type === "provider" || source.type === "git";
+}
+
 export function ReferencesPanel({
   context,
   serviceKind,
   projectId,
   reveal,
+  builtFromRepository = false,
   onInsert,
 }: {
   context: AnalyzeContext;
@@ -38,6 +46,8 @@ export function ReferencesPanel({
   serviceKind: string;
   projectId: string;
   reveal: boolean;
+  /** The service builds from a repository: its deployments also get GIT_SHA (panel env/git-sha.ts). */
+  builtFromRepository?: boolean;
   onInsert: (text: string) => void;
 }) {
   const selfNodes = context.self.nodes.map((n) => n.name).join(", ");
@@ -56,6 +66,7 @@ export function ReferencesPanel({
         <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">
           {selfNodes ? t("serviceEnv.refs.hint", { nodes: selfNodes }) : t("serviceEnv.refs.hintNoNode")}
         </p>
+        {builtFromRepository && <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">{t("serviceEnv.refs.gitSha")}</p>}
       </div>
       <div className="flex flex-col px-[18px] pt-1.5 pb-4">
         {own.length > 0 && <SelfGroup name={context.self.name} kind={serviceKind} builtins={own} reveal={reveal} onInsert={onInsert} />}

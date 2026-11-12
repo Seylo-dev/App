@@ -8,9 +8,10 @@
 // it looks like a credential, or when it references one; a name with a
 // framework's public prefix (publicPrefixes) is public whatever its name or
 // a token-like value says, but not when it holds a password (a URL with
-// one, or a reference to a database credential); and a "# @public" or
-// "# @secret" comment on the line above (or after the value) overrides all
-// of that for one variable.
+// one, or a reference to a database credential); the value of GIT_SHA, a
+// commit id, never counts (publicNames); and a "# @public" or "# @secret"
+// comment on the line above (or after the value) overrides all of that for
+// one variable.
 
 import { substituteReferences } from "./references";
 import { findVariable } from "./resolve";
@@ -64,6 +65,20 @@ function hasUrlPassword(value: string): boolean {
   return urlWithPassword.test(value);
 }
 
+/**
+ * Names whose value is never a credential, whatever it looks like: GIT_SHA
+ * holds a commit id (40 hex characters), which looksSecret takes for a
+ * token, and a secret GIT_SHA reaches no Dockerfile build arg (ARG GIT_SHA)
+ * and no Nixpacks build. A "# @secret" comment or a reference to a secret
+ * still makes one a secret (classifySecret, reason "publicName").
+ */
+const publicNames = new Set(["GIT_SHA"]);
+
+/** The name is one whose value never counts toward a secret (GIT_SHA). */
+export function isPublicName(key: string): boolean {
+  return publicNames.has(key);
+}
+
 /** The value looks like a credential whatever its name. */
 export function looksSecret(value: string): boolean {
   if (hasUrlPassword(value)) return true;
@@ -90,17 +105,18 @@ export function secretOverride(parsed: Pick<ParsedEnv, "comments" | "text">, ent
 
 /**
  * Why a variable is or is not a secret: a "# @public"/"# @secret" comment,
- * a framework public prefix, its name, its value (or the value its
- * references resolve to), a reference to a secret, or none of these.
+ * a framework public prefix, a name whose value is never a credential
+ * (publicName: GIT_SHA, a commit id), its name, its value (or the value
+ * its references resolve to), a reference to a secret, or none of these.
  */
-export type SecretReason = "comment" | "publicPrefix" | "name" | "value" | "reference" | "none";
+export type SecretReason = "comment" | "publicPrefix" | "publicName" | "name" | "value" | "reference" | "none";
 
 export interface SecretVerdict {
   secret: boolean;
   reason: SecretReason;
-  /** publicPrefix: the prefix ("NEXT_PUBLIC_"); reference: the first secret one as target.VARIABLE. */
+  /** publicPrefix: the prefix ("NEXT_PUBLIC_"); publicName: the name; reference: the first secret one as target.VARIABLE. */
   detail?: string;
-  /** Public by a comment or a prefix although its name or value alone would have made it a secret. */
+  /** Public by a comment, a prefix or a public name although its name or value alone would have made it a secret. */
   overridesGuess?: boolean;
   /**
    * A secret although its name has this framework public prefix: it holds a
@@ -150,11 +166,24 @@ function credentialUnderPrefix(entry: EnvEntry, prefix: string, options: Classif
 }
 
 /**
+ * A name whose value never counts (isPublicName: GIT_SHA): public unless a
+ * reference `referenceIsSecret` says carries a secret. The value, as
+ * written or resolved, is not looked at, since a commit id looks like a
+ * token to looksSecret.
+ */
+function publicByName(entry: EnvEntry, options: ClassifyOptions): SecretVerdict {
+  const ref = options.referenceIsSecret ? entry.references.find(options.referenceIsSecret) : undefined;
+  if (ref) return { secret: true, reason: "reference", detail: `${ref.target}.${ref.variable}` };
+  return { secret: false, reason: "publicName", detail: entry.key, overridesGuess: looksSecret(entry.value) };
+}
+
+/**
  * Whether one entry is a secret, and why: its comment, else a framework
  * public prefix (public, unless it holds a password: a URL with one or a
  * reference `referenceIsCredential` says carries a database credential),
- * else its name, its value, a reference `referenceIsSecret` says carries a
- * secret, or its resolved value.
+ * else a public name (GIT_SHA: public unless a reference carries a
+ * secret), else its name, its value, a reference `referenceIsSecret` says
+ * carries a secret, or its resolved value.
  */
 export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, entry: EnvEntry, options: ClassifyOptions = {}): SecretVerdict {
   const override = secretOverride(parsed, entry);
@@ -166,6 +195,7 @@ export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, ent
   if (prefix) {
     return credentialUnderPrefix(entry, prefix, options) ?? { secret: false, reason: "publicPrefix", detail: prefix, overridesGuess: looked() };
   }
+  if (isPublicName(entry.key)) return publicByName(entry, options);
   return guess(entry, options);
 }
 
@@ -173,8 +203,9 @@ export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, ent
  * Whether one entry is a secret: its override, else a framework public
  * prefix (not a secret unless it holds a password: a URL with one, or a
  * reference `referenceIsCredential` says carries a database credential),
- * else its name, its value, or any reference `referenceIsSecret` says
- * carries one (a database password, another service's secret).
+ * else its name, its value (unless the name is a public one,
+ * isPublicName), or any reference `referenceIsSecret` says carries one (a
+ * database password, another service's secret).
  */
 export function isSecretEntry(
   parsed: Pick<ParsedEnv, "comments" | "text">,

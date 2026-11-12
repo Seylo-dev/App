@@ -25,7 +25,7 @@ import { useInvalidate } from "../invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
-import { ReferencesPanel } from "./references-panel";
+import { buildsFromRepository, ReferencesPanel } from "./references-panel";
 import { SharedVariablesSheet } from "./shared-sheet";
 
 const emptyContext = (service: ServiceDetail): AnalyzeContext => ({
@@ -258,6 +258,7 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
               serviceKind={service.kind}
               projectId={service.projectId}
               reveal={reveal}
+              builtFromRepository={buildsFromRepository(service.sourceConfig)}
               onInsert={(v) => handle.current?.insert(v)}
             />
           ) : references.isError ? (

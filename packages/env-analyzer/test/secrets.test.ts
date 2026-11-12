@@ -3,6 +3,7 @@ import type { AnalyzeContext } from "../src";
 import {
   classifyEntries,
   classifySecret,
+  isPublicName,
   isSecretEntry,
   isSecretName,
   looksSecret,
@@ -33,6 +34,42 @@ describe("secret classification", () => {
       ["DATABASE_URL", true],
       ["API", false],
     ]);
+  });
+
+  test("GIT_SHA holds a commit id, not a credential, unless a comment or a reference says so", () => {
+    // Before: 40 hex characters looked like a token, so a GIT_SHA set by hand reached no build arg.
+    const sha = "ff9410c96aa507f27425f3c5dbb8e6bf8c4c37f9";
+    expect(looksSecret(sha)).toBe(true);
+    expect(isPublicName("GIT_SHA")).toBe(true);
+    expect(isPublicName("COMMIT")).toBe(false);
+    const text = `GIT_SHA=${sha}\nCOMMIT=${sha}\n# @secret\nGIT_SHA=${sha}\nGIT_SHA=\${{vault.TOKEN}}\n`;
+    const parsed = parseEnv(text);
+    const credential = (ref: { target: string; variable: string }) => ref.target === "vault";
+    expect(parsed.entries.map((e) => [e.key, isSecretEntry(parsed, e, credential)])).toEqual([
+      ["GIT_SHA", false],
+      ["COMMIT", true],
+      ["GIT_SHA", true],
+      ["GIT_SHA", true],
+    ]);
+    // classifySecret says why, so the editor's chips agree: public by its name, which overrides the token-like value.
+    const [own, commit, flagged, referenced] = parsed.entries;
+    if (!own || !commit || !flagged || !referenced) throw new Error("entries");
+    expect(classifySecret(parsed, own)).toEqual({ secret: false, reason: "publicName", detail: "GIT_SHA", overridesGuess: true });
+    expect(classifySecret(parsed, commit)).toEqual({ secret: true, reason: "value" });
+    expect(classifySecret(parsed, flagged)).toEqual({ secret: true, reason: "comment" });
+    expect(classifySecret(parsed, referenced, { referenceIsSecret: credential })).toEqual({
+      secret: true,
+      reason: "reference",
+      detail: "vault.TOKEN",
+    });
+    // The resolved value never counts either (EnvGraph.isSecret, the editor): a reference to a plain variable holding a sha.
+    expect(classifySecret(parsed, referenced, { resolvedValue: () => sha })).toEqual({
+      secret: false,
+      reason: "publicName",
+      detail: "GIT_SHA",
+      overridesGuess: false,
+    });
+    expect(classifySecret(parsed, commit, { resolvedValue: () => sha }).secret).toBe(true);
   });
 
   test("a comment above or after the value overrides the guess", () => {

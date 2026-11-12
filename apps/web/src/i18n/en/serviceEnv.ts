@@ -22,6 +22,7 @@ export default {
     title: "References",
     hint: "Click to insert. Internal addresses only work for services on {nodes}.",
     hintNoNode: "Click to insert.",
+    gitSha: "Each deploy also sets GIT_SHA, the commit this deployment was built from. A GIT_SHA you set yourself wins.",
     empty: "Nothing to reference yet. Other services of this project and shared variables show up here.",
     emptyOthers: "Other services of this project and shared variables show up here.",
     thisService: "this service",
@@ -56,6 +57,7 @@ export default {
     whyPrefixValue: "it holds a URL with a password, so its {prefix} prefix does not make it public.",
     whyPrefixReference: "it uses {reference}, which carries a database password, so its {prefix} prefix does not make it public.",
     whyPublicComment: "the {comment} comment says so.",
+    whyPublicName: "{key} holds a commit id, never a credential, whatever it looks like.",
     secretEffect:
       "Dockerfile and Railpack builds get it only as a build secret ({mount}), not as {arg}; Nixpacks builds do not get it. Crash reports and troubleshoot uploads hide its value.",
     publicEffect: "Builds get it as a build arg too ({arg}), and crash reports show its value.",

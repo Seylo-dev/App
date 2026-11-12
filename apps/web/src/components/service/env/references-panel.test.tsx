@@ -3,14 +3,15 @@
 // variables, then the other services; a panel that sends no self.builtins
 // gets no group for it. A variable that is empty right now gets no chip and
 // a group left with none is not shown; a value the caller may not see
-// (null) is not empty and keeps its chip.
+// (null) is not empty and keeps its chip. A service built from a
+// repository is told that each deploy also sets GIT_SHA.
 
 import { expect, test } from "bun:test";
 import { type AnalyzeContext, appVariables, databaseVariables, type ReferenceTarget, type ReferenceVariable } from "@seylo/env-analyzer";
 import { TooltipProvider } from "@seylo/ui/components/tooltip";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
-import { hasValue, ReferencesPanel, shownValue } from "./references-panel";
+import { buildsFromRepository, hasValue, ReferencesPanel, shownValue } from "./references-panel";
 
 const node = { id: "node00000000000a", name: "de-fsn-1" };
 const other = { id: "node00000000000b", name: "us-ash-1" };
@@ -81,10 +82,17 @@ const context = (self: Partial<AnalyzeContext["self"]> = {}, targets: ReferenceT
   targets,
 });
 
-const render = (ctx: AnalyzeContext, kind = "app", reveal = false) =>
+const render = (ctx: AnalyzeContext, kind = "app", reveal = false, builtFromRepository = false) =>
   renderStatic(() => (
     <TooltipProvider>
-      <ReferencesPanel context={ctx} serviceKind={kind} projectId="prj0000000000001" reveal={reveal} onInsert={() => {}} />
+      <ReferencesPanel
+        context={ctx}
+        serviceKind={kind}
+        projectId="prj0000000000001"
+        reveal={reveal}
+        builtFromRepository={builtFromRepository}
+        onInsert={() => {}}
+      />
     </TooltipProvider>
   ));
 
@@ -291,4 +299,17 @@ test("the tip's value line: the value, or why it is not shown", () => {
   const password = { ...domain, name: "PASSWORD", value: "pw", sensitive: true };
   expect(shownValue(password, false)).toBe(t("serviceEnv.hover.hidden"));
   expect(shownValue(password, true)).toBe("pw");
+});
+
+test("a service built from a repository is told about GIT_SHA next to its references", async () => {
+  // Before 0.2.14 nothing set GIT_SHA, and nothing said so.
+  expect(await render(context(), "app", false, true)).toContain("GIT_SHA, the commit this deployment was built from");
+  expect(await render(context(), "app", false, false)).not.toContain("GIT_SHA");
+  // Also with nothing else to reference yet.
+  expect(await render(context({ builtins: undefined }, []), "app", false, true)).toContain("GIT_SHA");
+});
+
+test("repository sources are the ones whose deploys build a commit", () => {
+  for (const type of ["github", "provider", "git"]) expect(buildsFromRepository({ type })).toBe(true);
+  for (const type of ["image", "inline", "upload", "none"]) expect(buildsFromRepository({ type })).toBe(false);
 });

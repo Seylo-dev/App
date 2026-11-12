@@ -51,8 +51,8 @@ export interface EnvGraph {
    * "# @public"/"# @secret" comment, a framework public prefix such as
    * NEXT_PUBLIC_ (public unless it holds a URL with a password or references
    * a database credential), its name, its value, a reference to a secret
-   * such as a database password, or its resolved value); unknown variables
-   * are not.
+   * such as a database password, or its resolved value; never the value of
+   * GIT_SHA, a commit id); unknown variables are not.
    */
   isSecret(target: string, variable: string): boolean;
 }
@@ -216,7 +216,7 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
     secretMemo.set(id, "visiting");
     // A "# @public"/"# @secret" comment or a framework public prefix decides (a prefixed one that
     // holds a password stays a secret); otherwise the resolved value counts too (a reference to a
-    // plain variable that holds a token).
+    // plain variable that holds a token), except for GIT_SHA, whose value is a commit id.
     const result = classifySecret(service.parsed, entry, {
       referenceIsSecret: (ref) => isSecret(ref.target, ref.variable),
       referenceIsCredential: (ref) => carriesCredential(ref.target, ref.variable),

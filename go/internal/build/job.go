@@ -36,6 +36,9 @@ type Job struct {
 	changed chan struct{}
 	final   *agentv1.BuildProgress
 	done    chan struct{}
+	// commit is the one BuildSourceInfo reported, for the final progress
+	// (builtCommit): replayed output may have dropped that message.
+	commit string
 	// finishedAt is written once, before final is set under mu.
 	finishedAt time.Time
 	// secretArgs are the Dockerfile's ARG names that are secret variables
@@ -111,8 +114,17 @@ func (j *Job) progress(p *agentv1.BuildProgress) {
 func (j *Job) sourceInfo(info *agentv1.BuildSourceInfo) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	j.commit = info.GetCommit()
 	j.flushLocked()
 	j.appendLocked(&agentv1.BuildResponse{Output: &agentv1.BuildResponse_SourceInfo{SourceInfo: info}})
+}
+
+// builtCommit is the commit the build checked out (BuildSourceInfo), ""
+// for sources not from git.
+func (j *Job) builtCommit() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.commit
 }
 
 func (j *Job) finish(p *agentv1.BuildProgress) {
