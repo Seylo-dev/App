@@ -856,7 +856,13 @@ function SwitchDialog({
   const mysql = users.engine === "mysql" || users.engine === "mariadb";
   const rootMain = mysql && users.main.user === "root";
   const needsGrant = mode === "existing" && target !== null && target.access !== "serverAdmin";
-  const valid = password !== null && (mode === "new" ? namePattern.test(name) : target !== null && (!needsGrant || grantAdmin));
+  // Removing the old main user is a delete: what runs as it (DEFINER) stops working.
+  const [acceptDefiners, setAcceptDefiners] = useState(false);
+  const definers = mysql && dropOld ? (users.users.find((u) => u.main)?.definerObjects ?? 0) : 0;
+  const valid =
+    password !== null &&
+    (mode === "new" ? namePattern.test(name) : target !== null && (!needsGrant || grantAdmin)) &&
+    (definers === 0 || acceptDefiners);
   return (
     <ConfirmDialog
       open
@@ -881,6 +887,7 @@ function SwitchDialog({
             ...(password ? { password } : {}),
             ...(needsGrant && grantAdmin ? { grantAdmin: true } : {}),
             ...(dropOld ? { oldUser: "delete" as const } : {}),
+            ...(definers > 0 && acceptDefiners ? { acceptOrphanDefiners: true } : {}),
           })
           .then(() => undefined)
       }
@@ -932,6 +939,12 @@ function SwitchDialog({
           {rootMain
             ? t("serviceDatabaseUsers.switch.deleteRoot")
             : `${t("serviceDatabaseUsers.switch.oldUser", { user: users.main.user })}: ${t("serviceDatabaseUsers.switch.deleteOld")}`}
+        </label>
+      )}
+      {definers > 0 && (
+        <label htmlFor="ds-definers" className="flex cursor-pointer items-start gap-2.5 text-[13px] leading-normal text-ink-strong">
+          <Checkbox id="ds-definers" className="mt-0.5" checked={acceptDefiners} onCheckedChange={(v) => setAcceptDefiners(v === true)} />
+          {t("serviceDatabaseUsers.deleteUser.definers", { count: definers })}
         </label>
       )}
     </ConfirmDialog>

@@ -223,6 +223,56 @@ test.describe("database users", () => {
     await page.screenshot({ path: `${shots}/redis.png`, fullPage: true });
   });
 
+  test("a switch that removes MySQL's root@% asks first when objects run as it", async ({ page }) => {
+    let switched: Record<string, unknown> | null = null;
+    const base = usersOf(svc.db);
+    const mysql = {
+      ...base,
+      engine: "mysql",
+      hosts: true,
+      presets: ["readOnly", "readWrite", "databaseAdmin", "serverAdmin"],
+      main: { user: "root", rename: "switch", canSwitch: true },
+      users: [
+        { ...base.users[0], name: "root", host: "%", roles: ["*.*: SELECT, INSERT"], ownsObjects: null, definerObjects: 2 },
+        {
+          ...base.users[0],
+          name: "root",
+          host: "localhost",
+          main: false,
+          system: true,
+          ownsObjects: null,
+          definerObjects: 0,
+          can: { passwordChange: false, rename: false, delete: false, makeMain: false },
+        },
+      ],
+    };
+    await installDemo(page, {
+      overrides: {
+        "databases.users": () => mysql,
+        "databases.switchMainUser": (input) => {
+          switched = input;
+          return { user: String(input.name), password: "Mn4bV8cXz2Lk7Jh3Gf9Ds6Aq1Wp5Ey0R", affectedServiceIds: [], deploymentId: null, warning: null };
+        },
+      },
+    });
+    await page.goto(`${tab(svc.db, "users")}?change=name`);
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm.getByRole("heading", { name: "Use another user as the main one" })).toBeVisible();
+    await confirm.getByLabel("Name").fill("boss");
+    await confirm.getByLabel("Type db to confirm").fill("db");
+    const submit = confirm.getByRole("button", { name: "Switch" });
+    await expect(submit).toBeEnabled();
+    const definers = confirm.getByLabel(/2 views, routines, triggers or events run as it and stop working/);
+    await expect(definers).toHaveCount(0);
+    await confirm.getByLabel("Remove root@%: root@localhost stays inside the container").check();
+    await expect(definers).toBeVisible();
+    await expect(submit).toBeDisabled();
+    await definers.check();
+    await submit.click();
+    await expect.poll(() => switched).not.toBeNull();
+    expect(switched).toEqual({ serviceId: svc.db, name: "boss", oldUser: "delete", acceptOrphanDefiners: true });
+  });
+
   test("MongoDB's main user changes name by a switch to a new user", async ({ page }) => {
     let switched: Record<string, unknown> | null = null;
     const mongo = {
