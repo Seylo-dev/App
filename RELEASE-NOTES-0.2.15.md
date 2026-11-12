@@ -1,8 +1,8 @@
-# Seylo 0.2.14
+# Seylo 0.2.15
 
 Update from Settings > Updates: the panel updates first, then each node. Nothing to run on the servers. New installs: `curl -fsSL https://install.seylo.dev | sudo sh`.
 
-What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-14
+What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-15
 
 ## New
 
