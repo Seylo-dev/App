@@ -380,11 +380,12 @@ func (s *Service) execute(ctx context.Context, j *Job, req *agentv1.BuildRequest
 	} else {
 		step(agentv1.BuildStage_BUILD_STAGE_FETCHING_SOURCE, "Fetching the source")
 		src := filepath.Join(work, "src")
-		if err := s.fetch(ctx, j, req, src, work); err != nil {
+		commit, err := s.fetch(ctx, j, req, src, work)
+		if err != nil {
 			return "", err
 		}
 		step(agentv1.BuildStage_BUILD_STAGE_BUILDING, "Building with "+builderName(req))
-		if err := s.build(ctx, j, req, src, work); err != nil {
+		if err := s.build(ctx, j, req, src, work, commit); err != nil {
 			return "", err
 		}
 	}
@@ -413,42 +414,63 @@ func builderName(req *agentv1.BuildRequest) string {
 	}
 }
 
-// fetch puts the source in src.
-func (s *Service) fetch(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work string) error {
+// fetch puts the source in src. For a git source it returns the full
+// commit it checked out (the one BuildSourceInfo reports), "" otherwise.
+func (s *Service) fetch(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work string) (commit string, err error) {
 	switch source := req.GetSource().GetSource().(type) {
 	case *agentv1.BuildSource_Git:
 		info, err := fetchGitOn(ctx, s.opts.Git, s.opts.Runner, j, source.Git, src, work, req.GetGitSubmodules())
 		if err != nil {
-			return err
+			return "", err
 		}
 		j.sourceInfo(info)
+		commit = info.GetCommit()
 	case *agentv1.BuildSource_UploadId:
 		archive := s.uploads.path(source.UploadId)
 		if _, err := os.Stat(archive); err != nil {
-			return fmt.Errorf("%w: %s", ErrUploadNotFound, source.UploadId)
+			return "", fmt.Errorf("%w: %s", ErrUploadNotFound, source.UploadId)
 		}
 		fmt.Fprintln(j, "--> Unpacking the uploaded source")
 		if err := os.MkdirAll(src, 0o755); err != nil {
-			return err
+			return "", err
 		}
 		if err := extractArchive(ctx, archive, src); err != nil {
-			return err
+			return "", err
 		}
 		// Single use: the archive is not needed after a successful unpack.
 		_ = os.Remove(archive)
 	case *agentv1.BuildSource_InlineDockerfile:
 		if err := os.MkdirAll(src, 0o755); err != nil {
-			return err
+			return "", err
 		}
 		fmt.Fprintln(j, "--> Building the Dockerfile written in the panel")
-		return os.WriteFile(filepath.Join(src, "Dockerfile"), []byte(source.InlineDockerfile), 0o644)
+		return "", os.WriteFile(filepath.Join(src, "Dockerfile"), []byte(source.InlineDockerfile), 0o644)
 	}
-	return checkTree(ctx, src)
+	return commit, checkTree(ctx, src)
+}
+
+// GitSHAVar is the variable a build from git gets with the full commit the
+// agent checked out, as Easypanel passes it: a build arg (ARG GIT_SHA) for
+// Dockerfiles and a build variable for Railpack and Nixpacks. The panel
+// gives the deployment's containers the same value (CONTRACTS.md).
+const GitSHAVar = "GIT_SHA"
+
+// withGitSHA returns the build's variables plus GIT_SHA=<commit> for a
+// source fetched from git (commit is "" for uploads and inline
+// Dockerfiles), unless the panel already sends GIT_SHA: the service's own
+// .env or the project's shared variables set it, and their value wins,
+// also an empty one.
+func withGitSHA(env []*agentv1.EnvVar, commit string) []*agentv1.EnvVar {
+	if commit == "" || slices.ContainsFunc(env, func(e *agentv1.EnvVar) bool { return e.GetName() == GitSHAVar }) {
+		return env
+	}
+	return append(slices.Clip(env), &agentv1.EnvVar{Name: GitSHAVar, Value: commit})
 }
 
 // build runs the chosen builder and leaves the image tagged as the
-// request's image reference in the local Docker.
-func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work string) error {
+// request's image reference in the local Docker. commit is the one fetch
+// checked out ("" when the source is not git).
+func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work, commit string) error {
 	contextDir, err := insideRoot(src, req.GetContextPath(), "The build path")
 	if err != nil {
 		return err
@@ -458,19 +480,23 @@ func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 		return err
 	}
 	spec := buildSpec{Builder: name, ContextDir: contextDir, Tag: req.GetImageReference(), Target: req.GetTargetStage(), Labels: imageLabels(req)}
+	buildVars := withGitSHA(req.GetEnv(), commit)
+	if len(buildVars) > len(req.GetEnv()) {
+		fmt.Fprintf(j, "--> %s=%s\n", GitSHAVar, commit)
+	}
 
 	inline := req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != ""
 	switch {
 	case inline || req.GetBuilder() == agentv1.Builder_BUILDER_DOCKERFILE:
-		if err := s.dockerfileSpec(req, &spec, src, contextDir, work); err != nil {
+		if err := s.dockerfileSpec(req, buildVars, &spec, src, contextDir, work); err != nil {
 			return err
 		}
 	case req.GetBuilder() == agentv1.Builder_BUILDER_NIXPACKS:
-		if err := s.nixpacksSpec(ctx, j, req, &spec, contextDir); err != nil {
+		if err := s.nixpacksSpec(ctx, j, req, buildVars, &spec, contextDir); err != nil {
 			return err
 		}
 	default:
-		if err := s.railpackSpec(ctx, j, req, &spec, contextDir, work); err != nil {
+		if err := s.railpackSpec(ctx, j, req, buildVars, &spec, contextDir, work); err != nil {
 			return err
 		}
 	}
@@ -485,7 +511,9 @@ func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 	return err
 }
 
-func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, spec *buildSpec, src, contextDir, work string) error {
+// dockerfileSpec builds the Dockerfile with buildVars (the request's
+// variables, withGitSHA) as build args and secrets.
+func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, buildVars []*agentv1.EnvVar, spec *buildSpec, src, contextDir, work string) error {
 	switch {
 	case req.GetSource().GetInlineDockerfile() != "":
 		spec.Dockerfile = filepath.Join(src, "Dockerfile")
@@ -507,7 +535,7 @@ func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, spec *buildSpec, src
 		}
 		spec.Dockerfile = f
 	}
-	secrets, args, err := splitEnv(req.GetEnv(), filepath.Join(work, "secrets"))
+	secrets, args, err := splitEnv(buildVars, filepath.Join(work, "secrets"))
 	if err != nil {
 		return err
 	}
@@ -515,7 +543,9 @@ func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, spec *buildSpec, src
 	return nil
 }
 
-func (s *Service) railpackSpec(ctx context.Context, j *Job, req *agentv1.BuildRequest, spec *buildSpec, contextDir, work string) error {
+// railpackSpec plans the build with Railpack, which sees buildVars (the
+// request's variables, withGitSHA) and gets every one as a BuildKit secret.
+func (s *Service) railpackSpec(ctx context.Context, j *Job, req *agentv1.BuildRequest, buildVars []*agentv1.EnvVar, spec *buildSpec, contextDir, work string) error {
 	bin, err := s.tools.Path(ctx, Railpack, j)
 	if err != nil {
 		return err
@@ -523,7 +553,7 @@ func (s *Service) railpackSpec(ctx context.Context, j *Job, req *agentv1.BuildRe
 	plan := filepath.Join(work, "railpack-plan.json")
 	args := []string{"prepare", contextDir, "--plan-out", plan, "--info-out", filepath.Join(work, "railpack-info.json")}
 	var env []string
-	for _, e := range req.GetEnv() {
+	for _, e := range buildVars {
 		arg, v := passVar(e.GetName(), e.GetValue())
 		args = append(args, "--env", arg)
 		if v != "" {
@@ -544,7 +574,7 @@ func (s *Service) railpackSpec(ctx context.Context, j *Job, req *agentv1.BuildRe
 		return err
 	}
 	// Railpack hands every variable to the build as a BuildKit secret.
-	secrets, err := writeSecrets(req.GetEnv(), filepath.Join(work, "secrets"))
+	secrets, err := writeSecrets(buildVars, filepath.Join(work, "secrets"))
 	if err != nil {
 		return err
 	}
@@ -553,7 +583,10 @@ func (s *Service) railpackSpec(ctx context.Context, j *Job, req *agentv1.BuildRe
 	spec.BuildArgs = []KV{
 		{"BUILDKIT_SYNTAX", RailpackFrontend},
 		// Changes when a value changes, so cached layers that used the old
-		// value are rebuilt.
+		// value are rebuilt. Only the panel's variables: the GIT_SHA the
+		// agent adds changes with every commit and would rebuild every step
+		// that sees secrets (the install step too) on every push, while the
+		// steps that copy the source run again for a new commit anyway.
 		{"secrets-hash", envHash(req.GetEnv())},
 	}
 	return nil
@@ -568,7 +601,9 @@ func buildScope(req *agentv1.BuildRequest) string {
 	return req.GetServiceId()
 }
 
-func (s *Service) nixpacksSpec(ctx context.Context, j *Job, req *agentv1.BuildRequest, spec *buildSpec, contextDir string) error {
+// nixpacksSpec generates the Dockerfile with Nixpacks from buildVars (the
+// request's variables, withGitSHA), leaving the secret ones out.
+func (s *Service) nixpacksSpec(ctx context.Context, j *Job, req *agentv1.BuildRequest, buildVars []*agentv1.EnvVar, spec *buildSpec, contextDir string) error {
 	bin, err := s.tools.Path(ctx, Nixpacks, j)
 	if err != nil {
 		return err
@@ -579,8 +614,8 @@ func (s *Service) nixpacksSpec(ctx context.Context, j *Job, req *agentv1.BuildRe
 	// ARG/ENV of the image, readable in its config and history. Secret
 	// variables are left out of the build; the container still gets them
 	// at runtime from the service's env.
-	vars := nixpacksVars(req.GetEnv())
-	if n := len(req.GetEnv()) - len(vars); n > 0 {
+	vars := nixpacksVars(buildVars)
+	if n := len(buildVars) - len(vars); n > 0 {
 		fmt.Fprintf(j, "--> %d secret variable(s) are not available during a Nixpacks build (they would be stored in the image); "+
 			"they are set when the service runs. Use Railpack or a Dockerfile with RUN --mount=type=secret if the build needs them\n", n)
 	}
@@ -623,7 +658,7 @@ func (s *Service) nixpacksSpec(ctx context.Context, j *Job, req *agentv1.BuildRe
 	for _, e := range vars {
 		args[e.GetName()] = e.GetValue()
 	}
-	for _, e := range req.GetEnv() {
+	for _, e := range buildVars {
 		if e.GetSecret() {
 			delete(args, e.GetName()) // never a build arg, even under a Nixpacks default's name
 		}

@@ -38,6 +38,7 @@ import type { Deps } from "../../deps";
 import type { RefusedSpec } from "../../desired";
 import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
+import { recordBuiltCommit, withRolledBackCommit } from "../env/git-sha";
 import { dataVolumes } from "../services/insert";
 import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService } from "../services/rows";
@@ -188,7 +189,8 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
     phaseStartedAt: now,
     targetNodeIds: targets,
     runSettings: (d.runSettings ?? runSettingsOf(spec)) as unknown as Record<string, unknown>,
-    envSealed: d.envSealed ?? sealDeploymentEnv(s.deps, svc.id),
+    // A rollback also gets the GIT_SHA its image was built with; builds get theirs once the commit is known.
+    envSealed: d.envSealed ?? withRolledBackCommit(s.deps, d.rollbackOf, sealDeploymentEnv(s.deps, svc.id)),
     steps: d.steps.length > 0 ? d.steps : initialSteps(build),
   });
 
@@ -275,6 +277,9 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
     branch: d.branch ?? resolved.commit?.branch ?? branch,
     steps: setStep(load(s, d.id)?.steps ?? current.steps, "clone", "running", { detail: resolved.cloneDetail }),
   });
+  // GIT_SHA for the containers: the exact commit the node checks out, when the panel knows it in full
+  // (the node reports it too, recordSourceInfo).
+  if (resolved.request.source?.source.case === "git") recordBuiltCommit(s.deps, d.id, resolved.request.source.source.value.commit);
   log(s, current, "clone", `Source: ${resolved.cloneDetail}. Builder: ${resolved.builderLabel}.`);
   // The commit and branch reach the deploy list and the service now (the log's tick only updates its own window).
   publishDeploymentChange(s.deps, d.serviceId, d.id);
@@ -527,6 +532,8 @@ function recordSourceInfo(
     })
     .where(eq(deployments.id, deploymentId))
     .run();
+  // The commit the node checked out, for GIT_SHA: also when the panel asked for a branch.
+  recordBuiltCommit(s.deps, deploymentId, info.commit);
   if (!d.commitSha || !d.commitMessage || !d.commitAuthor) publishDeploymentChange(s.deps, d.serviceId, deploymentId);
 }
 

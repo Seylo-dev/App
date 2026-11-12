@@ -61,7 +61,10 @@ export type BuildRequest = Message<"seylo.agent.v1.BuildRequest"> & {
 
   /**
    * Build-time variables. Secret ones are passed as BuildKit secrets, not
-   * build args, so they never end up in image layers.
+   * build args, so they never end up in image layers. For a git source,
+   * agents from 0.2.14 add GIT_SHA (not secret) with the full id of the
+   * commit they checked out (BuildSourceInfo.commit), unless env already
+   * has GIT_SHA: the panel's value wins, also an empty one.
    *
    * @generated from field: repeated seylo.agent.v1.EnvVar env = 7;
    */

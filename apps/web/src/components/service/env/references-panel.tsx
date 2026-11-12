@@ -14,15 +14,23 @@ import { t } from "../../../i18n/t";
 import { badgeTones } from "../kind-badge";
 import { isDatabaseKind, kindLook, type ServiceKind } from "../status";
 
+/** Sources whose deploys build a commit of a repository: their deployments get GIT_SHA. */
+export function buildsFromRepository(source: { type: string }): boolean {
+  return source.type === "github" || source.type === "provider" || source.type === "git";
+}
+
 export function ReferencesPanel({
   context,
   projectId,
   reveal,
+  builtFromRepository = false,
   onInsert,
 }: {
   context: AnalyzeContext;
   projectId: string;
   reveal: boolean;
+  /** The service builds from a repository: its deployments also get GIT_SHA (panel env/git-sha.ts). */
+  builtFromRepository?: boolean;
   onInsert: (text: string) => void;
 }) {
   const selfNodes = context.self.nodes.map((n) => n.name).join(", ");
@@ -36,6 +44,7 @@ export function ReferencesPanel({
         <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">
           {selfNodes ? t("serviceEnv.refs.hint", { nodes: selfNodes }) : t("serviceEnv.refs.hintNoNode")}
         </p>
+        {builtFromRepository && <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">{t("serviceEnv.refs.gitSha")}</p>}
       </div>
       <div className="flex flex-col px-[18px] pt-1.5 pb-4">
         {context.targets.length === 0 && <p className="m-0 py-3 text-[12.5px] text-muted-foreground">{t("serviceEnv.refs.empty")}</p>}

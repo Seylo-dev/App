@@ -79,7 +79,7 @@ packages use. "Built" means implemented and tested.
 | `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; an ACME route with `acme_challenge_on_https` (the panel's domains whose DNS does not point straight at the node, the panel's own domain, every tool host) answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.13; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https, the challenge path over https kept for the app on a domain without `acme_challenge_on_https`, and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with a redirect to https for every path and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareHTTPSRedirect`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), a TLS check on exposed Postgres, MySQL and MariaDB (0.2.9, `Listener.RequireTLS`, `requiretls.go`: Postgres must open with an SSLRequest, a direct TLS ClientHello or a CancelRequest, a GSSENCRequest gets "N" from the gate and the next message must ask for TLS, and a database that answers the SSLRequest "N" gets no plain login either; MySQL and MariaDB: the server's greeting must offer TLS (CLIENT_SSL; read whole, up to 1 KiB) or the client gets an ERR 3159 "TLS is not on in this database yet" in its place (MariaDB 10.11 has no TLS), and the client's first packet must be a 4.1 SSLRequest, payload exactly 32 bytes with CLIENT_SSL, since a whole handshake response with the flag set goes in the clear and a server without TLS masks the flag off; anything else gets the protocol's error, a Postgres ErrorResponse FATAL 28000 "this port only accepts TLS connections: connect with sslmode=require" or a MySQL ERR 3159 HY000, and the connection closes; 10 s for Postgres' first bytes, 30 s for MySQL's greeting and answer, at most the 8 bytes (Postgres) or the greeting and 6 bytes (MySQL) checked are buffered and go on unchanged, and a refused startup message is read to its end, up to Postgres' 10000 bytes or 64 KiB, so the client reads the error before the close), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM; psql `sslmode=require` and `prefer`, mysql `--ssl-mode=REQUIRED` and mariadb `--ssl` pass, `sslmode=disable`, `--ssl-mode=DISABLED`, `--skip-ssl` and `prefer` to a Postgres with TLS off get the gate's error, MariaDB 10.11 refuses `--ssl`, `--skip-ssl` and a plain response with CLIENT_SSL, and 120 refused MySQL logins in a row do not block the gate's address, verified in the VM: `TestIntegrationDatabaseTLSInProtocol`) |
-| `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
+| `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. Builds from git also get `GIT_SHA`, the full commit checked out, unless the request's variables set it (since 0.2.14; GIT_SHA, next to PORT). The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
 | `registry` | 127.0.0.1:5755 relay over RegistryTunnel (`TCPRelay`), `Tunnel` handler (registry and service-port targets; a `RegistryTarget.scope` makes it an HTTP-aware gate: only the node's pull/push repositories, never DELETE of content, the catalog or foreign blob mounts), the registry container on the panel's node (`Server`, GC) | Built (push/pull through the relay, and scoped push/pull/refusals with the real Docker and registry, verified in the VM) |
 | `compose` | `Parse` for ParseCompose: compose-go normalized project JSON + unsupported-feature warnings; never reads node files | Built |
 | `logs` | Per-service log store on disk (text segments, size and age retention), capture from Docker across generations with a restart cursor, follow, search, build logs | Built (capture, follow and restarts verified in the VM) |
@@ -2476,6 +2476,46 @@ never type the ids by hand.
   before keeps the env it had, whatever its image's own `ENV PORT` points
   at. The New app dialog's Set up later sends no port (it shows no Port
   field), so an empty app opens no first-run IP:port access.
+- GIT_SHA (0.2.14), the commit this deployment was built from, as Easypanel
+  passes it. Build: for a git source (GitHub App, a provider connection or
+  a plain clone URL; any builder) the agent adds `GIT_SHA=<full id of the
+  commit it checked out>` (`git log -1 --format=%H` after the checkout, the
+  one `BuildSourceInfo.commit` reports; 40 hex characters, 64 in a SHA-256
+  repository) to the build's variables (`go/internal/build` `withGitSHA`),
+  also when the panel asked for a branch head or a short commit id. It is
+  not secret: a Dockerfile build gets `--build-arg GIT_SHA=<sha>` (and the
+  BuildKit secret, like every variable), Railpack `--env GIT_SHA=<sha>`
+  (a secret of its plan), Nixpacks `--env GIT_SHA=<sha>` and so the build
+  arg and `ENV` of its Dockerfile. A Dockerfile without `ARG GIT_SHA`
+  builds as before: BuildKit (buildx 0.34, VM test
+  `TestGitBuildPassesGitSHA`) prints nothing about the unused build arg.
+  Railpack's `secrets-hash` stays the hash of the panel's variables, so a
+  new commit does not rebuild the steps that see secrets (the install step
+  too); steps that copy the source run again for a new commit anyway, and
+  one whose context is identical to an earlier build's may keep that
+  build's value in a cached layer (the containers still get the right one,
+  below). The panel sends no GIT_SHA of its own in `BuildRequest.env`; a
+  `GIT_SHA` of the service's `.env` or the project's shared variables (both
+  in `env`, `resolveServiceEnv`) wins, also an empty one, and the agent
+  adds none. Uploads, inline Dockerfiles and image sources get none.
+  Agents 0.2.11 to 0.2.13 pass no GIT_SHA to builds; their deployments
+  still get it at runtime. Runtime (`env/git-sha.ts`): the panel seals
+  `GIT_SHA` into the deployment's env (`deployments.env_sealed`, an entry
+  marked `builtCommit: true`, which `deploymentEnv` drops) while the
+  deployment is `building`, once the commit is known in full: from its own
+  lookup (a GitHub or provider commit, a branch head it listed) when the
+  build request names a full commit, else from the node's
+  `BuildSourceInfo` (every agent version sends it for git sources). Never
+  after the deployment left `building`: a late or replayed report does not
+  change what a rolled-out deployment runs. The service's own or shared
+  `GIT_SHA` in the sealed env wins. A rollback seals the service's env now
+  plus the `builtCommit` GIT_SHA of the deployment it runs again (through
+  a chain of rollbacks when one's own GIT_SHA won); a move keeps the live
+  env; a restart changes nothing. Deployments sealed before 0.2.14 have
+  none, so running apps are not recreated when the panel updates: GIT_SHA
+  comes with each service's next deploy (and a rollback to such a
+  deployment runs without it, as before). The References panel of the
+  Environment tab says so for repository sources.
 - Agent versions: the hello and `NodeFacts.agent_version` carry the bare
   version ("0.1.1"); `parseVersion` also accepts the older
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by

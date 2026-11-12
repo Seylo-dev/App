@@ -22,6 +22,7 @@ export default {
     title: "References",
     hint: "Click to insert. Internal addresses only work for services on {nodes}.",
     hintNoNode: "Click to insert.",
+    gitSha: "Each deploy also sets GIT_SHA, the commit this deployment was built from. A GIT_SHA you set yourself wins.",
     empty: "Nothing to reference yet. Other services of this project and shared variables show up here.",
     shared: "shared variables",
     project: "Project",
