@@ -10,7 +10,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { getService, invalidateService } from "../domains/lookup";
 import { assertNoTransfer } from "../services/copies";
 import { applyRetention, checkTarget, nextRun, ownObjectKey, type PolicyRow, queuePrune, type RunRow, startBackup, toRun } from "./runs";
-import { type DestinationRow, deleteObject, type StorageConfig, storageConfig, testStorage } from "./storage";
+import { type DestinationRow, deleteRunObject, type StorageConfig, storageConfig, testStorage } from "./storage";
 
 type Destination = Static<typeof backupOps.Destination>;
 type Policy = Static<typeof backupOps.Policy>;
@@ -387,7 +387,7 @@ export const deleteRun = implement(backupOps.deleteRun, async (input, ctx) => {
     try {
       // A key recorded before the panel checked keys may name another
       // service's object: drop the row, leave that object alone.
-      if (ownObjectKey(row, row.objectKey)) await deleteObject(storageConfig(ctx.secrets, destination), row.objectKey);
+      if (ownObjectKey(row, row.objectKey)) await deleteRunObject(storageConfig(ctx.secrets, destination), row.objectKey);
       else ctx.logger.warn({ runId: row.id, serviceId: row.serviceId }, "not deleting a backup object outside its run's folder");
     } catch (error) {
       ctx.logger.warn({ err: error, runId: row.id }, "deleting a backup object failed");

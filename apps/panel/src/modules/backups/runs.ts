@@ -13,6 +13,7 @@ import { backupDestinations, backupPolicies, backupRuns, services, volumes } fro
 import type { Deps } from "../../deps";
 import { findDatabase } from "../databases/info";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
+import { legacyKey } from "./address";
 import { backupFolder, expiredObjects, signedBackupsCapability, signedDestination } from "./signing";
 import { deleteObject, listObjects, storageConfig } from "./storage";
 
@@ -288,7 +289,14 @@ export async function pruneBackups(deps: Pick<Deps, "db" | "secrets" | "logger">
   if (!destination) return [];
   const config = storageConfig(deps.secrets, destination);
   const folder = backupFolder(destination.pathPrefix, policy.serviceId, policy.id);
-  const expired = expiredObjects(folder, await listObjects(config, folder), policy.keepLast);
+  // Each object by the key the agent names it with, kept with its key in
+  // the bucket: on a bucket host the ones written before 0.2.15 are
+  // under "<bucket>/" (legacyKey) and count towards keepLast too.
+  const stored = new Map<string, string>();
+  for (const key of await listObjects(config, folder)) stored.set(key, key);
+  const legacy = legacyKey(config, folder);
+  if (legacy) for (const key of await listObjects(config, legacy)) stored.set(`${folder}${key.slice(legacy.length)}`, key);
+  const expired = expiredObjects(folder, [...stored.keys()], policy.keepLast).map((key) => stored.get(key) ?? key);
   for (const key of expired) await deleteObject(config, key);
   if (expired.length > 0)
     deps.logger.info({ policyId, serviceId: policy.serviceId, count: expired.length }, "backup retention deleted old objects");

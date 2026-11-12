@@ -5,10 +5,12 @@
 // downloads of backups themselves go straight from the node to the bucket,
 // with URLs the panel presigned; nodes never get the keys. Both address the
 // bucket through address.ts bucketAddress, so they reach the same objects.
+// Objects nodes wrote on a bucket host before 0.2.15 are looked for
+// at their old address too (address.ts legacyKey).
 
 import type { backupDestinations } from "../../db/schema";
 import type { SecretBox } from "../../security/secret-box";
-import { bucketAddress, bunS3Options } from "./address";
+import { bucketAddress, bunS3Options, legacyKey } from "./address";
 import { storageTarget } from "./presign";
 
 export type DestinationRow = typeof backupDestinations.$inferSelect;
@@ -196,12 +198,50 @@ export async function testStorage(config: StorageConfig): Promise<TestResult> {
   };
 }
 
-/** Deletes one backup object. The key is the full key the agent reported, checked by ownObjectKey. */
+/** Deletes one object, the key as it is in the bucket. */
 export async function deleteObject(config: StorageConfig, key: string): Promise<void> {
   try {
     await client(config).delete(key);
   } catch (error) {
     throw requestError(config, { method: "DELETE", key }, error);
+  }
+}
+
+/**
+ * Deletes a run's backup object. The key is the full key the agent
+ * reported, checked by ownObjectKey; on a bucket host the object may still
+ * be at its address from before 0.2.15 (address.ts legacyKey), so
+ * that one goes too (a delete of a missing key succeeds).
+ */
+export async function deleteRunObject(config: StorageConfig, key: string): Promise<void> {
+  await deleteObject(config, key);
+  const legacy = legacyKey(config, key);
+  if (legacy) await deleteObject(config, legacy);
+}
+
+/**
+ * The key a run's object is at, for presigning its download: the key the
+ * agent reported, or on a bucket host its address from before 0.2.15
+ * (address.ts legacyKey) when only that one exists. When the bucket cannot
+ * tell (an error, or no answer within `timeoutMs`), the reported key: the
+ * node's download then fails with the bucket's own answer.
+ */
+export async function storedKey(config: StorageConfig, key: string, timeoutMs = 15_000): Promise<string> {
+  const legacy = legacyKey(config, key);
+  if (!legacy) return key;
+  const s3 = client(config);
+  const lookup = (async () => {
+    if (await s3.exists(key)) return key;
+    return (await s3.exists(legacy)) ? legacy : key;
+  })().catch(() => key);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(key), timeoutMs);
+  });
+  try {
+    return await Promise.race([lookup, late]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

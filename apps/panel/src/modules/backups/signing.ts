@@ -31,7 +31,7 @@ import { backupDestinations, backupRuns } from "../../db/schema";
 import type { SecretBox } from "../../security/secret-box";
 import { serviceNodes } from "../domains/lookup";
 import { presign, type SignedMethod, signedRequest } from "./presign";
-import { type DestinationRow, type StorageConfig, storageConfig } from "./storage";
+import { type DestinationRow, type StorageConfig, storageConfig, storedKey } from "./storage";
 
 /** Agents that take a destination without keys and ask the panel to sign (BackupDestination.signing_id). */
 export const signedBackupsCapability = "backup.signed.v1";
@@ -229,10 +229,14 @@ export async function signBackupRequests(
       : undefined;
     if (!source?.objectKey || source.serviceId !== run.serviceId || !destination) throw denied("The backup to restore is gone.");
     const key = source.objectKey;
-    steps = request.requests.map((r) => {
+    for (const r of request.requests) {
       if (r.op !== BackupStorageOp.GET || r.key !== key) throw denied("The panel signs only the download of the restored backup.");
-      return { presign: { method: "GET", key, query: {} } };
-    });
+    }
+    // On a bucket host a backup from before 0.2.15 may be at its old
+    // address (address.ts legacyKey): the node gets the one that exists.
+    target = storageConfig(deps.secrets, destination);
+    const stored = await storedKey(target, key);
+    steps = request.requests.map(() => ({ presign: { method: "GET", key: stored, query: {} } }));
   }
 
   const config = target ?? storageConfig(deps.secrets, destination);
