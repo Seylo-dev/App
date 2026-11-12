@@ -317,7 +317,19 @@ SMTP_HOST=\${{project.SMTP_HOST}}
 `;
 
 const refs = {
-  self: { serviceId: ids.worker, name: "worker", nodes: [us] },
+  // Its own built-ins as the panel sends them: no domain and no port yet (ports: []), so only INTERNAL_HOST has a value.
+  self: {
+    serviceId: ids.worker,
+    name: "worker",
+    nodes: [us],
+    builtins: [
+      { name: "URL", value: "", scope: "public", sensitive: false, description: "public URL of the primary domain" },
+      { name: "DOMAIN", value: "", scope: "public", sensitive: false, description: "host of the primary domain" },
+      { name: "INTERNAL_URL", value: "", scope: "internal", sensitive: false, description: "http://<service>:<port> on the project network" },
+      { name: "INTERNAL_HOST", value: "worker", scope: "internal", sensitive: false, description: "host name on the project network" },
+      { name: "INTERNAL_PORT", value: "", scope: "plain", sensitive: false, description: "main container port" },
+    ],
+  },
   targets: [
     {
       name: "db",

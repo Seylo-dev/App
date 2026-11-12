@@ -23,6 +23,8 @@ export default {
     hint: "Click to insert. Internal addresses only work for services on {nodes}.",
     hintNoNode: "Click to insert.",
     empty: "Nothing to reference yet. Other services of this project and shared variables show up here.",
+    emptyOthers: "Other services of this project and shared variables show up here.",
+    thisService: "this service",
     shared: "shared variables",
     project: "Project",
     public: "public",

@@ -5338,7 +5338,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `nodes.choices`, `ProjectPicker`). In `components/service/`: `editor/code-editor.tsx`
   (`CodeEditor`, lazy Monaco with only the editor worker),
   `editor/env-editor.tsx` (.env editor with env-analyzer markers, hovers,
-  completions), `terminal/xterm-view.tsx` +
+  completions), `env/references-panel.tsx` (the References panel: first the
+  edited service with `env.references` `self.builtins` only, each inserting
+  `${{<its name>.VAR}}`, never its own .env keys, and no such group when
+  `self.builtins` is empty or missing; then `targets`), `terminal/xterm-view.tsx` +
   `terminal/use-terminal-session.ts` (ticketed terminal sockets, one xterm
   write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
   `copy/` (the header's "..." `ServiceMenu` with the Clone and Move to
@@ -5402,7 +5405,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   hidden, the palette and the project page still open it, Unhide),
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
-  text unsaved), `console.spec.ts` (the Console | Shell switch in place
+  text unsaved), `env-references.spec.ts` (the References panel on the demo
+  data: worker first with its own built-ins and tips, none of its own
+  variables, a click inserting `${{worker.DOMAIN}}`; an exposed database's
+  internal variables on another node struck through, the Expose link),
+  `console.spec.ts` (the Console | Shell switch in place
   with `?mode=shell` and the old session closed, one card height for both
   modes at four window sizes with a one-row header, no ring on the
   switch in a dark preset, `/shell` redirecting, the Overview console

@@ -126,14 +126,21 @@ describe("env ops", () => {
   test("a service references its own DOMAIN and URL (n8n's N8N_HOST), not its own variables", async () => {
     const { api } = await world();
     await callOp(panel, domainOps.addAuto, { serviceId: api.id }, { cookie });
-    const text = "HOST=${{api.DOMAIN}}\nWEBHOOK_URL=${{api.URL}}/hook\nPLAIN=x\nCOPY=${{api.PLAIN}}\n";
+    const text =
+      "HOST=${{api.DOMAIN}}\nWEBHOOK_URL=${{api.URL}}/hook\nPLAIN=x\nCOPY=${{api.PLAIN}}\nSELF=${{api.INTERNAL_URL}}\nLISTEN=${{api.INTERNAL_HOST}}:${{api.INTERNAL_PORT}}\n";
     const saved = await set(api.id, text);
     expect(saved.body.diagnostics.map((d: { code: string; range: { startLine: number } }) => [d.code, d.range.startLine])).toEqual([
       ["self-reference", 4],
     ]);
-    // The editor's context carries the service's own built-ins, with their values.
+    // The editor's context carries the service's own built-ins, with their values (the References panel's first group).
     const ctx = await callOp(panel, envOps.references, { serviceId: api.id }, { cookie });
-    expect(ctx.body.self.builtins.find((v: { name: string }) => v.name === "DOMAIN")).toMatchObject({ value: "api.fsn.example.com" });
+    expect(ctx.body.self.builtins.map((v: { name: string; value: string }) => [v.name, v.value])).toEqual([
+      ["URL", "https://api.fsn.example.com"],
+      ["DOMAIN", "api.fsn.example.com"],
+      ["INTERNAL_URL", "http://api:3000"],
+      ["INTERNAL_HOST", "api"],
+      ["INTERNAL_PORT", "3000"],
+    ]);
     expect(analyzeEnv(text, ctx.body).diagnostics.map((d) => d.code)).toEqual(["self-reference"]);
     // The deploy gets the real values; its own variables stay as written.
     const env = Object.fromEntries(resolveServiceEnv(panel.deps, api.id).map((v) => [v.name, v.value]));
@@ -141,6 +148,8 @@ describe("env ops", () => {
       HOST: "api.fsn.example.com",
       WEBHOOK_URL: "https://api.fsn.example.com/hook",
       COPY: "${{api.PLAIN}}",
+      SELF: "http://api:3000",
+      LISTEN: "api:3000",
     });
   });
 

@@ -1,8 +1,9 @@
 // The References panel on the demo data: worker runs on us-ash-1, db
-// (exposed) and redis (not exposed) on de-fsn-1. An internal variable of a
-// service on another node is still listed, struck through, so it does not
-// look missing; for an exposed one its tip names the exposed variable to
-// use instead.
+// (exposed) and redis (not exposed) on de-fsn-1. worker itself comes first
+// with its own URL, DOMAIN and internal address (no domain yet), never its
+// own variables. An internal variable of a service on another node is still
+// listed, struck through, so it does not look missing; for an exposed one
+// its tip names the exposed variable to use instead.
 
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
@@ -44,5 +45,52 @@ test.describe("environment references", () => {
 
     // A service with no way in keeps the Expose link.
     await expect(panel.getByRole("link", { name: "Expose redis" })).toBeVisible();
+  });
+
+  test("the service itself comes first with its own built-ins, never its own variables", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(`/p/${ids.acme}/s/${svc.worker}/environment`);
+    const panel = page.getByRole("complementary", { name: "References" });
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    const editor = page.locator(".monaco-editor").first();
+    await expect(editor).toBeVisible({ timeout: 15_000 });
+    const line = (text: string) => editor.locator(".view-line", { hasText: text });
+    await expect(line("SMTP_HOST")).toBeVisible();
+
+    // First group: worker, its APP badge and "this service".
+    await expect(panel.locator("b").first()).toHaveText("worker");
+    const self = panel
+      .locator("div")
+      .filter({ has: page.getByText("this service", { exact: true }) })
+      .filter({ has: page.getByRole("button", { name: "DOMAIN", exact: true }) })
+      .last();
+    await expect(self.getByText("APP", { exact: true })).toBeVisible();
+    const chips = self.getByRole("button");
+    await expect(chips).toHaveText(["URL", "DOMAIN", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT"]);
+    // Its internal address works from where it runs: nothing is struck through.
+    for (const chip of await chips.all()) await expect(chip).not.toHaveAttribute("aria-disabled", "true");
+    // Its own .env variables are the lines of the file, not references.
+    for (const name of ["NODE_ENV", "QUEUE_CONCURRENCY", "LOG_LEVEL"]) {
+      await expect(panel.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
+
+    // The same tips as the other groups: no domain yet reads "Empty for now", a value shows as is.
+    const tip = (description: string) => page.getByRole("tooltip").filter({ hasText: description });
+    await self.getByRole("button", { name: "DOMAIN", exact: true }).hover();
+    await expect(tip("host of the primary domain")).toContainText("Empty for now");
+    // Away first, in steps: Radix closes a tip on a pointer move outside it, and one jump to the next chip is a single move.
+    await page.mouse.move(0, 0, { steps: 5 });
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    await self.getByRole("button", { name: "INTERNAL_HOST", exact: true }).hover();
+    await expect(tip("host name on the project network")).toContainText("worker");
+
+    // A click inserts ${{worker.DOMAIN}} at the cursor, and the analyzer takes it.
+    await line("SMTP_HOST").click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("HOST=");
+    await self.getByRole("button", { name: "DOMAIN", exact: true }).click();
+    await expect(line("worker.DOMAIN")).toHaveText("HOST=${{worker.DOMAIN}}");
+    await expect(page.getByText(/^Line 11:/)).toHaveCount(0);
   });
 });

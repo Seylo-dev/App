@@ -226,4 +226,23 @@ describe("a service's own built-in values", () => {
     expect(labels).toContain("worker.DOMAIN");
     expect(labels).toContain("worker.URL");
   });
+
+  // The References panel offers every one of them, its internal address too.
+  test("its internal address works from its own node, and a database's set resolves", () => {
+    const app: AnalyzeContext = {
+      ...context,
+      self: { ...context.self, builtins: appVariables.map((v) => ({ ...v, value: v.name === "INTERNAL_URL" ? "http://worker:3001" : `v-${v.name}` })) },
+    };
+    const text = "SELF=${{worker.INTERNAL_URL}}\nLISTEN=${{worker.INTERNAL_HOST}}:${{worker.INTERNAL_PORT}}\n";
+    expect(analyzeEnv(text, app).diagnostics).toEqual([]);
+    expect(resolveEnv(parseEnv(text), app).values).toEqual({ SELF: "http://worker:3001", LISTEN: "v-INTERNAL_HOST:v-INTERNAL_PORT" });
+
+    const db: AnalyzeContext = {
+      self: { serviceId: "dbid", name: "db", nodes: [fsn], builtins: databaseVariables.map((v) => ({ ...v, value: `v-${v.name}` })) },
+      targets: [],
+    };
+    const dbText = databaseVariables.map((v) => `${v.name}_COPY=\${{db.${v.name}}}`).join("\n");
+    expect(analyzeEnv(dbText, db).diagnostics).toEqual([]);
+    expect(Object.values(resolveEnv(parseEnv(dbText), db).values)).toEqual(databaseVariables.map((v) => `v-${v.name}`));
+  });
 });

@@ -264,7 +264,13 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
         </section>
         {showRefs &&
           (context ? (
-            <ReferencesPanel context={context} projectId={service.projectId} reveal={reveal} onInsert={(v) => handle.current?.insert(v)} />
+            <ReferencesPanel
+              context={context}
+              serviceKind={service.kind}
+              projectId={service.projectId}
+              reveal={reveal}
+              onInsert={(v) => handle.current?.insert(v)}
+            />
           ) : references.isError ? (
             <div className="max-w-[380px] min-w-0 flex-[1_1_320px]">
               <OpErrorNote error={references.error} />
