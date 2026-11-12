@@ -65,7 +65,7 @@ test.describe("sidebar new service", () => {
     await expect(sidebar.getByRole("link", { name: /^Approvals/ })).toBeVisible();
   });
 
-  test("every project has the same room after it, open with services, empty or collapsed", async ({ page }) => {
+  test("an open project has room after it, with or without services; collapsed projects sit close", async ({ page }) => {
     await installDemo(page);
     await page.goto("/");
     const sidebar = page.getByRole("navigation", { name: "Main" });
@@ -80,19 +80,22 @@ test.describe("sidebar new service", () => {
       return Math.round(b.y - (a.y + a.height));
     };
     await expect(sidebar.getByRole("link", { name: /^worker/ })).toBeVisible();
-    // After an open project's last service (acme-shop's worker) and before the next project.
-    const afterServices = await gap(/^worker/, /^personal/);
-    expect(afterServices).toBeGreaterThanOrEqual(8);
+    // Open with services: room after acme-shop's last service before personal.
+    expect(await gap(/^worker/, /^personal/)).toBeGreaterThanOrEqual(8);
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? "test/playwright/shots"}/sidebar-project-spacing.png`, clip: { x: 0, y: 0, width: 300, height: 700 } });
 
-    // Collapsed: acme-shop's row right above personal's gets the same room.
-    const collapsed = projects.map((p) => (p.id === ids.acme ? { ...p, collapsed: true } : p));
-    await installDemo(page, { overrides: { "projects.list": () => ({ projects: collapsed }) } });
+    // acme-shop collapsed and personal open with no services yet.
+    const shaped = projects.map((p) =>
+      p.id === ids.acme ? { ...p, collapsed: true } : p.id === ids.personal ? { ...p, serviceCount: 0, collapsed: false } : p,
+    );
+    await installDemo(page, { overrides: { "projects.list": () => ({ projects: shaped }) } });
     await page.goto("/");
     await expect(sidebar.getByRole("link", { name: /^personal/ })).toBeVisible();
     await expect(sidebar.getByRole("link", { name: /^worker/ })).toHaveCount(0);
-    const afterRow = await gap(/^acme-shop/, /^personal/);
-    expect(Math.abs(afterRow - afterServices)).toBeLessThanOrEqual(1);
+    // Collapsed: acme-shop sits close to personal.
+    expect(await gap(/^acme-shop/, /^personal/)).toBeLessThanOrEqual(2);
+    // Open and empty: room after personal before Panel.
+    expect(await gap(/^personal/, /^Panel/)).toBeGreaterThanOrEqual(8);
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? "test/playwright/shots"}/sidebar-project-spacing-collapsed.png`, clip: { x: 0, y: 0, width: 300, height: 700 } });
   });
 

@@ -62,8 +62,7 @@ export function ProjectsTree() {
         </button>
       </div>
 
-      {/* The same room after every project, open or not, so each one reads as its own group. */}
-      <ul aria-label={t("nav.projects")} className="-mt-2 m-0 flex list-none flex-col gap-2 p-0">
+      <ul aria-label={t("nav.projects")} className="-mt-2 m-0 flex list-none flex-col gap-px p-0">
         {list?.length === 0 && <li className="px-2.5 py-1.5 text-[12.5px] text-ink-ghost">{t("sidebar.noProjects")}</li>}
         {loading && (
           <li>
@@ -100,7 +99,7 @@ export function ProjectsTree() {
               {t("sidebar.hidden", { count: group.length })}
             </button>
             {showHidden && (
-              <ul aria-label={t("sidebar.hidden", { count: group.length })} className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+              <ul aria-label={t("sidebar.hidden", { count: group.length })} className="m-0 flex list-none flex-col gap-px p-0">
                 {group.map((project) => (
                   <li key={project.id} className="flex flex-col rounded-control">
                     <ProjectRow project={project} hidden onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
@@ -199,7 +198,13 @@ function ProjectRow({
           <ProjectMenu name={project.name} hidden={hidden} onHiddenChange={(hide) => onHiddenChange(project, hide)} />
         </div>
       </div>
-      {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} sortable={!hidden} />}
+      {/* Room after an open project (with its services, or none yet), so the next one reads as its own group;
+          collapsed projects sit close together. */}
+      {open && (
+        <div className="pb-2">
+          {project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} sortable={!hidden} />}
+        </div>
+      )}
     </>
   );
 }
