@@ -1,10 +1,13 @@
 // The deploy timeline (Deployments.dc.html): Clone > Build on <node> >
 // Ship to <node> > Health check > Switch traffic. Chips for history rows,
-// cards with time and detail for the log modal.
+// cards with time and detail for the log modal. While the deploy's build
+// waits for a free build slot on its node (Deployment.buildWait), a Queued
+// step goes first, with the place in line, and Clone waits behind it: the
+// panel has no step for it, the strip adds it from buildWait.
 
 import type { deployments } from "@seylo/ops";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconCheck, IconChevronRight, IconLoader2, IconMinus, IconX } from "@tabler/icons-react";
+import { IconCheck, IconChevronRight, IconClock, IconLoader2, IconMinus, IconX } from "@tabler/icons-react";
 import { Fragment } from "react";
 import { t } from "../../i18n/t";
 import { formatDuration } from "./format";
@@ -29,6 +32,54 @@ export function stepName(step: DeploymentStep): string {
   }
 }
 
+type BuildWait = Deployment["buildWait"];
+
+/** "Waiting for a build slot on de-fsn-1 - 2 ahead", or "- next in line": the Queued step's words. */
+export function buildWaitText(wait: NonNullable<BuildWait>): string {
+  const ahead = wait.position - 1;
+  return ahead === 0
+    ? t("serviceDeploys.steps.waitingNext", { node: wait.node.name })
+    : t("serviceDeploys.steps.waitingAhead", { node: wait.node.name, count: ahead });
+}
+
+/** One step of the strip: a deploy step, or the Queued step in front of them. */
+export interface StripStep {
+  key: DeploymentStep["key"] | "queued";
+  status: StepStatus;
+  name: string;
+  detail: string;
+  durationMs: number | null;
+}
+
+/**
+ * The steps the strip shows. With buildWait set the build waits for a free
+ * slot: a pending Queued step goes first, with the place in line and the
+ * time waited so far (the clone step's, which runs from the dispatch), and
+ * Clone is pending until the build starts. Otherwise the deploy's steps.
+ */
+export function stripSteps(steps: readonly DeploymentStep[], buildWait?: BuildWait): StripStep[] {
+  const out: StripStep[] = steps.map((step) => ({
+    key: step.key,
+    status: step.status,
+    name: stepName(step),
+    detail: step.detail,
+    durationMs: step.durationMs,
+  }));
+  if (!buildWait) return out;
+  const clone = steps.find((step) => step.key === "clone");
+  const queued: StripStep = {
+    key: "queued",
+    status: "pending",
+    name: t("serviceDeploys.steps.queued"),
+    detail: buildWaitText(buildWait),
+    durationMs: clone?.durationMs ?? null,
+  };
+  return [
+    queued,
+    ...out.map((step): StripStep => (step.key === "clone" ? { ...step, status: "pending", detail: "", durationMs: null } : step)),
+  ];
+}
+
 const chipTone: Record<StepStatus, string> = {
   ok: "bg-chip-green-bg text-chip-green-fg",
   running: "bg-chip-amber-bg text-chip-amber-fg",
@@ -37,7 +88,10 @@ const chipTone: Record<StepStatus, string> = {
   skipped: "bg-muted text-muted-foreground",
 };
 
-function StepIcon({ status, size }: { status: StepStatus; size: number }) {
+function StepIcon({ step, size }: { step: StripStep; size: number }) {
+  const { status } = step;
+  // Waiting in line, not working yet: a clock, never a spinner.
+  if (step.key === "queued") return <IconClock size={size} stroke={2.6} className="text-muted-foreground" aria-hidden="true" />;
   if (status === "ok") return <IconCheck size={size} stroke={3} className="text-status-ok" aria-hidden="true" />;
   if (status === "running") return <IconLoader2 size={size} stroke={3} className="animate-spin text-status-busy" aria-hidden="true" />;
   if (status === "failed") return <IconX size={size} stroke={3} className="text-status-error" aria-hidden="true" />;
@@ -45,16 +99,19 @@ function StepIcon({ status, size }: { status: StepStatus; size: number }) {
   return null;
 }
 
-/** A row of step chips with chevrons between them. */
-export function StepChips({ steps }: { steps: readonly DeploymentStep[] }) {
+/** A row of step chips with chevrons between them; the Queued chip has its place in line as its title. */
+export function StepChips({ steps, buildWait }: { steps: readonly DeploymentStep[]; buildWait?: BuildWait }) {
   return (
     <ol aria-label={t("serviceDeploys.steps.label")} className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0 text-xs font-medium">
-      {steps.map((step, i) => (
+      {stripSteps(steps, buildWait).map((step, i) => (
         <Fragment key={step.key}>
           {i > 0 && <IconChevronRight size={12} stroke={2.4} className="text-ink-ghost" aria-hidden="true" />}
-          <li className={cn("flex items-center gap-[5px] rounded-chip px-2 py-[3px]", chipTone[step.status])}>
-            <StepIcon status={step.status} size={12} />
-            {stepName(step)}
+          <li
+            className={cn("flex items-center gap-[5px] rounded-chip px-2 py-[3px]", chipTone[step.status])}
+            title={step.key === "queued" ? step.detail : undefined}
+          >
+            <StepIcon step={step} size={12} />
+            {step.name}
           </li>
         </Fragment>
       ))}
@@ -71,10 +128,10 @@ const cardTone: Record<StepStatus, { card: string; dot: string; detail: string }
 };
 
 /** Step cards for the log modal: icon, time, name and the one-line result. */
-export function StepCards({ steps }: { steps: readonly DeploymentStep[] }) {
+export function StepCards({ steps, buildWait }: { steps: readonly DeploymentStep[]; buildWait?: BuildWait }) {
   return (
     <ol aria-label={t("serviceDeploys.steps.label")} className="m-0 flex list-none flex-wrap gap-2 p-0">
-      {steps.map((step) => {
+      {stripSteps(steps, buildWait).map((step) => {
         const tone = cardTone[step.status];
         return (
           <li
@@ -83,7 +140,7 @@ export function StepCards({ steps }: { steps: readonly DeploymentStep[] }) {
           >
             <span className="mb-0.5 flex items-center gap-[7px]">
               <span aria-hidden="true" className={cn("flex size-5 shrink-0 items-center justify-center rounded-full", tone.dot)}>
-                <StepIcon status={step.status} size={11} />
+                <StepIcon step={step} size={11} />
               </span>
               <span className="ml-auto font-mono text-[11.5px] text-muted-foreground">
                 {step.status === "skipped"
@@ -95,7 +152,7 @@ export function StepCards({ steps }: { steps: readonly DeploymentStep[] }) {
                       : ""}
               </span>
             </span>
-            <b className="text-[12.5px] font-semibold">{stepName(step)}</b>
+            <b className="text-[12.5px] font-semibold">{step.name}</b>
             {step.detail && <span className={cn("text-xs leading-[1.4]", tone.detail)}>{step.detail}</span>}
           </li>
         );

@@ -187,7 +187,7 @@ function PreviewList({ service }: { service: ServiceDetail }) {
               {p.branch}
               {p.commitSha ? ` · ${shortSha(p.commitSha)}` : ""}
             </span>
-            {p.status && <DeploymentStatusChip status={p.status} />}
+            {p.status && <DeploymentStatusChip status={p.status} buildWaiting={p.buildWaiting} />}
             {p.closedAt && (
               <span className="text-xs text-muted-foreground">{t("servicePreviews.closed", { when: formatRelative(p.closedAt) })}</span>
             )}

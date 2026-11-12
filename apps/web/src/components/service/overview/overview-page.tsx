@@ -182,10 +182,10 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
           <div className="flex flex-wrap items-center gap-2">
             <b className="text-[13.5px] font-semibold">{deploymentTitle(latest, service.source)}</b>
             <span className="font-mono text-xs text-muted-foreground">{deploymentVersion(latest)}</span>
-            <DeploymentStatusChip status={latest.status} />
+            <DeploymentStatusChip status={latest.status} buildWaiting={latest.buildWait != null} />
             <span className="ml-auto text-xs text-muted-foreground">{formatRelative(latest.createdAt)}</span>
           </div>
-          <StepChips steps={latest.steps} />
+          <StepChips steps={latest.steps} buildWait={latest.buildWait} />
           {latest.error && <span className="text-[12.5px] text-chip-red-fg">{latest.error}</span>}
           <PrivateRepoHint service={service} d={latest} />
           {live && live.id !== latest.id && (

@@ -58,6 +58,10 @@ export default {
   },
   steps: {
     label: "Deploy steps",
+    /** In front of Clone while the build waits for a free build slot of its node's Builds at once. */
+    queued: "Queued",
+    waitingNext: "Waiting for a build slot on {node} - next in line",
+    waitingAhead: "Waiting for a build slot on {node} - {count} ahead",
     clone: "Clone",
     build: "Build",
     buildOn: "Build on {node}",

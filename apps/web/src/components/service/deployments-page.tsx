@@ -259,7 +259,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
         {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
         <PrivateRepoHint service={service} d={d} />
         {failed && <DeployHostAction service={service} error={d.error} />}
-        {running ? <StepChips steps={d.steps} /> : <DeploymentChips d={d} now={now} />}
+        {running ? <StepChips steps={d.steps} buildWait={d.buildWait} /> : <DeploymentChips d={d} now={now} />}
       </div>
       <div className="ml-auto flex shrink-0 gap-1.5">
         <RowButton icon={IconTerminal2} onClick={onLogs} haspopup>

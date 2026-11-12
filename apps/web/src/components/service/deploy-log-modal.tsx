@@ -118,7 +118,7 @@ function ModalBody({ serviceId, source, initial }: { serviceId: string; source?:
           </DialogClose>
         </div>
         <div className="px-5 pb-4">
-          <StepCards steps={d.steps} />
+          <StepCards steps={d.steps} buildWait={d.buildWait} />
         </div>
         {d.error && <p className="m-0 px-5 pb-3 text-[12.5px] leading-[1.45] text-chip-red-fg">{d.error}</p>}
         <div className="shrink-0 px-5">
