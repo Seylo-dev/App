@@ -120,6 +120,15 @@ test("behind Cloudflare, what Cloudflare answered the check: Full (strict), out 
   expect(shown).toContain("Cloudflare cannot reach the node on port 443/80.");
   expect(shown).toContain("must point at 159.195.35.141");
 
+  // Cloudflare's security answered in the node's place (a challenge, a WAF block): not another server.
+  html = await render(domain({ certificate: waitingCert, origin: "unknown", originReason: "cloudflareChallenge", ...checkedNow }));
+  shown = text(html);
+  expect(shown).toContain("Certificate waits for Cloudflare");
+  expect(shown).toContain("Cloudflare's security answered the check with a challenge or a block instead of passing it to the node");
+  expect(shown).toContain("Let requests to /.well-known/ on verifly.cc through");
+  expect(shown).not.toContain("Cloudflare proxy, not this node");
+  expect(html).toContain('data-reason="cloudflareChallenge"');
+
   // 404 while the node may not have the domain yet.
   shown = text(await render(domain({ certificate: waitingCert, origin: "unknown", originReason: "notFound", ...checkedNow })));
   expect(shown).toContain("get 404 from the server they reach");

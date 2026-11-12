@@ -234,7 +234,7 @@ test("behind Cloudflare the certificate waits for Cloudflare; Check again runs t
   expect(calls("domains.checkDns").at(-1)).toEqual({ serviceId: svc.api, domainId: "m00000000000000b" });
 });
 
-test("behind Cloudflare the row says what Cloudflare answered the check: Full (strict), then the node out of reach", async ({ page }) => {
+test("behind Cloudflare the row says what Cloudflare answered the check: Full (strict), the node out of reach, then a challenge", async ({ page }) => {
   const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
   const pending = { status: "pending", expiresAt: null, issuer: null, error: null };
   // SSL/TLS Full (strict) with Always Use HTTPS: Cloudflare refused the node's temporary certificate (526).
@@ -289,7 +289,18 @@ test("behind Cloudflare the row says what Cloudflare answered the check: Full (s
   await expect(note).toHaveAttribute("data-reason", "cloudflareUnreachable");
   await expect(note).toContainText("Cloudflare cannot reach the node on port 443/80. Its record for strict.example.com must point at 203.0.113.10");
 
-  // The firewall lets Cloudflare in: the check reaches the node and the certificate starts.
+  // The firewall lets Cloudflare in, but Bot Fight Mode answers the panel's request with a challenge.
+  reason = "cloudflareChallenge";
+  await note.getByRole("button", { name: "Check again" }).click();
+  await expect(note).toHaveAttribute("data-reason", "cloudflareChallenge");
+  await expect(note).toContainText(
+    "Cloudflare's security answered the check with a challenge or a block instead of passing it to the node (Bot Fight Mode, Under Attack mode, or a WAF or rate limiting rule), and it can stop Let's Encrypt the same way. Let requests to /.well-known/ on strict.example.com through",
+  );
+  // Not another server answering: the record is not called wrong.
+  await expect(row.getByText("Cloudflare proxy, not this node")).toHaveCount(0);
+  await expect(row.getByTestId("certificate-waiting")).toHaveText("Certificate waits for Cloudflare");
+
+  // Bot Fight Mode off: the check reaches the node and the certificate starts.
   reason = undefined;
   await note.getByRole("button", { name: "Check again" }).click();
   await expect(row.getByText("Generating SSL certificate")).toBeVisible();

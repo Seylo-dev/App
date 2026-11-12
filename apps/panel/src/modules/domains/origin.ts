@@ -32,9 +32,15 @@
 // also says why it did not reach the node (OriginReason): 525 and 526 are
 // SSL/TLS Full (strict) refusing the node's temporary certificate (Traefik's
 // default one, until Let's Encrypt issues the domain's: behind Always Use
-// HTTPS the check, like Let's Encrypt, is redirected to https and
-// Cloudflare connects to port 443), 521 and 522 are a node Cloudflare
-// cannot connect to, and 404 is a server with nothing for the check. The
+// HTTPS the check is redirected to https and Cloudflare connects to port
+// 443; Let's Encrypt's own path it leaves on http), 521 and 522 are a node
+// Cloudflare cannot connect to, and 404 is a server with nothing for the
+// check. A challenge (cf-mitigated, any status) or a 403 or 429 from
+// Cloudflare is its security answering in the node's place (Bot Fight
+// Mode, Under Attack mode, a WAF or rate limiting rule), which may pass one
+// request and stop the next, and can stop Let's Encrypt's request the same
+// way: unknown, never elsewhere, since the request may not have left
+// Cloudflare. The
 // reason is kept in memory with the domain's id (lastOriginReason): a hint
 // for the Domains row, gone after a restart until the next check (the tab
 // checks a waiting domain when it opens, recheck.ts the others).
@@ -119,7 +125,7 @@ const maxRedirects = 3;
 const maxBodyBytes = 1024;
 
 /** Why Cloudflare's proxy did not bring the check to the node (the contract's OriginReason). */
-export type OriginReason = "cloudflareCertificate" | "cloudflareUnreachable" | "notFound";
+export type OriginReason = "cloudflareCertificate" | "cloudflareUnreachable" | "cloudflareChallenge" | "notFound";
 
 export type OriginAnswer =
   | { kind: "proof"; nodeId: string }
@@ -129,6 +135,8 @@ export type OriginAnswer =
 /** The reason in an answer that Cloudflare gave itself (cf-ray, or server: cloudflare); undefined for any other. */
 export function cloudflareReason(response: Pick<Response, "status" | "headers">): OriginReason | undefined {
   const headers = response.headers;
+  // Only Cloudflare's challenge pages carry it (its value is "challenge"), whatever the status.
+  if (headers.has("cf-mitigated")) return "cloudflareChallenge";
   if (!headers.has("cf-ray") && headers.get("server")?.toLowerCase() !== "cloudflare") return undefined;
   switch (response.status) {
     case 525:
@@ -137,6 +145,10 @@ export function cloudflareReason(response: Pick<Response, "status" | "headers">)
     case 521:
     case 522:
       return "cloudflareUnreachable";
+    // The node's edge answers the origin path without the route's middlewares, so never with these.
+    case 403:
+    case 429:
+      return "cloudflareChallenge";
     case 404:
       return "notFound";
     default:
@@ -182,7 +194,8 @@ export async function probeOrigin(
         continue;
       }
       const reason = cloudflareReason(response);
-      if (response.status >= 500) {
+      // Cloudflare's security answered: the request may never have left Cloudflare, so nothing is known of the origin.
+      if (response.status >= 500 || reason === "cloudflareChallenge") {
         await response.body?.cancel();
         return withReason({ kind: "none" }, reason);
       }

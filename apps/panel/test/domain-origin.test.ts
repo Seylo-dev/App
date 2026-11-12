@@ -242,6 +242,43 @@ describe("origin proofs", () => {
     ).toEqual({ kind: "none", reason: "cloudflareCertificate" });
   });
 
+  // Cloudflare's security (Bot Fight Mode, Under Attack mode, a WAF or rate limiting rule) answering the panel's
+  // request in the node's place, which can pass one request and stop the next. Before, its 403 page was
+  // "another server answering" (elsewhere): the row said the record in Cloudflare pointed away from the node and
+  // the hold never ended, with the record right all along.
+  test("probeOrigin: a challenge or a block from Cloudflare is not another server answering", async () => {
+    const keys = [{ id: "n1", publicKey: nodeKey().publicKey }];
+    const probe = (answer: (url: string) => Response) => probeOrigin("shop.example.com", keys, alwaysHttps(answer));
+    const challenge = (status: number) =>
+      new Response("<!DOCTYPE html><html><head><title>Just a moment...</title>", {
+        status,
+        headers: { "content-type": "text/html", "cf-mitigated": "challenge", "cf-ray": "8f1c2a3b4d5e6f70-FRA", server: "cloudflare" },
+      });
+    // A managed or JS challenge says so in cf-mitigated, whatever the status (Under Attack mode once answered 503).
+    expect(await probe(() => challenge(403))).toEqual({ kind: "none", reason: "cloudflareChallenge" });
+    expect(await probe(() => challenge(503))).toEqual({ kind: "none", reason: "cloudflareChallenge" });
+    // On the first request too, before any redirect.
+    expect(
+      await probeOrigin(
+        "shop.example.com",
+        keys,
+        fakeFetch(() => challenge(403)),
+      ),
+    ).toEqual({
+      kind: "none",
+      reason: "cloudflareChallenge",
+    });
+    // A WAF block (403, error 1020) or a rate limiting rule (429) from Cloudflare.
+    expect(await probe(() => cloudflare(403, "<!DOCTYPE html><title>Attention Required! | Cloudflare</title>"))).toEqual({
+      kind: "none",
+      reason: "cloudflareChallenge",
+    });
+    expect(await probe(() => cloudflare(429))).toEqual({ kind: "none", reason: "cloudflareChallenge" });
+    // The same codes from a server that is not Cloudflare are another server answering, as before.
+    expect(await probe(() => text("forbidden", 403))).toEqual({ kind: "other" });
+    expect(await probe(() => text("slow down", 429))).toEqual({ kind: "other" });
+  });
+
   test("probeOrigin over a real connection: Bun's fetch hands the redirect over, then the proof", async () => {
     const key = nodeKey();
     let hits = 0;
@@ -401,6 +438,19 @@ describe("domains.checkDns and the origin", () => {
     expect(proven.originReason).toBeUndefined();
     expect(await row()).toMatchObject({ origin: "node" });
     expect((await row())?.originReason).toBeUndefined();
+  });
+
+  test("Cloudflare's security answering the check holds the domain as unknown with the reason, never elsewhere", async () => {
+    const { key, service, ref } = await proxiedDomain();
+    const check = async () => (await callOp(panel, domainOps.checkDns, ref, { cookie })).body;
+    // The node has the domain's route, so another server answering would read elsewhere.
+    setOriginFetch(alwaysHttps(() => cloudflare(403, "<!DOCTYPE html><title>Attention Required! | Cloudflare</title>")));
+    expect(await check()).toMatchObject({ status: "proxied", origin: "unknown", originReason: "cloudflareChallenge" });
+    expect(await listed(service.id)).toMatchObject([{ origin: "unknown", originReason: "cloudflareChallenge" }]);
+    // Bot Fight Mode lets the next request through: the node proves itself.
+    setOriginFetch(alwaysHttps((url) => text(proofFor(key.privateKey, url))));
+    expect(await check()).toMatchObject({ origin: "node" });
+    expect((await listed(service.id))[0]?.originReason).toBeUndefined();
   });
 
   test("the reason without an origin to go with it is not listed", async () => {

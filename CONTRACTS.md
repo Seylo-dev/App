@@ -76,7 +76,7 @@ packages use. "Built" means implemented and tested.
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
-| `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; every ACME route answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.12; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with Always Use HTTPS and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareAlwaysHTTPS`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
+| `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; an ACME route with `acme_challenge_on_https` (the panel's domains whose DNS does not point straight at the node, the panel's own domain, every tool host) answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.12; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https, the challenge path over https kept for the app on a domain without `acme_challenge_on_https`, and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with a redirect to https for every path and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareHTTPSRedirect`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), a TLS check on exposed Postgres, MySQL and MariaDB (0.2.9, `Listener.RequireTLS`, `requiretls.go`: Postgres must open with an SSLRequest, a direct TLS ClientHello or a CancelRequest, a GSSENCRequest gets "N" from the gate and the next message must ask for TLS, and a database that answers the SSLRequest "N" gets no plain login either; MySQL and MariaDB: the server's greeting must offer TLS (CLIENT_SSL; read whole, up to 1 KiB) or the client gets an ERR 3159 "TLS is not on in this database yet" in its place (MariaDB 10.11 has no TLS), and the client's first packet must be a 4.1 SSLRequest, payload exactly 32 bytes with CLIENT_SSL, since a whole handshake response with the flag set goes in the clear and a server without TLS masks the flag off; anything else gets the protocol's error, a Postgres ErrorResponse FATAL 28000 "this port only accepts TLS connections: connect with sslmode=require" or a MySQL ERR 3159 HY000, and the connection closes; 10 s for Postgres' first bytes, 30 s for MySQL's greeting and answer, at most the 8 bytes (Postgres) or the greeting and 6 bytes (MySQL) checked are buffered and go on unchanged, and a refused startup message is read to its end, up to Postgres' 10000 bytes or 64 KiB, so the client reads the error before the close), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM; psql `sslmode=require` and `prefer`, mysql `--ssl-mode=REQUIRED` and mariadb `--ssl` pass, `sslmode=disable`, `--ssl-mode=DISABLED`, `--skip-ssl` and `prefer` to a Postgres with TLS off get the gate's error, MariaDB 10.11 refuses `--ssl`, `--skip-ssl` and a plain response with CLIENT_SSL, and 120 refused MySQL logins in a row do not block the gate's address, verified in the VM: `TestIntegrationDatabaseTLSInProtocol`) |
 | `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
@@ -1080,20 +1080,29 @@ local API, join and resume. The areas:
   router never matches the path), without the route's middlewares (an
   allowlist or basic auth would hide the node from the check); routes of a
   service on the same hosts share them (the TLS of the first route with
-  HTTPS on), the tool host and the LB file get none. Every ACME route
-  (held or not, the tool host too) also sends
-  `/.well-known/acme-challenge/` (`proxy.AcmeChallengePath`) on websecure
-  to Traefik's own challenge handler `acme-http@internal`
-  (`proxy.AcmeChallengeService`, there whenever a resolver has the HTTP
-  challenge on, as the agent's Traefik and the Wings fork's `le` both do),
-  with `tls: {}`, no middlewares, at priority 1999997000 (above every
-  router of the hosts but the origin ones), since 0.2.12: Let's Encrypt
-  follows a redirect from http to https without checking the certificate,
-  so behind Cloudflare's Always Use HTTPS with SSL/TLS Full its request
-  reaches 443, where before only the app (or Traefik's 404) answered and
-  the first certificate never came (Traefik's own challenge router is on
-  web only). Routes on the same hosts share it; the LB file and the
-  database certificate router get none. The edge answers `GET <OriginPath><challenge>` (16 to 128
+  HTTPS on), the tool host and the LB file get none. An ACME route with
+  `Route.acme_challenge_on_https` (held or not; the agent sets it on every
+  tool host) also sends `/.well-known/acme-challenge/`
+  (`proxy.AcmeChallengePath`) on websecure to Traefik's own challenge
+  handler `acme-http@internal` (`proxy.AcmeChallengeService`, there
+  whenever a resolver has the HTTP challenge on, as the agent's Traefik and
+  the Wings fork's `le` both do), with `tls: {}`, no middlewares, at
+  priority 1999997000 (above every router of the hosts but the origin
+  ones), since 0.2.12: Let's Encrypt follows a redirect from http to https
+  without checking the certificate, so behind Cloudflare's proxy with a
+  redirect to https that takes every path (a Redirect Rule or Page Rule;
+  Always Use HTTPS itself leaves `/.well-known/acme-challenge/` alone, seen
+  on a live domain 2026-11-12) and SSL/TLS Full its request reaches 443,
+  where before only the app (or Traefik's 404) answered and neither the
+  first certificate nor a renewal came (Traefik's own challenge router is
+  on web only). The handler answers only the tokens of its own orders in
+  progress and 404 for the rest, never falling through, so while the field
+  is set an app on the host cannot answer challenges over https itself (a
+  central responder other servers redirect their challenges to): the panel
+  leaves the field off for a domain whose last DNS check saw it point
+  straight at the node, where the CA reaches port 80 and the app keeps the
+  path on 443. Routes on the same hosts share the router of the first with
+  the field; the LB file and the database certificate router get none. The edge answers `GET <OriginPath><challenge>` (16 to 128
   base64url characters, anything else 404, before the tool header is
   looked at) with the node key's Ed25519 signature over
   `<slug>-origin-v1` 0x00 host 0x00 challenge (host from the Host header,
@@ -4815,8 +4824,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (SSL/TLS Full (strict) refuses the node's temporary certificate, Traefik's
   default one, until Let's Encrypt issues the domain's), `cloudflareUnreachable`
   for 521/522 (Cloudflare cannot connect to the node on 443 or 80),
-  `notFound` for 404 (with `unknown` or `elsewhere`); any other answer
-  gives none. `Domain.originReason` (while `origin` is listed) and
+  `cloudflareChallenge` for a challenge page (a `cf-mitigated` header,
+  whatever the status) or a 403 or 429 from Cloudflare (its security in
+  the node's place: Bot Fight Mode, Under Attack mode, a WAF or rate
+  limiting rule, which may pass one request and stop the next and stop
+  Let's Encrypt the same way; always `unknown`, never `elsewhere`, since
+  the request may not have left Cloudflare; before, the 403 page read as
+  another server answering), `notFound` for 404 (with `unknown` or
+  `elsewhere`); any other answer gives none. `Domain.originReason` (while `origin` is listed) and
   `DnsCheck.originReason` carry it; the panel keeps it in memory per
   domain id (`lastOriginReason`, set and cleared with every stored origin,
   dropped for `node`), so after a restart it is absent until the next
@@ -4847,10 +4862,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   routers on both entry points, so the origin check reaches the node when
   Cloudflare's proxy connects on 443 with SSL/TLS Full; Full (strict)
   refuses that certificate with 525/526, which the check reports as
-  `originReason: cloudflareCertificate`, and the challenge router on
-  websecure is in place for the first order after the release, so behind
-  Always Use HTTPS with Full that certificate can be issued, since 0.2.12;
-  an agent from before 0.2.8 ignores
+  `originReason: cloudflareCertificate`; Always Use HTTPS redirects the
+  check to https but leaves Let's Encrypt's `/.well-known/acme-challenge/`
+  on http, so after the release the order reaches port 80; with a
+  redirect to https for every path the challenge router on websecure
+  (`Route.acme_challenge_on_https`) is in place for the first order, since
+  0.2.12; an agent from before 0.2.8 ignores
   the field and asks the CA at once), and `Domain.certificate` has
   `waitingForDns: true`, while the last check said `missing` or
   `wrongTarget`, `proxied` with the origin not `node`, or `ok` with the
@@ -4881,6 +4898,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `certificate_expires_at` is a held route serving; CERTIFICATE_FAILED is
   ignored); one with a certificate, or a DNS_MISMATCH that holds a domain
   nothing proved, marks the service dirty too.
+- Let's Encrypt's challenge on 443 (0.2.12, `acmeChallengeOnHttps` in
+  `modules/domains/acme-hold.ts`): an ACME domain's route goes out with
+  `Route.acme_challenge_on_https` unless its last DNS check said `ok` (the
+  record points straight at the node, so the CA reaches port 80, where
+  Traefik answers, and the app keeps `/.well-known/acme-challenge/` over
+  https); automatic domains (the node's wildcard record, never checked)
+  and the panel's own domain (`nodes/panel-service.ts`) always have it.
+  Held or released alike, since renewals take the same way. A check that
+  moves an ACME domain's DNS between `ok` and anything else marks the
+  service dirty (`settleHold`), so the route follows a record put behind
+  Cloudflare's proxy or taken out of it.
 
 ## Web app
 

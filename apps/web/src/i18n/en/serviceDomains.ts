@@ -63,6 +63,8 @@ export default {
       "Cloudflare's SSL mode Full (strict) refuses the node's temporary certificate until Let's Encrypt issues one: set SSL/TLS to Full for a few minutes, or turn off Always Use HTTPS, then Check again.",
     cloudflareUnreachable:
       "Cloudflare cannot reach the node on port 443/80. Its record for {host} must point at {ip}, and a firewall in front of the node must let Cloudflare in on those ports. Then Check again.",
+    cloudflareChallenge:
+      "Cloudflare's security answered the check with a challenge or a block instead of passing it to the node (Bot Fight Mode, Under Attack mode, or a WAF or rate limiting rule), and it can stop Let's Encrypt the same way. Let requests to /.well-known/ on {host} through (a WAF skip rule, or Bot Fight Mode off), then Check again.",
     notFound:
       "Requests to {host} through Cloudflare get 404 from the server they reach, not the node's answer: its record in Cloudflare must point at {ip}. If it already does, the node may not have the domain yet: Check again in a minute.",
   },

@@ -71,13 +71,18 @@ export const OriginStatus = Type.Union([Type.Literal("node"), Type.Literal("else
  * (strict) refuses the node's temporary certificate (Traefik's default one,
  * served until Let's Encrypt issues the domain's). cloudflareUnreachable:
  * 521 or 522, Cloudflare cannot connect to the node on port 443 or 80.
- * notFound: 404, the server Cloudflare reached has nothing for the check
- * (the record there points at another server, or the node has no route for
- * the domain yet). Absent for every other answer.
+ * cloudflareChallenge: Cloudflare's security answered in the node's place
+ * (a challenge page, cf-mitigated, or a 403 or 429 from Cloudflare: Bot
+ * Fight Mode, Under Attack mode, a WAF or rate limiting rule), which stops
+ * Let's Encrypt's request the same way; the origin is unknown, never
+ * elsewhere. notFound: 404, the server Cloudflare reached has nothing for
+ * the check (the record there points at another server, or the node has no
+ * route for the domain yet). Absent for every other answer.
  */
 export const OriginReason = Type.Union([
   Type.Literal("cloudflareCertificate"),
   Type.Literal("cloudflareUnreachable"),
+  Type.Literal("cloudflareChallenge"),
   Type.Literal("notFound"),
 ]);
 

@@ -29256,6 +29256,10 @@
                               "type": "string"
                             },
                             {
+                              "const": "cloudflareChallenge",
+                              "type": "string"
+                            },
+                            {
                               "const": "notFound",
                               "type": "string"
                             }
@@ -29521,6 +29525,10 @@
                             },
                             {
                               "const": "cloudflareUnreachable",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cloudflareChallenge",
                               "type": "string"
                             },
                             {
@@ -29886,6 +29894,10 @@
                           "type": "string"
                         },
                         {
+                          "const": "cloudflareChallenge",
+                          "type": "string"
+                        },
+                        {
                           "const": "notFound",
                           "type": "string"
                         }
@@ -30207,6 +30219,10 @@
                         },
                         {
                           "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareChallenge",
                           "type": "string"
                         },
                         {
@@ -30556,6 +30572,10 @@
                               },
                               {
                                 "const": "cloudflareUnreachable",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cloudflareChallenge",
                                 "type": "string"
                               },
                               {
@@ -31077,6 +31097,10 @@
                           "type": "string"
                         },
                         {
+                          "const": "cloudflareChallenge",
+                          "type": "string"
+                        },
+                        {
                           "const": "notFound",
                           "type": "string"
                         }
@@ -31524,6 +31548,10 @@
                         },
                         {
                           "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareChallenge",
                           "type": "string"
                         },
                         {
@@ -32073,6 +32101,10 @@
                           "type": "string"
                         },
                         {
+                          "const": "cloudflareChallenge",
+                          "type": "string"
+                        },
+                        {
                           "const": "notFound",
                           "type": "string"
                         }
@@ -32507,6 +32539,10 @@
                         },
                         {
                           "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareChallenge",
                           "type": "string"
                         },
                         {
@@ -33008,6 +33044,10 @@
                         },
                         {
                           "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareChallenge",
                           "type": "string"
                         },
                         {
