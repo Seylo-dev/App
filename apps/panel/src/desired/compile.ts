@@ -10,7 +10,8 @@
 //                     crash policy, resources, replicas, deploy strategy, compose
 //                     member and cron kind specs). null = nothing runs here.
 //   cron_jobs         ServiceSpec.cron_jobs, mapped here
-//   nodes             NodeSettings, mapped here; ServiceSpec.load_balancer URLs of
+//   nodes             NodeSettings, mapped here (builds at once on Auto from the stored
+//                     facts, modules/nodes/parallel-builds.ts); ServiceSpec.load_balancer URLs of
 //                     copies on other nodes (their public address, through their edge)
 //   contributors      the rest, from the modules that own it (contributors.ts):
 //                     networking sets env (references resolved), routing, dev access,
@@ -35,6 +36,7 @@ import type { PanelDb } from "../db/client";
 import { cronJobs, nodes, services, users } from "../db/schema";
 import { normalizeCronSchedule } from "../jobs/cron-expr";
 import { nodeAddress, privateIpv4Of } from "../modules/domains/lookup";
+import { parallelBuildsOf, storedFacts } from "../modules/nodes/parallel-builds";
 import { serviceSpecFor, servicesOnNode } from "../modules/services";
 import type { SecretBox } from "../security/secret-box";
 import { getSetting } from "../settings";
@@ -80,8 +82,9 @@ export function compileNodeSettings(db: PanelDb, node: typeof nodes.$inferSelect
     acmeEmail: owner?.email ?? "",
     wildcardDomain: node.wildcardDomain ?? "",
     logRetention: { maxBytesPerService: BigInt(node.logMaxBytesPerService), maxAge: seconds(node.logMaxAgeDays * 86_400) },
-    // 0 tells the agent this node does not build.
-    maxParallelBuilds: node.canBuild ? node.maxParallelBuilds : 0,
+    // 0 tells the agent this node does not build. On Auto, sized from the facts stored at the
+    // agent's hello (before the connect sync compiles this) or its last NodeFacts event.
+    maxParallelBuilds: node.canBuild ? parallelBuildsOf(node, storedFacts(node.facts)) : 0,
     // Agents older than the panel update themselves after they connect.
     autoUpdate: getSetting(db, "autoUpdate") ?? false,
     // `seylo status` on the node shows the panel's name for it, a rename included.

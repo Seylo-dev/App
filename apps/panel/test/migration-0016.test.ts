@@ -25,7 +25,7 @@ const journalOf = (folder: string) => JSON.parse(readFileSync(join(folder, "meta
 
 test("the journal is in order: one entry per number, each later than the one before", () => {
   const entries = journalOf(join(migrations, "panel")).entries;
-  expect(entries.map((e) => e.tag).slice(-3)).toEqual(["0015_domain_acme_hold", "0016_service_transfers", "0017_transfer_volumes"]);
+  expect(entries.map((e) => e.tag).slice(15, 18)).toEqual(["0015_domain_acme_hold", "0016_service_transfers", "0017_transfer_volumes"]);
   entries.forEach((e, i) => {
     expect(e.idx).toBe(i);
     expect(e.tag.slice(0, 4)).toBe(String(i).padStart(4, "0"));

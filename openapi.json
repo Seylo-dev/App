@@ -49962,6 +49962,7 @@
                     "canBuild",
                     "canBuildWarning",
                     "maxParallelBuilds",
+                    "parallelBuildsAuto",
                     "wings",
                     "gamesFirstCpu",
                     "facts",
@@ -50112,7 +50113,12 @@
                     "maxParallelBuilds": {
                       "minimum": 1,
                       "maximum": 16,
+                      "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                       "type": "integer"
+                    },
+                    "parallelBuildsAuto": {
+                      "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "type": "boolean"
                     },
                     "wings": {
                       "type": "object",
@@ -50851,6 +50857,7 @@
                           "canBuild",
                           "canBuildWarning",
                           "maxParallelBuilds",
+                          "parallelBuildsAuto",
                           "wings",
                           "gamesFirstCpu",
                           "facts",
@@ -50995,7 +51002,12 @@
                           "maxParallelBuilds": {
                             "minimum": 1,
                             "maximum": 16,
+                            "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                             "type": "integer"
+                          },
+                          "parallelBuildsAuto": {
+                            "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                            "type": "boolean"
                           },
                           "wings": {
                             "type": "object",
@@ -51617,6 +51629,7 @@
                     "canBuild",
                     "canBuildWarning",
                     "maxParallelBuilds",
+                    "parallelBuildsAuto",
                     "wings",
                     "gamesFirstCpu",
                     "facts",
@@ -51761,7 +51774,12 @@
                     "maxParallelBuilds": {
                       "minimum": 1,
                       "maximum": 16,
+                      "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                       "type": "integer"
+                    },
+                    "parallelBuildsAuto": {
+                      "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "type": "boolean"
                     },
                     "wings": {
                       "type": "object",
@@ -52371,6 +52389,7 @@
                     "canBuild",
                     "canBuildWarning",
                     "maxParallelBuilds",
+                    "parallelBuildsAuto",
                     "wings",
                     "gamesFirstCpu",
                     "facts",
@@ -52515,7 +52534,12 @@
                     "maxParallelBuilds": {
                       "minimum": 1,
                       "maximum": 16,
+                      "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                       "type": "integer"
+                    },
+                    "parallelBuildsAuto": {
+                      "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "type": "boolean"
                     },
                     "wings": {
                       "type": "object",
@@ -52910,6 +52934,7 @@
                     "canBuild",
                     "canBuildWarning",
                     "maxParallelBuilds",
+                    "parallelBuildsAuto",
                     "wings",
                     "gamesFirstCpu",
                     "facts",
@@ -53054,7 +53079,12 @@
                     "maxParallelBuilds": {
                       "minimum": 1,
                       "maximum": 16,
+                      "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                       "type": "integer"
+                    },
+                    "parallelBuildsAuto": {
+                      "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "type": "boolean"
                     },
                     "wings": {
                       "type": "object",
@@ -53457,6 +53487,7 @@
                     "canBuild",
                     "canBuildWarning",
                     "maxParallelBuilds",
+                    "parallelBuildsAuto",
                     "wings",
                     "gamesFirstCpu",
                     "facts",
@@ -53601,7 +53632,12 @@
                     "maxParallelBuilds": {
                       "minimum": 1,
                       "maximum": 16,
+                      "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                       "type": "integer"
+                    },
+                    "parallelBuildsAuto": {
+                      "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "type": "boolean"
                     },
                     "wings": {
                       "type": "object",
@@ -54026,7 +54062,7 @@
       "post": {
         "operationId": "nodes.updateSettings",
         "summary": "Change node settings",
-        "description": "Changes a node's location label, public address, wildcard domain, how many builds run at once, how much log history each service keeps and its Panel address (\"follow\" moves the node to the panel's domain once that is live, \"stay\" keeps it on the address it dials). Omitted fields stay as they are.",
+        "description": "Changes a node's location label, public address, wildcard domain, how many builds run at once, how much log history each service keeps and its Panel address (\"follow\" moves the node to the panel's domain once that is live, \"stay\" keeps it on the address it dials). Omitted fields stay as they are. Builds at once is a fixed number or Auto: maxParallelBuilds sets a fixed number (1 to 16) and turns Auto off; parallelBuildsAuto true turns Auto on, which runs one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes; parallelBuildsAuto false keeps the number that applies now as a fixed one, unless maxParallelBuilds gives another. parallelBuildsAuto true together with maxParallelBuilds is BAD_REQUEST (field maxParallelBuilds). The output's maxParallelBuilds is the number that applies now.",
         "tags": [
           "nodes"
         ],
@@ -54094,7 +54130,12 @@
                   "maxParallelBuilds": {
                     "minimum": 1,
                     "maximum": 16,
+                    "description": "A fixed number of builds at once; turns Auto off. Not together with parallelBuildsAuto true.",
                     "type": "integer"
+                  },
+                  "parallelBuildsAuto": {
+                    "description": "true: Auto, one build per 4 CPU cores and per 4 GiB of memory, 1 to 16. false: a fixed number, the one that applies now unless maxParallelBuilds is given. Added in 0.2.14.",
+                    "type": "boolean"
                   },
                   "logRetention": {
                     "type": "object",
@@ -54156,6 +54197,7 @@
                     "canBuild",
                     "canBuildWarning",
                     "maxParallelBuilds",
+                    "parallelBuildsAuto",
                     "wings",
                     "gamesFirstCpu",
                     "facts",
@@ -54306,7 +54348,12 @@
                     "maxParallelBuilds": {
                       "minimum": 1,
                       "maximum": 16,
+                      "description": "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
                       "type": "integer"
+                    },
+                    "parallelBuildsAuto": {
+                      "description": "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "type": "boolean"
                     },
                     "wings": {
                       "type": "object",

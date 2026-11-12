@@ -28,6 +28,7 @@ import { confirmGraceMs, confirmNodeCertificate, issueNodeCertificate, lbTlsCont
 import { detectNodeLocation, detectNodeLocations } from "./location";
 import { nodeHandlers, publishNode } from "./ops";
 import { ensurePanelService, panelContributor, panelServiceId } from "./panel-service";
+import { parallelBuildsOf, storedFacts } from "./parallel-builds";
 import { pruneTables } from "./retention";
 import { factsOf } from "./view";
 
@@ -137,6 +138,16 @@ function start(deps: Deps) {
     const text = JSON.stringify(json);
     if (factsWriter.last.get(nodeId) === text) return;
     factsWriter.last.set(nodeId, text);
+    const before = deps.db
+      .select({
+        facts: nodes.facts,
+        canBuild: nodes.canBuild,
+        parallelBuildsAuto: nodes.parallelBuildsAuto,
+        maxParallelBuilds: nodes.maxParallelBuilds,
+      })
+      .from(nodes)
+      .where(eq(nodes.id, nodeId))
+      .get();
     deps.db
       .update(nodes)
       .set({
@@ -147,6 +158,10 @@ function start(deps: Deps) {
       })
       .where(eq(nodes.id, nodeId))
       .run();
+    // Builds at once on Auto follows the machine: other cores or memory, the agent gets the new number.
+    if (before?.canBuild && parallelBuildsOf(before, storedFacts(before.facts)) !== parallelBuildsOf(before, facts)) {
+      deps.agents.desired.markDirty({ nodeId });
+    }
     // The agent's own Docker version check, unless the panel holds a newer one (docker-check.ts).
     const dockerReport = reportFromAgent(facts.dockerUpdate);
     if (dockerReport) recordAgentFinding(deps.db, nodeId, dockerReport);

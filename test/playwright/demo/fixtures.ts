@@ -32,6 +32,7 @@ export const ids = {
 const nodeBase = {
   publicIpv6: null,
   maxParallelBuilds: 2,
+  parallelBuildsAuto: false,
   gamesFirstCpu: false,
   lastSeenAt: iso(5_000),
   createdAt: iso(40 * day),

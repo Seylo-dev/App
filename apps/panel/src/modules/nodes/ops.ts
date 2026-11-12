@@ -24,6 +24,7 @@ import { agentJoinTarget, agentPinnedTarget } from "./join-target";
 import { forgetNodeCertificate, refreshLbPeers } from "./lb-tls";
 import { nodeLive } from "./live";
 import { detectNodeLocation } from "./location";
+import { parallelBuildsOf } from "./parallel-builds";
 import { factsOf, toNode, toNodeDetail } from "./view";
 
 const joinTokenTtlMs = 60 * 60 * 1000;
@@ -181,6 +182,34 @@ const setGamesFirstCpu = implement(nodeOps.setGamesFirstCpu, (input, ctx) => {
   return toNode(ctx, changeNode(ctx, input.nodeId, { gamesFirstCpu: input.enabled }, { desired: true }));
 });
 
+/**
+ * Builds at once from nodes.updateSettings. maxParallelBuilds alone is the
+ * call from before Auto (0.2.13 clients, MCP callers): a fixed number, so
+ * Auto goes off. parallelBuildsAuto false without a number keeps the one
+ * that applies now, Auto's included, as the fixed one.
+ */
+function parallelBuildsChange(
+  ctx: OpContext,
+  input: { nodeId: string; maxParallelBuilds?: number; parallelBuildsAuto?: boolean },
+): Partial<typeof nodes.$inferInsert> {
+  if (input.parallelBuildsAuto === true) {
+    if (input.maxParallelBuilds !== undefined) {
+      throw new OpError(
+        "BAD_REQUEST",
+        "Builds at once is either Auto or a fixed number: leave out maxParallelBuilds with parallelBuildsAuto true, or send parallelBuildsAuto false with it.",
+        { field: "maxParallelBuilds" },
+      );
+    }
+    return { parallelBuildsAuto: true };
+  }
+  if (input.maxParallelBuilds !== undefined) return { parallelBuildsAuto: false, maxParallelBuilds: input.maxParallelBuilds };
+  if (input.parallelBuildsAuto === false) {
+    const row = nodeRow(ctx, input.nodeId);
+    return { parallelBuildsAuto: false, maxParallelBuilds: parallelBuildsOf(row, factsOf(ctx, row)) };
+  }
+  return {};
+}
+
 const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
   const set: Partial<typeof nodes.$inferInsert> = {};
   if (input.location !== undefined) {
@@ -190,7 +219,7 @@ const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
   }
   if (input.publicAddress !== undefined) set.publicAddress = checkPublicAddress(input.publicAddress);
   if (input.wildcardDomain !== undefined) set.wildcardDomain = input.wildcardDomain;
-  if (input.maxParallelBuilds !== undefined) set.maxParallelBuilds = input.maxParallelBuilds;
+  Object.assign(set, parallelBuildsChange(ctx, input));
   if (input.logRetention) {
     set.logMaxBytesPerService = input.logRetention.maxBytesPerService;
     set.logMaxAgeDays = input.logRetention.maxAgeDays;
@@ -201,7 +230,11 @@ const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
       field: "panelAddressChoice",
     });
   }
-  const agentsCare = input.wildcardDomain !== undefined || input.maxParallelBuilds !== undefined || input.logRetention !== undefined;
+  const agentsCare =
+    input.wildcardDomain !== undefined ||
+    input.maxParallelBuilds !== undefined ||
+    input.parallelBuildsAuto !== undefined ||
+    input.logRetention !== undefined;
   const choiceChanged =
     input.panelAddressChoice !== undefined && setPanelAddressChoice(ctx.db, input.nodeId, input.panelAddressChoice, "owner");
   // The choice lives in settings (panel-address.ts); the row still records that the node changed.

@@ -5,10 +5,12 @@
 // stay on the node's address; not on the panel node), and removing the
 // node. A location the panel
 // detected from the node's address is marked Detected until the form is
-// saved, which makes it the owner's (locationSource "manual").
+// saved, which makes it the owner's (locationSource "manual"). Builds at
+// once is Auto (sized from the node's cores and memory, autoParallelBuilds
+// in @seylo/ops) or a fixed number from 1 to 16.
 
 import { slug } from "@seylo/brand";
-import { nodes } from "@seylo/ops";
+import { autoParallelBuilds, maxParallelBuildsLimit, nodes } from "@seylo/ops";
 import { opQueryKey, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -17,6 +19,7 @@ import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
@@ -25,6 +28,15 @@ import { errorMessage, queryClient } from "../../lib/api";
 import type { NodeDetail } from "../../lib/types";
 
 const mib = 1024 * 1024;
+
+/** The Builds at once choice that is not a number. */
+const autoBuilds = "auto";
+const buildCounts = Array.from({ length: maxParallelBuildsLimit }, (_, i) => String(i + 1));
+
+/** What Save sends for Builds at once: Auto without a number, or a number alone, which makes it fixed (Auto off). */
+export function parallelBuildsInput(choice: string): { parallelBuildsAuto: true } | { maxParallelBuilds: number } {
+  return choice === autoBuilds ? { parallelBuildsAuto: true } : { maxParallelBuilds: Number(choice) };
+}
 
 function refresh(nodeId: string) {
   void queryClient.invalidateQueries({ queryKey: opQueryKey(nodes.get, { nodeId }) });
@@ -44,7 +56,11 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
   const [publicAddress, setPublicAddress] = useState(node.publicAddress ?? "");
   const [tags, setTags] = useState(node.tags.join(", "));
   const [wildcard, setWildcard] = useState(node.wildcardDomain ?? "");
-  const [parallel, setParallel] = useState(String(node.maxParallelBuilds));
+  const [parallel, setParallel] = useState(node.parallelBuildsAuto ? autoBuilds : String(node.maxParallelBuilds));
+  // What Auto runs on this node now: the panel's own number while it is on, else the same formula on its facts.
+  const autoNow = node.parallelBuildsAuto ? node.maxParallelBuilds : autoParallelBuilds(node.facts);
+  const reportedHardware = Boolean(node.facts && node.facts.cpuCores > 0 && node.facts.memoryTotalBytes > 0);
+  const autoLabel = t("nodes.form.parallelBuildsAuto", { builds: autoNow });
   const [logMb, setLogMb] = useState(String(Math.round(node.logRetention.maxBytesPerService / mib)));
   const [logDays, setLogDays] = useState(String(node.logRetention.maxAgeDays));
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -83,7 +99,7 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
         location: location.trim() || null,
         publicAddress: publicAddress.trim() || null,
         wildcardDomain: wildcard.trim().replace(/^\*\./, "").toLowerCase() || null,
-        maxParallelBuilds: Number(parallel),
+        ...parallelBuildsInput(parallel),
         logRetention: { maxBytesPerService: Number(logMb) * mib, maxAgeDays: Number(logDays) },
       });
       done();
@@ -149,8 +165,30 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
         </Field>
         {wildcard.trim() && dnsIp && <DnsRecordLine record={`*.${wildcard.trim().replace(/^\*\./, "")} A ${dnsIp}`} />}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Field id="node-parallel" label="nodes.form.parallelBuilds">
-            <Input id="node-parallel" type="number" min={1} max={16} value={parallel} onChange={(e) => setParallel(e.target.value)} />
+          <Field
+            id="node-parallel"
+            label="nodes.form.parallelBuilds"
+            hint={
+              parallel !== autoBuilds
+                ? undefined
+                : reportedHardware
+                  ? "nodes.form.parallelBuildsAutoHint"
+                  : "nodes.form.parallelBuildsAutoNoFacts"
+            }
+          >
+            <Select value={parallel} onValueChange={setParallel}>
+              <SelectTrigger id="node-parallel" aria-describedby={parallel === autoBuilds ? "node-parallel-hint" : undefined}>
+                <SelectValue>{parallel === autoBuilds ? autoLabel : parallel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={autoBuilds}>{autoLabel}</SelectItem>
+                {buildCounts.map((count) => (
+                  <SelectItem key={count} value={count}>
+                    {count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <Field id="node-log-mb" label="nodes.form.logSize">
             <Input id="node-log-mb" type="number" min={1} value={logMb} onChange={(e) => setLogMb(e.target.value)} />
@@ -308,6 +346,7 @@ function Field({
 }: {
   id: string;
   label: MessageKey;
+  /** Under the field, with the id `<id>-hint` for aria-describedby. */
   hint?: MessageKey;
   /** Next to the label, for example the Detected chip. */
   badge?: ReactNode;
@@ -331,7 +370,11 @@ function Field({
           {note}
         </span>
       ) : (
-        hint && <span className="text-xs text-muted-foreground">{t(hint)}</span>
+        hint && (
+          <span id={`${id}-hint`} className="text-xs text-muted-foreground">
+            {t(hint)}
+          </span>
+        )
       )}
     </div>
   );

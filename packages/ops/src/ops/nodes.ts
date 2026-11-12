@@ -4,6 +4,7 @@
 
 import { type TSchema, Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
+import { maxParallelBuildsLimit } from "../parallel-builds";
 import { permission } from "../permission";
 import { Empty, Id, Timestamp } from "../schemas";
 
@@ -151,6 +152,9 @@ export const LogRetention = Type.Object({
   maxAgeDays: Type.Integer({ minimum: 1, maximum: 3650, description: "Default 14 days." }),
 });
 
+const parallelBuildsAutoText =
+  "Builds at once is on Auto: one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory). It follows the machine: a node that reconnects with other hardware gets the new number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.";
+
 /** One row of the Nodes table and the dashboard node chips. */
 export const Node = Type.Object({
   id: Id,
@@ -188,7 +192,18 @@ export const Node = Type.Object({
   canBuild: Type.Boolean(),
   /** Why building here is a bad idea even if allowed, for example "Less than 2 GB of memory". Null when fine. */
   canBuildWarning: Nullable(Type.String()),
-  maxParallelBuilds: Type.Integer({ minimum: 1, maximum: 16 }),
+  /**
+   * Builds that run at the same time on this node while it can build: the number that applies
+   * now, Auto's when parallelBuildsAuto is on (worked out from facts.cpuCores and
+   * facts.memoryTotalBytes by autoParallelBuilds, packages/ops/src/parallel-builds.ts).
+   */
+  maxParallelBuilds: Type.Integer({
+    minimum: 1,
+    maximum: maxParallelBuildsLimit,
+    description: "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
+  }),
+  /** Added in 0.2.14. Nodes that join start on Auto; nodes from before keep their fixed number. */
+  parallelBuildsAuto: Type.Boolean({ description: parallelBuildsAutoText }),
   wings: WingsInfo,
   gamesFirstCpu: Type.Boolean(),
   facts: Nullable(NodeFacts),
@@ -447,7 +462,7 @@ export const updateSettings = defineOp({
   kind: "mutation",
   summary: "Change node settings",
   description:
-    'Changes a node\'s location label, public address, wildcard domain, how many builds run at once, how much log history each service keeps and its Panel address ("follow" moves the node to the panel\'s domain once that is live, "stay" keeps it on the address it dials). Omitted fields stay as they are.',
+    'Changes a node\'s location label, public address, wildcard domain, how many builds run at once, how much log history each service keeps and its Panel address ("follow" moves the node to the panel\'s domain once that is live, "stay" keeps it on the address it dials). Omitted fields stay as they are. Builds at once is a fixed number or Auto: maxParallelBuilds sets a fixed number (1 to 16) and turns Auto off; parallelBuildsAuto true turns Auto on, which runs one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes; parallelBuildsAuto false keeps the number that applies now as a fixed one, unless maxParallelBuilds gives another. parallelBuildsAuto true together with maxParallelBuilds is BAD_REQUEST (field maxParallelBuilds). The output\'s maxParallelBuilds is the number that applies now.',
   input: Type.Object({
     nodeId: Id,
     location: Type.Optional(
@@ -472,7 +487,19 @@ export const updateSettings = defineOp({
     wildcardDomain: Type.Optional(
       Nullable(Type.String({ maxLength: 200, pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$" })),
     ),
-    maxParallelBuilds: Type.Optional(Type.Integer({ minimum: 1, maximum: 16 })),
+    maxParallelBuilds: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: maxParallelBuildsLimit,
+        description: "A fixed number of builds at once; turns Auto off. Not together with parallelBuildsAuto true.",
+      }),
+    ),
+    parallelBuildsAuto: Type.Optional(
+      Type.Boolean({
+        description:
+          "true: Auto, one build per 4 CPU cores and per 4 GiB of memory, 1 to 16. false: a fixed number, the one that applies now unless maxParallelBuilds is given. Added in 0.2.14.",
+      }),
+    ),
     logRetention: Type.Optional(LogRetention),
     /**
      * The node's Panel address (added in 0.2.14). "follow" on an online node

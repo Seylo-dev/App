@@ -78,8 +78,15 @@ export const nodes = sqliteTable(
     agentVersion: text("agent_version"),
     /** The owner allowed builds here ("build once, run anywhere"). */
     canBuild: integer("can_build", { mode: "boolean" }).notNull().default(false),
-    /** Builds run at the same time on this node when it can build. */
+    /** Builds run at the same time on this node when it can build, while parallelBuildsAuto is off. */
     maxParallelBuilds: integer("max_parallel_builds").notNull().default(1),
+    /**
+     * "Builds at once" on Auto: the panel sends autoParallelBuilds of the node's stored facts
+     * (@seylo/ops, one per 4 cores and 4 GiB, 1..16) instead of maxParallelBuilds. Every new
+     * node starts on it (the default); migration 0018 turned it off for the nodes before it, so
+     * they keep their number. Added in 0.2.14.
+     */
+    parallelBuildsAuto: integer("parallel_builds_auto", { mode: "boolean" }).notNull().default(true),
     /** Per-service log store limits sent in NodeSettings.log_retention. */
     logMaxBytesPerService: integer("log_max_bytes_per_service")
       .notNull()

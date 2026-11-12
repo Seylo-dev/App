@@ -297,7 +297,9 @@ so the update holds back none of their certificates); for 0.2.10
 service export and import) and `0017_transfer_volumes`
 (`service_exports.volumes`, `node_id` without a foreign key, `stop_service`
 and `source_stopped`, so a download that stopped its service starts it
-again after a panel restart)), which the panel applies at start, also
+again after a panel restart); for 0.2.14 `0018_parallel_builds_auto`
+(`nodes.parallel_builds_auto`, default true for new nodes, set false on
+existing ones so they keep their fixed builds at once)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -534,6 +536,30 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `state/desired.pb` for the same rule. `agent.SaveConfig` (the agent's own writes) keeps
   unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
   makes every new FileConfig key pick a side.
+- Builds at once (0.2.14): `NodeSettings.max_parallel_builds` is the
+  node's fixed `nodes.max_parallel_builds`, or with
+  `nodes.parallel_builds_auto` on, `autoParallelBuilds` of its stored
+  facts (`packages/ops/src/parallel-builds.ts`, the one function the
+  compiler, the nodes view and the web app use): min(floor(cpu_cores / 4),
+  floor(memory_total_bytes / 4 GiB)) clamped to 1..16, 1 without facts or
+  with cores or memory 0 (agents that do not report them). Still 0 while
+  Can build is off; no proto change, so 0.2.13 agents take it as before.
+  The compiler reads `nodes.facts`, which the hello writes before the
+  connect sync compiles (`decideHello`), and a NodeFacts event writes
+  within 2 s (`modules/nodes/index.ts` writeFacts); that write marks the
+  node dirty when the number it gives changes, so the agent's queue limit
+  follows new hardware without a reconnect. The column defaults to on, so
+  every node made after migration 0018 (joins, the installer's panel node,
+  test helpers) starts on Auto; 0018 turned it off for the nodes before it,
+  which keep their number. The `Node` view's `maxParallelBuilds` is the
+  number that applies now (Auto's from the live facts, else the stored
+  ones) and `parallelBuildsAuto` says which. `nodes.updateSettings`:
+  `parallelBuildsAuto: true` turns Auto on and leaves the stored fixed
+  number; `maxParallelBuilds` alone (the 0.2.13 call) sets a fixed number
+  and turns Auto off; `parallelBuildsAuto: false` without a number keeps
+  the number that applies now as the fixed one; both `true` and a number
+  is BAD_REQUEST, field `maxParallelBuilds`. Any of them marks the node's
+  desired state.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
   with jitter (half to full delay); 5 minutes after a rejection that needs
   a person (bad token, unknown node, bad signature, disabled, too old), a

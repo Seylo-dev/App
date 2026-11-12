@@ -16,6 +16,7 @@ export { registeredFormats } from "./formats";
 export * from "./lint";
 export * from "./live";
 export * from "./ops/index.gen";
+export * from "./parallel-builds";
 export * from "./people";
 export * from "./permission";
 export * from "./redact";

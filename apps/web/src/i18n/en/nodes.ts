@@ -202,6 +202,10 @@ export default {
     wildcard: "Wildcard domain",
     wildcardHint: "New services on this node get <name>.<this domain>. Point the wildcard A record at this node first.",
     parallelBuilds: "Builds at once",
+    // The Auto choice, with what it works out to on this node now (autoParallelBuilds in @seylo/ops).
+    parallelBuildsAuto: "Auto - {builds} now",
+    parallelBuildsAutoHint: "1 per 4 cores and 4 GB of memory, up to 16.",
+    parallelBuildsAutoNoFacts: "1 per 4 cores and 4 GB of memory, up to 16. The node has not reported its cores and memory yet.",
     logSize: "Logs per service (MB)",
     logDays: "Keep logs (days)",
     // The same name as the node list's column, so the setting reads the same in both places.

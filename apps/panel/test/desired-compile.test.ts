@@ -31,6 +31,8 @@ beforeEach(() => {
     wildcardDomain: "a.example.com",
     logMaxAgeDays: 3,
     canBuild: true,
+    // A fixed number (new nodes start on Auto: parallel-builds.test.ts).
+    parallelBuildsAuto: false,
     maxParallelBuilds: 2,
   });
   nodeB = addNode("b", "203.0.113.2");

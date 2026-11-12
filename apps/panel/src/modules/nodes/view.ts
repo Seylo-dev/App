@@ -2,9 +2,8 @@
 // in-memory node state (online, facts, usage, services) and the newest
 // Docker version check (docker-check.ts).
 
-import { fromJson } from "@bufbuild/protobuf";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { type NodeFacts, NodeFactsSchema, ServicePhase } from "@seylo/proto";
+import { type NodeFacts, ServicePhase } from "@seylo/proto";
 import { count, eq } from "drizzle-orm";
 import {
   lastHelloRejection,
@@ -21,6 +20,7 @@ import { usageOf } from "../metrics/index";
 import { metricsFor } from "../metrics/ingest";
 import { latestRelease } from "../updates/release-state";
 import { dockerView } from "./docker-check";
+import { parallelBuildsOf, storedFacts } from "./parallel-builds";
 
 type NodeRow = typeof nodes.$inferSelect;
 type CheckStatus = "pass" | "warn" | "fail" | "skipped";
@@ -29,14 +29,7 @@ const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
 /** Facts from the live session, else the last ones stored at connect. */
 export function factsOf(deps: Deps, row: NodeRow): NodeFacts | null {
-  const live = deps.agents.state.get(row.id)?.facts;
-  if (live) return live;
-  if (!row.facts) return null;
-  try {
-    return fromJson(NodeFactsSchema, row.facts as never, { ignoreUnknownFields: true });
-  } catch {
-    return null;
-  }
+  return deps.agents.state.get(row.id)?.facts ?? storedFacts(row.facts);
 }
 
 const twoGiB = 2 * 1024 ** 3;
@@ -81,7 +74,10 @@ export function toNode(deps: Deps, row: NodeRow) {
     updateAvailable: latest !== null && isNewer(latest, version),
     canBuild: row.canBuild,
     canBuildWarning: canBuildWarning(facts),
-    maxParallelBuilds: row.maxParallelBuilds,
+    // What the node runs with: Auto from these facts, which the stored ones the compiler reads
+    // follow within seconds (index.ts writeFacts).
+    maxParallelBuilds: parallelBuildsOf(row, facts),
+    parallelBuildsAuto: row.parallelBuildsAuto,
     wings: {
       detected: Boolean(facts?.wings),
       version: facts?.wings?.version || null,

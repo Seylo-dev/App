@@ -150,9 +150,11 @@ export function decideHello(
         // that joins does not (`seylo join --can-build` is only reported in its facts). A re-join
         // above keeps the row's value. nodes.setCanBuild changes it later.
         const canBuild = row.canBuild;
+        // Builds at once starts on Auto, sized from the facts stored here, before the connect
+        // sync compiles the node's settings (nodes/parallel-builds.ts). A re-join keeps the row's.
         const node = tx
           .insert(nodes)
-          .values({ name, publicKey: Buffer.from(publicKey), canBuild, isPanelNode, ...report, ...machine })
+          .values({ name, publicKey: Buffer.from(publicKey), canBuild, parallelBuildsAuto: true, isPanelNode, ...report, ...machine })
           .returning({ id: nodes.id })
           .get();
         tx.update(joinTokens).set({ nodeId: node.id }).where(eq(joinTokens.id, row.id)).run();
