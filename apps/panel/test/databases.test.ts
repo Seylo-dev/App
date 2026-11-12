@@ -21,6 +21,7 @@ import {
 } from "../src/modules/databases/engines";
 import { retiredExposedPasswordSecret, writeSecret } from "../src/modules/databases/info";
 import { releaseHeldRetirements } from "../src/modules/databases/retire";
+import { mainPasswordExec } from "../src/modules/databases/user-scripts";
 import { publishDeploymentChange } from "../src/modules/deployments/store";
 import { deploymentEnv, resolveServiceEnv, sealDeploymentEnv } from "../src/modules/env/desired";
 import { ensureEdgeTicketKey } from "../src/security/edge-ticket-key";
@@ -70,13 +71,22 @@ describe("engines", () => {
   });
 
   test("password changes go on stdin, never in the command", () => {
-    for (const engine of ["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb"] as const) {
+    for (const engine of ["mysql", "mariadb", "redis", "valkey", "keydb"] as const) {
       const exec = changePasswordExec(engine, "admin", "NewSecret123", "OldSecret456");
       expect(exec?.command.join(" ")).not.toContain("NewSecret123");
       expect(exec?.command.join(" ")).not.toContain("OldSecret456");
       expect(exec?.stdin).toContain("NewSecret123");
       // The old password signs in from the environment, not the command line.
       expect(exec?.command.join(" ")).not.toContain(" -a ");
+    }
+    // Postgres and MongoDB sign in with the stored login (user-scripts.ts), not the container's first one.
+    for (const engine of ["postgres", "mongo"] as const) {
+      expect(changePasswordExec(engine, "admin", "x", "y")).toBeNull();
+      const exec = mainPasswordExec(engine, { user: "admin", password: "OldSecret456", database: "shop" }, "NewSecret123");
+      expect(exec.command.join(" ")).not.toMatch(/NewSecret123|OldSecret456/);
+      expect(exec.stdin).toContain("OldSecret456");
+      expect(exec.command.join(" ")).not.toContain("MONGO_INITDB_ROOT");
+      expect(exec.command.join(" ")).not.toContain("POSTGRES_USER");
     }
     // These read the password from their environment at start: the new env restarts them.
     expect(changePasswordExec("dragonfly", "default", "x", "y")).toBeNull();

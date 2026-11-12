@@ -1,0 +1,1065 @@
+{
+  "scenarios": [
+    {
+      "engine": "postgres",
+      "image": "postgres:18.6-alpine",
+      "dataPath": "/var/lib/postgresql",
+      "command": [],
+      "health": [
+        "sh",
+        "-c",
+        "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"
+      ],
+      "env": {
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "MainPassword000a",
+        "POSTGRES_DB": "app"
+      },
+      "envAfter": {
+        "POSTGRES_USER": "boss",
+        "POSTGRES_PASSWORD": "MainPassword222c",
+        "POSTGRES_DB": "app"
+      },
+      "database": "app",
+      "values": {
+        "database": "app",
+        "initial": "MainPassword000a",
+        "second": "MainPassword111b",
+        "third": "MainPassword222c",
+        "newMain": "boss",
+        "newMainPassword": "BossPassword333d",
+        "reader": "reader",
+        "readerPassword": "ReaderPassword4e",
+        "readerPassword2": "ReaderPassword5f",
+        "writer": "writer",
+        "writerPassword": "WriterPassword6g",
+        "writer2": "writer2",
+        "writer2Password": "WriterPassword7h",
+        "dbAdmin": "dbadmin",
+        "dbAdminPassword": "DbAdminPassword8",
+        "serverAdmin": "sadmin",
+        "serverAdminPassword": "SAdminPassword9i",
+        "main": "postgres",
+        "finalMain": "boss",
+        "finalPassword": "MainPassword222c"
+      },
+      "steps": [
+        {
+          "name": "list0",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword000a\nSELECT json_build_object('kind', 'server', 'version', current_setting('server_version_num')::int, 'databases', (SELECT json_agg(datname ORDER BY datname) FROM pg_database WHERE datallowconn));\nSELECT json_build_object('kind', 'user', 'name', r.rolname, 'bootstrap', r.oid = 10, 'super', r.rolsuper, 'createrole', r.rolcreaterole, 'createdb', r.rolcreatedb, 'expired', COALESCE(r.rolvaliduntil < now(), false), 'password', CASE WHEN r.rolpassword IS NULL THEN 'none' WHEN r.rolpassword LIKE 'SCRAM-SHA-256$%' THEN 'scram' WHEN r.rolpassword LIKE 'md5%' THEN 'md5' ELSE 'other' END, 'memberOf', COALESCE((SELECT json_agg(b.rolname ORDER BY b.rolname) FROM pg_auth_members m JOIN pg_roles b ON b.oid = m.roleid WHERE m.member = r.oid), '[]'::json), 'owns', (SELECT count(*) FROM pg_shdepend d WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o')) FROM pg_authid r WHERE r.rolcanlogin AND r.rolname NOT LIKE 'pg\\_%' ORDER BY r.rolname LIMIT 501;\n"
+        },
+        {
+          "name": "createReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword000a\nCREATE ROLE \"reader\" LOGIN PASSWORD 'SCRAM-SHA-256$4096:c2V5bG8tdm0tZml4dHVyZQ==$XoCZCgdUhmQwKa3j1Gbj281OZSzy5H7oDii7oQR5i2w=:ofOSU+RlKVYveBZokW01DHaa+sxgBnT8mnbXsewnukk=';\nGRANT CONNECT ON DATABASE \"app\" TO \"reader\";\nGRANT pg_read_all_data TO \"reader\";\n"
+        },
+        {
+          "name": "createWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword000a\nCREATE ROLE \"writer\" LOGIN PASSWORD 'SCRAM-SHA-256$4096:c2V5bG8tdm0tZml4dHVyZQ==$TjqlkRy+Teaq7qb/8nLmxuZJESt6fnQG8gUlPydzSqw=:81ppRDNUrgFw2x5dmB5KwyJo0qTCLe2hjn/O8PBV3do=';\nGRANT CONNECT, CREATE, TEMPORARY ON DATABASE \"app\" TO \"writer\";\nGRANT pg_read_all_data, pg_write_all_data TO \"writer\";\nGRANT USAGE, CREATE ON SCHEMA public TO \"writer\";\n"
+        },
+        {
+          "name": "createServerAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword000a\nCREATE ROLE \"sadmin\" LOGIN PASSWORD 'SCRAM-SHA-256$4096:c2V5bG8tdm0tZml4dHVyZQ==$s/qQRJOZkPjc6bfdm8rEGq0B22lPXgStTJbhA4TLdCU=:WNM0QlQU9hYFY1A+OzpOG1YttlhPGCZmMHCjn8Y72/4=';\nALTER ROLE \"sadmin\" SUPERUSER CREATEDB CREATEROLE;\n"
+        },
+        {
+          "name": "list1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword000a\nSELECT json_build_object('kind', 'server', 'version', current_setting('server_version_num')::int, 'databases', (SELECT json_agg(datname ORDER BY datname) FROM pg_database WHERE datallowconn));\nSELECT json_build_object('kind', 'user', 'name', r.rolname, 'bootstrap', r.oid = 10, 'super', r.rolsuper, 'createrole', r.rolcreaterole, 'createdb', r.rolcreatedb, 'expired', COALESCE(r.rolvaliduntil < now(), false), 'password', CASE WHEN r.rolpassword IS NULL THEN 'none' WHEN r.rolpassword LIKE 'SCRAM-SHA-256$%' THEN 'scram' WHEN r.rolpassword LIKE 'md5%' THEN 'md5' ELSE 'other' END, 'memberOf', COALESCE((SELECT json_agg(b.rolname ORDER BY b.rolname) FROM pg_auth_members m JOIN pg_roles b ON b.oid = m.roleid WHERE m.member = r.oid), '[]'::json), 'owns', (SELECT count(*) FROM pg_shdepend d WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o')) FROM pg_authid r WHERE r.rolcanlogin AND r.rolname NOT LIKE 'pg\\_%' ORDER BY r.rolname LIMIT 501;\n"
+        },
+        {
+          "name": "passwordReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword000a\nALTER ROLE \"reader\" PASSWORD 'SCRAM-SHA-256$4096:c2V5bG8tdm0tZml4dHVyZQ==$vrJZTJiWWNATxo1jqq63urZyV4OLRdlG8t0s45HWor0=:DL6etp7M9D459yjzw9kn4Ehf3Jz4dM7Er1KzkAKnX/A=';\n"
+        },
+        {
+          "name": "renameWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword000a\nALTER ROLE \"writer\" RENAME TO \"writer2\";\n"
+        },
+        {
+          "name": "deleteReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword000a\n\\connect 'app'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\n\\connect 'postgres'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\n\\connect 'template1'\nREASSIGN OWNED BY \"reader\" TO \"postgres\";\nDROP OWNED BY \"reader\";\nSELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'reader';\nDROP ROLE \"reader\";\n"
+        },
+        {
+          "name": "deleteWriter2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword000a\n\\connect 'app'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\n\\connect 'postgres'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\n\\connect 'template1'\nREASSIGN OWNED BY \"writer2\" TO \"postgres\";\nDROP OWNED BY \"writer2\";\nSELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = 'writer2';\nDROP ROLE \"writer2\";\n"
+        },
+        {
+          "name": "list2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword000a\nSELECT json_build_object('kind', 'server', 'version', current_setting('server_version_num')::int, 'databases', (SELECT json_agg(datname ORDER BY datname) FROM pg_database WHERE datallowconn));\nSELECT json_build_object('kind', 'user', 'name', r.rolname, 'bootstrap', r.oid = 10, 'super', r.rolsuper, 'createrole', r.rolcreaterole, 'createdb', r.rolcreatedb, 'expired', COALESCE(r.rolvaliduntil < now(), false), 'password', CASE WHEN r.rolpassword IS NULL THEN 'none' WHEN r.rolpassword LIKE 'SCRAM-SHA-256$%' THEN 'scram' WHEN r.rolpassword LIKE 'md5%' THEN 'md5' ELSE 'other' END, 'memberOf', COALESCE((SELECT json_agg(b.rolname ORDER BY b.rolname) FROM pg_auth_members m JOIN pg_roles b ON b.oid = m.roleid WHERE m.member = r.oid), '[]'::json), 'owns', (SELECT count(*) FROM pg_shdepend d WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o')) FROM pg_authid r WHERE r.rolcanlogin AND r.rolname NOT LIKE 'pg\\_%' ORDER BY r.rolname LIMIT 501;\n"
+        },
+        {
+          "name": "mainPassword1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword000a\nALTER ROLE \"postgres\" PASSWORD 'SCRAM-SHA-256$4096:c2V5bG8tdm0tZml4dHVyZQ==$Z1HR8lh9ZjBQKVgjo+JhtkZLGCZ/CEx9fn3OGupyvsI=:fRdrT6NvSbfqhSnP42vXTatK5mE2o9BJnkYzElsaC54=';\n"
+        },
+        {
+          "name": "mainPassword2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword111b\nALTER ROLE \"postgres\" PASSWORD 'SCRAM-SHA-256$4096:c2V5bG8tdm0tZml4dHVyZQ==$ksKSeQCh1NC6nTlNoPzAvMhOu2/im7P2FY3bz5GFQ1w=:6gudpxeTbJANksstLuD+dT8tAj+3MEMVjj04B5PKGVs=';\n"
+        },
+        {
+          "name": "mainRename",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=postgres",
+            "--dbname=app",
+            "--single-transaction"
+          ],
+          "stdin": "MainPassword222c\nCREATE ROLE \"seylo_tmp_fixture0\" SUPERUSER NOLOGIN;\nSET SESSION AUTHORIZATION \"seylo_tmp_fixture0\";\nALTER ROLE \"postgres\" RENAME TO \"boss\";\nRESET SESSION AUTHORIZATION;\nDROP ROLE \"seylo_tmp_fixture0\";\n"
+        },
+        {
+          "name": "listAfter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nPGPASSWORD=$pw\nexport PGPASSWORD\n{ err=$(psql -X -q -At -v ON_ERROR_STOP=1 \"$@\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'FATAL:  password authentication failed'*|*'FATAL:  role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=boss",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword222c\nSELECT json_build_object('kind', 'server', 'version', current_setting('server_version_num')::int, 'databases', (SELECT json_agg(datname ORDER BY datname) FROM pg_database WHERE datallowconn));\nSELECT json_build_object('kind', 'user', 'name', r.rolname, 'bootstrap', r.oid = 10, 'super', r.rolsuper, 'createrole', r.rolcreaterole, 'createdb', r.rolcreatedb, 'expired', COALESCE(r.rolvaliduntil < now(), false), 'password', CASE WHEN r.rolpassword IS NULL THEN 'none' WHEN r.rolpassword LIKE 'SCRAM-SHA-256$%' THEN 'scram' WHEN r.rolpassword LIKE 'md5%' THEN 'md5' ELSE 'other' END, 'memberOf', COALESCE((SELECT json_agg(b.rolname ORDER BY b.rolname) FROM pg_auth_members m JOIN pg_roles b ON b.oid = m.roleid WHERE m.member = r.oid), '[]'::json), 'owns', (SELECT count(*) FROM pg_shdepend d WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o')) FROM pg_authid r WHERE r.rolcanlogin AND r.rolname NOT LIKE 'pg\\_%' ORDER BY r.rolname LIMIT 501;\n"
+        },
+        {
+          "name": "proofFinal",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nhost=$(hostname -i 2>/dev/null | cut -d' ' -f1)\n[ -n \"$host\" ] || host=127.0.0.1\n{ err=$(PGPASSWORD=\"$pw\" psql -X -q -At -h \"$host\" \"$@\" -c \"SELECT current_user\" 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *'password authentication failed'*|*'role \"'*'\" does not exist'*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "--username=boss",
+            "--dbname=app"
+          ],
+          "stdin": "MainPassword222c\n"
+        }
+      ]
+    },
+    {
+      "engine": "mysql",
+      "image": "mysql:8.4.6",
+      "dataPath": "/var/lib/mysql",
+      "command": [],
+      "health": [
+        "sh",
+        "-c",
+        "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"
+      ],
+      "env": {
+        "MYSQL_ROOT_PASSWORD": "MainPassword000a",
+        "MYSQL_DATABASE": "app"
+      },
+      "envAfter": {
+        "MYSQL_ROOT_PASSWORD": "BossPassword333d",
+        "MYSQL_DATABASE": "app",
+        "MYSQL_USER": "boss",
+        "MYSQL_PASSWORD": "BossPassword333d"
+      },
+      "database": "app",
+      "values": {
+        "database": "app",
+        "initial": "MainPassword000a",
+        "second": "MainPassword111b",
+        "third": "MainPassword222c",
+        "newMain": "boss",
+        "newMainPassword": "BossPassword333d",
+        "reader": "reader",
+        "readerPassword": "ReaderPassword4e",
+        "readerPassword2": "ReaderPassword5f",
+        "writer": "writer",
+        "writerPassword": "WriterPassword6g",
+        "writer2": "writer2",
+        "writer2Password": "WriterPassword7h",
+        "dbAdmin": "dbadmin",
+        "dbAdminPassword": "DbAdminPassword8",
+        "serverAdmin": "sadmin",
+        "serverAdminPassword": "SAdminPassword9i",
+        "main": "root",
+        "finalMain": "boss",
+        "finalPassword": "BossPassword333d"
+      },
+      "steps": [
+        {
+          "name": "list0",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', u.account_locked = 'Y', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "createReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'reader'@'%' IDENTIFIED BY 'ReaderPassword4e'; GRANT SELECT, SHOW VIEW ON `app`.* TO 'reader'@'%';\n\n"
+        },
+        {
+          "name": "createWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'writer'@'%' IDENTIFIED BY 'WriterPassword6g'; GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, TRIGGER ON `app`.* TO 'writer'@'%';\n\n"
+        },
+        {
+          "name": "createDbAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'dbadmin'@'%' IDENTIFIED BY 'DbAdminPassword8'; GRANT ALL PRIVILEGES ON `app`.* TO 'dbadmin'@'%' WITH GRANT OPTION;\n\n"
+        },
+        {
+          "name": "createServerAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'sadmin'@'%' IDENTIFIED BY 'SAdminPassword9i'; GRANT ALL PRIVILEGES ON *.* TO 'sadmin'@'%' WITH GRANT OPTION;\n\n"
+        },
+        {
+          "name": "list1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', u.account_locked = 'Y', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "passwordReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nALTER USER 'reader'@'%' IDENTIFIED BY 'ReaderPassword5f';\n\n"
+        },
+        {
+          "name": "renameWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nRENAME USER 'writer'@'%' TO 'writer2'@'%';\n\n"
+        },
+        {
+          "name": "deleteReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nDROP USER 'reader'@'%';\nSELECT CONCAT('KILL ', id, ';') FROM information_schema.PROCESSLIST WHERE USER = 'reader';\n"
+        },
+        {
+          "name": "list2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', u.account_locked = 'Y', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "mainPassword1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r for_admin || exit 2\nIFS= read -r for_root || exit 2\nIFS= read -r for_self || exit 2\nrun() { rp=$1; rs=$2; shift 2; { err=$(printf '%s\\n' \"$rs\" | MYSQL_PWD=\"$rp\" mysql \"$@\" 2>&1 >&3); } 3>&1; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" \"$for_admin\" -uroot; code=$?\n  if [ \"$code\" -eq 0 ]; then\n    [ -n \"$for_root\" ] || exit 0\n    run \"$p\" \"$for_root\" -uroot && exit 0\n    printf '%s\\n' \"$err\" >&2; echo 'seylo: root password unchanged'; exit 0\n  fi\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ -n \"$for_self\" ] || exit 1\nrun \"$pw\" \"$for_self\" -h127.0.0.1 -u\"$1\"; code=$?\n[ \"$code\" -eq 0 ] || { printf '%s\\n' \"$err\" >&2; exit \"$code\"; }\necho 'seylo: root password unchanged'",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword000a\nALTER USER 'root'@'%' IDENTIFIED BY 'MainPassword111b'; ALTER USER 'root'@'localhost' IDENTIFIED BY 'MainPassword111b'; FLUSH PRIVILEGES;\n\n\n"
+        },
+        {
+          "name": "mainPassword2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r for_admin || exit 2\nIFS= read -r for_root || exit 2\nIFS= read -r for_self || exit 2\nrun() { rp=$1; rs=$2; shift 2; { err=$(printf '%s\\n' \"$rs\" | MYSQL_PWD=\"$rp\" mysql \"$@\" 2>&1 >&3); } 3>&1; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" \"$for_admin\" -uroot; code=$?\n  if [ \"$code\" -eq 0 ]; then\n    [ -n \"$for_root\" ] || exit 0\n    run \"$p\" \"$for_root\" -uroot && exit 0\n    printf '%s\\n' \"$err\" >&2; echo 'seylo: root password unchanged'; exit 0\n  fi\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ -n \"$for_self\" ] || exit 1\nrun \"$pw\" \"$for_self\" -h127.0.0.1 -u\"$1\"; code=$?\n[ \"$code\" -eq 0 ] || { printf '%s\\n' \"$err\" >&2; exit \"$code\"; }\necho 'seylo: root password unchanged'",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword111b\nALTER USER 'root'@'%' IDENTIFIED BY 'MainPassword222c'; ALTER USER 'root'@'localhost' IDENTIFIED BY 'MainPassword222c'; FLUSH PRIVILEGES;\n\n\n"
+        },
+        {
+          "name": "switchPrepare",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword222c\nCREATE USER 'boss'@'%' IDENTIFIED BY 'BossPassword333d'; GRANT ALL PRIVILEGES ON *.* TO 'boss'@'%' WITH GRANT OPTION;\n\n"
+        },
+        {
+          "name": "switchProof",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\n{ err=$(MYSQL_PWD=\"$pw\" mysql -h127.0.0.1 -u\"$1\" -N -B -r -e 'SELECT CURRENT_USER()' 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "boss"
+          ],
+          "stdin": "BossPassword333d\n"
+        },
+        {
+          "name": "switchProofWrong",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\n{ err=$(MYSQL_PWD=\"$pw\" mysql -h127.0.0.1 -u\"$1\" -N -B -r -e 'SELECT CURRENT_USER()' 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "boss"
+          ],
+          "stdin": "MainPassword000a\n"
+        },
+        {
+          "name": "switchAfter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "root"
+          ],
+          "stdin": "MainPassword222c\nALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY 'BossPassword333d'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY 'BossPassword333d'; DROP USER IF EXISTS 'root'@'%'; FLUSH PRIVILEGES;\n\n"
+        },
+        {
+          "name": "listAfter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mysql -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mysql -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mysql --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MYSQL_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "boss"
+          ],
+          "stdin": "BossPassword333d\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', u.account_locked = 'Y', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "proofFinal",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\n{ err=$(MYSQL_PWD=\"$pw\" mysql -h127.0.0.1 -u\"$1\" -N -B -r -e 'SELECT CURRENT_USER()' 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "boss"
+          ],
+          "stdin": "BossPassword333d\n"
+        }
+      ]
+    },
+    {
+      "engine": "mariadb",
+      "image": "mariadb:11.8.2",
+      "dataPath": "/var/lib/mysql",
+      "command": [],
+      "health": [
+        "healthcheck.sh",
+        "--connect",
+        "--innodb_initialized"
+      ],
+      "env": {
+        "MARIADB_ROOT_PASSWORD": "MainPassword000a",
+        "MARIADB_DATABASE": "app",
+        "MARIADB_USER": "shop",
+        "MARIADB_PASSWORD": "MainPassword000a",
+        "MARIADB_AUTO_UPGRADE": "1"
+      },
+      "envAfter": {
+        "MARIADB_ROOT_PASSWORD": "MainPassword222c",
+        "MARIADB_DATABASE": "app",
+        "MARIADB_USER": "boss",
+        "MARIADB_PASSWORD": "MainPassword222c",
+        "MARIADB_AUTO_UPGRADE": "1"
+      },
+      "database": "app",
+      "values": {
+        "database": "app",
+        "initial": "MainPassword000a",
+        "second": "MainPassword111b",
+        "third": "MainPassword222c",
+        "newMain": "boss",
+        "newMainPassword": "BossPassword333d",
+        "reader": "reader",
+        "readerPassword": "ReaderPassword4e",
+        "readerPassword2": "ReaderPassword5f",
+        "writer": "writer",
+        "writerPassword": "WriterPassword6g",
+        "writer2": "writer2",
+        "writer2Password": "WriterPassword7h",
+        "dbAdmin": "dbadmin",
+        "dbAdminPassword": "DbAdminPassword8",
+        "serverAdmin": "sadmin",
+        "serverAdminPassword": "SAdminPassword9i",
+        "main": "shop",
+        "finalMain": "boss",
+        "finalPassword": "MainPassword222c"
+      },
+      "steps": [
+        {
+          "name": "list0",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', IFNULL(JSON_VALUE(gp.Priv, '$.account_locked'), 'false') = 'true', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u LEFT JOIN mysql.global_priv gp ON gp.User = u.User AND gp.Host = u.Host WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') AND u.is_role = 'N' ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "createReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'reader'@'%' IDENTIFIED BY 'ReaderPassword4e'; GRANT SELECT, SHOW VIEW ON `app`.* TO 'reader'@'%';\n\n"
+        },
+        {
+          "name": "createWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'writer'@'%' IDENTIFIED BY 'WriterPassword6g'; GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES, EXECUTE, CREATE VIEW, SHOW VIEW, TRIGGER ON `app`.* TO 'writer'@'%';\n\n"
+        },
+        {
+          "name": "createDbAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'dbadmin'@'%' IDENTIFIED BY 'DbAdminPassword8'; GRANT ALL PRIVILEGES ON `app`.* TO 'dbadmin'@'%' WITH GRANT OPTION;\n\n"
+        },
+        {
+          "name": "createServerAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nCREATE USER 'sadmin'@'%' IDENTIFIED BY 'SAdminPassword9i'; GRANT ALL PRIVILEGES ON *.* TO 'sadmin'@'%' WITH GRANT OPTION;\n\n"
+        },
+        {
+          "name": "list1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', IFNULL(JSON_VALUE(gp.Priv, '$.account_locked'), 'false') = 'true', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u LEFT JOIN mysql.global_priv gp ON gp.User = u.User AND gp.Host = u.Host WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') AND u.is_role = 'N' ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "passwordReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nALTER USER 'reader'@'%' IDENTIFIED BY 'ReaderPassword5f';\n\n"
+        },
+        {
+          "name": "renameWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nRENAME USER 'writer'@'%' TO 'writer2'@'%';\n\n"
+        },
+        {
+          "name": "deleteReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nDROP USER 'reader'@'%';\nSELECT CONCAT('KILL ', id, ';') FROM information_schema.PROCESSLIST WHERE USER = 'reader';\n"
+        },
+        {
+          "name": "list2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', IFNULL(JSON_VALUE(gp.Priv, '$.account_locked'), 'false') = 'true', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u LEFT JOIN mysql.global_priv gp ON gp.User = u.User AND gp.Host = u.Host WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') AND u.is_role = 'N' ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "mainPassword1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r for_admin || exit 2\nIFS= read -r for_root || exit 2\nIFS= read -r for_self || exit 2\nrun() { rp=$1; rs=$2; shift 2; { err=$(printf '%s\\n' \"$rs\" | MYSQL_PWD=\"$rp\" mariadb \"$@\" 2>&1 >&3); } 3>&1; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" \"$for_admin\" -uroot; code=$?\n  if [ \"$code\" -eq 0 ]; then\n    [ -n \"$for_root\" ] || exit 0\n    run \"$p\" \"$for_root\" -uroot && exit 0\n    printf '%s\\n' \"$err\" >&2; echo 'seylo: root password unchanged'; exit 0\n  fi\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ -n \"$for_self\" ] || exit 1\nrun \"$pw\" \"$for_self\" -h127.0.0.1 -u\"$1\"; code=$?\n[ \"$code\" -eq 0 ] || { printf '%s\\n' \"$err\" >&2; exit \"$code\"; }\necho 'seylo: root password unchanged'",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword000a\nALTER USER 'shop'@'%' IDENTIFIED BY 'MainPassword111b';\nALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY 'MainPassword111b'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY 'MainPassword111b'; FLUSH PRIVILEGES;\nSET PASSWORD = PASSWORD('MainPassword111b');\n"
+        },
+        {
+          "name": "mainPassword2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r for_admin || exit 2\nIFS= read -r for_root || exit 2\nIFS= read -r for_self || exit 2\nrun() { rp=$1; rs=$2; shift 2; { err=$(printf '%s\\n' \"$rs\" | MYSQL_PWD=\"$rp\" mariadb \"$@\" 2>&1 >&3); } 3>&1; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" \"$for_admin\" -uroot; code=$?\n  if [ \"$code\" -eq 0 ]; then\n    [ -n \"$for_root\" ] || exit 0\n    run \"$p\" \"$for_root\" -uroot && exit 0\n    printf '%s\\n' \"$err\" >&2; echo 'seylo: root password unchanged'; exit 0\n  fi\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ -n \"$for_self\" ] || exit 1\nrun \"$pw\" \"$for_self\" -h127.0.0.1 -u\"$1\"; code=$?\n[ \"$code\" -eq 0 ] || { printf '%s\\n' \"$err\" >&2; exit \"$code\"; }\necho 'seylo: root password unchanged'",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword111b\nALTER USER 'shop'@'%' IDENTIFIED BY 'MainPassword222c';\nALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY 'MainPassword222c'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY 'MainPassword222c'; FLUSH PRIVILEGES;\nSET PASSWORD = PASSWORD('MainPassword222c');\n"
+        },
+        {
+          "name": "mainRename",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "shop"
+          ],
+          "stdin": "MainPassword222c\nRENAME USER 'shop'@'%' TO 'boss'@'%';\n\n"
+        },
+        {
+          "name": "listAfter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\nIFS= read -r q || exit 2\nIFS= read -r follow || follow=\nrun() { rp=$1; shift; { err=$(printf '%s\\n' \"$q\" | MYSQL_PWD=\"$rp\" mariadb -N -B -r \"$@\" 2>&1 >&3); } 3>&1; }\nafter() { ap=$1; shift; [ -z \"$follow\" ] || printf '%s\\n' \"$follow\" | MYSQL_PWD=\"$ap\" mariadb -N -B -r \"$@\" 2>/dev/null | MYSQL_PWD=\"$ap\" mariadb --force \"$@\" >/dev/null 2>&1; exit 0; }\ntried=\nfor p in \"$MARIADB_ROOT_PASSWORD\" \"$pw\"; do\n  [ -n \"$p\" ] && [ \"$p\" != \"$tried\" ] || continue\n  tried=$p\n  run \"$p\" -uroot && after \"$p\" -uroot\n  code=$?\n  [ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n  case \"$err\" in *\"ERROR 1045\"*) ;; *) exit \"$code\" ;; esac\ndone\n[ \"$1\" = root ] || exit 10\nrun \"$pw\" -h127.0.0.1 -uroot && after \"$pw\" -h127.0.0.1 -uroot\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "boss"
+          ],
+          "stdin": "MainPassword222c\nSELECT JSON_OBJECT('user', u.User, 'host', u.Host, 'locked', IFNULL(JSON_VALUE(gp.Priv, '$.account_locked'), 'false') = 'true', 'global', CONCAT_WS(',', IF(u.Select_priv = 'Y', 'select', NULL), IF(u.Insert_priv = 'Y', 'insert', NULL), IF(u.Update_priv = 'Y', 'update', NULL), IF(u.Delete_priv = 'Y', 'delete', NULL), IF(u.Create_priv = 'Y', 'create', NULL), IF(u.Drop_priv = 'Y', 'drop', NULL), IF(u.Alter_priv = 'Y', 'alter', NULL), IF(u.Index_priv = 'Y', 'index', NULL), IF(u.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(u.Event_priv = 'Y', 'event', NULL), IF(u.Grant_priv = 'Y', 'grant', NULL), IF(u.Super_priv = 'Y', 'super', NULL), IF(u.Create_user_priv = 'Y', 'createUser', NULL)), 'db', (SELECT CONCAT_WS(',', IF(d.Select_priv = 'Y', 'select', NULL), IF(d.Insert_priv = 'Y', 'insert', NULL), IF(d.Update_priv = 'Y', 'update', NULL), IF(d.Delete_priv = 'Y', 'delete', NULL), IF(d.Create_priv = 'Y', 'create', NULL), IF(d.Drop_priv = 'Y', 'drop', NULL), IF(d.Alter_priv = 'Y', 'alter', NULL), IF(d.Index_priv = 'Y', 'index', NULL), IF(d.Create_routine_priv = 'Y', 'createRoutine', NULL), IF(d.Event_priv = 'Y', 'event', NULL), IF(d.Grant_priv = 'Y', 'grant', NULL)) FROM mysql.db d WHERE d.User = u.User AND d.Host = u.Host AND d.Db IN ('app') LIMIT 1), 'definers', (SELECT COUNT(*) FROM information_schema.VIEWS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.ROUTINES x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.TRIGGERS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host)) + (SELECT COUNT(*) FROM information_schema.EVENTS x WHERE x.DEFINER = CONCAT(u.User, '@', u.Host))) FROM mysql.user u LEFT JOIN mysql.global_priv gp ON gp.User = u.User AND gp.Host = u.Host WHERE u.User NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema', 'mariadb.sys', 'healthcheck', 'PUBLIC') AND u.is_role = 'N' ORDER BY u.User, u.Host LIMIT 501;\n\n"
+        },
+        {
+          "name": "proofFinal",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r pw || exit 2\n{ err=$(MYSQL_PWD=\"$pw\" mariadb -h127.0.0.1 -u\"$1\" -N -B -r -e 'SELECT CURRENT_USER()' 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *\"ERROR 1045\"*) exit 10 ;; esac\nexit \"$code\"",
+            "sh",
+            "boss"
+          ],
+          "stdin": "MainPassword222c\n"
+        }
+      ]
+    },
+    {
+      "engine": "mongo",
+      "image": "mongo:9.0.8",
+      "dataPath": "/data/db",
+      "command": [],
+      "health": [],
+      "env": {
+        "MONGO_INITDB_ROOT_USERNAME": "root",
+        "MONGO_INITDB_ROOT_PASSWORD": "MainPassword000a",
+        "MONGO_INITDB_DATABASE": "app"
+      },
+      "envAfter": {
+        "MONGO_INITDB_ROOT_USERNAME": "boss",
+        "MONGO_INITDB_ROOT_PASSWORD": "BossPassword333d",
+        "MONGO_INITDB_DATABASE": "app"
+      },
+      "database": "app",
+      "values": {
+        "database": "app",
+        "initial": "MainPassword000a",
+        "second": "MainPassword111b",
+        "third": "MainPassword222c",
+        "newMain": "boss",
+        "newMainPassword": "BossPassword333d",
+        "reader": "reader",
+        "readerPassword": "ReaderPassword4e",
+        "readerPassword2": "ReaderPassword5f",
+        "writer": "writer",
+        "writerPassword": "WriterPassword6g",
+        "writer2": "writer2",
+        "writer2Password": "WriterPassword7h",
+        "dbAdmin": "dbadmin",
+        "dbAdminPassword": "DbAdminPassword8",
+        "serverAdmin": "sadmin",
+        "serverAdminPassword": "SAdminPassword9i",
+        "main": "root",
+        "finalMain": "boss",
+        "finalPassword": "BossPassword333d"
+      },
+      "steps": [
+        {
+          "name": "list0",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const r = admin.runCommand({ usersInfo: { forAllDBs: true } }); if (r.ok !== 1) throw new Error(r.errmsg || \"usersInfo failed\"); r.users.slice(0, 501).forEach((u) => print(JSON.stringify({ kind: \"user\", user: u.user, db: u.db, roles: u.roles || [], mechanisms: u.mechanisms || [] }))); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "createReader",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.createUser({ user: \"reader\", pwd: \"ReaderPassword4e\", roles: [{\"role\":\"read\",\"db\":\"app\"}] }); print(\"created\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "createWriter",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.createUser({ user: \"writer\", pwd: \"WriterPassword6g\", roles: [{\"role\":\"readWrite\",\"db\":\"app\"}] }); print(\"created\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "createDbAdmin",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.createUser({ user: \"dbadmin\", pwd: \"DbAdminPassword8\", roles: [{\"role\":\"dbOwner\",\"db\":\"app\"}] }); print(\"created\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "createServerAdmin",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.createUser({ user: \"sadmin\", pwd: \"SAdminPassword9i\", roles: [{\"role\":\"root\",\"db\":\"admin\"}] }); print(\"created\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "list1",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const r = admin.runCommand({ usersInfo: { forAllDBs: true } }); if (r.ok !== 1) throw new Error(r.errmsg || \"usersInfo failed\"); r.users.slice(0, 501).forEach((u) => print(JSON.stringify({ kind: \"user\", user: u.user, db: u.db, roles: u.roles || [], mechanisms: u.mechanisms || [] }))); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "passwordReader",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.getSiblingDB(\"admin\").changeUserPassword(\"reader\", \"ReaderPassword5f\"); print(\"changed\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "renameWriter",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const s = admin.getSiblingDB(\"admin\"); const u = s.getUser(\"writer\"); if (!u) throw new Error(\"no such user\"); s.createUser({ user: \"writer2\", pwd: \"WriterPassword7h\", roles: u.roles }); s.dropUser(\"writer\"); print(\"renamed\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "deleteReader",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.getSiblingDB(\"admin\").dropUser(\"reader\"); print(\"deleted\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "list2",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const r = admin.runCommand({ usersInfo: { forAllDBs: true } }); if (r.ok !== 1) throw new Error(r.errmsg || \"usersInfo failed\"); r.users.slice(0, 501).forEach((u) => print(JSON.stringify({ kind: \"user\", user: u.user, db: u.db, roles: u.roles || [], mechanisms: u.mechanisms || [] }))); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "mainPassword1",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.getSiblingDB(\"admin\").changeUserPassword(\"root\", \"MainPassword111b\"); print(\"changed\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "mainPassword2",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword111b\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.getSiblingDB(\"admin\").changeUserPassword(\"root\", \"MainPassword222c\"); print(\"changed\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "switchPrepare",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"root\", \"MainPassword222c\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } admin.createUser({ user: \"boss\", pwd: \"BossPassword333d\", roles: [{\"role\":\"root\",\"db\":\"admin\"}] }); print(\"ready\"); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "switchProof",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"boss\", \"BossPassword333d\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const s = admin.runCommand({ connectionStatus: 1 }); print(JSON.stringify(s.authInfo.authenticatedUsers)); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "switchProofWrong",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"boss\", \"MainPassword000a\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const s = admin.runCommand({ connectionStatus: 1 }); print(JSON.stringify(s.authInfo.authenticatedUsers)); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "listAfter",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"boss\", \"BossPassword333d\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const r = admin.runCommand({ usersInfo: { forAllDBs: true } }); if (r.ok !== 1) throw new Error(r.errmsg || \"usersInfo failed\"); r.users.slice(0, 501).forEach((u) => print(JSON.stringify({ kind: \"user\", user: u.user, db: u.db, roles: u.roles || [], mechanisms: u.mechanisms || [] }))); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        },
+        {
+          "name": "proofFinal",
+          "command": [
+            "mongosh",
+            "--quiet",
+            "--norc",
+            "mongodb://127.0.0.1:27017/admin"
+          ],
+          "stdin": "let seyloCode = 0; try { const admin = db.getSiblingDB(\"admin\"); try { const a = admin.auth(\"boss\", \"BossPassword333d\"); if (!a || a.ok !== 1) throw new Error(\"Authentication failed.\"); } catch (e) { seyloCode = 10; throw e; } const s = admin.runCommand({ connectionStatus: 1 }); print(JSON.stringify(s.authInfo.authenticatedUsers)); } catch (e) { if (seyloCode === 0) seyloCode = 3; print(\"seylo: \" + e.message); } quit(seyloCode);\n"
+        }
+      ]
+    },
+    {
+      "engine": "clickhouse",
+      "image": "clickhouse/clickhouse-server:26.8.36.3",
+      "dataPath": "/var/lib/clickhouse",
+      "command": [],
+      "health": [
+        "sh",
+        "-c",
+        "wget -qO- \"http://$(hostname -i | cut -d' ' -f1):8123/ping\" | grep -q Ok"
+      ],
+      "env": {
+        "CLICKHOUSE_USER": "ch_admin",
+        "CLICKHOUSE_PASSWORD": "MainPassword000a",
+        "CLICKHOUSE_DB": "app",
+        "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT": "1"
+      },
+      "envAfter": {
+        "CLICKHOUSE_USER": "boss",
+        "CLICKHOUSE_PASSWORD": "BossPassword333d",
+        "CLICKHOUSE_DB": "app",
+        "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT": "1"
+      },
+      "database": "app",
+      "values": {
+        "database": "app",
+        "initial": "MainPassword000a",
+        "second": "MainPassword111b",
+        "third": "MainPassword222c",
+        "newMain": "boss",
+        "newMainPassword": "BossPassword333d",
+        "reader": "reader",
+        "readerPassword": "ReaderPassword4e",
+        "readerPassword2": "ReaderPassword5f",
+        "writer": "writer",
+        "writerPassword": "WriterPassword6g",
+        "writer2": "writer2",
+        "writer2Password": "WriterPassword7h",
+        "dbAdmin": "dbadmin",
+        "dbAdminPassword": "DbAdminPassword8",
+        "serverAdmin": "sadmin",
+        "serverAdminPassword": "SAdminPassword9i",
+        "main": "ch_admin",
+        "finalMain": "boss",
+        "finalPassword": "BossPassword333d"
+      },
+      "steps": [
+        {
+          "name": "list0",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nSELECT 'user' AS kind, name, storage, toString(auth_type) AS auth FROM system.users ORDER BY name LIMIT 501 FORMAT JSONEachRow;\nSELECT 'grant' AS kind, user_name, access_type, database, grant_option FROM system.grants WHERE user_name IS NOT NULL FORMAT JSONEachRow;\n"
+        },
+        {
+          "name": "createReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nCREATE USER `reader` IDENTIFIED WITH sha256_password BY 'ReaderPassword4e';\nGRANT SELECT, SHOW ON `app`.* TO `reader`;\n"
+        },
+        {
+          "name": "createWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nCREATE USER `writer` IDENTIFIED WITH sha256_password BY 'WriterPassword6g';\nGRANT SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY, DROP TABLE, DROP VIEW, TRUNCATE, OPTIMIZE, SHOW ON `app`.* TO `writer`;\n"
+        },
+        {
+          "name": "createDbAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nCREATE USER `dbadmin` IDENTIFIED WITH sha256_password BY 'DbAdminPassword8';\nGRANT ALL ON `app`.* TO `dbadmin` WITH GRANT OPTION;\n"
+        },
+        {
+          "name": "createServerAdmin",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nCREATE USER `sadmin` IDENTIFIED WITH sha256_password BY 'SAdminPassword9i';\nGRANT CURRENT GRANTS ON *.* TO `sadmin` WITH GRANT OPTION;\n"
+        },
+        {
+          "name": "list1",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nSELECT 'user' AS kind, name, storage, toString(auth_type) AS auth FROM system.users ORDER BY name LIMIT 501 FORMAT JSONEachRow;\nSELECT 'grant' AS kind, user_name, access_type, database, grant_option FROM system.grants WHERE user_name IS NOT NULL FORMAT JSONEachRow;\n"
+        },
+        {
+          "name": "passwordReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nALTER USER `reader` IDENTIFIED WITH sha256_password BY 'ReaderPassword5f';\n"
+        },
+        {
+          "name": "renameWriter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nALTER USER `writer` RENAME TO `writer2`;\n"
+        },
+        {
+          "name": "deleteReader",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nDROP USER `reader`;\n"
+        },
+        {
+          "name": "list2",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nSELECT 'user' AS kind, name, storage, toString(auth_type) AS auth FROM system.users ORDER BY name LIMIT 501 FORMAT JSONEachRow;\nSELECT 'grant' AS kind, user_name, access_type, database, grant_option FROM system.grants WHERE user_name IS NOT NULL FORMAT JSONEachRow;\n"
+        },
+        {
+          "name": "listAfter",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nSELECT 'user' AS kind, name, storage, toString(auth_type) AS auth FROM system.users ORDER BY name LIMIT 501 FORMAT JSONEachRow;\nSELECT 'grant' AS kind, user_name, access_type, database, grant_option FROM system.grants WHERE user_name IS NOT NULL FORMAT JSONEachRow;\n"
+        },
+        {
+          "name": "proofFinal",
+          "command": [
+            "sh",
+            "-c",
+            "IFS= read -r _ || exit 2\n{ err=$(clickhouse-client --user=\"$CLICKHOUSE_USER\" --multiquery 2>&1 >&3); } 3>&1\ncode=$?\n[ -z \"$err\" ] || printf '%s\\n' \"$err\" >&2\n[ \"$code\" -eq 0 ] && exit 0\ncase \"$err\" in *AUTHENTICATION_FAILED*|*'Authentication failed'*|*REQUIRED_PASSWORD*) exit 10 ;; esac\nexit \"$code\""
+          ],
+          "stdin": "-\nSELECT 'user' AS kind, name, storage, toString(auth_type) AS auth FROM system.users ORDER BY name LIMIT 501 FORMAT JSONEachRow;\nSELECT 'grant' AS kind, user_name, access_type, database, grant_option FROM system.grants WHERE user_name IS NOT NULL FORMAT JSONEachRow;\n"
+        }
+      ]
+    }
+  ]
+}

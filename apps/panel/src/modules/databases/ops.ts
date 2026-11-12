@@ -1,25 +1,25 @@
 // Database op handlers: the engine catalog, create a database service with
 // generated credentials (on a catalog version, or any image of the
 // engine's repository), read it, its connection details, password resets
-// (applied inside the running database through the agent's Exec, or by the
-// restart a new environment causes), the web UI and shell links, and TLS
-// exposure through the agent's portgate, which uses the database's own user.
+// (users.ts changeMainPassword: inside the running database through the
+// agent's Exec, or by the restart a new environment causes), the web UI
+// and shell links, and TLS exposure through the agent's portgate, which
+// uses the database's own user.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { parseEnv } from "@seylo/env-analyzer";
-import { databases as dbOps, domains as domainOps, env as envOps, exposures as exposureOps, OpError, terminals } from "@seylo/ops";
+import { databases as dbOps, domains as domainOps, env as envOps, OpError, terminals } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
 import { userOf } from "../../auth/principal";
-import { portExposures, serviceDatabases, services } from "../../db/schema";
-import { implement, type OpContext } from "../../ops/implement";
+import { portExposures, serviceDatabases } from "../../db/schema";
+import { implement } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { normalizeCidrs } from "../domains/checks";
 import { invalidateService } from "../domains/lookup";
 import { assertHostUnclaimed } from "../domains/ownership";
 import { issuerName } from "../domains/rows";
-import { readServiceEnv, writeServiceEnv } from "../env/store";
+import { writeServiceEnv } from "../env/store";
 import { assertCreateRights } from "../services/create-rights";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
@@ -27,7 +27,6 @@ import terminalsModule from "../terminals";
 import { missingExposureCapability, nodeHasCapability } from "./capability";
 import { edgeToolLink } from "./edge-ticket";
 import {
-  changePasswordExec,
   databaseSpec,
   defaultDatabaseName,
   engines,
@@ -38,8 +37,6 @@ import {
   exposureRefusal,
   generatePassword,
   generateUserName,
-  rootPasswordVariable,
-  rootUnchangedMarker,
 } from "./engines";
 import { imageVersion } from "./images";
 import {
@@ -53,6 +50,7 @@ import {
   writeSecret,
 } from "./info";
 import { createdPgdata } from "./pgdata";
+import { afterChange, changeMainPassword } from "./users";
 
 type Database = Static<typeof dbOps.Database>;
 
@@ -123,11 +121,6 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
     },
     createdAt: info.row.createdAt.toISOString(),
   };
-}
-
-function afterChange(ctx: OpContext, info: { service: { id: string; projectId: string } }) {
-  ctx.agents.desired.markDirty({ serviceId: info.service.id });
-  invalidateService(ctx, info.service.id, [dbOps.get.id, dbOps.connection.id, exposureOps.get.id, envOps.references.id]);
 }
 
 export const listEngines = implement(dbOps.engines, () => ({
@@ -227,72 +220,10 @@ export const connection = implement(dbOps.connection, (input, ctx) => {
   return { internal: internalConnection(info), exposed: exposedConnection(info) };
 });
 
-/** The references that carry the database's password: inside and through the exposed port alike. */
-const credentialVariables = ["PASSWORD", "INTERNAL_URL", "INTERNAL_HTTP_URL", "EXPOSED_URL"];
-
-/** Services of the project whose env uses this database's credentials. */
-function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo): string[] {
-  const name = info.service.name.toLowerCase();
-  const rows = ctx.db
-    .select({ id: services.id })
-    .from(services)
-    .where(and(eq(services.projectId, info.service.projectId), ne(services.id, info.service.id)))
-    .all();
-  return rows
-    .filter((row) =>
-      parseEnv(readServiceEnv(ctx.db, ctx.secrets, row.id).text).entries.some((e) =>
-        e.references.some((r) => r.target.toLowerCase() === name && credentialVariables.includes(r.variable)),
-      ),
-    )
-    .map((row) => row.id);
-}
-
-export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) => {
-  const info = loadDatabase(ctx, input.serviceId);
-  const password = input.password ?? generatePassword();
-  // One user inside and through the exposed port: user "exposed" (kept for older callers) changes it too.
-  // Engines that read the password from their environment take it with the restart the new env causes.
-  const exec = changePasswordExec(info.row.engine, info.admin.user, password, info.admin.password);
-  let warning: string | null = null;
-  if (exec) {
-    if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
-    // Change it inside the running database first; only store it once that worked.
-    const result = await ctx.agents.call(
-      info.node.id,
-      "exec",
-      { serviceId: info.service.id, command: exec.command, stdin: new TextEncoder().encode(exec.stdin), timeout: { seconds: 30n } },
-      { timeoutMs: 45_000, metadata: { actor: userOf(ctx.principal)?.id ?? "" } },
-    );
-    if (result.exitCode !== 0) {
-      ctx.logger.warn({ serviceId: info.service.id, exitCode: result.exitCode }, "database password change failed");
-      throw new OpError("CONFLICT", "The database refused the password change. Check that it is running and try again.", {
-        reason: "execFailed",
-        exitCode: String(result.exitCode),
-      });
-    }
-    if (new TextDecoder().decode(result.stdout).includes(rootUnchangedMarker)) {
-      ctx.logger.warn({ serviceId: info.service.id }, "database root password left out of step");
-      warning = rootUnchangedWarning(info);
-    }
-  }
-  ctx.db.transaction((tx) => {
-    writeSecret(tx, ctx.secrets, info.service.id, adminPasswordSecret, password);
-  });
-  afterChange(ctx, info);
-  return { password, affectedServiceIds: servicesUsingCredentials(ctx, info), warning };
-});
-
-/**
- * What resetPassword says when a MySQL or MariaDB admin other than root
- * changed its own password but root could not sign in to get the same one
- * (changePasswordExec printed rootUnchangedMarker): root is out of step
- * with the password the container gives it.
- */
-function rootUnchangedWarning(info: DatabaseInfo): string {
-  const variable = rootPasswordVariable(info.row.engine === "mariadb" ? "mariadb" : "mysql");
-  const label = info.engine.label;
-  return `The password of ${info.admin.user} changed, but ${label}'s root user kept an older password, which the panel does not know: root no longer signs in with the one the database's container gives it (${variable}), as after a password reset before 0.2.11 or a change made by hand, and ${info.admin.user} cannot change root's. Root sign-ins with ${variable} fail until root has the new password: sign in as root with its older password and run ALTER USER 'root'@'%' IDENTIFIED BY '<new password>' and the same for 'root'@'localhost'. Later resets then change both.`;
-}
+// One user inside and through the exposed port: user "exposed" (kept for older callers) changes it too.
+export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) =>
+  changeMainPassword(ctx, loadDatabase(ctx, input.serviceId), input.password ?? generatePassword()),
+);
 
 export const openWebUi = implement(dbOps.openWebUi, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);

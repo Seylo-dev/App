@@ -440,7 +440,249 @@ export const resetPassword = defineOp({
      * Null otherwise.
      */
     warning: Type.Union([Type.String(), Type.Null()]),
+    /**
+     * The deploy that restarts the database with the new password (0.2.12):
+     * ClickHouse and Dragonfly read it at start, and Redis, Valkey and KeyDB
+     * would start with the old one again. Null for the other engines.
+     */
+    deploymentId: Type.Optional(Type.Union([Id, Type.Null()])),
   }),
+  sensitive: { input: ["password"], output: ["password"] },
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: true,
+});
+
+/** A password Seylo sets: the same alphabet as every database password (URL-safe, no quoting). */
+const UserPassword = Type.String({ minLength: 12, maxLength: 128, pattern: "^[A-Za-z0-9._~-]+$" });
+
+/** A MySQL or MariaDB account's host: "%", an address, a name or a pattern. */
+const UserHost = Type.String({ minLength: 1, maxLength: 255, pattern: "^[A-Za-z0-9.%_:/-]+$" });
+
+/**
+ * What a new user may do (databases.createUser). readOnly reads the
+ * database, readWrite also writes and changes its tables, databaseAdmin
+ * does everything in the database and may grant it, serverAdmin
+ * everything on the server, like the main user. Engines offer some of
+ * them (databases.users presets).
+ */
+export const DatabaseUserPreset = Type.Union([
+  Type.Literal("readOnly"),
+  Type.Literal("readWrite"),
+  Type.Literal("databaseAdmin"),
+  Type.Literal("serverAdmin"),
+]);
+
+/** A login user of the database, as databases.users lists it. */
+export const DatabaseUserRef = Type.Object({
+  /** As the engine names it; users made outside Seylo may have names Seylo would not make. */
+  name: Type.String({ minLength: 1, maxLength: 128 }),
+  /** MySQL and MariaDB: the account's host; "%" when left out. */
+  host: Type.Optional(UserHost),
+  /** MongoDB: the user's authentication database; "admin" when left out. */
+  authDatabase: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+});
+
+export const DatabaseUser = Type.Object({
+  name: Type.String(),
+  /** MySQL and MariaDB: the account's host; null for the other engines. */
+  host: Type.Union([Type.String(), Type.Null()]),
+  /** MongoDB: the user's authentication database; null for the other engines. */
+  authDatabase: Type.Union([Type.String(), Type.Null()]),
+  /** The user Seylo signs in with: the shell, the web UI, backups, the env references and the URLs. */
+  main: Type.Boolean(),
+  /** A user the database or its image needs (MySQL's root@localhost, Postgres's bootstrap role): no rename or delete. */
+  system: Type.Boolean(),
+  /** What it may do, read from its rights; custom for anything else, none for no rights on this database. */
+  access: Type.Union([
+    Type.Literal("readOnly"),
+    Type.Literal("readWrite"),
+    Type.Literal("databaseAdmin"),
+    Type.Literal("serverAdmin"),
+    Type.Literal("custom"),
+    Type.Literal("none"),
+  ]),
+  /** Its rights as the engine says them: Postgres role memberships, MongoDB role@db, MySQL and ClickHouse grants. */
+  roles: Type.Array(Type.String()),
+  /** It cannot sign in now (an expired Postgres role, a locked MySQL account). */
+  locked: Type.Boolean(),
+  /** Postgres: how many tables and other objects it owns, in every database of the server; null for the other engines. */
+  ownsObjects: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  /** MySQL and MariaDB: views, routines, triggers and events that run as it (DEFINER); null for the other engines. */
+  definerObjects: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  /** A rename needs a new password: MongoDB (a new user with the same roles) and Postgres md5 passwords. */
+  renameNeedsPassword: Type.Boolean(),
+  /** What the Users tab may do with it. */
+  can: Type.Object({
+    password: Type.Boolean(),
+    rename: Type.Boolean(),
+    delete: Type.Boolean(),
+    /** databases.switchMainUser with existing: true. */
+    makeMain: Type.Boolean(),
+  }),
+  /** Why an action is not offered, when one is not. */
+  why: Type.Union([Type.String(), Type.Null()]),
+});
+
+const UserChangeOutput = {
+  /** Services of the project whose env uses the main user's name or password: they get the new one on their next deploy. */
+  affectedServiceIds: Type.Array(Id),
+  /** The deploy that restarts the database with what changed; null when none was needed. */
+  deploymentId: Type.Union([Id, Type.Null()]),
+  /** Set when the change happened but something else did not (a MySQL root out of step, an old user Seylo could not remove). */
+  warning: Type.Union([Type.String(), Type.Null()]),
+};
+
+export const users = defineOp({
+  id: "databases.users",
+  kind: "query",
+  summary: "List a database's users",
+  description:
+    "Lists the users that can sign in to a running database, read from the engine itself: the main user (the one Seylo signs in with for the shell, the web UI, backups and the URLs), users made here or by hand, with their access and what the Users tab may do with each. presets are the access presets databases.createUser takes on this engine; main.rename says how the main user's name changes (inPlace, restart: a short restart, switch: databases.switchMainUser, none). Redis, Valkey, KeyDB and Dragonfly have one user, default, whose password is the only thing to change (notice says why). signIn is offline while the database is stopped or its node is away (only the main user, from what Seylo stores), and failed when Seylo's stored login no longer signs in. Seylo stores only the main user's password.",
+  input: Type.Object({ serviceId: Id }),
+  output: Type.Object({
+    engine: DatabaseEngine,
+    /** At most 500, sorted by name. */
+    users: Type.Array(DatabaseUser),
+    /** More than 500 users: the rest are not listed. */
+    truncated: Type.Boolean(),
+    presets: Type.Array(DatabaseUserPreset),
+    /** MySQL and MariaDB: users have a host. */
+    hosts: Type.Boolean(),
+    /** databases.createUser works on this engine. */
+    canCreate: Type.Boolean(),
+    /** Why users cannot be made or changed here, for the engines where they cannot (Redis and the like). */
+    notice: Type.Union([Type.String(), Type.Null()]),
+    main: Type.Object({
+      user: Type.String(),
+      /** inPlace: databases.renameUser; restart: renameUser restarts the database; switch: databases.switchMainUser; none. */
+      rename: Type.Union([Type.Literal("inPlace"), Type.Literal("restart"), Type.Literal("switch"), Type.Literal("none")]),
+      /** databases.switchMainUser works on this engine. */
+      canSwitch: Type.Boolean(),
+    }),
+    /** ok, offline (stopped or node away: only the stored main user) or failed (the stored login does not sign in). */
+    signIn: Type.Union([Type.Literal("ok"), Type.Literal("failed"), Type.Literal("offline")]),
+    /** What is wrong when signIn is not ok, or what is out of step (a MySQL root user). */
+    message: Type.Union([Type.String(), Type.Null()]),
+  }),
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: false,
+});
+
+export const createUser = defineOp({
+  id: "databases.createUser",
+  kind: "mutation",
+  summary: "Create a database user",
+  description:
+    "Creates a user that signs in with its own password, with one access preset of databases.users presets: readOnly, readWrite, databaseAdmin or serverAdmin, on the database's own database (the server for serverAdmin). Postgres readOnly and readWrite use pg_read_all_data and pg_write_all_data, which cover every database of the server. MySQL and MariaDB take a host (default %, which services and the exposed port use). The password is generated when left out and returned once: Seylo does not keep it. The URLs are this user's internal and exposed connection URLs. Not on Redis, Valkey, KeyDB or Dragonfly (CONFLICT notOffered).",
+  input: Type.Object({
+    serviceId: Id,
+    name: Identifier,
+    host: Type.Optional(UserHost),
+    access: DatabaseUserPreset,
+    /** Generated (32 random characters) when left out. */
+    password: Type.Optional(UserPassword),
+  }),
+  output: Type.Object({
+    user: DatabaseUser,
+    password: Type.String(),
+    internalUrl: Type.String(),
+    /** Null while exposure is off. */
+    exposedUrl: Type.Union([Type.String(), Type.Null()]),
+  }),
+  sensitive: { input: ["password"], output: ["password", "internalUrl", "exposedUrl"] },
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: true,
+});
+
+export const setUserPassword = defineOp({
+  id: "databases.setUserPassword",
+  kind: "destructive",
+  summary: "Set a database user's password",
+  description:
+    "Sets a new password for one user of the database (generated when left out). Anything signed in with the old password stops connecting. For the main user it is databases.resetPassword: Seylo stores it, the services that reference it get it on their next deploy (affectedServiceIds), and ClickHouse, Dragonfly, Redis, Valkey and KeyDB restart with it (deploymentId). known: true only stores a main user's password that already works (when the stored one stopped signing in), after a sign-in test, without changing the database.",
+  input: Type.Object({
+    serviceId: Id,
+    user: DatabaseUserRef,
+    password: Type.Optional(UserPassword),
+    known: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({ password: Type.String(), ...UserChangeOutput }),
+  sensitive: { input: ["password"], output: ["password"] },
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: true,
+});
+
+export const renameUser = defineOp({
+  id: "databases.renameUser",
+  kind: "destructive",
+  summary: "Rename a database user",
+  description:
+    "Gives a user a new name (MySQL and MariaDB: and host). Clients signed in with the old name stop connecting. Postgres keeps ownership and grants; an md5 password is cleared by Postgres, so it needs password. MySQL and MariaDB refuse while views, routines, triggers or events run as the user (definerObjects), unless acceptOrphanDefiners. MongoDB has no rename: a new user with the same roles and the given password replaces the old one. The main user: Postgres renames it in place and restarts the database (deploy: false leaves that for later, with failed sign-ins in its log until then), MySQL and MariaDB rename an admin other than root in place, ClickHouse restarts with the new name; MySQL's root and MongoDB refuse with useSwitchMainUser (databases.switchMainUser). Seylo stores the new name: services that reference the database get it on their next deploy (affectedServiceIds).",
+  input: Type.Object({
+    serviceId: Id,
+    user: DatabaseUserRef,
+    name: Identifier,
+    /** MySQL and MariaDB: the new host; the old one when left out. */
+    host: Type.Optional(UserHost),
+    /** Sets this password with the rename; needed where renameNeedsPassword. */
+    password: Type.Optional(UserPassword),
+    acceptOrphanDefiners: Type.Optional(Type.Boolean()),
+    /** Postgres main user: false skips the restart. */
+    deploy: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({
+    user: DatabaseUserRef,
+    /** The password set with the rename, else null. */
+    password: Type.Union([Type.String(), Type.Null()]),
+    ...UserChangeOutput,
+  }),
+  sensitive: { input: ["password"], output: ["password"] },
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: true,
+});
+
+export const deleteUser = defineOp({
+  id: "databases.deleteUser",
+  kind: "destructive",
+  summary: "Delete a database user",
+  description:
+    "Deletes a user that is not the main one; the data stays. Clients signed in with it stop connecting. Postgres refuses while the user owns tables or other objects (ownsObjects, details.count) unless reassignOwned, which gives them to the main user first in every database. MySQL and MariaDB refuse while views, routines, triggers or events run as it unless acceptOrphanDefiners. Refused for the main user (mainUser), the users the database needs (systemUser) and MongoDB's last user with root (lastAdmin).",
+  input: Type.Object({
+    serviceId: Id,
+    user: DatabaseUserRef,
+    reassignOwned: Type.Optional(Type.Boolean()),
+    acceptOrphanDefiners: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({
+    deleted: Type.Literal(true),
+    /** Postgres: objects given to the main user. */
+    reassignedObjects: Type.Integer({ minimum: 0 }),
+  }),
+  permission: serviceScope("databases.credentials"),
+  mcp: true,
+  audit: true,
+});
+
+export const switchMainUser = defineOp({
+  id: "databases.switchMainUser",
+  kind: "destructive",
+  summary: "Use another user as a database's main user",
+  description:
+    "Makes another user the one Seylo signs in with (the shell, the web UI, backups, the env references and the URLs): a new one with full rights, or an existing one (existing: true), which gets a new password since Seylo does not know its own, and full rights with grantAdmin when it lacks them (else notAdmin). Seylo signs in as it before storing anything; a new user is removed again when that fails. oldUser keep (default) leaves the old main user as it is; delete removes it (MySQL and MariaDB root: only root@%, root@localhost stays for the image). MySQL and MariaDB give root the new main user's password, as they always have the main user's. Services that reference the database get the new name and password on their next deploy (affectedServiceIds). Not on ClickHouse, Redis, Valkey, KeyDB or Dragonfly (notOffered).",
+  input: Type.Object({
+    serviceId: Id,
+    name: Identifier,
+    existing: Type.Optional(Type.Boolean()),
+    password: Type.Optional(UserPassword),
+    grantAdmin: Type.Optional(Type.Boolean()),
+    oldUser: Type.Optional(Type.Union([Type.Literal("keep"), Type.Literal("delete")])),
+  }),
+  output: Type.Object({ user: Type.String(), password: Type.String(), ...UserChangeOutput }),
   sensitive: { input: ["password"], output: ["password"] },
   permission: serviceScope("databases.credentials"),
   mcp: true,

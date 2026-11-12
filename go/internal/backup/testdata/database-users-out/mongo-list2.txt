@@ -1,0 +1,4 @@
+admin> {"kind":"user","user":"dbadmin","db":"admin","roles":[{"role":"dbOwner","db":"app"}],"mechanisms":["SCRAM-SHA-1","SCRAM-SHA-256"]}
+{"kind":"user","user":"root","db":"admin","roles":[{"role":"root","db":"admin"}],"mechanisms":["SCRAM-SHA-1","SCRAM-SHA-256"]}
+{"kind":"user","user":"sadmin","db":"admin","roles":[{"role":"root","db":"admin"}],"mechanisms":["SCRAM-SHA-1","SCRAM-SHA-256"]}
+{"kind":"user","user":"writer2","db":"admin","roles":[{"role":"readWrite","db":"app"}],"mechanisms":["SCRAM-SHA-1","SCRAM-SHA-256"]}

@@ -1,0 +1,3 @@
+{"kind" : "server", "version" : 180006, "databases" : ["app", "other", "postgres", "template1"]}
+{"kind" : "user", "name" : "boss", "bootstrap" : true, "super" : true, "createrole" : true, "createdb" : true, "expired" : false, "password" : "scram", "memberOf" : [], "owns" : 0}
+{"kind" : "user", "name" : "sadmin", "bootstrap" : false, "super" : true, "createrole" : true, "createdb" : true, "expired" : false, "password" : "scram", "memberOf" : [], "owns" : 1}

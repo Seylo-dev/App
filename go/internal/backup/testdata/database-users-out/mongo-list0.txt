@@ -1,0 +1,1 @@
+admin> {"kind":"user","user":"root","db":"admin","roles":[{"role":"root","db":"admin"}],"mechanisms":["SCRAM-SHA-1","SCRAM-SHA-256"]}

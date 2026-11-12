@@ -1,0 +1,200 @@
+{"kind":"user","name":"ch_admin","storage":"users_xml","auth":"['plaintext_password']"}
+{"kind":"user","name":"dbadmin","storage":"local_directory","auth":"['sha256_password']"}
+{"kind":"user","name":"sadmin","storage":"local_directory","auth":"['sha256_password']"}
+{"kind":"user","name":"writer2","storage":"local_directory","auth":"['sha256_password']"}
+{"kind":"grant","user_name":"ch_admin","access_type":"READ","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"WRITE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"TABLE ENGINE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CHECK","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SHOW","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SELECT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"INSERT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"UNDROP TABLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"TRUNCATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"OPTIMIZE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"BACKUP","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"KILL QUERY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"KILL TRANSACTION","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"MOVE PARTITION BETWEEN SHARDS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ROLE ADMIN","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALLOW SQL SECURITY NONE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SHOW ACCESS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SHOW HANDLERS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SYSTEM","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"dictGet","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"displaySecretsInShowAndSelect","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"INTROSPECTION","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CLUSTER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"FILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"URL","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"REMOTE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"MONGO","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"REDIS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"MYSQL","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"POSTGRES","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SQLITE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ODBC","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"JDBC","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"HDFS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"S3","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"HIVE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"AZURE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"KAFKA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"NATS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"RABBITMQ","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"YTSAURUS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ARROW FLIGHT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"BIGQUERY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DISK","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SOURCES","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"SET DEFINER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"CREATE ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"ALTER ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"DROP ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"ch_admin","access_type":"IMPERSONATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"READ","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"WRITE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"TABLE ENGINE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CHECK","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SHOW","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SELECT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"INSERT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"UNDROP TABLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"TRUNCATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"OPTIMIZE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"BACKUP","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"KILL QUERY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"KILL TRANSACTION","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"MOVE PARTITION BETWEEN SHARDS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ROLE ADMIN","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALLOW SQL SECURITY NONE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SHOW ACCESS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SHOW HANDLERS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SYSTEM","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"dictGet","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"displaySecretsInShowAndSelect","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"INTROSPECTION","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CLUSTER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"FILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"URL","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"REMOTE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"MONGO","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"REDIS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"MYSQL","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"POSTGRES","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SQLITE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ODBC","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"JDBC","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"HDFS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"S3","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"HIVE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"AZURE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"KAFKA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"NATS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"RABBITMQ","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"YTSAURUS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ARROW FLIGHT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"BIGQUERY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DISK","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SOURCES","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SET DEFINER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"IMPERSONATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CHECK","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SHOW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SELECT","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"INSERT","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER DATABASE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER VIEW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE DATABASE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE VIEW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE DICTIONARY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP DATABASE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP VIEW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP DICTIONARY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"UNDROP TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"TRUNCATE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"OPTIMIZE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"BACKUP","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE ROW POLICY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER ROW POLICY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP ROW POLICY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SHOW ROW POLICIES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM MERGES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM TTL MERGES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FETCHES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM MOVES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM PULLING REPLICATION LOG","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM CLEANUP","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM BACKGROUND","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SENDS","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM REPLICATION QUEUES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM VIRTUAL PARTS UPDATE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM REDUCE BLOCKING PARTS","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM DROP REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SYNC REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTART REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTORE REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTORE DATABASE REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM WAIT LOADING PARTS","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM WAIT QUERY RUNNER","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SYNC DATABASE REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FLUSH DISTRIBUTED","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FLUSH OBJECT STORAGE QUEUE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM LOAD PRIMARY KEY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM UNLOAD PRIMARY KEY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"dictGet","database":"app","grant_option":1}
+{"kind":"grant","user_name":"writer2","access_type":"SHOW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"SELECT","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"INSERT","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"ALTER TABLE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"ALTER DATABASE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"ALTER VIEW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"CREATE TABLE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"CREATE VIEW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"CREATE DICTIONARY","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"DROP TABLE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"DROP VIEW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"TRUNCATE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer2","access_type":"OPTIMIZE","database":"app","grant_option":0}

@@ -1,0 +1,5 @@
+{"db": null, "host": "%", "user": "boss", "global": "select,insert,update,delete,create,drop,alter,index,createRoutine,event,grant,super,createUser", "locked": false, "definers": 0}
+{"db": "select,insert,update,delete,create,drop,alter,index,createRoutine,event,grant", "host": "%", "user": "dbadmin", "global": "", "locked": false, "definers": 0}
+{"db": null, "host": "localhost", "user": "root", "global": "select,insert,update,delete,create,drop,alter,index,createRoutine,event,grant,super,createUser", "locked": false, "definers": 0}
+{"db": null, "host": "%", "user": "sadmin", "global": "select,insert,update,delete,create,drop,alter,index,createRoutine,event,grant,super,createUser", "locked": false, "definers": 0}
+{"db": "select,insert,update,delete,create,drop,alter,index", "host": "%", "user": "writer2", "global": "", "locked": false, "definers": 0}

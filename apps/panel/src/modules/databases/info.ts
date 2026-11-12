@@ -112,16 +112,17 @@ export interface Connection {
 
 /**
  * For services of the project on the same node: host is the service name on
- * the project network. ClickHouse adds its HTTP interface (httpUrl).
+ * the project network. ClickHouse adds its HTTP interface (httpUrl). creds:
+ * another user than the main one (databases.createUser's URLs).
  */
-export function internalConnection(info: DatabaseInfo): Connection & { httpUrl?: string } {
+export function internalConnection(info: DatabaseInfo, creds: Credentials = info.admin): Connection & { httpUrl?: string } {
   const host = info.service.name;
-  const http = httpUrl(info.row.engine, info.admin, host);
+  const http = httpUrl(info.row.engine, creds, host);
   return {
-    url: connectionUrl(info.row.engine, info.admin, host, info.engine.port),
+    url: connectionUrl(info.row.engine, creds, host, info.engine.port),
     host,
     port: info.engine.port,
-    ...info.admin,
+    ...creds,
     ...(http ? { httpUrl: http } : {}),
   };
 }
@@ -137,7 +138,8 @@ export function exposedAddress(info: DatabaseInfo): { host: string; port: number
   return { host, port: info.exposure.listenPort > 0 ? info.exposure.listenPort : null };
 }
 
-export function exposedConnection(info: DatabaseInfo): (Connection & { tlsParams: string }) | null {
+/** creds: another user than the main one (databases.createUser's URLs). */
+export function exposedConnection(info: DatabaseInfo, creds: Credentials = info.admin): (Connection & { tlsParams: string }) | null {
   const address = exposedAddress(info);
   if (!address || address.port === null) return null;
   // Mongo and ClickHouse speak TLS from the first byte through the agent; with no host name the
@@ -145,12 +147,12 @@ export function exposedConnection(info: DatabaseInfo): (Connection & { tlsParams
   // never verifies).
   const accept = info.row.tlsHostname ? "" : (selfSignedParam[info.row.engine] ?? "");
   // The same user and password as inside: exposing only opens the port, with TLS.
-  const url = connectionUrl(info.row.engine, info.admin, address.host, address.port, true);
+  const url = connectionUrl(info.row.engine, creds, address.host, address.port, true);
   return {
     url: accept ? `${url}&${accept}` : url,
     host: address.host,
     port: address.port,
-    ...info.admin,
+    ...creds,
     tlsParams: accept ? `${info.engine.tlsParams}&${accept}` : info.engine.tlsParams,
   };
 }

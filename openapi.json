@@ -20051,6 +20051,373 @@
         "x-mcp": true
       }
     },
+    "/api/v1/databases.createUser": {
+      "post": {
+        "operationId": "databases.createUser",
+        "summary": "Create a database user",
+        "description": "Creates a user that signs in with its own password, with one access preset of databases.users presets: readOnly, readWrite, databaseAdmin or serverAdmin, on the database's own database (the server for serverAdmin). Postgres readOnly and readWrite use pg_read_all_data and pg_write_all_data, which cover every database of the server. MySQL and MariaDB take a host (default %, which services and the exposed port use). The password is generated when left out and returned once: Seylo does not keep it. The URLs are this user's internal and exposed connection URLs. Not on Redis, Valkey, KeyDB or Dragonfly (CONFLICT notOffered).",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "name",
+                  "access"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "host": {
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^[A-Za-z0-9.%_:/-]+$",
+                    "type": "string"
+                  },
+                  "access": {
+                    "anyOf": [
+                      {
+                        "const": "readOnly",
+                        "type": "string"
+                      },
+                      {
+                        "const": "readWrite",
+                        "type": "string"
+                      },
+                      {
+                        "const": "databaseAdmin",
+                        "type": "string"
+                      },
+                      {
+                        "const": "serverAdmin",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "password": {
+                    "minLength": 12,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9._~-]+$",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "user",
+                    "password",
+                    "internalUrl",
+                    "exposedUrl"
+                  ],
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "host",
+                        "authDatabase",
+                        "main",
+                        "system",
+                        "access",
+                        "roles",
+                        "locked",
+                        "ownsObjects",
+                        "definerObjects",
+                        "renameNeedsPassword",
+                        "can",
+                        "why"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "host": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "authDatabase": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "main": {
+                          "type": "boolean"
+                        },
+                        "system": {
+                          "type": "boolean"
+                        },
+                        "access": {
+                          "anyOf": [
+                            {
+                              "const": "readOnly",
+                              "type": "string"
+                            },
+                            {
+                              "const": "readWrite",
+                              "type": "string"
+                            },
+                            {
+                              "const": "databaseAdmin",
+                              "type": "string"
+                            },
+                            {
+                              "const": "serverAdmin",
+                              "type": "string"
+                            },
+                            {
+                              "const": "custom",
+                              "type": "string"
+                            },
+                            {
+                              "const": "none",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "roles": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "locked": {
+                          "type": "boolean"
+                        },
+                        "ownsObjects": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "definerObjects": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "renameNeedsPassword": {
+                          "type": "boolean"
+                        },
+                        "can": {
+                          "type": "object",
+                          "required": [
+                            "password",
+                            "rename",
+                            "delete",
+                            "makeMain"
+                          ],
+                          "properties": {
+                            "password": {
+                              "type": "boolean"
+                            },
+                            "rename": {
+                              "type": "boolean"
+                            },
+                            "delete": {
+                              "type": "boolean"
+                            },
+                            "makeMain": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "why": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "password": {
+                      "type": "string"
+                    },
+                    "internalUrl": {
+                      "type": "string"
+                    },
+                    "exposedUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:databases.credentials",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/databases.deleteUser": {
+      "post": {
+        "operationId": "databases.deleteUser",
+        "summary": "Delete a database user",
+        "description": "Deletes a user that is not the main one; the data stays. Clients signed in with it stop connecting. Postgres refuses while the user owns tables or other objects (ownsObjects, details.count) unless reassignOwned, which gives them to the main user first in every database. MySQL and MariaDB refuse while views, routines, triggers or events run as it unless acceptOrphanDefiners. Refused for the main user (mainUser), the users the database needs (systemUser) and MongoDB's last user with root (lastAdmin).",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "user"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "type": "string"
+                      },
+                      "host": {
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "pattern": "^[A-Za-z0-9.%_:/-]+$",
+                        "type": "string"
+                      },
+                      "authDatabase": {
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "reassignOwned": {
+                    "type": "boolean"
+                  },
+                  "acceptOrphanDefiners": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted",
+                    "reassignedObjects"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "const": true,
+                      "type": "boolean"
+                    },
+                    "reassignedObjects": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "service:databases.credentials",
+        "x-mcp": true
+      }
+    },
     "/api/v1/databases.engines": {
       "get": {
         "operationId": "databases.engines",
@@ -20747,6 +21114,186 @@
         "x-mcp": false
       }
     },
+    "/api/v1/databases.renameUser": {
+      "post": {
+        "operationId": "databases.renameUser",
+        "summary": "Rename a database user",
+        "description": "Gives a user a new name (MySQL and MariaDB: and host). Clients signed in with the old name stop connecting. Postgres keeps ownership and grants; an md5 password is cleared by Postgres, so it needs password. MySQL and MariaDB refuse while views, routines, triggers or events run as the user (definerObjects), unless acceptOrphanDefiners. MongoDB has no rename: a new user with the same roles and the given password replaces the old one. The main user: Postgres renames it in place and restarts the database (deploy: false leaves that for later, with failed sign-ins in its log until then), MySQL and MariaDB rename an admin other than root in place, ClickHouse restarts with the new name; MySQL's root and MongoDB refuse with useSwitchMainUser (databases.switchMainUser). Seylo stores the new name: services that reference the database get it on their next deploy (affectedServiceIds).",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "user",
+                  "name"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "type": "string"
+                      },
+                      "host": {
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "pattern": "^[A-Za-z0-9.%_:/-]+$",
+                        "type": "string"
+                      },
+                      "authDatabase": {
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "host": {
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^[A-Za-z0-9.%_:/-]+$",
+                    "type": "string"
+                  },
+                  "password": {
+                    "minLength": 12,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9._~-]+$",
+                    "type": "string"
+                  },
+                  "acceptOrphanDefiners": {
+                    "type": "boolean"
+                  },
+                  "deploy": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "user",
+                    "password",
+                    "affectedServiceIds",
+                    "deploymentId",
+                    "warning"
+                  ],
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "type": "string"
+                        },
+                        "host": {
+                          "minLength": 1,
+                          "maxLength": 255,
+                          "pattern": "^[A-Za-z0-9.%_:/-]+$",
+                          "type": "string"
+                        },
+                        "authDatabase": {
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "password": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "affectedServiceIds": {
+                      "type": "array",
+                      "items": {
+                        "pattern": "^[a-z0-9]{16}$",
+                        "description": "Panel-issued id.",
+                        "type": "string"
+                      }
+                    },
+                    "deploymentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warning": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "service:databases.credentials",
+        "x-mcp": true
+      }
+    },
     "/api/v1/databases.resetPassword": {
       "post": {
         "operationId": "databases.resetPassword",
@@ -20830,6 +21377,18 @@
                     "warning": {
                       "anyOf": [
                         {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "deploymentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
                           "type": "string"
                         },
                         {
@@ -21241,6 +21800,138 @@
         "x-mcp": true
       }
     },
+    "/api/v1/databases.setUserPassword": {
+      "post": {
+        "operationId": "databases.setUserPassword",
+        "summary": "Set a database user's password",
+        "description": "Sets a new password for one user of the database (generated when left out). Anything signed in with the old password stops connecting. For the main user it is databases.resetPassword: Seylo stores it, the services that reference it get it on their next deploy (affectedServiceIds), and ClickHouse, Dragonfly, Redis, Valkey and KeyDB restart with it (deploymentId). known: true only stores a main user's password that already works (when the stored one stopped signing in), after a sign-in test, without changing the database.",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "user"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "type": "string"
+                      },
+                      "host": {
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "pattern": "^[A-Za-z0-9.%_:/-]+$",
+                        "type": "string"
+                      },
+                      "authDatabase": {
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "password": {
+                    "minLength": 12,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9._~-]+$",
+                    "type": "string"
+                  },
+                  "known": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "password",
+                    "affectedServiceIds",
+                    "deploymentId",
+                    "warning"
+                  ],
+                  "properties": {
+                    "password": {
+                      "type": "string"
+                    },
+                    "affectedServiceIds": {
+                      "type": "array",
+                      "items": {
+                        "pattern": "^[a-z0-9]{16}$",
+                        "description": "Panel-issued id.",
+                        "type": "string"
+                      }
+                    },
+                    "deploymentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warning": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "service:databases.credentials",
+        "x-mcp": true
+      }
+    },
     "/api/v1/databases.setVersion": {
       "post": {
         "operationId": "databases.setVersion",
@@ -21638,6 +22329,493 @@
         },
         "x-op-kind": "destructive",
         "x-permission": "service:services.deploy",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/databases.switchMainUser": {
+      "post": {
+        "operationId": "databases.switchMainUser",
+        "summary": "Use another user as a database's main user",
+        "description": "Makes another user the one Seylo signs in with (the shell, the web UI, backups, the env references and the URLs): a new one with full rights, or an existing one (existing: true), which gets a new password since Seylo does not know its own, and full rights with grantAdmin when it lacks them (else notAdmin). Seylo signs in as it before storing anything; a new user is removed again when that fails. oldUser keep (default) leaves the old main user as it is; delete removes it (MySQL and MariaDB root: only root@%, root@localhost stays for the image). MySQL and MariaDB give root the new main user's password, as they always have the main user's. Services that reference the database get the new name and password on their next deploy (affectedServiceIds). Not on ClickHouse, Redis, Valkey, KeyDB or Dragonfly (notOffered).",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "name"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "existing": {
+                    "type": "boolean"
+                  },
+                  "password": {
+                    "minLength": 12,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9._~-]+$",
+                    "type": "string"
+                  },
+                  "grantAdmin": {
+                    "type": "boolean"
+                  },
+                  "oldUser": {
+                    "anyOf": [
+                      {
+                        "const": "keep",
+                        "type": "string"
+                      },
+                      {
+                        "const": "delete",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "user",
+                    "password",
+                    "affectedServiceIds",
+                    "deploymentId",
+                    "warning"
+                  ],
+                  "properties": {
+                    "user": {
+                      "type": "string"
+                    },
+                    "password": {
+                      "type": "string"
+                    },
+                    "affectedServiceIds": {
+                      "type": "array",
+                      "items": {
+                        "pattern": "^[a-z0-9]{16}$",
+                        "description": "Panel-issued id.",
+                        "type": "string"
+                      }
+                    },
+                    "deploymentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "warning": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "service:databases.credentials",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/databases.users": {
+      "get": {
+        "operationId": "databases.users",
+        "summary": "List a database's users",
+        "description": "Lists the users that can sign in to a running database, read from the engine itself: the main user (the one Seylo signs in with for the shell, the web UI, backups and the URLs), users made here or by hand, with their access and what the Users tab may do with each. presets are the access presets databases.createUser takes on this engine; main.rename says how the main user's name changes (inPlace, restart: a short restart, switch: databases.switchMainUser, none). Redis, Valkey, KeyDB and Dragonfly have one user, default, whose password is the only thing to change (notice says why). signIn is offline while the database is stopped or its node is away (only the main user, from what Seylo stores), and failed when Seylo's stored login no longer signs in. Seylo stores only the main user's password.",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "engine",
+                    "users",
+                    "truncated",
+                    "presets",
+                    "hosts",
+                    "canCreate",
+                    "notice",
+                    "main",
+                    "signIn",
+                    "message"
+                  ],
+                  "properties": {
+                    "engine": {
+                      "anyOf": [
+                        {
+                          "const": "postgres",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mysql",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mariadb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mongo",
+                          "type": "string"
+                        },
+                        {
+                          "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "host",
+                          "authDatabase",
+                          "main",
+                          "system",
+                          "access",
+                          "roles",
+                          "locked",
+                          "ownsObjects",
+                          "definerObjects",
+                          "renameNeedsPassword",
+                          "can",
+                          "why"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "host": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "authDatabase": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "main": {
+                            "type": "boolean"
+                          },
+                          "system": {
+                            "type": "boolean"
+                          },
+                          "access": {
+                            "anyOf": [
+                              {
+                                "const": "readOnly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "readWrite",
+                                "type": "string"
+                              },
+                              {
+                                "const": "databaseAdmin",
+                                "type": "string"
+                              },
+                              {
+                                "const": "serverAdmin",
+                                "type": "string"
+                              },
+                              {
+                                "const": "custom",
+                                "type": "string"
+                              },
+                              {
+                                "const": "none",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "roles": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "locked": {
+                            "type": "boolean"
+                          },
+                          "ownsObjects": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "definerObjects": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "renameNeedsPassword": {
+                            "type": "boolean"
+                          },
+                          "can": {
+                            "type": "object",
+                            "required": [
+                              "password",
+                              "rename",
+                              "delete",
+                              "makeMain"
+                            ],
+                            "properties": {
+                              "password": {
+                                "type": "boolean"
+                              },
+                              "rename": {
+                                "type": "boolean"
+                              },
+                              "delete": {
+                                "type": "boolean"
+                              },
+                              "makeMain": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          "why": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "const": "readOnly",
+                            "type": "string"
+                          },
+                          {
+                            "const": "readWrite",
+                            "type": "string"
+                          },
+                          {
+                            "const": "databaseAdmin",
+                            "type": "string"
+                          },
+                          {
+                            "const": "serverAdmin",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "hosts": {
+                      "type": "boolean"
+                    },
+                    "canCreate": {
+                      "type": "boolean"
+                    },
+                    "notice": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "main": {
+                      "type": "object",
+                      "required": [
+                        "user",
+                        "rename",
+                        "canSwitch"
+                      ],
+                      "properties": {
+                        "user": {
+                          "type": "string"
+                        },
+                        "rename": {
+                          "anyOf": [
+                            {
+                              "const": "inPlace",
+                              "type": "string"
+                            },
+                            {
+                              "const": "restart",
+                              "type": "string"
+                            },
+                            {
+                              "const": "switch",
+                              "type": "string"
+                            },
+                            {
+                              "const": "none",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "canSwitch": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "signIn": {
+                      "anyOf": [
+                        {
+                          "const": "ok",
+                          "type": "string"
+                        },
+                        {
+                          "const": "failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "offline",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "message": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:databases.credentials",
         "x-mcp": true
       }
     },

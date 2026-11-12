@@ -658,16 +658,20 @@ function mysqlPasswordScript(engine: "mysql" | "mariadb"): string {
 }
 
 /**
- * Exec call that changes the password of `user` in a running database to
- * `password`. The new password goes on stdin, so it never shows in a
- * process list. The container's environment still holds the old password,
- * which is what these commands sign in with. MySQL and MariaDB
+ * Exec call that changes the password of `user` in a running MySQL,
+ * MariaDB, Redis, Valkey or KeyDB to `password`. The new password goes on
+ * stdin, so it never shows in a process list. MySQL and MariaDB
  * (mysqlPasswordScript) sign in as root and change root's password with
  * the admin's, also for an admin other than root, since the container
  * gives root the admin's password (rootPasswordVariable); `current` is the
  * admin's password before the change, for when the container's root
- * password does not sign in. Null for engines whose password changes by
- * restarting with the new environment (passwordChange "restart").
+ * password does not sign in. The Redis-like engines sign in with the
+ * container's password, which is the one they started with. Null for
+ * Postgres and MongoDB, which sign in with the stored login instead
+ * (user-scripts.ts mainPasswordExec: the container's environment keeps
+ * the first password until the next deploy, so a second change signing in
+ * with it failed), and for engines whose password changes by restarting
+ * with the new environment (passwordChange "restart").
  */
 export function changePasswordExec(
   engine: DatabaseEngine,
@@ -677,10 +681,8 @@ export function changePasswordExec(
 ): { command: string[]; stdin: string } | null {
   switch (engine) {
     case "postgres":
-      return {
-        command: ["sh", "-c", 'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
-        stdin: `ALTER USER "${user}" WITH PASSWORD '${password}';\n`,
-      };
+    case "mongo":
+      return null;
     case "mysql":
     case "mariadb": {
       const alter = (account: string, ifExists = false) =>
@@ -700,15 +702,6 @@ export function changePasswordExec(
         stdin: `${current}\n${forAdmin.join(" ")}\n${forRoot.join(" ")}\n${forSelf}\n`,
       };
     }
-    case "mongo":
-      return {
-        command: [
-          "sh",
-          "-c",
-          'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin admin',
-        ],
-        stdin: `db.changeUserPassword("${user}", "${password}")\n`,
-      };
     case "redis":
     case "valkey":
     case "keydb": {
