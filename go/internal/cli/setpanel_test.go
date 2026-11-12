@@ -200,3 +200,38 @@ func TestSetPanelPrintsAFailedConnection(t *testing.T) {
 		t.Fatalf("the agent was asked %d times; set-panel waits for it to connect", asked)
 	}
 }
+
+// The address config.yml already has (put back by hand): set-panel only
+// asks the panel to keep the node there, restarts the agent so it sends
+// that, and dials nothing. Run once more, nothing changes.
+func TestSetPanelSameAddressAsksToStay(t *testing.T) {
+	shortSetPanelWait(t)
+	h := newHarness(t)
+	h.euid = 0
+	panel := rpctest.NewFakePanel(t, rpctest.WithTLS())
+	pin := conn.FormatPin(panel.SPKI())
+	raw := strings.Replace(string(domainJoined(t, h, panel)), "panel_url: https://panel.example.com", "panel_url: "+panel.URL()+"\npanel_pin: "+pin, 1)
+	if err := os.WriteFile(filepath.Join(h.dataDir, "config.yml"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.agentStatus = agentSays(localapi.NodeStatus{PanelURL: panel.URL(), PanelConnected: true, Connection: localapi.ConnectionStatus{State: "connected"}})
+
+	out, err := h.run("set-panel", panel.URL(), "--pin", pin)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Wrote stay_on_address") || !strings.Contains(out, "Restarted the agent.") || panel.Connects() != 0 {
+		t.Fatalf("output:\n%s\n(%d connects)", out, panel.Connects())
+	}
+	cfg, err := agent.LoadConfig(filepath.Join(h.dataDir, "config.yml"))
+	if err != nil || !cfg.StayOnAddress || cfg.PanelURL != panel.URL() {
+		t.Fatalf("config.yml = %+v, %v", cfg, err)
+	}
+	if len(h.units.calls) != 1 {
+		t.Fatalf("calls = %v", h.units.calls)
+	}
+	out, err = h.run("set-panel", panel.URL(), "--pin", pin)
+	if err != nil || !strings.Contains(out, "nothing changed") || len(h.units.calls) != 1 {
+		t.Fatalf("second run: %v\n%s\ncalls %v", err, out, h.units.calls)
+	}
+}

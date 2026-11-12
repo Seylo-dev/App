@@ -42,7 +42,9 @@ import (
 // changes as a move does (movedConfig): the new address becomes
 // panel_url/panel_pin, the old one the fallback for one cycle; node_id,
 // the identity and a staged address stay. The file as it was is kept as
-// config.yml.bak.
+// config.yml.bak. It also sets stay_on_address: on its next connect the
+// agent asks the panel to keep the node on the new address (Panel address
+// "stay"), so the panel does not move it back to its domain.
 
 // SetPanelOptions are `seylo set-panel`'s arguments.
 type SetPanelOptions struct {
@@ -71,8 +73,11 @@ type SetPanelResult struct {
 	// still changes the address (ALREADY_CONNECTED, AGENT_TOO_OLD,
 	// NODE_DISABLED); nil when it accepted the node.
 	Refused *agentv1.HelloRejected
-	// Unchanged: config.yml already pointed there; nothing was dialed or written.
+	// Unchanged: config.yml already pointed there; nothing was dialed.
 	Unchanged bool
+	// StayRequested (with Unchanged): config.yml only got stay_on_address,
+	// which the agent sends after a restart.
+	StayRequested bool
 	// Backup is the copy of config.yml as it was.
 	Backup string
 }
@@ -97,6 +102,15 @@ func SetPanel(ctx context.Context, layout datadir.Layout, opts SetPanelOptions) 
 	res := &SetPanelResult{Previous: cfg.PanelURL, PanelURL: to.url, PanelPin: to.pin}
 	if sameTarget(from, to) && from.insecure == to.insecure {
 		res.Unchanged = true
+		if !cfg.StayOnAddress {
+			// The address is right (set by hand, say): still ask the panel to keep the node on it.
+			next := *cfg
+			next.StayOnAddress = true
+			if err := SaveConfig(path, &next); err != nil {
+				return nil, err
+			}
+			res.StayRequested = true
+		}
 		return res, nil
 	}
 	key, err := readAgentKey(layout.AgentKey())
@@ -120,6 +134,9 @@ func SetPanel(ctx context.Context, layout datadir.Layout, opts SetPanelOptions) 
 	}
 	next := movedConfig(*cfg, from, to)
 	next.InsecureTransport = to.insecure
+	// The owner chose this address: the agent asks the panel to keep the
+	// node on it (Panel address "stay") on its next connect.
+	next.StayOnAddress = true
 	if err := next.Validate(); err != nil {
 		return nil, err
 	}

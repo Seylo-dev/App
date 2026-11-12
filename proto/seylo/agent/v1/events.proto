@@ -197,6 +197,13 @@ message NodeAlert {
   // True when the condition cleared; pairs with an earlier alert of the
   // same kind.
   bool resolved = 4;
+  // PANEL_MOVE_FAILED only: the new address's certificate came from an
+  // issuer the node does not trust, or did not match the pin (what TLS
+  // inspection makes of a certificate). While such an alert is open the
+  // panel treats the node's Panel address as "stay" until the owner
+  // chooses one. Added in 0.2.14; older agents leave it false and the
+  // panel reads the message.
+  bool inspected_certificate = 5;
 }
 
 enum NodeAlertKind {

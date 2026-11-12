@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/conn"
 	"github.com/seylo-dev/app/go/internal/rpc"
@@ -28,9 +29,13 @@ import (
 // pinned https:// fallback stays as a standing one, dialed once the new
 // address failed for standingFallbackAfter, so a node whose panel domain
 // was removed or changed finds the panel again; any other fallback is
-// dropped. A failed move raises a PANEL_MOVE_FAILED node alert and is tried
-// again after moveRetryAfter or an agent restart. The panel's own node
-// dials loopback and never moves.
+// dropped. When panel_url fails on a certificate the node will never
+// trust (inspectedCertificate) the fallback is dialed at once instead
+// (connect.go primaryFailed). A failed move raises a PANEL_MOVE_FAILED
+// node alert and is tried again after moveRetryAfter or an agent restart.
+// The panel's own node dials loopback and never moves, and the panel
+// names no address to a node whose Panel address is "stay"
+// (ClientHello.stay_on_address).
 //
 // A node at a pinned https:// address whose move fails because the new
 // address's certificate comes from an issuer it does not trust, or does
@@ -39,12 +44,14 @@ import (
 // (TLS inspection re-signs the domain's certificate), which is why it
 // joined over the panel's IP and pin, and the panel names its domain on
 // every connect. Each try drops the session the panel just accepted, so
-// the node tries that address again only after that long, an agent
-// restart (which reloads the trust store), or when the panel names
-// another address or a pin for it. A certificate that is expired, not
-// valid yet or for another name is no sign of that (a clock that is not
-// set yet, DNS that still leads to the old server) and keeps
-// moveRetryAfter.
+// the node tries that address again only after that long, or when the
+// panel names another address or a pin for it. Since 0.2.14 that wait
+// (from any address) is kept in state/panel.json, so restarts and updates
+// do not try it again either, and it goes once the panel stops naming the
+// address (panel_memory.go); `seylo set-panel` moves the node by hand. A
+// certificate that is expired, not valid yet or for another name is no
+// sign of that (a clock that is not set yet, DNS that still leads to the
+// old server) and keeps moveRetryAfter, in memory only.
 //
 // Only an authenticated session (https:// with a pin or a CA-verified
 // certificate) can move the node. Over plain HTTP anyone on the path can
@@ -131,7 +138,7 @@ func (c *connector) moveTarget(current panelTarget, acc *agentv1.HelloAccepted) 
 	if sameTarget(current, next) || dropsPin(current, next) {
 		return panelTarget{}, false
 	}
-	if until, ok := c.moveRetry[moveKey(next)]; ok && time.Now().Before(until) {
+	if w, ok := c.moveRetry[moveKey(next)]; ok && time.Now().Before(w.until) {
 		return panelTarget{}, false
 	}
 	return next, true
@@ -222,6 +229,7 @@ func (c *connector) move(ctx context.Context, from, to panelTarget, panelID stri
 		}
 		if err == nil {
 			c.moved(ctx, from, to)
+			c.accepted(to, res.Accepted)
 			return t, res, nil
 		}
 		var rejected *rpc.RejectedError
@@ -264,7 +272,14 @@ func (c *connector) moved(ctx context.Context, from, to panelTarget) {
 	*c.cfg = next
 	c.saveConfigLocked()
 	c.cfgMu.Unlock()
+	kept := false
+	for _, w := range c.moveRetry {
+		kept = kept || w.kept
+	}
 	clear(c.moveRetry)
+	if kept {
+		c.saveMemory()
+	}
 	c.moveAlerted = ""
 	c.logger.Info("moved to the panel's new address; the old one stays as a fallback until a reconnect there works",
 		"panel_url", to.url, "fallback", next.Fallback.PanelURL)
@@ -281,19 +296,26 @@ func (c *connector) moved(ctx context.Context, from, to panelTarget) {
 // moveFailed keeps (or puts back) the old address and reports why, once
 // per address (moveAlerted). A move from a pinned https:// address that
 // failed on the certificate's issuer or pin (inspectedCertificate) waits
-// untrustedMoveRetryAfter, any other moveRetryAfter.
+// untrustedMoveRetryAfter, any other moveRetryAfter. A move that failed on
+// the issuer or the pin is kept in state/panel.json (panel_memory.go): an
+// agent restart or update does not try it again, so it does not drop the
+// first session the panel accepts and raise the alert once more.
 func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err error) {
 	key := moveKey(to)
 	untrusted := untrustedCertificate(err)
-	pinned := inspectedCertificate(err) && from.pin != "" && tlsURL(from.url)
+	inspected := inspectedCertificate(err)
+	pinned := inspected && from.pin != "" && tlsURL(from.url)
 	retry := moveRetryAfter
 	if pinned {
 		retry = untrustedMoveRetryAfter
 	}
 	if c.moveRetry == nil {
-		c.moveRetry = map[string]time.Time{}
+		c.moveRetry = map[string]moveWait{}
 	}
-	c.moveRetry[key] = time.Now().Add(retry)
+	c.moveRetry[key] = moveWait{target: to, until: time.Now().Add(retry), kept: inspected}
+	if inspected {
+		c.saveMemory()
+	}
 	stay := from.url
 	if from.fallback && restorable(c.config().Fallback) {
 		c.restoreFallback()
@@ -306,18 +328,26 @@ func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err er
 	c.moveAlerted = key
 	// The error is one line: it can quote what the new address chose (its
 	// certificate's names), and the owner reads it in the panel.
-	msg := fmt.Sprintf("Could not move to the panel address %s: %s\nThe node keeps connecting through %s and tries again in %s or when the agent restarts.",
-		to.url, conn.PrintableLine(err.Error()), stay, durationWords(retry))
-	if untrusted {
+	again := "or when the agent restarts"
+	if inspected {
+		again = "or when the panel names another address"
+	}
+	msg := fmt.Sprintf("Could not move to the panel address %s: %s\nThe node keeps connecting through %s and tries again in %s %s.",
+		to.url, conn.PrintableLine(err.Error()), stay, durationWords(retry), again)
+	switch {
+	case inspected:
+		msg += fmt.Sprintf(" The node does not trust that address's certificate: the panel must send its pin, or the certificate must come from a CA in the node's trust store (then `%s set-panel %s` on the node moves it).", brand.Slug, to.url)
+	case untrusted:
 		msg += " The node does not trust that address's certificate: the panel must send its pin, or the certificate must come from a CA in the node's trust store (an agent restart reloads it)."
 	}
 	if pinned {
-		msg += " If the node's network decrypts HTTPS (TLS inspection), it cannot use that address and stays on its pinned one."
+		msg += " If the node's network decrypts HTTPS (TLS inspection), it cannot use that address and stays on its pinned one: the panel keeps it there (Panel address in the node's settings) until you choose otherwise."
 	}
 	c.moveAlert(ctx, &agentv1.NodeAlert{
-		Kind:     agentv1.NodeAlertKind_NODE_ALERT_KIND_PANEL_MOVE_FAILED,
-		Severity: agentv1.AlertSeverity_ALERT_SEVERITY_WARNING,
-		Message:  msg,
+		Kind:                 agentv1.NodeAlertKind_NODE_ALERT_KIND_PANEL_MOVE_FAILED,
+		Severity:             agentv1.AlertSeverity_ALERT_SEVERITY_WARNING,
+		Message:              msg,
+		InspectedCertificate: pinned,
 	})
 }
 

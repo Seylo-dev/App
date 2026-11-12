@@ -66,9 +66,20 @@ func setPanel(ctx context.Context, d *deps, opts agent.SetPanelOptions) error {
 	if err != nil {
 		return fmt.Errorf("%w. config.yml was not changed", err)
 	}
-	if res.Unchanged {
+	if res.Unchanged && !res.StayRequested {
 		_, err := fmt.Fprintf(d.out, "config.yml already points at %s; nothing changed. `sudo %s restart` restarts the agent.\n", res.PanelURL, brand.Slug)
 		return err
+	}
+	if res.Unchanged {
+		fmt.Fprintf(d.out, "config.yml already points at %s. Wrote stay_on_address to it: the agent asks the panel to keep this node on that address.\n", res.PanelURL)
+		if err := d.units.Restart(ctx, systemd.AgentUnit); err != nil {
+			return fmt.Errorf("restarting the agent: %w. Restart it with sudo systemctl restart %s", err, systemd.AgentUnit)
+		}
+		fmt.Fprintln(d.out, "Restarted the agent.")
+		if status, err := waitForPanel(ctx, d); err == nil {
+			printConnection(d, status)
+		}
+		return nil
 	}
 	fmt.Fprintf(d.out, "%s is the panel this node belongs to (panel id %s", res.PanelURL, res.PanelID)
 	if res.PanelVersion != "" {
@@ -88,6 +99,7 @@ func setPanel(ctx context.Context, d *deps, opts agent.SetPanelOptions) error {
 		fmt.Fprintf(d.out, ", panel_pin %s", res.PanelPin)
 	}
 	fmt.Fprintf(d.out, "); the previous file is %s.\n", res.Backup)
+	fmt.Fprintln(d.out, "The panel keeps this node on that address from its next connect (Panel address: Stay in the node's settings in the panel).")
 	if err := d.units.Restart(ctx, systemd.AgentUnit); err != nil {
 		return fmt.Errorf("restarting the agent: %w. config.yml points at %s already: restart it with sudo systemctl restart %s", err, res.PanelURL, systemd.AgentUnit)
 	}

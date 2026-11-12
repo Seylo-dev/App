@@ -176,7 +176,11 @@ type NodeSettings struct {
 	HostShell bool `protobuf:"varint,10,opt,name=host_shell,json=hostShell,proto3" json:"host_shell,omitempty"` // added in 0.2 (nodeops)
 	// Tailscale Serve for the panel. Only the panel node gets it; unset
 	// (older panels, other nodes) means the agent keeps no Serve entry.
-	Tailnet       *TailnetServe `protobuf:"bytes,11,opt,name=tailnet,proto3" json:"tailnet,omitempty"` // added in 0.2.1 (tailnet)
+	Tailnet *TailnetServe `protobuf:"bytes,11,opt,name=tailnet,proto3" json:"tailnet,omitempty"` // added in 0.2.1 (tailnet)
+	// The node's name in the panel, so `seylo status` shows a rename made
+	// while the agent is connected (HelloAccepted.node_name has it at each
+	// connect). Empty from older panels. Added in 0.2.14.
+	NodeName      string `protobuf:"bytes,12,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -286,6 +290,13 @@ func (x *NodeSettings) GetTailnet() *TailnetServe {
 		return x.Tailnet
 	}
 	return nil
+}
+
+func (x *NodeSettings) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
 }
 
 // CleanupSchedule is when and what the agent cleans up by itself. It only
@@ -1116,7 +1127,7 @@ const file_seylo_agent_v1_desired_proto_rawDesc = "" +
 	"\bsettings\x18\x04 \x01(\v2\x1c.seylo.agent.v1.NodeSettingsR\bsettings\"/\n" +
 	"\x0eProjectNetwork\x12\x1d\n" +
 	"\n" +
-	"project_id\x18\x01 \x01(\tR\tprojectId\"\x9b\x04\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\"\xb8\x04\n" +
 	"\fNodeSettings\x12=\n" +
 	"\vmaintenance\x18\x01 \x01(\v2\x1b.seylo.agent.v1.MaintenanceR\vmaintenance\x12&\n" +
 	"\x0fgames_first_cpu\x18\x02 \x01(\bR\rgamesFirstCpu\x12\x1d\n" +
@@ -1132,7 +1143,8 @@ const file_seylo_agent_v1_desired_proto_rawDesc = "" +
 	"\n" +
 	"host_shell\x18\n" +
 	" \x01(\bR\thostShell\x126\n" +
-	"\atailnet\x18\v \x01(\v2\x1c.seylo.agent.v1.TailnetServeR\atailnet\"\xf1\x01\n" +
+	"\atailnet\x18\v \x01(\v2\x1c.seylo.agent.v1.TailnetServeR\atailnet\x12\x1b\n" +
+	"\tnode_name\x18\f \x01(\tR\bnodeName\"\xf1\x01\n" +
 	"\x0fCleanupSchedule\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cron\x18\x02 \x01(\tR\x04cron\x12!\n" +

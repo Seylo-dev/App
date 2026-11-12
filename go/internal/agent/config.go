@@ -110,6 +110,12 @@ type FileConfig struct {
 	// TailscaleSocket is tailscaled's LocalAPI socket when it is not at
 	// /var/run/tailscale/tailscaled.sock (an absolute path).
 	TailscaleSocket string `yaml:"tailscale_socket,omitempty"`
+	// StayOnAddress asks the panel to keep this node on panel_url: its
+	// Panel address setting becomes "stay" and the panel names no other
+	// address (ClientHello.stay_on_address). `seylo set-panel` and a join
+	// with --pin at an IP address set it; the agent removes it once a
+	// panel answered (HelloAccepted.panel_address). Added in 0.2.14.
+	StayOnAddress bool `yaml:"stay_on_address,omitempty"`
 }
 
 // PanelAddress is one way to reach the panel, as config.yml stores it.
@@ -334,6 +340,17 @@ func PlainRemote(panelURL string) bool {
 func loopbackURL(panelURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(panelURL))
 	return err == nil && u.Host != "" && loopbackHost(u.Hostname())
+}
+
+// ipHost reports whether panelURL names its host by an IP address (not
+// loopback): https://203.0.113.4:3443, not https://panel.example.com.
+func ipHost(panelURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(panelURL))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && !ip.IsLoopback()
 }
 
 func loopbackHost(host string) bool {

@@ -9,6 +9,7 @@ package agentv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -20,6 +21,58 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// Where a node's agent dials, as the owner chose it per node. Added in 0.2.14.
+type PanelAddressChoice int32
+
+const (
+	PanelAddressChoice_PANEL_ADDRESS_CHOICE_UNSPECIFIED PanelAddressChoice = 0
+	// Move to the panel's domain once it is live (HelloAccepted.panel_url).
+	PanelAddressChoice_PANEL_ADDRESS_CHOICE_FOLLOW PanelAddressChoice = 1
+	// Keep the address the node dials; the panel names no other.
+	PanelAddressChoice_PANEL_ADDRESS_CHOICE_STAY PanelAddressChoice = 2
+)
+
+// Enum value maps for PanelAddressChoice.
+var (
+	PanelAddressChoice_name = map[int32]string{
+		0: "PANEL_ADDRESS_CHOICE_UNSPECIFIED",
+		1: "PANEL_ADDRESS_CHOICE_FOLLOW",
+		2: "PANEL_ADDRESS_CHOICE_STAY",
+	}
+	PanelAddressChoice_value = map[string]int32{
+		"PANEL_ADDRESS_CHOICE_UNSPECIFIED": 0,
+		"PANEL_ADDRESS_CHOICE_FOLLOW":      1,
+		"PANEL_ADDRESS_CHOICE_STAY":        2,
+	}
+)
+
+func (x PanelAddressChoice) Enum() *PanelAddressChoice {
+	p := new(PanelAddressChoice)
+	*p = x
+	return p
+}
+
+func (x PanelAddressChoice) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PanelAddressChoice) Descriptor() protoreflect.EnumDescriptor {
+	return file_seylo_agent_v1_handshake_proto_enumTypes[0].Descriptor()
+}
+
+func (PanelAddressChoice) Type() protoreflect.EnumType {
+	return &file_seylo_agent_v1_handshake_proto_enumTypes[0]
+}
+
+func (x PanelAddressChoice) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PanelAddressChoice.Descriptor instead.
+func (PanelAddressChoice) EnumDescriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{0}
+}
 
 type HelloRejectReason int32
 
@@ -70,11 +123,11 @@ func (x HelloRejectReason) String() string {
 }
 
 func (HelloRejectReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_handshake_proto_enumTypes[0].Descriptor()
+	return file_seylo_agent_v1_handshake_proto_enumTypes[1].Descriptor()
 }
 
 func (HelloRejectReason) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_handshake_proto_enumTypes[0]
+	return &file_seylo_agent_v1_handshake_proto_enumTypes[1]
 }
 
 func (x HelloRejectReason) Number() protoreflect.EnumNumber {
@@ -83,7 +136,7 @@ func (x HelloRejectReason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use HelloRejectReason.Descriptor instead.
 func (HelloRejectReason) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{0}
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{1}
 }
 
 // Handshake is the payload of EVENT frames on stream 0 until the panel
@@ -295,7 +348,22 @@ type ClientHello struct {
 	//
 	//	*ClientHello_Join
 	//	*ClientHello_Resume
-	Credential    isClientHello_Credential `protobuf_oneof:"credential"`
+	Credential isClientHello_Credential `protobuf_oneof:"credential"`
+	// The person with root on the node chose the address this agent dials
+	// over the panel's domain: `seylo set-panel` pointed it here, or it
+	// joined with --pin at an IP address (config.yml stay_on_address). The
+	// panel records Panel address "stay" for the node (after a join only
+	// while the panel has a domain, whose join command was passed over) and
+	// then names no other address in HelloAccepted.panel_url. The agent
+	// sends it on every connect until a HelloAccepted carries panel_address,
+	// which says the panel read it. Older panels ignore it. Added in 0.2.14.
+	StayOnAddress bool `protobuf:"varint,5,opt,name=stay_on_address,json=stayOnAddress,proto3" json:"stay_on_address,omitempty"`
+	// Why the agent could not reach the panel since its last accepted
+	// session (or since it started), set when at least one connect failed
+	// meanwhile: the panel shows it on the node's page ("Was offline from
+	// ... to ...: <reason>"). Kept in the agent's state dir across restarts
+	// and cleared once a session is accepted. Added in 0.2.14.
+	Away          *AwayReport `protobuf:"bytes,6,opt,name=away,proto3" json:"away,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -369,6 +437,20 @@ func (x *ClientHello) GetResume() *ResumeCredential {
 	return nil
 }
 
+func (x *ClientHello) GetStayOnAddress() bool {
+	if x != nil {
+		return x.StayOnAddress
+	}
+	return false
+}
+
+func (x *ClientHello) GetAway() *AwayReport {
+	if x != nil {
+		return x.Away
+	}
+	return nil
+}
+
 type isClientHello_Credential interface {
 	isClientHello_Credential()
 }
@@ -384,6 +466,80 @@ type ClientHello_Resume struct {
 func (*ClientHello_Join) isClientHello_Credential() {}
 
 func (*ClientHello_Resume) isClientHello_Credential() {}
+
+// AwayReport is the last connect error an agent had while it could not
+// reach the panel. Added in 0.2.14.
+type AwayReport struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the agent lost its last session, or started without one.
+	Since *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=since,proto3" json:"since,omitempty"`
+	// The last failed connect's error as one line of printable text (it can
+	// quote a certificate's names, which whoever answered chose).
+	LastError   string                 `protobuf:"bytes,2,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	LastErrorAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_error_at,json=lastErrorAt,proto3" json:"last_error_at,omitempty"`
+	// Failed connects since `since`.
+	FailedAttempts uint32 `protobuf:"varint,4,opt,name=failed_attempts,json=failedAttempts,proto3" json:"failed_attempts,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *AwayReport) Reset() {
+	*x = AwayReport{}
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AwayReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AwayReport) ProtoMessage() {}
+
+func (x *AwayReport) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AwayReport.ProtoReflect.Descriptor instead.
+func (*AwayReport) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AwayReport) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
+func (x *AwayReport) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+func (x *AwayReport) GetLastErrorAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastErrorAt
+	}
+	return nil
+}
+
+func (x *AwayReport) GetFailedAttempts() uint32 {
+	if x != nil {
+		return x.FailedAttempts
+	}
+	return 0
+}
 
 // JoinCredential is used once: the first connection of a new node.
 type JoinCredential struct {
@@ -403,7 +559,7 @@ type JoinCredential struct {
 
 func (x *JoinCredential) Reset() {
 	*x = JoinCredential{}
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +571,7 @@ func (x *JoinCredential) String() string {
 func (*JoinCredential) ProtoMessage() {}
 
 func (x *JoinCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +584,7 @@ func (x *JoinCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinCredential.ProtoReflect.Descriptor instead.
 func (*JoinCredential) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{3}
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *JoinCredential) GetToken() string {
@@ -471,7 +627,7 @@ type ResumeCredential struct {
 
 func (x *ResumeCredential) Reset() {
 	*x = ResumeCredential{}
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -483,7 +639,7 @@ func (x *ResumeCredential) String() string {
 func (*ResumeCredential) ProtoMessage() {}
 
 func (x *ResumeCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -496,7 +652,7 @@ func (x *ResumeCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeCredential.ProtoReflect.Descriptor instead.
 func (*ResumeCredential) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{4}
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ResumeCredential) GetNodeId() string {
@@ -550,13 +706,24 @@ type HelloAccepted struct {
 	// connect, so a certificate for the panel's domain alone no longer makes
 	// a panel. Added in 0.2; older agents ignore it.
 	PanelSignature []byte `protobuf:"bytes,6,opt,name=panel_signature,json=panelSignature,proto3" json:"panel_signature,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The node's Panel address setting: FOLLOW (the default) names the
+	// panel's domain in panel_url once it is live; STAY never does, so the
+	// node keeps the address it dials. Set by panels since 0.2.14 (older
+	// ones leave it UNSPECIFIED); agents take it as the answer to
+	// ClientHello.stay_on_address. Not covered by panel_signature: it only
+	// ends the agent's request.
+	PanelAddress PanelAddressChoice `protobuf:"varint,7,opt,name=panel_address,json=panelAddress,proto3,enum=seylo.agent.v1.PanelAddressChoice" json:"panel_address,omitempty"`
+	// The node's name in the panel (as renamed there), which `seylo status`
+	// shows once the agent connected. Empty from older panels. Display
+	// only, not covered by panel_signature. Added in 0.2.14.
+	NodeName      string `protobuf:"bytes,8,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HelloAccepted) Reset() {
 	*x = HelloAccepted{}
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +735,7 @@ func (x *HelloAccepted) String() string {
 func (*HelloAccepted) ProtoMessage() {}
 
 func (x *HelloAccepted) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +748,7 @@ func (x *HelloAccepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloAccepted.ProtoReflect.Descriptor instead.
 func (*HelloAccepted) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HelloAccepted) GetNodeId() string {
@@ -626,6 +793,20 @@ func (x *HelloAccepted) GetPanelSignature() []byte {
 	return nil
 }
 
+func (x *HelloAccepted) GetPanelAddress() PanelAddressChoice {
+	if x != nil {
+		return x.PanelAddress
+	}
+	return PanelAddressChoice_PANEL_ADDRESS_CHOICE_UNSPECIFIED
+}
+
+func (x *HelloAccepted) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
 type HelloRejected struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Reason  HelloRejectReason      `protobuf:"varint,1,opt,name=reason,proto3,enum=seylo.agent.v1.HelloRejectReason" json:"reason,omitempty"`
@@ -654,7 +835,7 @@ type HelloRejected struct {
 
 func (x *HelloRejected) Reset() {
 	*x = HelloRejected{}
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -666,7 +847,7 @@ func (x *HelloRejected) String() string {
 func (*HelloRejected) ProtoMessage() {}
 
 func (x *HelloRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_handshake_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -679,7 +860,7 @@ func (x *HelloRejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloRejected.ProtoReflect.Descriptor instead.
 func (*HelloRejected) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_handshake_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HelloRejected) GetReason() HelloRejectReason {
@@ -714,7 +895,7 @@ var File_seylo_agent_v1_handshake_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
 	"\n" +
-	"\x1eseylo/agent/v1/handshake.proto\x12\x0eseylo.agent.v1\x1a\x19seylo/agent/v1/node.proto\"\x91\x02\n" +
+	"\x1eseylo/agent/v1/handshake.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19seylo/agent/v1/node.proto\"\x91\x02\n" +
 	"\tHandshake\x12@\n" +
 	"\fserver_hello\x18\x01 \x01(\v2\x1b.seylo.agent.v1.ServerHelloH\x00R\vserverHello\x12@\n" +
 	"\fclient_hello\x18\x02 \x01(\v2\x1b.seylo.agent.v1.ClientHelloH\x00R\vclientHello\x12;\n" +
@@ -725,14 +906,23 @@ const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
 	"\bpanel_id\x18\x01 \x01(\tR\apanelId\x12#\n" +
 	"\rpanel_version\x18\x02 \x01(\tR\fpanelVersion\x12\x14\n" +
 	"\x05nonce\x18\x03 \x01(\fR\x05nonce\x12\"\n" +
-	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xe3\x01\n" +
+	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"\xbb\x02\n" +
 	"\vClientHello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12/\n" +
 	"\x05facts\x18\x02 \x01(\v2\x19.seylo.agent.v1.NodeFactsR\x05facts\x124\n" +
 	"\x04join\x18\x03 \x01(\v2\x1e.seylo.agent.v1.JoinCredentialH\x00R\x04join\x12:\n" +
-	"\x06resume\x18\x04 \x01(\v2 .seylo.agent.v1.ResumeCredentialH\x00R\x06resumeB\f\n" +
+	"\x06resume\x18\x04 \x01(\v2 .seylo.agent.v1.ResumeCredentialH\x00R\x06resume\x12&\n" +
+	"\x0fstay_on_address\x18\x05 \x01(\bR\rstayOnAddress\x12.\n" +
+	"\x04away\x18\x06 \x01(\v2\x1a.seylo.agent.v1.AwayReportR\x04awayB\f\n" +
 	"\n" +
-	"credential\"\x8a\x01\n" +
+	"credential\"\xc6\x01\n" +
+	"\n" +
+	"AwayReport\x120\n" +
+	"\x05since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\x02 \x01(\tR\tlastError\x12>\n" +
+	"\rlast_error_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastErrorAt\x12'\n" +
+	"\x0ffailed_attempts\x18\x04 \x01(\rR\x0efailedAttempts\"\x8a\x01\n" +
 	"\x0eJoinCredential\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
@@ -741,7 +931,7 @@ const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
 	"\x0erequested_name\x18\x04 \x01(\tR\rrequestedName\"I\n" +
 	"\x10ResumeCredential\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1c\n" +
-	"\tsignature\x18\x02 \x01(\fR\tsignature\"\xdf\x01\n" +
+	"\tsignature\x18\x02 \x01(\fR\tsignature\"\xc5\x02\n" +
 	"\rHelloAccepted\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -749,12 +939,18 @@ const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
 	"\x16edge_ticket_public_key\x18\x03 \x01(\fR\x13edgeTicketPublicKey\x12\x1b\n" +
 	"\tpanel_url\x18\x04 \x01(\tR\bpanelUrl\x12\x1b\n" +
 	"\tpanel_pin\x18\x05 \x01(\tR\bpanelPin\x12'\n" +
-	"\x0fpanel_signature\x18\x06 \x01(\fR\x0epanelSignature\"\xb9\x01\n" +
+	"\x0fpanel_signature\x18\x06 \x01(\fR\x0epanelSignature\x12G\n" +
+	"\rpanel_address\x18\a \x01(\x0e2\".seylo.agent.v1.PanelAddressChoiceR\fpanelAddress\x12\x1b\n" +
+	"\tnode_name\x18\b \x01(\tR\bnodeName\"\xb9\x01\n" +
 	"\rHelloRejected\x129\n" +
 	"\x06reason\x18\x01 \x01(\x0e2!.seylo.agent.v1.HelloRejectReasonR\x06reason\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12*\n" +
 	"\x11min_agent_version\x18\x03 \x01(\tR\x0fminAgentVersion\x12'\n" +
-	"\x0fpanel_signature\x18\x04 \x01(\fR\x0epanelSignature*\xcc\x02\n" +
+	"\x0fpanel_signature\x18\x04 \x01(\fR\x0epanelSignature*z\n" +
+	"\x12PanelAddressChoice\x12$\n" +
+	" PANEL_ADDRESS_CHOICE_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bPANEL_ADDRESS_CHOICE_FOLLOW\x10\x01\x12\x1d\n" +
+	"\x19PANEL_ADDRESS_CHOICE_STAY\x10\x02*\xcc\x02\n" +
 	"\x11HelloRejectReason\x12#\n" +
 	"\x1fHELLO_REJECT_REASON_UNSPECIFIED\x10\x00\x12%\n" +
 	"!HELLO_REJECT_REASON_INVALID_TOKEN\x10\x01\x12%\n" +
@@ -778,33 +974,40 @@ func file_seylo_agent_v1_handshake_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_handshake_proto_rawDescData
 }
 
-var file_seylo_agent_v1_handshake_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_seylo_agent_v1_handshake_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_seylo_agent_v1_handshake_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_seylo_agent_v1_handshake_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_seylo_agent_v1_handshake_proto_goTypes = []any{
-	(HelloRejectReason)(0),   // 0: seylo.agent.v1.HelloRejectReason
-	(*Handshake)(nil),        // 1: seylo.agent.v1.Handshake
-	(*ServerHello)(nil),      // 2: seylo.agent.v1.ServerHello
-	(*ClientHello)(nil),      // 3: seylo.agent.v1.ClientHello
-	(*JoinCredential)(nil),   // 4: seylo.agent.v1.JoinCredential
-	(*ResumeCredential)(nil), // 5: seylo.agent.v1.ResumeCredential
-	(*HelloAccepted)(nil),    // 6: seylo.agent.v1.HelloAccepted
-	(*HelloRejected)(nil),    // 7: seylo.agent.v1.HelloRejected
-	(*NodeFacts)(nil),        // 8: seylo.agent.v1.NodeFacts
+	(PanelAddressChoice)(0),       // 0: seylo.agent.v1.PanelAddressChoice
+	(HelloRejectReason)(0),        // 1: seylo.agent.v1.HelloRejectReason
+	(*Handshake)(nil),             // 2: seylo.agent.v1.Handshake
+	(*ServerHello)(nil),           // 3: seylo.agent.v1.ServerHello
+	(*ClientHello)(nil),           // 4: seylo.agent.v1.ClientHello
+	(*AwayReport)(nil),            // 5: seylo.agent.v1.AwayReport
+	(*JoinCredential)(nil),        // 6: seylo.agent.v1.JoinCredential
+	(*ResumeCredential)(nil),      // 7: seylo.agent.v1.ResumeCredential
+	(*HelloAccepted)(nil),         // 8: seylo.agent.v1.HelloAccepted
+	(*HelloRejected)(nil),         // 9: seylo.agent.v1.HelloRejected
+	(*NodeFacts)(nil),             // 10: seylo.agent.v1.NodeFacts
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
 }
 var file_seylo_agent_v1_handshake_proto_depIdxs = []int32{
-	2, // 0: seylo.agent.v1.Handshake.server_hello:type_name -> seylo.agent.v1.ServerHello
-	3, // 1: seylo.agent.v1.Handshake.client_hello:type_name -> seylo.agent.v1.ClientHello
-	6, // 2: seylo.agent.v1.Handshake.accepted:type_name -> seylo.agent.v1.HelloAccepted
-	7, // 3: seylo.agent.v1.Handshake.rejected:type_name -> seylo.agent.v1.HelloRejected
-	8, // 4: seylo.agent.v1.ClientHello.facts:type_name -> seylo.agent.v1.NodeFacts
-	4, // 5: seylo.agent.v1.ClientHello.join:type_name -> seylo.agent.v1.JoinCredential
-	5, // 6: seylo.agent.v1.ClientHello.resume:type_name -> seylo.agent.v1.ResumeCredential
-	0, // 7: seylo.agent.v1.HelloRejected.reason:type_name -> seylo.agent.v1.HelloRejectReason
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	3,  // 0: seylo.agent.v1.Handshake.server_hello:type_name -> seylo.agent.v1.ServerHello
+	4,  // 1: seylo.agent.v1.Handshake.client_hello:type_name -> seylo.agent.v1.ClientHello
+	8,  // 2: seylo.agent.v1.Handshake.accepted:type_name -> seylo.agent.v1.HelloAccepted
+	9,  // 3: seylo.agent.v1.Handshake.rejected:type_name -> seylo.agent.v1.HelloRejected
+	10, // 4: seylo.agent.v1.ClientHello.facts:type_name -> seylo.agent.v1.NodeFacts
+	6,  // 5: seylo.agent.v1.ClientHello.join:type_name -> seylo.agent.v1.JoinCredential
+	7,  // 6: seylo.agent.v1.ClientHello.resume:type_name -> seylo.agent.v1.ResumeCredential
+	5,  // 7: seylo.agent.v1.ClientHello.away:type_name -> seylo.agent.v1.AwayReport
+	11, // 8: seylo.agent.v1.AwayReport.since:type_name -> google.protobuf.Timestamp
+	11, // 9: seylo.agent.v1.AwayReport.last_error_at:type_name -> google.protobuf.Timestamp
+	0,  // 10: seylo.agent.v1.HelloAccepted.panel_address:type_name -> seylo.agent.v1.PanelAddressChoice
+	1,  // 11: seylo.agent.v1.HelloRejected.reason:type_name -> seylo.agent.v1.HelloRejectReason
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_handshake_proto_init() }
@@ -828,8 +1031,8 @@ func file_seylo_agent_v1_handshake_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_handshake_proto_rawDesc), len(file_seylo_agent_v1_handshake_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   7,
+			NumEnums:      2,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

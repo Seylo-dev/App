@@ -1455,9 +1455,16 @@ type NodeAlert struct {
 	Message  string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	// True when the condition cleared; pairs with an earlier alert of the
 	// same kind.
-	Resolved      bool `protobuf:"varint,4,opt,name=resolved,proto3" json:"resolved,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Resolved bool `protobuf:"varint,4,opt,name=resolved,proto3" json:"resolved,omitempty"`
+	// PANEL_MOVE_FAILED only: the new address's certificate came from an
+	// issuer the node does not trust, or did not match the pin (what TLS
+	// inspection makes of a certificate). While such an alert is open the
+	// panel treats the node's Panel address as "stay" until the owner
+	// chooses one. Added in 0.2.14; older agents leave it false and the
+	// panel reads the message.
+	InspectedCertificate bool `protobuf:"varint,5,opt,name=inspected_certificate,json=inspectedCertificate,proto3" json:"inspected_certificate,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *NodeAlert) Reset() {
@@ -1514,6 +1521,13 @@ func (x *NodeAlert) GetMessage() string {
 func (x *NodeAlert) GetResolved() bool {
 	if x != nil {
 		return x.Resolved
+	}
+	return false
+}
+
+func (x *NodeAlert) GetInspectedCertificate() bool {
+	if x != nil {
+		return x.InspectedCertificate
 	}
 	return false
 }
@@ -1736,12 +1750,13 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"started_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
 	"\vfinished_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishedAt\x12,\n" +
-	"\x12pruned_object_keys\x18\t \x03(\tR\x10prunedObjectKeys\"\xaf\x01\n" +
+	"\x12pruned_object_keys\x18\t \x03(\tR\x10prunedObjectKeys\"\xe4\x01\n" +
 	"\tNodeAlert\x121\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.seylo.agent.v1.NodeAlertKindR\x04kind\x129\n" +
 	"\bseverity\x18\x02 \x01(\x0e2\x1d.seylo.agent.v1.AlertSeverityR\bseverity\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1a\n" +
-	"\bresolved\x18\x04 \x01(\bR\bresolved\"\xec\x02\n" +
+	"\bresolved\x18\x04 \x01(\bR\bresolved\x123\n" +
+	"\x15inspected_certificate\x18\x05 \x01(\bR\x14inspectedCertificate\"\xec\x02\n" +
 	"\fUpdateResult\x124\n" +
 	"\x06target\x18\x01 \x01(\x0e2\x1c.seylo.agent.v1.UpdateTargetR\x06target\x12\x1b\n" +
 	"\tupdate_id\x18\x02 \x01(\tR\bupdateId\x12!\n" +

@@ -136,7 +136,7 @@ func (b *localBackend) Status(ctx context.Context) (localapi.NodeStatus, error) 
 	desired := b.desired.Current()
 	out := localapi.NodeStatus{
 		NodeID:          cfg.NodeID,
-		NodeName:        b.deps.Facts.Get().GetHostname(),
+		NodeName:        b.nodeName(cfg, desired),
 		AgentVersion:    version.String(),
 		PanelURL:        cfg.PanelURL,
 		PanelConnected:  connStatus.State == "connected",
@@ -146,9 +146,6 @@ func (b *localBackend) Status(ctx context.Context) (localapi.NodeStatus, error) 
 		AppliedRevision: snap.GetAppliedRevision(),
 		RecentErrors:    errs,
 		Services:        []localapi.ServiceSummary{},
-	}
-	if cfg.NodeName != "" {
-		out.NodeName = cfg.NodeName
 	}
 	if b.deps.Updater != nil {
 		out.Busy = b.deps.Updater.Busy()
@@ -170,6 +167,26 @@ func (b *localBackend) Status(ctx context.Context) (localapi.NodeStatus, error) 
 	}
 	out.RouteErrors = routeErrors(snap.GetServices(), names)
 	return out, nil
+}
+
+// nodeName is the node's name for `seylo status` and every CLI line that
+// names the node: the panel's, once the agent connected (the desired
+// state's node settings, which follow a rename at once, else the name
+// the last HelloAccepted gave, kept in state/panel.json); before the
+// first connect the name config.yml proposed when joining, else the
+// hostname. A node renamed in the panel no longer shows as its hostname,
+// which read like another machine.
+func (b *localBackend) nodeName(cfg FileConfig, desired *agentv1.DesiredState) string {
+	if name := conn.PrintableLine(desired.GetSettings().GetNodeName()); name != "" {
+		return name
+	}
+	if name := b.conn.panelNodeName(); name != "" {
+		return name
+	}
+	if cfg.NodeName != "" {
+		return cfg.NodeName
+	}
+	return b.deps.Facts.Get().GetHostname()
 }
 
 // routeErrors lists the services whose route file reconcile cannot write,

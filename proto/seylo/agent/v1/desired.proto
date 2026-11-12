@@ -60,6 +60,10 @@ message NodeSettings {
   // Tailscale Serve for the panel. Only the panel node gets it; unset
   // (older panels, other nodes) means the agent keeps no Serve entry.
   TailnetServe tailnet = 11; // added in 0.2.1 (tailnet)
+  // The node's name in the panel, so `seylo status` shows a rename made
+  // while the agent is connected (HelloAccepted.node_name has it at each
+  // connect). Empty from older panels. Added in 0.2.14.
+  string node_name = 12;
 }
 
 // CleanupSchedule is when and what the agent cleans up by itself. It only

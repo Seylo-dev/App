@@ -15,7 +15,7 @@ import (
 var (
 	joinReplaces = []string{
 		"panel_url", "node_id", "panel_pin", "panel_id", "panel_key", "panel_proves",
-		"trust_on_first_use", "insecure_transport", "join_token", "fallback", "staged", "staged_move",
+		"trust_on_first_use", "insecure_transport", "join_token", "fallback", "staged", "staged_move", "stay_on_address",
 	}
 	// Kept unless --name or --can-build is given.
 	joinKeepsUnlessFlagged = []string{"node_name", "can_build"}
@@ -101,7 +101,8 @@ func TestJoinForceKeepsTheOwnersSettings(t *testing.T) {
 			t.Errorf("%s = %v after the re-join, was %v", key, after[key], before[key])
 		}
 	}
-	want := map[string]any{"panel_url": "https://203.0.113.7:3443", "panel_pin": newPin, "join_token": "tok2"}
+	// A join at an IP address with the pin asks the panel to keep the node there.
+	want := map[string]any{"panel_url": "https://203.0.113.7:3443", "panel_pin": newPin, "join_token": "tok2", "stay_on_address": true}
 	for _, key := range joinReplaces {
 		if !reflect.DeepEqual(after[key], want[key]) {
 			t.Errorf("%s = %v after the re-join, want %v", key, after[key], want[key])

@@ -4,6 +4,8 @@
 
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { NodeFacts } from "./node_pb";
 import { file_seylo_agent_v1_node } from "./node_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -12,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/handshake.proto.
  */
 export const file_seylo_agent_v1_handshake: GenFile = /*@__PURE__*/
-  fileDesc("Ch5zZXlsby9hZ2VudC92MS9oYW5kc2hha2UucHJvdG8SDnNleWxvLmFnZW50LnYxIuMBCglIYW5kc2hha2USMwoMc2VydmVyX2hlbGxvGAEgASgLMhsuc2V5bG8uYWdlbnQudjEuU2VydmVySGVsbG9IABIzCgxjbGllbnRfaGVsbG8YAiABKAsyGy5zZXlsby5hZ2VudC52MS5DbGllbnRIZWxsb0gAEjEKCGFjY2VwdGVkGAMgASgLMh0uc2V5bG8uYWdlbnQudjEuSGVsbG9BY2NlcHRlZEgAEjEKCHJlamVjdGVkGAQgASgLMh0uc2V5bG8uYWdlbnQudjEuSGVsbG9SZWplY3RlZEgAQgYKBHN0ZXAiWwoLU2VydmVySGVsbG8SEAoIcGFuZWxfaWQYASABKAkSFQoNcGFuZWxfdmVyc2lvbhgCIAEoCRINCgVub25jZRgDIAEoDBIUCgxjYXBhYmlsaXRpZXMYBCADKAkiwAEKC0NsaWVudEhlbGxvEhUKDWFnZW50X3ZlcnNpb24YASABKAkSKAoFZmFjdHMYAiABKAsyGS5zZXlsby5hZ2VudC52MS5Ob2RlRmFjdHMSLgoEam9pbhgDIAEoCzIeLnNleWxvLmFnZW50LnYxLkpvaW5DcmVkZW50aWFsSAASMgoGcmVzdW1lGAQgASgLMiAuc2V5bG8uYWdlbnQudjEuUmVzdW1lQ3JlZGVudGlhbEgAQgwKCmNyZWRlbnRpYWwiXgoOSm9pbkNyZWRlbnRpYWwSDQoFdG9rZW4YASABKAkSEgoKcHVibGljX2tleRgCIAEoDBIRCglzaWduYXR1cmUYAyABKAwSFgoOcmVxdWVzdGVkX25hbWUYBCABKAkiNgoQUmVzdW1lQ3JlZGVudGlhbBIPCgdub2RlX2lkGAEgASgJEhEKCXNpZ25hdHVyZRgCIAEoDCKTAQoNSGVsbG9BY2NlcHRlZBIPCgdub2RlX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSHgoWZWRnZV90aWNrZXRfcHVibGljX2tleRgDIAEoDBIRCglwYW5lbF91cmwYBCABKAkSEQoJcGFuZWxfcGluGAUgASgJEhcKD3BhbmVsX3NpZ25hdHVyZRgGIAEoDCKHAQoNSGVsbG9SZWplY3RlZBIxCgZyZWFzb24YASABKA4yIS5zZXlsby5hZ2VudC52MS5IZWxsb1JlamVjdFJlYXNvbhIPCgdtZXNzYWdlGAIgASgJEhkKEW1pbl9hZ2VudF92ZXJzaW9uGAMgASgJEhcKD3BhbmVsX3NpZ25hdHVyZRgEIAEoDCrMAgoRSGVsbG9SZWplY3RSZWFzb24SIwofSEVMTE9fUkVKRUNUX1JFQVNPTl9VTlNQRUNJRklFRBAAEiUKIUhFTExPX1JFSkVDVF9SRUFTT05fSU5WQUxJRF9UT0tFThABEiUKIUhFTExPX1JFSkVDVF9SRUFTT05fVE9LRU5fRVhQSVJFRBACEiQKIEhFTExPX1JFSkVDVF9SRUFTT05fVU5LTk9XTl9OT0RFEAMSJQohSEVMTE9fUkVKRUNUX1JFQVNPTl9CQURfU0lHTkFUVVJFEAQSJQohSEVMTE9fUkVKRUNUX1JFQVNPTl9BR0VOVF9UT09fT0xEEAUSJQohSEVMTE9fUkVKRUNUX1JFQVNPTl9OT0RFX0RJU0FCTEVEEAYSKQolSEVMTE9fUkVKRUNUX1JFQVNPTl9BTFJFQURZX0NPTk5FQ1RFRBAHQrkBChJjb20uc2V5bG8uYWdlbnQudjFCDkhhbmRzaGFrZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_seylo_agent_v1_node]);
+  fileDesc("Ch5zZXlsby9hZ2VudC92MS9oYW5kc2hha2UucHJvdG8SDnNleWxvLmFnZW50LnYxIuMBCglIYW5kc2hha2USMwoMc2VydmVyX2hlbGxvGAEgASgLMhsuc2V5bG8uYWdlbnQudjEuU2VydmVySGVsbG9IABIzCgxjbGllbnRfaGVsbG8YAiABKAsyGy5zZXlsby5hZ2VudC52MS5DbGllbnRIZWxsb0gAEjEKCGFjY2VwdGVkGAMgASgLMh0uc2V5bG8uYWdlbnQudjEuSGVsbG9BY2NlcHRlZEgAEjEKCHJlamVjdGVkGAQgASgLMh0uc2V5bG8uYWdlbnQudjEuSGVsbG9SZWplY3RlZEgAQgYKBHN0ZXAiWwoLU2VydmVySGVsbG8SEAoIcGFuZWxfaWQYASABKAkSFQoNcGFuZWxfdmVyc2lvbhgCIAEoCRINCgVub25jZRgDIAEoDBIUCgxjYXBhYmlsaXRpZXMYBCADKAkigwIKC0NsaWVudEhlbGxvEhUKDWFnZW50X3ZlcnNpb24YASABKAkSKAoFZmFjdHMYAiABKAsyGS5zZXlsby5hZ2VudC52MS5Ob2RlRmFjdHMSLgoEam9pbhgDIAEoCzIeLnNleWxvLmFnZW50LnYxLkpvaW5DcmVkZW50aWFsSAASMgoGcmVzdW1lGAQgASgLMiAuc2V5bG8uYWdlbnQudjEuUmVzdW1lQ3JlZGVudGlhbEgAEhcKD3N0YXlfb25fYWRkcmVzcxgFIAEoCBIoCgRhd2F5GAYgASgLMhouc2V5bG8uYWdlbnQudjEuQXdheVJlcG9ydEIMCgpjcmVkZW50aWFsIpcBCgpBd2F5UmVwb3J0EikKBXNpbmNlGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpsYXN0X2Vycm9yGAIgASgJEjEKDWxhc3RfZXJyb3JfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhcKD2ZhaWxlZF9hdHRlbXB0cxgEIAEoDSJeCg5Kb2luQ3JlZGVudGlhbBINCgV0b2tlbhgBIAEoCRISCgpwdWJsaWNfa2V5GAIgASgMEhEKCXNpZ25hdHVyZRgDIAEoDBIWCg5yZXF1ZXN0ZWRfbmFtZRgEIAEoCSI2ChBSZXN1bWVDcmVkZW50aWFsEg8KB25vZGVfaWQYASABKAkSEQoJc2lnbmF0dXJlGAIgASgMIuEBCg1IZWxsb0FjY2VwdGVkEg8KB25vZGVfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIeChZlZGdlX3RpY2tldF9wdWJsaWNfa2V5GAMgASgMEhEKCXBhbmVsX3VybBgEIAEoCRIRCglwYW5lbF9waW4YBSABKAkSFwoPcGFuZWxfc2lnbmF0dXJlGAYgASgMEjkKDXBhbmVsX2FkZHJlc3MYByABKA4yIi5zZXlsby5hZ2VudC52MS5QYW5lbEFkZHJlc3NDaG9pY2USEQoJbm9kZV9uYW1lGAggASgJIocBCg1IZWxsb1JlamVjdGVkEjEKBnJlYXNvbhgBIAEoDjIhLnNleWxvLmFnZW50LnYxLkhlbGxvUmVqZWN0UmVhc29uEg8KB21lc3NhZ2UYAiABKAkSGQoRbWluX2FnZW50X3ZlcnNpb24YAyABKAkSFwoPcGFuZWxfc2lnbmF0dXJlGAQgASgMKnoKElBhbmVsQWRkcmVzc0Nob2ljZRIkCiBQQU5FTF9BRERSRVNTX0NIT0lDRV9VTlNQRUNJRklFRBAAEh8KG1BBTkVMX0FERFJFU1NfQ0hPSUNFX0ZPTExPVxABEh0KGVBBTkVMX0FERFJFU1NfQ0hPSUNFX1NUQVkQAirMAgoRSGVsbG9SZWplY3RSZWFzb24SIwofSEVMTE9fUkVKRUNUX1JFQVNPTl9VTlNQRUNJRklFRBAAEiUKIUhFTExPX1JFSkVDVF9SRUFTT05fSU5WQUxJRF9UT0tFThABEiUKIUhFTExPX1JFSkVDVF9SRUFTT05fVE9LRU5fRVhQSVJFRBACEiQKIEhFTExPX1JFSkVDVF9SRUFTT05fVU5LTk9XTl9OT0RFEAMSJQohSEVMTE9fUkVKRUNUX1JFQVNPTl9CQURfU0lHTkFUVVJFEAQSJQohSEVMTE9fUkVKRUNUX1JFQVNPTl9BR0VOVF9UT09fT0xEEAUSJQohSEVMTE9fUkVKRUNUX1JFQVNPTl9OT0RFX0RJU0FCTEVEEAYSKQolSEVMTE9fUkVKRUNUX1JFQVNPTl9BTFJFQURZX0NPTk5FQ1RFRBAHQrkBChJjb20uc2V5bG8uYWdlbnQudjFCDkhhbmRzaGFrZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_seylo_agent_v1_node]);
 
 /**
  * Handshake is the payload of EVENT frames on stream 0 until the panel
@@ -141,6 +143,31 @@ export type ClientHello = Message<"seylo.agent.v1.ClientHello"> & {
     value: ResumeCredential;
     case: "resume";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * The person with root on the node chose the address this agent dials
+   * over the panel's domain: `seylo set-panel` pointed it here, or it
+   * joined with --pin at an IP address (config.yml stay_on_address). The
+   * panel records Panel address "stay" for the node (after a join only
+   * while the panel has a domain, whose join command was passed over) and
+   * then names no other address in HelloAccepted.panel_url. The agent
+   * sends it on every connect until a HelloAccepted carries panel_address,
+   * which says the panel read it. Older panels ignore it. Added in 0.2.14.
+   *
+   * @generated from field: bool stay_on_address = 5;
+   */
+  stayOnAddress: boolean;
+
+  /**
+   * Why the agent could not reach the panel since its last accepted
+   * session (or since it started), set when at least one connect failed
+   * meanwhile: the panel shows it on the node's page ("Was offline from
+   * ... to ...: <reason>"). Kept in the agent's state dir across restarts
+   * and cleared once a session is accepted. Added in 0.2.14.
+   *
+   * @generated from field: seylo.agent.v1.AwayReport away = 6;
+   */
+  away?: AwayReport | undefined;
 };
 
 /**
@@ -149,6 +176,48 @@ export type ClientHello = Message<"seylo.agent.v1.ClientHello"> & {
  */
 export const ClientHelloSchema: GenMessage<ClientHello> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_handshake, 2);
+
+/**
+ * AwayReport is the last connect error an agent had while it could not
+ * reach the panel. Added in 0.2.14.
+ *
+ * @generated from message seylo.agent.v1.AwayReport
+ */
+export type AwayReport = Message<"seylo.agent.v1.AwayReport"> & {
+  /**
+   * When the agent lost its last session, or started without one.
+   *
+   * @generated from field: google.protobuf.Timestamp since = 1;
+   */
+  since?: Timestamp | undefined;
+
+  /**
+   * The last failed connect's error as one line of printable text (it can
+   * quote a certificate's names, which whoever answered chose).
+   *
+   * @generated from field: string last_error = 2;
+   */
+  lastError: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp last_error_at = 3;
+   */
+  lastErrorAt?: Timestamp | undefined;
+
+  /**
+   * Failed connects since `since`.
+   *
+   * @generated from field: uint32 failed_attempts = 4;
+   */
+  failedAttempts: number;
+};
+
+/**
+ * Describes the message seylo.agent.v1.AwayReport.
+ * Use `create(AwayReportSchema)` to create a new message.
+ */
+export const AwayReportSchema: GenMessage<AwayReport> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_handshake, 3);
 
 /**
  * JoinCredential is used once: the first connection of a new node.
@@ -191,7 +260,7 @@ export type JoinCredential = Message<"seylo.agent.v1.JoinCredential"> & {
  * Use `create(JoinCredentialSchema)` to create a new message.
  */
 export const JoinCredentialSchema: GenMessage<JoinCredential> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_handshake, 3);
+  messageDesc(file_seylo_agent_v1_handshake, 4);
 
 /**
  * ResumeCredential is used on every later connection.
@@ -217,7 +286,7 @@ export type ResumeCredential = Message<"seylo.agent.v1.ResumeCredential"> & {
  * Use `create(ResumeCredentialSchema)` to create a new message.
  */
 export const ResumeCredentialSchema: GenMessage<ResumeCredential> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_handshake, 4);
+  messageDesc(file_seylo_agent_v1_handshake, 5);
 
 /**
  * @generated from message seylo.agent.v1.HelloAccepted
@@ -286,6 +355,27 @@ export type HelloAccepted = Message<"seylo.agent.v1.HelloAccepted"> & {
    * @generated from field: bytes panel_signature = 6;
    */
   panelSignature: Uint8Array;
+
+  /**
+   * The node's Panel address setting: FOLLOW (the default) names the
+   * panel's domain in panel_url once it is live; STAY never does, so the
+   * node keeps the address it dials. Set by panels since 0.2.14 (older
+   * ones leave it UNSPECIFIED); agents take it as the answer to
+   * ClientHello.stay_on_address. Not covered by panel_signature: it only
+   * ends the agent's request.
+   *
+   * @generated from field: seylo.agent.v1.PanelAddressChoice panel_address = 7;
+   */
+  panelAddress: PanelAddressChoice;
+
+  /**
+   * The node's name in the panel (as renamed there), which `seylo status`
+   * shows once the agent connected. Empty from older panels. Display
+   * only, not covered by panel_signature. Added in 0.2.14.
+   *
+   * @generated from field: string node_name = 8;
+   */
+  nodeName: string;
 };
 
 /**
@@ -293,7 +383,7 @@ export type HelloAccepted = Message<"seylo.agent.v1.HelloAccepted"> & {
  * Use `create(HelloAcceptedSchema)` to create a new message.
  */
 export const HelloAcceptedSchema: GenMessage<HelloAccepted> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_handshake, 5);
+  messageDesc(file_seylo_agent_v1_handshake, 6);
 
 /**
  * @generated from message seylo.agent.v1.HelloRejected
@@ -343,7 +433,39 @@ export type HelloRejected = Message<"seylo.agent.v1.HelloRejected"> & {
  * Use `create(HelloRejectedSchema)` to create a new message.
  */
 export const HelloRejectedSchema: GenMessage<HelloRejected> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_handshake, 6);
+  messageDesc(file_seylo_agent_v1_handshake, 7);
+
+/**
+ * Where a node's agent dials, as the owner chose it per node. Added in 0.2.14.
+ *
+ * @generated from enum seylo.agent.v1.PanelAddressChoice
+ */
+export enum PanelAddressChoice {
+  /**
+   * @generated from enum value: PANEL_ADDRESS_CHOICE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Move to the panel's domain once it is live (HelloAccepted.panel_url).
+   *
+   * @generated from enum value: PANEL_ADDRESS_CHOICE_FOLLOW = 1;
+   */
+  FOLLOW = 1,
+
+  /**
+   * Keep the address the node dials; the panel names no other.
+   *
+   * @generated from enum value: PANEL_ADDRESS_CHOICE_STAY = 2;
+   */
+  STAY = 2,
+}
+
+/**
+ * Describes the enum seylo.agent.v1.PanelAddressChoice.
+ */
+export const PanelAddressChoiceSchema: GenEnum<PanelAddressChoice> = /*@__PURE__*/
+  enumDesc(file_seylo_agent_v1_handshake, 0);
 
 /**
  * @generated from enum seylo.agent.v1.HelloRejectReason
@@ -396,5 +518,5 @@ export enum HelloRejectReason {
  * Describes the enum seylo.agent.v1.HelloRejectReason.
  */
 export const HelloRejectReasonSchema: GenEnum<HelloRejectReason> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_handshake, 0);
+  enumDesc(file_seylo_agent_v1_handshake, 1);
 

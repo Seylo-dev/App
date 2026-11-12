@@ -88,8 +88,26 @@ type connector struct {
 	// primaryDown is when connects to panel_url started failing (zero
 	// while they work); standingTried is the last standing fallback dial.
 	primaryDown, standingTried time.Time
-	// moveRetry holds when a failed move to an address may be tried again.
-	moveRetry map[string]time.Time
+	// primaryCert is panel_url's last connect when it failed on a
+	// certificate the node does not trust or on the pin
+	// (inspectedCertificate) and the next attempt dials the fallback: a
+	// session there that the panel asks to move back to that address
+	// records the failed move instead of dialing it again.
+	primaryCert *certFailure
+	// moveRetry holds when a failed move to an address may be tried again,
+	// by moveKey; the ones that failed on an inspected certificate are
+	// kept in state/panel.json (panel_memory.go).
+	moveRetry map[string]moveWait
+	// memPath is state/panel.json ("" keeps nothing, in tests).
+	memPath string
+	// memMu guards nodeName, which the local API reads.
+	memMu sync.Mutex
+	// nodeName is the node's name in the panel (HelloAccepted.node_name).
+	nodeName string
+	// away is the connect trouble since the last accepted session;
+	// awaySaved is when it was last written to panel.json.
+	away      awayState
+	awaySaved time.Time
 	// moveAlerted is the address the last PANEL_MOVE_FAILED alert named.
 	moveAlerted string
 	// plainMoveWarned: a plain-HTTP session's panel_url was ignored and
@@ -134,6 +152,11 @@ func (c *connector) run(ctx context.Context) error {
 			delay = rejectedRetry
 			c.logger.Error("the panel refused this agent; fix the node config or join again", "reason", rejected.Rejected.GetReason().String(), "message", rejected.Rejected.GetMessage())
 			c.status.failed("rejected", err, delay)
+		case errors.Is(err, conn.ErrPinMismatch) && c.useFallback:
+			// Another key answers at panel_url: the fallback goes next, at once.
+			delay = reconnectMin
+			c.logger.Warn("panel connection failed on the pinned key; trying the fallback", "err", err)
+			c.status.failed("waiting", err, delay)
 		case errors.Is(err, conn.ErrPinMismatch), errors.Is(err, errNotJoined), errors.Is(err, errOtherPanel):
 			delay = rejectedRetry
 			c.logger.Error("cannot connect to the panel", "err", err)
@@ -203,14 +226,20 @@ func (c *connector) connectOnce(ctx context.Context) error {
 		c.logger.Warn("the panel's address does not answer; trying the previous one", "panel_url", cfg.PanelURL, "fallback", target.url)
 	}
 	c.useFallback, c.useStaged = false, false
+	primaryCert := c.primaryCert
+	c.primaryCert = nil
 	t, res, err := c.dial(ctx, target)
 	if err != nil {
 		var rejected *rpc.RejectedError
+		if ctx.Err() == nil && !alreadyConnected(err) {
+			c.connectFailed(err)
+		}
 		if !target.fallback && !target.staged && !errors.As(err, &rejected) && ctx.Err() == nil {
-			c.primaryFailed(cfg)
+			c.primaryFailed(cfg, target, err)
 		}
 		return err
 	}
+	c.accepted(target, res.Accepted)
 	promoted := false
 	switch {
 	case target.staged:
@@ -224,7 +253,15 @@ func (c *connector) connectOnce(ctx context.Context) error {
 		c.afterHandshake(cfg, res, t.ServerSPKI)
 		target = primaryTarget(c.config()) // with the pin trust on first use just recorded
 	}
-	if next, ok := c.moveTarget(target, res.Accepted); ok {
+	next, move := c.moveTarget(target, res.Accepted)
+	if move && target.fallback && primaryCert != nil && sameTarget(primaryCert.target, next) {
+		// The panel names the address that just failed on its certificate:
+		// that failure is the move's, without a second dial that would drop
+		// this session.
+		c.moveFailed(ctx, target, next, primaryCert.err)
+		move = false
+	}
+	if move {
 		// The panel holds one session per node, so this one goes first.
 		_ = t.Close("moving to the panel's new address")
 		if t, res, err = c.move(ctx, target, next, res.Server.GetPanelId()); err != nil {
@@ -246,10 +283,17 @@ func (c *connector) connectOnce(ctx context.Context) error {
 // primaryFailed decides whether the next attempt dials the fallback: at
 // once during a move's first cycle, after standingFallbackAfter of failed
 // connects for a standing fallback (then again every standingFallbackAfter).
-// A staged address (the panel moving to another node) goes first once
-// connects failed for stagedAfter: from then on every other attempt dials
-// it, unless the moved panel on this node still waits for its switch.
-func (c *connector) primaryFailed(cfg FileConfig) {
+// A certificate the node will never trust at panel_url (from an issuer it
+// does not trust, as TLS inspection re-signs it, or a key that is not the
+// pinned one: inspectedCertificate) dials a standing fallback at once
+// too: no panel restart explains it, and waiting only kept the node
+// offline (it took 5 minutes and more). Timeouts, refused connections and
+// other errors keep the wait, so a short panel restart does not flip the
+// node's address. A staged address (the panel moving to another node) goes
+// first once connects failed for stagedAfter: from then on every other
+// attempt dials it, unless the moved panel on this node still waits for
+// its switch.
+func (c *connector) primaryFailed(cfg FileConfig, target panelTarget, err error) {
 	now := time.Now()
 	if c.primaryDown.IsZero() {
 		c.primaryDown = now
@@ -259,13 +303,33 @@ func (c *connector) primaryFailed(cfg FileConfig) {
 		return
 	}
 	f := cfg.Fallback
+	inspected := inspectedCertificate(err)
 	switch {
 	case f == nil:
 	case !f.Standing:
 		c.useFallback = true
+	case inspected:
+		c.useFallback, c.standingTried = true, now
 	case now.Sub(c.primaryDown) >= standingFallbackAfter && now.Sub(c.standingTried) >= standingFallbackAfter:
 		c.useFallback, c.standingTried = true, now
 	}
+	if c.useFallback && inspected {
+		c.primaryCert = &certFailure{target: target, err: err}
+	}
+}
+
+// certFailure is a connect to an address that failed on its certificate.
+type certFailure struct {
+	target panelTarget
+	err    error
+}
+
+// alreadyConnected reports whether the panel refused the hello because it
+// still holds this node's previous session (an agent restart, a move):
+// no reason the node is away.
+func alreadyConnected(err error) bool {
+	var rejected *rpc.RejectedError
+	return errors.As(err, &rejected) && rejected.Rejected.GetReason() == agentv1.HelloRejectReason_HELLO_REJECT_REASON_ALREADY_CONNECTED
 }
 
 // dial connects to target and runs the handshake.
@@ -376,6 +440,7 @@ func (c *connector) serve(ctx context.Context, t *conn.WebSocket, res *rpc.Hands
 	wg.Wait()
 	c.deps.Components.disconnected()
 	c.status.disconnected(session)
+	c.sessionEnded()
 	return err
 }
 
@@ -403,7 +468,7 @@ func heartbeat(ctx context.Context, p conn.Pinger, session *rpc.Session) {
 // hello builds the ClientHello: resume with the node key when the node
 // joined, otherwise join with the token.
 func (c *connector) hello(cfg FileConfig, server *agentv1.ServerHello) (*agentv1.ClientHello, error) {
-	hello := &agentv1.ClientHello{AgentVersion: version.Version, Facts: c.deps.Facts.Get()}
+	hello := &agentv1.ClientHello{AgentVersion: version.Version, Facts: c.deps.Facts.Get(), StayOnAddress: cfg.StayOnAddress, Away: c.awayReport()}
 	switch {
 	case cfg.NodeID != "":
 		hello.Credential = &agentv1.ClientHello_Resume{Resume: &agentv1.ResumeCredential{

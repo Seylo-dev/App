@@ -293,7 +293,7 @@ func TestMoveRetryAfterAFailedMove(t *testing.T) {
 		c := &connector{deps: &Deps{}, logger: slog.New(slog.DiscardHandler), cfg: &FileConfig{}}
 		before := time.Now()
 		c.moveFailed(context.Background(), tc.from, to, tc.err)
-		if got := c.moveRetry[moveKey(to)].Sub(before); got < tc.want || got > tc.want+time.Minute {
+		if got := c.moveRetry[moveKey(to)].until.Sub(before); got < tc.want || got > tc.want+time.Minute {
 			t.Errorf("%s: retry in %s, want %s", tc.name, got, tc.want)
 		}
 	}
@@ -570,25 +570,62 @@ func TestStandingFallbackTiming(t *testing.T) {
 	t.Cleanup(func() { standingFallbackAfter = saved })
 	standingFallbackAfter = time.Hour
 	c := &connector{}
-	cfg := FileConfig{Fallback: &PanelAddress{PanelURL: "https://10.0.0.1:3443", PanelPin: conn.FormatPin(make([]byte, 32)), Standing: true}}
-	c.primaryFailed(cfg)
+	cfg := FileConfig{PanelURL: "https://panel.example.com",
+		Fallback: &PanelAddress{PanelURL: "https://10.0.0.1:3443", PanelPin: conn.FormatPin(make([]byte, 32)), Standing: true}}
+	primary := primaryTarget(cfg)
+	timeout := fmt.Errorf("dial panel: %w", context.DeadlineExceeded)
+	c.primaryFailed(cfg, primary, timeout)
 	if c.useFallback {
 		t.Fatal("a standing fallback was used after one failure")
 	}
 	c.primaryDown = time.Now().Add(-2 * time.Hour)
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primary, timeout)
 	if !c.useFallback {
 		t.Fatal("the standing fallback was not used after an hour of failures")
 	}
 	c.useFallback = false
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primary, timeout)
 	if c.useFallback {
 		t.Fatal("the standing fallback was dialed again right away")
 	}
 	cfg.Fallback.Standing = false
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primary, timeout)
 	if !c.useFallback {
 		t.Fatal("a first-cycle fallback was not used at once")
+	}
+}
+
+// A certificate the node will never trust at panel_url (an issuer it does
+// not trust, as TLS inspection re-signs it, or a key that is not the
+// pinned one) dials a standing fallback at once; a timeout or a refused
+// connection keeps the 5-minute wait, so a short panel restart does not
+// move the node.
+func TestStandingFallbackAtOnceOnAnInspectedCertificate(t *testing.T) {
+	cfg := FileConfig{PanelURL: "https://panel.example.com",
+		Fallback: &PanelAddress{PanelURL: "https://203.0.113.4:3443", PanelPin: conn.FormatPin(make([]byte, 32)), Standing: true}}
+	primary := primaryTarget(cfg)
+	verify := func(err error) error {
+		return fmt.Errorf("dial panel: %w", &tls.CertificateVerificationError{Err: err})
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		now  bool
+	}{
+		{"unknown authority", verify(x509.UnknownAuthorityError{}), true},
+		{"pin mismatch", fmt.Errorf("dial panel: %w", conn.ErrPinMismatch), true},
+		{"timeout", fmt.Errorf("dial panel: %w", context.DeadlineExceeded), false},
+		{"refused", errors.New("dial panel: connect: connection refused"), false},
+		{"expired", verify(x509.CertificateInvalidError{Reason: x509.Expired}), false},
+	} {
+		c := &connector{}
+		c.primaryFailed(cfg, primary, tc.err)
+		if c.useFallback != tc.now {
+			t.Errorf("%s: fallback at once = %v, want %v", tc.name, c.useFallback, tc.now)
+		}
+		if (c.primaryCert != nil) != tc.now {
+			t.Errorf("%s: certificate failure kept = %v, want %v", tc.name, c.primaryCert != nil, tc.now)
+		}
 	}
 }
 

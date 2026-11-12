@@ -527,13 +527,13 @@ func TestStagedAddressTiming(t *testing.T) {
 		Fallback: &PanelAddress{PanelURL: "https://10.0.0.1:3443", PanelPin: pin},
 	}
 	c := &connector{}
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primaryTarget(cfg), errors.New("dial panel: connection refused"))
 	if c.useStaged || !c.useFallback {
 		t.Fatalf("first failure: staged %v, fallback %v; the first-cycle fallback goes first", c.useStaged, c.useFallback)
 	}
 	c.useFallback = false
 	c.primaryDown = time.Now().Add(-2 * time.Hour)
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primaryTarget(cfg), errors.New("dial panel: connection refused"))
 	if !c.useStaged || c.useFallback {
 		t.Fatalf("after stagedAfter: staged %v, fallback %v", c.useStaged, c.useFallback)
 	}
@@ -543,13 +543,13 @@ func TestStagedAddressTiming(t *testing.T) {
 	w.waits.Store(true)
 	cfg.StagedMove = stageMove
 	c = &connector{deps: &Deps{Updater: w}, logger: slog.New(slog.DiscardHandler), primaryDown: time.Now().Add(-2 * time.Hour)}
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primaryTarget(cfg), errors.New("dial panel: connection refused"))
 	if c.useStaged {
 		t.Fatal("the target dials its staged address before the switch")
 	}
 	w.waits.Store(false)
 	c.useFallback = false
-	c.primaryFailed(cfg)
+	c.primaryFailed(cfg, primaryTarget(cfg), errors.New("dial panel: connection refused"))
 	if !c.useStaged {
 		t.Fatal("the target does not dial its staged address after the switch")
 	}

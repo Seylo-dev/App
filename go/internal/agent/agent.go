@@ -92,6 +92,11 @@ func Join(layout datadir.Layout, opts JoinOptions) error {
 	if opts.CanBuild != nil {
 		cfg.CanBuild = *opts.CanBuild
 	}
+	// A join at the panel's IP with its pin is the owner keeping the node
+	// there (the Add node dialog offers it next to the domain's command
+	// for networks that decrypt HTTPS): the agent asks the panel for
+	// Panel address "stay" on its first connect.
+	cfg.StayOnAddress = false
 	if opts.Pin != "" {
 		pin, err := conn.ParsePin(opts.Pin)
 		if err != nil {
@@ -99,6 +104,7 @@ func Join(layout datadir.Layout, opts JoinOptions) error {
 		}
 		cfg.PanelPin = conn.FormatPin(pin)
 		cfg.TrustOnFirstUse = false
+		cfg.StayOnAddress = ipHost(opts.PanelURL)
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -243,7 +249,9 @@ func newDaemon(ctx context.Context, layout datadir.Layout, logger *slog.Logger) 
 		cfgPath: cfgPath, cfg: cfg,
 		clock:   &clockWatch{reports: func() state.Reporter { return d.Reports }, logger: logger},
 		rootCAs: panelRoots,
+		memPath: panelMemoryPath(layout),
 	}
+	c.restoreMemory(time.Now())
 	// Set before any loop runs; the address follows moves (move.go).
 	d.PanelAddress = func() (string, string) {
 		cfg := c.config()

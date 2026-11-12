@@ -76,6 +76,11 @@ type FakePanel struct {
 	connects int
 	// healthMove is the "moveId" /api/health names ("" for none).
 	healthMove string
+	// names is HelloAccepted.node_name by node id.
+	names map[string]string
+	// choices is each node's Panel address: a hello with stay_on_address
+	// makes it STAY, and a STAY node gets no panel_url (like the panel).
+	choices map[string]agentv1.PanelAddressChoice
 }
 
 // Report is one delivered outbox report.
@@ -115,6 +120,7 @@ func NewFakePanel(tb testing.TB, opts ...FakePanelOption) *FakePanel {
 		tb: tb, PanelID: "fakepanel", EdgeKey: edge, EdgePrivate: edgePriv, caps: cfg.caps,
 		tokens: map[string]bool{}, nodes: map[string]ed25519.PublicKey{}, sessions: map[string]*rpc.Session{},
 		seen: map[uint64]bool{}, changed: make(chan struct{}),
+		names: map[string]string{}, choices: map[string]agentv1.PanelAddressChoice{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/agent/connect", p.serveAgent)
@@ -166,6 +172,31 @@ func (p *FakePanel) SetPanelAddress(url, pin string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.moveURL, p.movePin = url, pin
+}
+
+// SetNodeName makes HelloAccepted.node_name name nodeID so ("" for none).
+func (p *FakePanel) SetNodeName(nodeID, name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.names[nodeID] = name
+}
+
+// SetPanelAddressChoice sets nodeID's Panel address, as the owner would.
+func (p *FakePanel) SetPanelAddressChoice(nodeID string, choice agentv1.PanelAddressChoice) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.choices[nodeID] = choice
+}
+
+// PanelAddressChoice is nodeID's Panel address (FOLLOW unless a hello
+// asked to stay or SetPanelAddressChoice changed it).
+func (p *FakePanel) PanelAddressChoice(nodeID string) agentv1.PanelAddressChoice {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c, ok := p.choices[nodeID]; ok {
+		return c
+	}
+	return agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_FOLLOW
 }
 
 // AcceptedHosts returns the Host header of every accepted connection, in
@@ -452,8 +483,18 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeID, drops = id, p.drops
 		p.hosts = append(p.hosts, r.Host)
+		if h.GetStayOnAddress() {
+			p.choices[id] = agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_STAY
+		}
+		choice, ok := p.choices[id]
+		if !ok {
+			choice = agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_FOLLOW
+		}
 		acc := &agentv1.HelloAccepted{NodeId: id, SessionId: fmt.Sprintf("s%d", len(p.hellos)), EdgeTicketPublicKey: p.EdgeKey,
-			PanelUrl: p.moveURL, PanelPin: p.movePin}
+			PanelUrl: p.moveURL, PanelPin: p.movePin, PanelAddress: choice, NodeName: p.names[id]}
+		if choice == agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_STAY {
+			acc.PanelUrl, acc.PanelPin = "", ""
+		}
 		if p.signAccepts {
 			acc.PanelSignature = rpc.SignPanelAccept(p.EdgePrivate, server, h, acc)
 		}
