@@ -59,7 +59,18 @@ export default {
       redis: "Until then, tell the client to skip the check (redis-cli --insecure) or give it the certificate (--cacert).",
     },
     download: "Download certificate",
-    downloadHint: "or trust this file in the client (sslrootcert, ssl-ca, tlsCAFile).",
+    downloadHint: "or trust this file in the client (sslrootcert, ssl-ca, tlsCAFile) and connect by {host}.",
+    // Without a TLS host name the certificate names no host, so only a client that skips the name check connects with the file.
+    downloadHintNoHost: {
+      postgres:
+        "or trust this file with sslmode=verify-ca and sslrootcert (node-postgres also needs uselibpqcompat=true). It names no host until a TLS host name is set, so verify-full refuses it.",
+      mysql:
+        "or trust this file with ssl-mode=VERIFY_CA and ssl-ca. It names no host until a TLS host name is set, so VERIFY_IDENTITY refuses it.",
+      mongo:
+        "or trust this file with tlsCAFile and tlsAllowInvalidHostnames=true. It names no host until a TLS host name is set, so tlsCAFile alone refuses it.",
+      other:
+        "or trust this file in a client that does not check the host name. It names no host until a TLS host name is set, so a client that checks it refuses it.",
+    },
   },
   exposureTitle: "Exposure settings",
   exposureBody: "Who may connect, and which certificate the database presents.",

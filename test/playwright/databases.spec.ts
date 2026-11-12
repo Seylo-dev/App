@@ -348,6 +348,10 @@ test.describe("database engines", () => {
     const file = await download;
     expect(file.suggestedFilename()).toBe("db.crt");
     expect(readFileSync(await file.path(), "utf8")).toBe(demoCertificatePem);
+    // It names no host, so the file is for clients that skip the name check.
+    await expect(note).toContainText(
+      "or trust this file with sslmode=verify-ca and sslrootcert (node-postgres also needs uselibpqcompat=true). It names no host until a TLS host name is set, so verify-full refuses it.",
+    );
 
     // A host name whose Let's Encrypt certificate failed: the host and the CA's reason.
     withHostname = true;
@@ -357,6 +361,9 @@ test.describe("database engines", () => {
     await expect(note).toContainText(`Last attempt: ${acmeError}`);
     await expect(note).toContainText("db.acme.dev needs an A record to the node set to DNS only (not proxied), and port 80 has to reach the node.");
     await expect(note).not.toContainText("set a TLS host name under Port and access");
+    // The node's certificate names the host now, so any client trusts the file by it.
+    await expect(note).toContainText("or trust this file in the client (sslrootcert, ssl-ca, tlsCAFile) and connect by db.acme.dev.");
+    await expect(note).not.toContainText("verify-ca");
     await page.screenshot({ path: `${shots}/exposed-self-signed-acme-failed.png`, fullPage: true });
   });
 

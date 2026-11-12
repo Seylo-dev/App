@@ -41,12 +41,31 @@ export function SelfSignedNote({ db, serviceName }: { db: Db; serviceName: strin
             >
               {t("serviceDatabase.selfSigned.download")}
             </button>{" "}
-            {t("serviceDatabase.selfSigned.downloadHint")}
+            {downloadHint(db)}
           </>
         )}
       </p>
     </Callout>
   );
+}
+
+/**
+ * How to trust the downloaded file. With a TLS host name the fallback
+ * names it, so any client that checks certificates connects by it; without
+ * one it names no host, so only the clients that skip the name check do
+ * (libpq verify-ca, MySQL VERIFY_CA, Mongo tlsAllowInvalidHostnames).
+ */
+function downloadHint(db: Db): string {
+  const host = db.exposure.tlsHostname;
+  if (host) return t("serviceDatabase.selfSigned.downloadHint", { host });
+  switch (db.engine) {
+    case "postgres":
+    case "mysql":
+    case "mongo":
+      return t(`serviceDatabase.selfSigned.downloadHintNoHost.${db.engine}`);
+    default:
+      return t("serviceDatabase.selfSigned.downloadHintNoHost.other");
+  }
 }
 
 /**

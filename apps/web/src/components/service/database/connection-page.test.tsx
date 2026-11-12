@@ -165,6 +165,10 @@ test("a self-signed exposure says why, how to get a trusted certificate and what
   expect(none).toContain("sslmode=no-verify");
   expect(none).toContain(t("serviceDatabase.selfSigned.meanwhile.postgres"));
   expect(none).toContain(`>${t("serviceDatabase.selfSigned.download")}</button>`);
+  // The file names no host: only verify-ca connects with it, node-postgres with uselibpqcompat.
+  expect(none).toContain(t("serviceDatabase.selfSigned.downloadHintNoHost.postgres"));
+  expect(none).toContain("sslmode=verify-ca");
+  expect(none).not.toContain("tlsCAFile");
   // Its issuer is only its own name.
   expect(none).not.toContain(t("serviceDatabase.certIssuer", { issuer: "database" }));
 
@@ -187,6 +191,13 @@ test("a self-signed exposure says why, how to get a trusted certificate and what
   expect(acme).not.toContain(t("serviceDatabase.selfSigned.getTrusted"));
   // No PEM reported (an older node): no download.
   expect(acme).not.toContain(t("serviceDatabase.selfSigned.download"));
+  // With the PEM: the file names the host, so any client trusts it by that name.
+  const acmePem = await render({
+    ...db,
+    exposure: { ...db.exposure, tlsHostname: "db.example.com", selfSignedReason: "acmeMissing", certificatePem: pem },
+  });
+  expect(acmePem).toContain(t("serviceDatabase.selfSigned.downloadHint", { host: "db.example.com" }));
+  expect(acmePem).not.toContain("verify-ca");
 
   // MariaDB's own certificate: no host name advice, its clients' setting.
   const maria = await render({ ...db, engine: "mariadb", exposure: { ...db.exposure, selfSignedReason: "engine" } });
@@ -195,7 +206,15 @@ test("a self-signed exposure says why, how to get a trusted certificate and what
   expect(maria).not.toContain(t("serviceDatabase.selfSigned.getTrusted"));
 
   // Mongo's exposed URL already accepts it without a host name; with one, the client is told to.
-  expect(await render({ ...db, engine: "mongo" })).toContain(t("serviceDatabase.selfSigned.meanwhile.mongoInUrl"));
+  const mongo = await render({ ...db, engine: "mongo", exposure: { ...db.exposure, certificatePem: pem } });
+  expect(mongo).toContain(t("serviceDatabase.selfSigned.meanwhile.mongoInUrl"));
+  expect(mongo).toContain(t("serviceDatabase.selfSigned.downloadHintNoHost.mongo"));
+  expect(await render({ ...db, engine: "mysql", exposure: { ...db.exposure, certificatePem: pem } })).toContain(
+    t("serviceDatabase.selfSigned.downloadHintNoHost.mysql"),
+  );
+  expect(await render({ ...db, engine: "redis", exposure: { ...db.exposure, certificatePem: pem } })).toContain(
+    t("serviceDatabase.selfSigned.downloadHintNoHost.other"),
+  );
   expect(
     await render({ ...db, engine: "mongo", exposure: { ...db.exposure, tlsHostname: "m.example.com", selfSignedReason: "acmeMissing" } }),
   ).toContain(t("serviceDatabase.selfSigned.meanwhile.mongo"));
