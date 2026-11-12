@@ -164,7 +164,7 @@ func TestDumpCommands(t *testing.T) {
 		ext    string
 		gz     bool
 	}{
-		{agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, "app", []string{"pg_dump", "--format=custom", `--dbname="$DB_NAME"`}, extPgCustom, false},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, "app", []string{"pg_dump", "--format=custom", `--dbname="$DB_CONN"`}, extPgCustom, false},
 		{agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, "", []string{"pg_dumpall"}, extSQL, true},
 		{agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, "app", []string{"$DUMP", "--single-transaction", `--databases "$DB_NAME"`, "mariadb-dump"}, extSQL, true},
 		{agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, "", []string{"--all-databases"}, extSQL, true},

@@ -13,4 +13,7 @@ type Runner interface {
 	Start(ctx context.Context, req *agentv1.RunBackupRequest, report func(*agentv1.BackupResult)) error
 	// Restore restores an object and returns when done.
 	Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) (*agentv1.RestoreBackupResponse, error)
+	// Inspect lists a database service's databases and tables, for
+	// choosing what a backup holds.
+	Inspect(ctx context.Context, req *agentv1.InspectDatabaseRequest) (*agentv1.InspectDatabaseResponse, error)
 }

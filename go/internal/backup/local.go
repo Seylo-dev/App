@@ -231,6 +231,9 @@ func (l *Local) planBackup(req *agentv1.RunBackupRequest) (*backupPlan, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := checkSelections(t.engine, w.Database.GetSelections()); err != nil {
+			return nil, err
+		}
 		p.db = &t
 	default:
 		return nil, fmt.Errorf("%w: the subject has neither a volume nor a database", ErrBadRequest)
@@ -283,12 +286,12 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 	var ext string
 	var produce func(w io.Writer) error
 	if p.db != nil {
-		job, err := dumpJob(*p.db, p.req.GetRunId())
+		plan, err := l.planDump(ctx, p, res)
 		if err != nil {
 			return err
 		}
-		ext = job.ext
-		produce = func(w io.Writer) error { return l.runDump(ctx, p, job, w) }
+		ext = plan.ext
+		produce = func(w io.Writer) error { return l.runPlan(ctx, p, plan, w) }
 	} else {
 		ext = extVolume
 		produce = func(w io.Writer) error {
@@ -388,9 +391,83 @@ func upload(ctx context.Context, store Store, key string, progress *progressWrit
 	return up.n, nil
 }
 
-// runDump runs the dump command in a helper container and writes its
-// stdout (gzipped when the format needs it) to w.
-func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writer) error {
+// planDump decides what a database backup dumps and records what it
+// holds in res. With selections the server is listed first and the
+// chosen names matched against it (resolve): a failed listing or nothing
+// left fails the backup. Without, the dump is the one from before
+// selections (everything, or the one database the request names) and the
+// listing only measures it: when it fails, the backup still runs, with a
+// warning.
+func (l *Local) planDump(ctx context.Context, p *backupPlan, res *agentv1.BackupResult) (dumpPlan, error) {
+	t := *p.db
+	run := p.req.GetRunId()
+	if sels := p.req.GetSubject().GetDatabase().GetSelections(); len(sels) > 0 {
+		live, err := l.inspect(ctx, p.spec, t, "measure-"+run)
+		if err != nil {
+			return dumpPlan{}, fmt.Errorf("listing the databases before the backup: %w", err)
+		}
+		picked, warnings, err := resolve(t.engine, sels, live)
+		res.Warnings = warnings
+		if err != nil {
+			return dumpPlan{}, err
+		}
+		plan, err := selectionPlan(t, picked)
+		if err != nil {
+			return dumpPlan{}, err
+		}
+		res.Contents = selectionContents(picked)
+		return plan, nil
+	}
+	job, err := dumpJob(t, run)
+	if err != nil {
+		return dumpPlan{}, err
+	}
+	if selectable(t.engine) {
+		live, err := l.inspect(ctx, p.spec, t, "measure-"+run)
+		switch {
+		case err != nil:
+			res.Warnings = append(res.Warnings, "What the backup holds could not be measured: "+err.Error())
+			if t.database == "" {
+				res.Contents = &agentv1.BackupContents{WholeServer: true}
+			}
+		case t.database == "":
+			res.Contents = wholeServerContents(live)
+		default:
+			res.Contents = singleContents(live, t.database)
+		}
+	}
+	return dumpPlan{jobs: []dbJob{job}, ext: job.ext}, nil
+}
+
+// runPlan writes the plan's dump to w: one job's output, or each job's
+// framed into a bundle.
+func (l *Local) runPlan(ctx context.Context, p *backupPlan, plan dumpPlan, w io.Writer) error {
+	run := p.req.GetRunId()
+	if plan.bundle == nil {
+		return l.runDump(ctx, p, plan.jobs[0], w, "backup-"+run)
+	}
+	bw, err := newBundleWriter(w, *plan.bundle)
+	if err != nil {
+		return err
+	}
+	for i, job := range plan.jobs {
+		mw, err := bw.member()
+		if err != nil {
+			return err
+		}
+		if err := l.runDump(ctx, p, job, mw, fmt.Sprintf("backup-%s-%d", run, i+1)); err != nil {
+			return fmt.Errorf("dumping %q: %w", plan.bundle.Members[i].Database, err)
+		}
+		if err := bw.endMember(); err != nil {
+			return err
+		}
+	}
+	return bw.close()
+}
+
+// runDump runs the dump command in a helper container named what and
+// writes its stdout (gzipped when the format needs it) to w.
+func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writer, what string) error {
 	errTail := jobrun.NewTail(20, []string{p.db.password})
 	out := w
 	var gz *gzip.Writer
@@ -398,7 +475,7 @@ func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writ
 		gz = gzip.NewWriter(w)
 		out = gz
 	}
-	helper, err := l.helperSpec(p.spec, job, "backup-"+p.req.GetRunId())
+	helper, err := l.helperSpec(p.spec, job, what)
 	if err != nil {
 		return err
 	}
@@ -425,6 +502,23 @@ func lastLine(t *jobrun.Tail) string {
 	return "no output"
 }
 
+// restoreLine is lastLine of a restore, except that pg_restore ends a
+// failed statement with "Command was: <the statement>": the line that
+// says why (its "ERROR:" line) comes before it.
+func restoreLine(t *jobrun.Tail) string {
+	last := lastLine(t)
+	if !strings.HasPrefix(last, "Command was:") {
+		return last
+	}
+	lines := t.Lines()
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); strings.Contains(s, "ERROR:") {
+			return s
+		}
+	}
+	return last
+}
+
 // helperSpec is the dump or restore container: the database's own image
 // on its project network, with the service's volumes when the job needs
 // the files the server writes.
@@ -434,7 +528,7 @@ func (l *Local) helperSpec(spec *agentv1.ServiceSpec, job dbJob, what string) (j
 		Image:      jobrun.ImageRef(spec.GetImage()),
 		Auth:       spec.GetImage().GetAuth(),
 		Entrypoint: []string{"/bin/sh", "-c"},
-		Cmd:        []string{job.script},
+		Cmd:        helperCmd(job),
 		Env:        job.env,
 		Labels:     jobrun.Labels(jobrun.OwnerOf(spec), jobrun.RoleBackup, map[string]string{jobrun.LabelRun: what}),
 		Network:    jobrun.ProjectNetwork(spec),
@@ -447,6 +541,15 @@ func (l *Local) helperSpec(spec *agentv1.ServiceSpec, job dbJob, what string) (j
 		s.Binds = binds
 	}
 	return s, nil
+}
+
+// helperCmd is the helper's command: the script, then its arguments
+// ("$0" is a name, "$@" the arguments).
+func helperCmd(job dbJob) []string {
+	if len(job.args) == 0 {
+		return []string{job.script}
+	}
+	return append([]string{job.script, "seylo-backup"}, job.args...)
 }
 
 // prune deletes objects past keep and returns their keys.
@@ -504,12 +607,19 @@ func (l *Local) Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) 
 		}
 		return l.restoreVolume(ctx, store, key, l.mounters(spec, w.Volume, false), dir)
 	case *agentv1.BackupSubject_Database:
+		sels := w.Database.GetSelections()
 		database := w.Database.GetDatabase()
+		if database == "" && len(sels) == 1 {
+			database = sels[0].GetDatabase()
+		}
 		if database == "" && ext == extPgCustom {
 			database = spec.GetDatabase().GetCredentials().GetDatabase()
 		}
 		t, err := targetOf(spec, database)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkSelections(t.engine, sels); err != nil {
 			return nil, err
 		}
 		if dbengine.RedisLike(t.engine) {
@@ -521,10 +631,18 @@ func (l *Local) Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) 
 			}
 			return l.restoreRedis(ctx, store, key, spec)
 		}
+		if ext == extBundle {
+			return l.restoreBundle(ctx, store, key, spec, t)
+		}
 		run := restoreRun(l.opts.Now())
 		job, err := restoreJob(t, ext, run)
 		if err != nil {
 			return nil, err
+		}
+		if t.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO {
+			// What the backup holds replaces what is there: mongorestore
+			// --drop drops only the collections it restores.
+			job.args = restoreNamespaces(sels)
 		}
 		return l.restoreDump(ctx, store, key, spec, t, job, run)
 	default:
@@ -578,9 +696,133 @@ func (l *Local) restoreDump(ctx context.Context, store Store, key string, spec *
 		return nil, err
 	}
 	if res.ExitCode != 0 {
-		return nil, fmt.Errorf("the restore exited with code %d: %s", res.ExitCode, lastLine(tail))
+		return nil, fmt.Errorf("the restore exited with code %d: %s", res.ExitCode, restoreLine(tail))
 	}
 	return &agentv1.RestoreBackupResponse{RestoredBytes: uint64(counter.n)}, nil
+}
+
+// restoreBundle restores each database of a bundle in turn, each with its
+// own restore (for Postgres one transaction per database). A failure
+// stops there and says which databases were restored before it.
+func (l *Local) restoreBundle(ctx context.Context, store Store, key string, spec *agentv1.ServiceSpec, t dbTarget) (*agentv1.RestoreBackupResponse, error) {
+	engine := map[agentv1.DatabaseEngine]string{
+		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES: "postgres",
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:    "mongo",
+	}[t.engine]
+	if engine == "" {
+		return nil, fmt.Errorf("%w: a bundle cannot be restored into %v", ErrBadRequest, t.engine)
+	}
+	r, counter, closeFn, err := open(ctx, store, key, false)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+	br, err := openBundle(r)
+	if err != nil {
+		return nil, err
+	}
+	if br.manifest.Engine != engine {
+		return nil, fmt.Errorf("%w: the bundle holds %s databases, not %s", ErrBadRequest, br.manifest.Engine, engine)
+	}
+	var done []string
+	for {
+		m, mr, err := br.nextMember()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, bundleFailure(done, "", br.manifest, err)
+		}
+		mt := t
+		mt.database = m.Database
+		run := restoreRun(l.opts.Now())
+		job, err := restoreJob(mt, m.Format, run)
+		if err != nil {
+			return nil, bundleFailure(done, m.Database, br.manifest, err)
+		}
+		if t.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO {
+			job.args = restoreNamespaces([]*agentv1.DatabaseSelection{{Database: m.Database}})
+		}
+		if err := l.restoreMember(ctx, spec, mt, job, run, mr, br); err != nil {
+			return nil, bundleFailure(done, m.Database, br.manifest, err)
+		}
+		done = append(done, m.Database)
+	}
+	return &agentv1.RestoreBackupResponse{RestoredBytes: uint64(counter.n)}, nil
+}
+
+// bundleFailure says what a failed bundle restore did.
+func bundleFailure(done []string, failed string, m bundleManifest, err error) error {
+	what := "reading the bundle failed"
+	if failed != "" {
+		what = fmt.Sprintf("restoring %q failed", failed)
+	}
+	restored := "nothing was restored"
+	if len(done) > 0 {
+		restored = "restored before it: " + quoteList(done)
+	}
+	next := len(done)
+	if failed != "" {
+		next++
+	}
+	var left []string
+	for _, mem := range m.Members[min(next, len(m.Members)):] {
+		left = append(left, mem.Database)
+	}
+	if len(left) > 0 {
+		restored += "; not restored: " + quoteList(left)
+	}
+	return fmt.Errorf("%s (%s): %w", what, restored, err)
+}
+
+// errReader remembers the first read error of r.
+type errReader struct {
+	r   io.Reader
+	err error
+}
+
+func (e *errReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) && e.err == nil {
+		e.err = err
+	}
+	return n, err
+}
+
+// restoreMember runs one bundle member's restore with the member's bytes
+// on stdin. They go through a pipe this function owns: once the helper is
+// done, the copy into it is stopped and waited for, and what the tool did
+// not read is drained here, so nothing else reads the bundle while the
+// next member starts.
+func (l *Local) restoreMember(ctx context.Context, spec *agentv1.ServiceSpec, t dbTarget, job dbJob, run string, member io.Reader, br *bundleReader) error {
+	src := &errReader{r: member}
+	pr, pw := io.Pipe()
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		_, err := io.Copy(pw, src)
+		pw.CloseWithError(err)
+	}()
+	tail := jobrun.NewTail(20, []string{t.password})
+	helper, err := l.helperSpec(spec, job, "restore-"+run)
+	if err != nil {
+		pr.Close()
+		<-copied
+		return err
+	}
+	res, err := l.opts.Docker.Run(ctx, helper, jobrun.IO{Stdin: pr, Stdout: tail, Stderr: tail})
+	pr.CloseWithError(errors.New("the restore finished"))
+	<-copied
+	if err != nil {
+		return err
+	}
+	if src.err != nil {
+		return src.err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("the restore exited with code %d: %s", res.ExitCode, restoreLine(tail))
+	}
+	return br.drain()
 }
 
 // restoreVolume unpacks into a fresh sibling folder while the services

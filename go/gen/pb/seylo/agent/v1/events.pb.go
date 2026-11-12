@@ -1545,8 +1545,14 @@ type BackupResult struct {
 	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	// Objects deleted by retention (keep_last) after this run succeeded.
 	PrunedObjectKeys []string `protobuf:"bytes,9,rep,name=pruned_object_keys,json=prunedObjectKeys,proto3" json:"pruned_object_keys,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// added in 0.2.15: database backups only, what the object holds as
+	// measured right before the dump. Unset from older agents.
+	Contents *BackupContents `protobuf:"bytes,10,opt,name=contents,proto3" json:"contents,omitempty"`
+	// added in 0.2.15: chosen databases or tables that were skipped because
+	// they no longer exist, or why the contents could not be measured.
+	Warnings      []string `protobuf:"bytes,11,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BackupResult) Reset() {
@@ -1638,6 +1644,20 @@ func (x *BackupResult) GetFinishedAt() *timestamppb.Timestamp {
 func (x *BackupResult) GetPrunedObjectKeys() []string {
 	if x != nil {
 		return x.PrunedObjectKeys
+	}
+	return nil
+}
+
+func (x *BackupResult) GetContents() *BackupContents {
+	if x != nil {
+		return x.Contents
+	}
+	return nil
+}
+
+func (x *BackupResult) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
 	}
 	return nil
 }
@@ -1944,7 +1964,7 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"last_lines\x18\a \x03(\tR\tlastLines\x12\x1e\n" +
 	"\vcron_job_id\x18\b \x01(\tR\tcronJobId\x12\x16\n" +
-	"\x06manual\x18\t \x01(\bR\x06manual\"\xd6\x02\n" +
+	"\x06manual\x18\t \x01(\bR\x06manual\"\xae\x03\n" +
 	"\fBackupResult\x12\x1b\n" +
 	"\tbackup_id\x18\x01 \x01(\tR\bbackupId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x18\n" +
@@ -1958,7 +1978,10 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"started_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
 	"\vfinished_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishedAt\x12,\n" +
-	"\x12pruned_object_keys\x18\t \x03(\tR\x10prunedObjectKeys\"\xe4\x01\n" +
+	"\x12pruned_object_keys\x18\t \x03(\tR\x10prunedObjectKeys\x12:\n" +
+	"\bcontents\x18\n" +
+	" \x01(\v2\x1e.seylo.agent.v1.BackupContentsR\bcontents\x12\x1a\n" +
+	"\bwarnings\x18\v \x03(\tR\bwarnings\"\xe4\x01\n" +
 	"\tNodeAlert\x121\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.seylo.agent.v1.NodeAlertKindR\x04kind\x129\n" +
 	"\bseverity\x18\x02 \x01(\x0e2\x1d.seylo.agent.v1.AlertSeverityR\bseverity\x12\x18\n" +
@@ -2080,6 +2103,7 @@ var file_seylo_agent_v1_events_proto_goTypes = []any{
 	(*ImageHealthCheck)(nil),      // 25: seylo.agent.v1.ImageHealthCheck
 	(*durationpb.Duration)(nil),   // 26: google.protobuf.Duration
 	(HealthState)(0),              // 27: seylo.agent.v1.HealthState
+	(*BackupContents)(nil),        // 28: seylo.agent.v1.BackupContents
 }
 var file_seylo_agent_v1_events_proto_depIdxs = []int32{
 	20, // 0: seylo.agent.v1.Event.time:type_name -> google.protobuf.Timestamp
@@ -2115,16 +2139,17 @@ var file_seylo_agent_v1_events_proto_depIdxs = []int32{
 	4,  // 30: seylo.agent.v1.CronRun.result:type_name -> seylo.agent.v1.CronRunResult
 	20, // 31: seylo.agent.v1.BackupResult.started_at:type_name -> google.protobuf.Timestamp
 	20, // 32: seylo.agent.v1.BackupResult.finished_at:type_name -> google.protobuf.Timestamp
-	5,  // 33: seylo.agent.v1.NodeAlert.kind:type_name -> seylo.agent.v1.NodeAlertKind
-	7,  // 34: seylo.agent.v1.NodeAlert.severity:type_name -> seylo.agent.v1.AlertSeverity
-	6,  // 35: seylo.agent.v1.UpdateResult.target:type_name -> seylo.agent.v1.UpdateTarget
-	20, // 36: seylo.agent.v1.UpdateResult.started_at:type_name -> google.protobuf.Timestamp
-	20, // 37: seylo.agent.v1.UpdateResult.finished_at:type_name -> google.protobuf.Timestamp
-	38, // [38:38] is the sub-list for method output_type
-	38, // [38:38] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	28, // 33: seylo.agent.v1.BackupResult.contents:type_name -> seylo.agent.v1.BackupContents
+	5,  // 34: seylo.agent.v1.NodeAlert.kind:type_name -> seylo.agent.v1.NodeAlertKind
+	7,  // 35: seylo.agent.v1.NodeAlert.severity:type_name -> seylo.agent.v1.AlertSeverity
+	6,  // 36: seylo.agent.v1.UpdateResult.target:type_name -> seylo.agent.v1.UpdateTarget
+	20, // 37: seylo.agent.v1.UpdateResult.started_at:type_name -> google.protobuf.Timestamp
+	20, // 38: seylo.agent.v1.UpdateResult.finished_at:type_name -> google.protobuf.Timestamp
+	39, // [39:39] is the sub-list for method output_type
+	39, // [39:39] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_events_proto_init() }

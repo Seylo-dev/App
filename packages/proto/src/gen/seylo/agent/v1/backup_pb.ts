@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/backup.proto.
  */
 export const file_seylo_agent_v1_backup: GenFile = /*@__PURE__*/
-  fileDesc("ChtzZXlsby9hZ2VudC92MS9iYWNrdXAucHJvdG8SDnNleWxvLmFnZW50LnYxIq8BChFCYWNrdXBEZXN0aW5hdGlvbhIQCghlbmRwb2ludBgBIAEoCRIOCgZyZWdpb24YAiABKAkSDgoGYnVja2V0GAMgASgJEg4KBnByZWZpeBgEIAEoCRIVCg1hY2Nlc3Nfa2V5X2lkGAUgASgJEhkKEXNlY3JldF9hY2Nlc3Nfa2V5GAYgASgJEhIKCnBhdGhfc3R5bGUYByABKAgSEgoKc2lnbmluZ19pZBgIIAEoCSJvCg1CYWNrdXBTdWJqZWN0EhIKCnNlcnZpY2VfaWQYASABKAkSEAoGdm9sdW1lGAIgASgJSAASMAoIZGF0YWJhc2UYAyABKAsyHC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUR1bXBIAEIGCgR3aGF0IiAKDERhdGFiYXNlRHVtcBIQCghkYXRhYmFzZRgBIAEoCSLGAQoQUnVuQmFja3VwUmVxdWVzdBIRCgliYWNrdXBfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEi4KB3N1YmplY3QYAyABKAsyHS5zZXlsby5hZ2VudC52MS5CYWNrdXBTdWJqZWN0EjYKC2Rlc3RpbmF0aW9uGAQgASgLMiEuc2V5bG8uYWdlbnQudjEuQmFja3VwRGVzdGluYXRpb24SFAoMc3RvcF9zZXJ2aWNlGAUgASgIEhEKCWtlZXBfbGFzdBgGIAEoDSITChFSdW5CYWNrdXBSZXNwb25zZSJzCg5CYWNrdXBQcm9ncmVzcxIRCgliYWNrdXBfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEioKBXBoYXNlGAMgASgOMhsuc2V5bG8uYWdlbnQudjEuQmFja3VwUGhhc2USEgoKYnl0ZXNfZG9uZRgEIAEoBCKSAQoUUmVzdG9yZUJhY2t1cFJlcXVlc3QSLgoHc3ViamVjdBgBIAEoCzIdLnNleWxvLmFnZW50LnYxLkJhY2t1cFN1YmplY3QSNgoLZGVzdGluYXRpb24YAiABKAsyIS5zZXlsby5hZ2VudC52MS5CYWNrdXBEZXN0aW5hdGlvbhISCgpvYmplY3Rfa2V5GAMgASgJIi8KFVJlc3RvcmVCYWNrdXBSZXNwb25zZRIWCg5yZXN0b3JlZF9ieXRlcxgBIAEoBCqnAQoLQmFja3VwUGhhc2USHAoYQkFDS1VQX1BIQVNFX1VOU1BFQ0lGSUVEEAASIQodQkFDS1VQX1BIQVNFX1NUT1BQSU5HX1NFUlZJQ0UQARIaChZCQUNLVVBfUEhBU0VfVVBMT0FESU5HEAISIQodQkFDS1VQX1BIQVNFX1NUQVJUSU5HX1NFUlZJQ0UQAxIYChRCQUNLVVBfUEhBU0VfUFJVTklORxAEQrYBChJjb20uc2V5bG8uYWdlbnQudjFCC0JhY2t1cFByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw");
+  fileDesc("ChtzZXlsby9hZ2VudC92MS9iYWNrdXAucHJvdG8SDnNleWxvLmFnZW50LnYxIq8BChFCYWNrdXBEZXN0aW5hdGlvbhIQCghlbmRwb2ludBgBIAEoCRIOCgZyZWdpb24YAiABKAkSDgoGYnVja2V0GAMgASgJEg4KBnByZWZpeBgEIAEoCRIVCg1hY2Nlc3Nfa2V5X2lkGAUgASgJEhkKEXNlY3JldF9hY2Nlc3Nfa2V5GAYgASgJEhIKCnBhdGhfc3R5bGUYByABKAgSEgoKc2lnbmluZ19pZBgIIAEoCSJvCg1CYWNrdXBTdWJqZWN0EhIKCnNlcnZpY2VfaWQYASABKAkSEAoGdm9sdW1lGAIgASgJSAASMAoIZGF0YWJhc2UYAyABKAsyHC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUR1bXBIAEIGCgR3aGF0IlcKDERhdGFiYXNlRHVtcBIQCghkYXRhYmFzZRgBIAEoCRI1CgpzZWxlY3Rpb25zGAIgAygLMiEuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VTZWxlY3Rpb24iTwoRRGF0YWJhc2VTZWxlY3Rpb24SEAoIZGF0YWJhc2UYASABKAkSKAoGdGFibGVzGAIgAygLMhguc2V5bG8uYWdlbnQudjEuVGFibGVSZWYiKAoIVGFibGVSZWYSDgoGc2NoZW1hGAEgASgJEgwKBG5hbWUYAiABKAkiWwoOQmFja3VwQ29udGVudHMSFAoMd2hvbGVfc2VydmVyGAEgASgIEjMKCWRhdGFiYXNlcxgCIAMoCzIgLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlQ29udGVudHMipwEKEERhdGFiYXNlQ29udGVudHMSDAoEbmFtZRgBIAEoCRISCgpzaXplX2J5dGVzGAIgASgEEhMKC2FwcHJveF9yb3dzGAMgASgDEhMKC3RhYmxlX2NvdW50GAQgASgNEi0KBnRhYmxlcxgFIAMoCzIdLnNleWxvLmFnZW50LnYxLlRhYmxlQ29udGVudHMSGAoQdGFibGVzX3RydW5jYXRlZBgGIAEoCCJWCg1UYWJsZUNvbnRlbnRzEg4KBnNjaGVtYRgBIAEoCRIMCgRuYW1lGAIgASgJEhIKCnNpemVfYnl0ZXMYAyABKAQSEwoLYXBwcm94X3Jvd3MYBCABKAMiPgoWSW5zcGVjdERhdGFiYXNlUmVxdWVzdBISCgpzZXJ2aWNlX2lkGAEgASgJEhAKCGRhdGFiYXNlGAIgASgJIksKF0luc3BlY3REYXRhYmFzZVJlc3BvbnNlEjAKCGNvbnRlbnRzGAEgASgLMh4uc2V5bG8uYWdlbnQudjEuQmFja3VwQ29udGVudHMixgEKEFJ1bkJhY2t1cFJlcXVlc3QSEQoJYmFja3VwX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIuCgdzdWJqZWN0GAMgASgLMh0uc2V5bG8uYWdlbnQudjEuQmFja3VwU3ViamVjdBI2CgtkZXN0aW5hdGlvbhgEIAEoCzIhLnNleWxvLmFnZW50LnYxLkJhY2t1cERlc3RpbmF0aW9uEhQKDHN0b3Bfc2VydmljZRgFIAEoCBIRCglrZWVwX2xhc3QYBiABKA0iEwoRUnVuQmFja3VwUmVzcG9uc2UicwoOQmFja3VwUHJvZ3Jlc3MSEQoJYmFja3VwX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIqCgVwaGFzZRgDIAEoDjIbLnNleWxvLmFnZW50LnYxLkJhY2t1cFBoYXNlEhIKCmJ5dGVzX2RvbmUYBCABKAQikgEKFFJlc3RvcmVCYWNrdXBSZXF1ZXN0Ei4KB3N1YmplY3QYASABKAsyHS5zZXlsby5hZ2VudC52MS5CYWNrdXBTdWJqZWN0EjYKC2Rlc3RpbmF0aW9uGAIgASgLMiEuc2V5bG8uYWdlbnQudjEuQmFja3VwRGVzdGluYXRpb24SEgoKb2JqZWN0X2tleRgDIAEoCSIvChVSZXN0b3JlQmFja3VwUmVzcG9uc2USFgoOcmVzdG9yZWRfYnl0ZXMYASABKAQqpwEKC0JhY2t1cFBoYXNlEhwKGEJBQ0tVUF9QSEFTRV9VTlNQRUNJRklFRBAAEiEKHUJBQ0tVUF9QSEFTRV9TVE9QUElOR19TRVJWSUNFEAESGgoWQkFDS1VQX1BIQVNFX1VQTE9BRElORxACEiEKHUJBQ0tVUF9QSEFTRV9TVEFSVElOR19TRVJWSUNFEAMSGAoUQkFDS1VQX1BIQVNFX1BSVU5JTkcQBEK2AQoSY29tLnNleWxvLmFnZW50LnYxQgtCYWNrdXBQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM");
 
 /**
  * @generated from message seylo.agent.v1.BackupDestination
@@ -124,11 +124,30 @@ export const BackupSubjectSchema: GenMessage<BackupSubject> = /*@__PURE__*/
  */
 export type DatabaseDump = Message<"seylo.agent.v1.DatabaseDump"> & {
   /**
-   * Empty means every database.
+   * Without selections: empty means everything on the server (every
+   * database, for Postgres the roles too), set means that one database.
+   * Panels from 0.2.15 set it as well when exactly one database is
+   * chosen, so an agent without backup.select.v1 would still dump only
+   * that database. On a restore: the database a single-database object
+   * goes into (empty: the service's main database).
    *
    * @generated from field: string database = 1;
    */
   database: string;
+
+  /**
+   * added in 0.2.15 (backup.select.v1): what to back up, by name. Empty
+   * keeps the behaviour above. Set, the agent lists the server right
+   * before the dump: a chosen database or table that no longer exists is
+   * skipped with a line in BackupResult.warnings, and the backup fails
+   * when nothing is left (a database whose chosen tables are all gone is
+   * never widened to the whole database). Tables only with exactly one
+   * database. On a restore: what the object holds (the backup's recorded
+   * contents); exactly that is replaced, everything else stays.
+   *
+   * @generated from field: repeated seylo.agent.v1.DatabaseSelection selections = 2;
+   */
+  selections: DatabaseSelection[];
 };
 
 /**
@@ -137,6 +156,228 @@ export type DatabaseDump = Message<"seylo.agent.v1.DatabaseDump"> & {
  */
 export const DatabaseDumpSchema: GenMessage<DatabaseDump> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_backup, 2);
+
+/**
+ * One chosen database, optionally only some of its tables (Postgres and
+ * MySQL) or collections (MongoDB). added in 0.2.15
+ *
+ * @generated from message seylo.agent.v1.DatabaseSelection
+ */
+export type DatabaseSelection = Message<"seylo.agent.v1.DatabaseSelection"> & {
+  /**
+   * @generated from field: string database = 1;
+   */
+  database: string;
+
+  /**
+   * Empty: the whole database.
+   *
+   * @generated from field: repeated seylo.agent.v1.TableRef tables = 2;
+   */
+  tables: TableRef[];
+};
+
+/**
+ * Describes the message seylo.agent.v1.DatabaseSelection.
+ * Use `create(DatabaseSelectionSchema)` to create a new message.
+ */
+export const DatabaseSelectionSchema: GenMessage<DatabaseSelection> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 3);
+
+/**
+ * A table or collection by name. added in 0.2.15
+ *
+ * @generated from message seylo.agent.v1.TableRef
+ */
+export type TableRef = Message<"seylo.agent.v1.TableRef"> & {
+  /**
+   * Postgres only: the table's schema. Separate from name, never a dotted
+   * string.
+   *
+   * @generated from field: string schema = 1;
+   */
+  schema: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.TableRef.
+ * Use `create(TableRefSchema)` to create a new message.
+ */
+export const TableRefSchema: GenMessage<TableRef> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 4);
+
+/**
+ * What a backup holds, as the database reported it right before the dump:
+ * names, approximate rows and sizes inside the database (not the size of
+ * the compressed object). added in 0.2.15
+ *
+ * @generated from message seylo.agent.v1.BackupContents
+ */
+export type BackupContents = Message<"seylo.agent.v1.BackupContents"> & {
+  /**
+   * Everything on the server (no selection): databases lists what was
+   * there. A whole-server backup whose measurement failed has
+   * whole_server set and no databases (BackupResult.warnings says why).
+   *
+   * @generated from field: bool whole_server = 1;
+   */
+  wholeServer: boolean;
+
+  /**
+   * @generated from field: repeated seylo.agent.v1.DatabaseContents databases = 2;
+   */
+  databases: DatabaseContents[];
+};
+
+/**
+ * Describes the message seylo.agent.v1.BackupContents.
+ * Use `create(BackupContentsSchema)` to create a new message.
+ */
+export const BackupContentsSchema: GenMessage<BackupContents> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 5);
+
+/**
+ * @generated from message seylo.agent.v1.DatabaseContents
+ */
+export type DatabaseContents = Message<"seylo.agent.v1.DatabaseContents"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * On disk inside the database server, indexes included. For a backup of
+   * some tables only, the sum of those tables.
+   *
+   * @generated from field: uint64 size_bytes = 2;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * The engine's estimate; -1 when it has none.
+   *
+   * @generated from field: int64 approx_rows = 3;
+   */
+  approxRows: bigint;
+
+  /**
+   * Every table or collection the backup holds of this database, also
+   * those left out of tables.
+   *
+   * @generated from field: uint32 table_count = 4;
+   */
+  tableCount: number;
+
+  /**
+   * The biggest first. At most 500 per database and 2000 per result.
+   *
+   * @generated from field: repeated seylo.agent.v1.TableContents tables = 5;
+   */
+  tables: TableContents[];
+
+  /**
+   * Some tables are not listed (the caps); the totals above still count them.
+   *
+   * @generated from field: bool tables_truncated = 6;
+   */
+  tablesTruncated: boolean;
+};
+
+/**
+ * Describes the message seylo.agent.v1.DatabaseContents.
+ * Use `create(DatabaseContentsSchema)` to create a new message.
+ */
+export const DatabaseContentsSchema: GenMessage<DatabaseContents> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 6);
+
+/**
+ * @generated from message seylo.agent.v1.TableContents
+ */
+export type TableContents = Message<"seylo.agent.v1.TableContents"> & {
+  /**
+   * Postgres: the schema. Empty for MySQL, MariaDB and MongoDB.
+   *
+   * @generated from field: string schema = 1;
+   */
+  schema: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: uint64 size_bytes = 3;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * The engine's estimate; -1 when it has none (a Postgres table never
+   * analysed).
+   *
+   * @generated from field: int64 approx_rows = 4;
+   */
+  approxRows: bigint;
+};
+
+/**
+ * Describes the message seylo.agent.v1.TableContents.
+ * Use `create(TableContentsSchema)` to create a new message.
+ */
+export const TableContentsSchema: GenMessage<TableContents> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 7);
+
+/**
+ * InspectDatabaseRequest lists a database service's databases (database
+ * empty: names, sizes and table counts, no tables) or one database's
+ * tables or collections, through the same helper and sign-in as a backup.
+ * Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.15
+ *
+ * @generated from message seylo.agent.v1.InspectDatabaseRequest
+ */
+export type InspectDatabaseRequest = Message<"seylo.agent.v1.InspectDatabaseRequest"> & {
+  /**
+   * @generated from field: string service_id = 1;
+   */
+  serviceId: string;
+
+  /**
+   * @generated from field: string database = 2;
+   */
+  database: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.InspectDatabaseRequest.
+ * Use `create(InspectDatabaseRequestSchema)` to create a new message.
+ */
+export const InspectDatabaseRequestSchema: GenMessage<InspectDatabaseRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 8);
+
+/**
+ * @generated from message seylo.agent.v1.InspectDatabaseResponse
+ */
+export type InspectDatabaseResponse = Message<"seylo.agent.v1.InspectDatabaseResponse"> & {
+  /**
+   * whole_server is false. With a database asked for: that one database,
+   * or none when it does not exist; its tables are capped at 5000.
+   *
+   * @generated from field: seylo.agent.v1.BackupContents contents = 1;
+   */
+  contents?: BackupContents | undefined;
+};
+
+/**
+ * Describes the message seylo.agent.v1.InspectDatabaseResponse.
+ * Use `create(InspectDatabaseResponseSchema)` to create a new message.
+ */
+export const InspectDatabaseResponseSchema: GenMessage<InspectDatabaseResponse> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_backup, 9);
 
 /**
  * RunBackupRequest starts a backup and returns once it is accepted. The
@@ -190,7 +431,7 @@ export type RunBackupRequest = Message<"seylo.agent.v1.RunBackupRequest"> & {
  * Use `create(RunBackupRequestSchema)` to create a new message.
  */
 export const RunBackupRequestSchema: GenMessage<RunBackupRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_backup, 3);
+  messageDesc(file_seylo_agent_v1_backup, 10);
 
 /**
  * @generated from message seylo.agent.v1.RunBackupResponse
@@ -203,7 +444,7 @@ export type RunBackupResponse = Message<"seylo.agent.v1.RunBackupResponse"> & {
  * Use `create(RunBackupResponseSchema)` to create a new message.
  */
 export const RunBackupResponseSchema: GenMessage<RunBackupResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_backup, 4);
+  messageDesc(file_seylo_agent_v1_backup, 11);
 
 /**
  * BackupProgress is best-effort progress of a running backup.
@@ -239,7 +480,7 @@ export type BackupProgress = Message<"seylo.agent.v1.BackupProgress"> & {
  * Use `create(BackupProgressSchema)` to create a new message.
  */
 export const BackupProgressSchema: GenMessage<BackupProgress> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_backup, 5);
+  messageDesc(file_seylo_agent_v1_backup, 12);
 
 /**
  * RestoreBackupRequest restores an object into the subject and returns when
@@ -269,7 +510,7 @@ export type RestoreBackupRequest = Message<"seylo.agent.v1.RestoreBackupRequest"
  * Use `create(RestoreBackupRequestSchema)` to create a new message.
  */
 export const RestoreBackupRequestSchema: GenMessage<RestoreBackupRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_backup, 6);
+  messageDesc(file_seylo_agent_v1_backup, 13);
 
 /**
  * @generated from message seylo.agent.v1.RestoreBackupResponse
@@ -286,7 +527,7 @@ export type RestoreBackupResponse = Message<"seylo.agent.v1.RestoreBackupRespons
  * Use `create(RestoreBackupResponseSchema)` to create a new message.
  */
 export const RestoreBackupResponseSchema: GenMessage<RestoreBackupResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_backup, 7);
+  messageDesc(file_seylo_agent_v1_backup, 14);
 
 /**
  * @generated from enum seylo.agent.v1.BackupPhase

@@ -132,6 +132,13 @@ service AgentService {
   rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse) {
     option (capability) = "backup.run.v1";
   }
+  // The databases and tables of a database service, for choosing what a
+  // backup holds. Its capability also says the agent takes
+  // DatabaseDump.selections, writes .bundle objects and reports
+  // BackupResult.contents. added in 0.2.15
+  rpc InspectDatabase(InspectDatabaseRequest) returns (InspectDatabaseResponse) {
+    option (capability) = "backup.select.v1";
+  }
 
   // Node maintenance.
   rpc Prune(PruneRequest) returns (PruneResponse) {

@@ -16,7 +16,7 @@ func TestWireJobsRegistersAndMapsErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []string{"cron.run.v1", "backup.run.v1", "node.prune.v1", "database.engines.v2", "database.exposure.v2", "backup.signed.v1"} {
+	for _, c := range []string{"cron.run.v1", "backup.run.v1", "backup.select.v1", "node.prune.v1", "database.engines.v2", "database.exposure.v2", "backup.signed.v1"} {
 		if !slices.Contains(reg.Capabilities(), c) {
 			t.Errorf("capability %s not advertised: %v", c, reg.Capabilities())
 		}
@@ -48,5 +48,14 @@ func TestWireJobsRegistersAndMapsErrors(t *testing.T) {
 	}
 	if rpc.StatusOf(err).GetMessage() == "" {
 		t.Fatal("status lost its message")
+	}
+	err = panel.Call(ctx, "InspectDatabase", &agentv1.InspectDatabaseRequest{ServiceId: "gone"}, &agentv1.InspectDatabaseResponse{})
+	if code(err) != agentv1.StatusCode_STATUS_CODE_NOT_FOUND {
+		t.Fatalf("InspectDatabase unknown service = %v", err)
+	}
+	// An app has no databases to list.
+	err = panel.Call(ctx, "InspectDatabase", &agentv1.InspectDatabaseRequest{ServiceId: "s1"}, &agentv1.InspectDatabaseResponse{})
+	if code(err) != agentv1.StatusCode_STATUS_CODE_INVALID_ARGUMENT {
+		t.Fatalf("InspectDatabase on an app = %v", err)
 	}
 }

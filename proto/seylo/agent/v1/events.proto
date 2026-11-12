@@ -240,6 +240,12 @@ message BackupResult {
   google.protobuf.Timestamp finished_at = 8;
   // Objects deleted by retention (keep_last) after this run succeeded.
   repeated string pruned_object_keys = 9;
+  // added in 0.2.15: database backups only, what the object holds as
+  // measured right before the dump. Unset from older agents.
+  BackupContents contents = 10;
+  // added in 0.2.15: chosen databases or tables that were skipped because
+  // they no longer exist, or why the contents could not be measured.
+  repeated string warnings = 11;
 }
 
 message NodeAlert {

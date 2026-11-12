@@ -134,7 +134,8 @@ type sleeper interface {
 	Resolve(ctx context.Context, serviceID string, containerPort uint32) (string, error)
 }
 
-// wireJobs: register RunBackup, RestoreBackup (backup.run.v1), RunCronNow
+// wireJobs: register RunBackup, RestoreBackup (backup.run.v1),
+// InspectDatabase (backup.select.v1), RunCronNow
 // (cron.run.v1) and Prune (node.prune.v1); advertise database.engines.v2
 // and database.exposure.v2; add the cron, backup, tunnel, tool and
 // scheduled cleanup loops; follow the desired state through d.Feed.
@@ -205,6 +206,15 @@ func wireJobs(reg *Registry, d *Deps) error {
 	})
 	rpc.HandleUnary(reg, "RestoreBackup", func(ctx context.Context, req *agentv1.RestoreBackupRequest) (*agentv1.RestoreBackupResponse, error) {
 		resp, err := d.Backups.Restore(ctx, req)
+		if err != nil {
+			return nil, jobsStatus(err)
+		}
+		return resp, nil
+	})
+	// backup.select.v1: chosen databases and tables, .bundle objects and
+	// BackupResult.contents come with it.
+	rpc.HandleUnary(reg, "InspectDatabase", func(ctx context.Context, req *agentv1.InspectDatabaseRequest) (*agentv1.InspectDatabaseResponse, error) {
+		resp, err := d.Backups.Inspect(ctx, req)
 		if err != nil {
 			return nil, jobsStatus(err)
 		}

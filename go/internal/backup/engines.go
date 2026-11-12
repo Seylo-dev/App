@@ -16,6 +16,9 @@ type dbJob struct {
 	// script runs with "sh -c"; it reads DB_* from env.
 	script string
 	env    []string
+	// args are the script's "$@": names (tables, databases, collections)
+	// as arguments, never spliced into the script.
+	args []string
 	// ext is the object format of a dump.
 	ext string
 	// gzip: the agent compresses the dump (decompresses on restore).
@@ -92,6 +95,9 @@ func (t dbTarget) baseEnv() []string {
 		// The password as a quoted MySQL option-file value.
 		"DB_PASSWORD_CNF=" + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(t.password),
 		"DB_NAME=" + t.database,
+		// The database as a libpq connection string (Postgres): a name
+		// with "=" is never read as connection options.
+		"DB_CONN=" + pgConninfo(t.database),
 		"DB_DATA_DIR=" + t.dataDir,
 	}
 }
@@ -105,11 +111,35 @@ printf '[client]\npassword="%s"\n' "$DB_PASSWORD_CNF" > /tmp/.backup.cnf
 if command -v mariadb-dump >/dev/null 2>&1; then DUMP=mariadb-dump; CLIENT=mariadb; else DUMP=mysqldump; CLIENT=mysql; fi
 `
 
-// mongoAuth adds credentials when the database has a user.
+// mongoAuth adds credentials, when the database has a user, after the
+// job's own arguments.
 const mongoAuth = `set -e
-set --
-if [ -n "$DB_USER" ]; then set -- --username="$DB_USER" --password="$DB_PASSWORD" --authenticationDatabase=admin; fi
+if [ -n "$DB_USER" ]; then set -- "$@" --username="$DB_USER" --password="$DB_PASSWORD" --authenticationDatabase=admin; fi
 `
+
+// pgCreateMissing creates the database a single-database restore goes
+// into when it no longer exists (the name as a psql variable, quoted by
+// :'name'), then the restore runs.
+const pgCreateMissing = `set -e
+printf '%s\n' "SELECT format('CREATE DATABASE %I', :'name') WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'name') \gexec" |
+  psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname=postgres --no-password --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v name="$DB_NAME" >/dev/null
+`
+
+// pgDumpJob dumps the one database t names in pg_dump's custom format;
+// args may add --table patterns.
+func pgDumpJob(t dbTarget) dbJob {
+	return dbJob{
+		env:    append(t.baseEnv(), "PGPASSWORD="+t.password),
+		script: `exec pg_dump --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_CONN" --no-password --format=custom "$@"`,
+		ext:    extPgCustom,
+	}
+}
+
+// mongoDumpJob dumps the one database t names (args may leave
+// collections out).
+func mongoDumpJob(t dbTarget) dbJob {
+	return dbJob{env: t.baseEnv(), script: mongoAuth + `exec mongodump --host="$DB_HOST" --port="$DB_PORT" "$@" --archive --gzip --db="$DB_NAME"`, ext: extMongo}
+}
 
 // dragonflyDump: Dragonfly does not serve the replication stream
 // redis-cli --rdb reads, so the server writes an RDB snapshot under a name
@@ -291,16 +321,14 @@ func dumpJob(t dbTarget, run string) (dbJob, error) {
 	j := dbJob{env: t.baseEnv()}
 	switch t.engine {
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
-		j.env = append(j.env, "PGPASSWORD="+t.password)
 		if t.database != "" {
-			j.script = `exec pg_dump --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_NAME" --no-password --format=custom`
-			j.ext = extPgCustom
-		} else {
-			// --clean makes the dump replace databases on restore instead of
-			// appending rows to existing tables.
-			j.script = `exec pg_dumpall --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --no-password --clean --if-exists`
-			j.ext, j.gzip = extSQL, true
+			return pgDumpJob(t), nil
 		}
+		j.env = append(j.env, "PGPASSWORD="+t.password)
+		// --clean makes the dump replace databases on restore instead of
+		// appending rows to existing tables.
+		j.script = `exec pg_dumpall --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --no-password --clean --if-exists`
+		j.ext, j.gzip = extSQL, true
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
 		which := `--all-databases`
 		if t.database != "" {
@@ -309,11 +337,10 @@ func dumpJob(t dbTarget, run string) (dbJob, error) {
 		j.script = mysqlPrelude + `exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --single-transaction --routines --triggers --events --hex-blob ` + which
 		j.ext, j.gzip = extSQL, true
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
-		which := ""
 		if t.database != "" {
-			which = ` --db="$DB_NAME"`
+			return mongoDumpJob(t), nil
 		}
-		j.script = mongoAuth + `exec mongodump --host="$DB_HOST" --port="$DB_PORT" "$@" --archive --gzip` + which
+		j.script = mongoAuth + `exec mongodump --host="$DB_HOST" --port="$DB_PORT" "$@" --archive --gzip`
 		j.ext = extMongo
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB:
 		// The CLI writes the RDB to stdout with "-"; its status lines go to
@@ -370,8 +397,9 @@ func restoreJob(t dbTarget, ext, run string) (dbJob, error) {
 			// other objects alone. --single-transaction: a dump that names a
 			// user the database no longer has (renamed or deleted on the
 			// Users tab) fails with nothing changed, not part way after the
-			// drops. It implies --exit-on-error.
-			j.script = `exec pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_NAME" --no-password --clean --if-exists --exit-on-error --single-transaction`
+			// drops. It implies --exit-on-error. A database that no longer
+			// exists is created first.
+			j.script = pgCreateMissing + `exec pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_CONN" --no-password --clean --if-exists --exit-on-error --single-transaction`
 		case extSQL:
 			// pg_dumpall output; "role already exists" errors are expected
 			// and harmless, so psql does not stop on errors.

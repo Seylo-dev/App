@@ -285,8 +285,22 @@ func (*BackupSubject_Database) isBackupSubject_What() {}
 
 type DatabaseDump struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Empty means every database.
-	Database      string `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
+	// Without selections: empty means everything on the server (every
+	// database, for Postgres the roles too), set means that one database.
+	// Panels from 0.2.15 set it as well when exactly one database is
+	// chosen, so an agent without backup.select.v1 would still dump only
+	// that database. On a restore: the database a single-database object
+	// goes into (empty: the service's main database).
+	Database string `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
+	// added in 0.2.15 (backup.select.v1): what to back up, by name. Empty
+	// keeps the behaviour above. Set, the agent lists the server right
+	// before the dump: a chosen database or table that no longer exists is
+	// skipped with a line in BackupResult.warnings, and the backup fails
+	// when nothing is left (a database whose chosen tables are all gone is
+	// never widened to the whole database). Tables only with exactly one
+	// database. On a restore: what the object holds (the backup's recorded
+	// contents); exactly that is replaced, everything else stays.
+	Selections    []*DatabaseSelection `protobuf:"bytes,2,rep,name=selections,proto3" json:"selections,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -328,6 +342,445 @@ func (x *DatabaseDump) GetDatabase() string {
 	return ""
 }
 
+func (x *DatabaseDump) GetSelections() []*DatabaseSelection {
+	if x != nil {
+		return x.Selections
+	}
+	return nil
+}
+
+// One chosen database, optionally only some of its tables (Postgres and
+// MySQL) or collections (MongoDB). added in 0.2.15
+type DatabaseSelection struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Database string                 `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
+	// Empty: the whole database.
+	Tables        []*TableRef `protobuf:"bytes,2,rep,name=tables,proto3" json:"tables,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DatabaseSelection) Reset() {
+	*x = DatabaseSelection{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DatabaseSelection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DatabaseSelection) ProtoMessage() {}
+
+func (x *DatabaseSelection) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DatabaseSelection.ProtoReflect.Descriptor instead.
+func (*DatabaseSelection) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *DatabaseSelection) GetDatabase() string {
+	if x != nil {
+		return x.Database
+	}
+	return ""
+}
+
+func (x *DatabaseSelection) GetTables() []*TableRef {
+	if x != nil {
+		return x.Tables
+	}
+	return nil
+}
+
+// A table or collection by name. added in 0.2.15
+type TableRef struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Postgres only: the table's schema. Separate from name, never a dotted
+	// string.
+	Schema        string `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
+	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TableRef) Reset() {
+	*x = TableRef{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TableRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TableRef) ProtoMessage() {}
+
+func (x *TableRef) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TableRef.ProtoReflect.Descriptor instead.
+func (*TableRef) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TableRef) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
+}
+
+func (x *TableRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// What a backup holds, as the database reported it right before the dump:
+// names, approximate rows and sizes inside the database (not the size of
+// the compressed object). added in 0.2.15
+type BackupContents struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Everything on the server (no selection): databases lists what was
+	// there. A whole-server backup whose measurement failed has
+	// whole_server set and no databases (BackupResult.warnings says why).
+	WholeServer   bool                `protobuf:"varint,1,opt,name=whole_server,json=wholeServer,proto3" json:"whole_server,omitempty"`
+	Databases     []*DatabaseContents `protobuf:"bytes,2,rep,name=databases,proto3" json:"databases,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupContents) Reset() {
+	*x = BackupContents{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupContents) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupContents) ProtoMessage() {}
+
+func (x *BackupContents) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupContents.ProtoReflect.Descriptor instead.
+func (*BackupContents) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *BackupContents) GetWholeServer() bool {
+	if x != nil {
+		return x.WholeServer
+	}
+	return false
+}
+
+func (x *BackupContents) GetDatabases() []*DatabaseContents {
+	if x != nil {
+		return x.Databases
+	}
+	return nil
+}
+
+type DatabaseContents struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// On disk inside the database server, indexes included. For a backup of
+	// some tables only, the sum of those tables.
+	SizeBytes uint64 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	// The engine's estimate; -1 when it has none.
+	ApproxRows int64 `protobuf:"varint,3,opt,name=approx_rows,json=approxRows,proto3" json:"approx_rows,omitempty"`
+	// Every table or collection the backup holds of this database, also
+	// those left out of tables.
+	TableCount uint32 `protobuf:"varint,4,opt,name=table_count,json=tableCount,proto3" json:"table_count,omitempty"`
+	// The biggest first. At most 500 per database and 2000 per result.
+	Tables []*TableContents `protobuf:"bytes,5,rep,name=tables,proto3" json:"tables,omitempty"`
+	// Some tables are not listed (the caps); the totals above still count them.
+	TablesTruncated bool `protobuf:"varint,6,opt,name=tables_truncated,json=tablesTruncated,proto3" json:"tables_truncated,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *DatabaseContents) Reset() {
+	*x = DatabaseContents{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DatabaseContents) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DatabaseContents) ProtoMessage() {}
+
+func (x *DatabaseContents) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DatabaseContents.ProtoReflect.Descriptor instead.
+func (*DatabaseContents) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DatabaseContents) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DatabaseContents) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *DatabaseContents) GetApproxRows() int64 {
+	if x != nil {
+		return x.ApproxRows
+	}
+	return 0
+}
+
+func (x *DatabaseContents) GetTableCount() uint32 {
+	if x != nil {
+		return x.TableCount
+	}
+	return 0
+}
+
+func (x *DatabaseContents) GetTables() []*TableContents {
+	if x != nil {
+		return x.Tables
+	}
+	return nil
+}
+
+func (x *DatabaseContents) GetTablesTruncated() bool {
+	if x != nil {
+		return x.TablesTruncated
+	}
+	return false
+}
+
+type TableContents struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Postgres: the schema. Empty for MySQL, MariaDB and MongoDB.
+	Schema    string `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
+	Name      string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	SizeBytes uint64 `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	// The engine's estimate; -1 when it has none (a Postgres table never
+	// analysed).
+	ApproxRows    int64 `protobuf:"varint,4,opt,name=approx_rows,json=approxRows,proto3" json:"approx_rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TableContents) Reset() {
+	*x = TableContents{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TableContents) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TableContents) ProtoMessage() {}
+
+func (x *TableContents) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TableContents.ProtoReflect.Descriptor instead.
+func (*TableContents) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *TableContents) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
+}
+
+func (x *TableContents) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TableContents) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *TableContents) GetApproxRows() int64 {
+	if x != nil {
+		return x.ApproxRows
+	}
+	return 0
+}
+
+// InspectDatabaseRequest lists a database service's databases (database
+// empty: names, sizes and table counts, no tables) or one database's
+// tables or collections, through the same helper and sign-in as a backup.
+// Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.15
+type InspectDatabaseRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServiceId     string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
+	Database      string                 `protobuf:"bytes,2,opt,name=database,proto3" json:"database,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectDatabaseRequest) Reset() {
+	*x = InspectDatabaseRequest{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectDatabaseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectDatabaseRequest) ProtoMessage() {}
+
+func (x *InspectDatabaseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectDatabaseRequest.ProtoReflect.Descriptor instead.
+func (*InspectDatabaseRequest) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *InspectDatabaseRequest) GetServiceId() string {
+	if x != nil {
+		return x.ServiceId
+	}
+	return ""
+}
+
+func (x *InspectDatabaseRequest) GetDatabase() string {
+	if x != nil {
+		return x.Database
+	}
+	return ""
+}
+
+type InspectDatabaseResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// whole_server is false. With a database asked for: that one database,
+	// or none when it does not exist; its tables are capped at 5000.
+	Contents      *BackupContents `protobuf:"bytes,1,opt,name=contents,proto3" json:"contents,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectDatabaseResponse) Reset() {
+	*x = InspectDatabaseResponse{}
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectDatabaseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectDatabaseResponse) ProtoMessage() {}
+
+func (x *InspectDatabaseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectDatabaseResponse.ProtoReflect.Descriptor instead.
+func (*InspectDatabaseResponse) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *InspectDatabaseResponse) GetContents() *BackupContents {
+	if x != nil {
+		return x.Contents
+	}
+	return nil
+}
+
 // RunBackupRequest starts a backup and returns once it is accepted. The
 // result arrives as a durable BackupResult event, so it survives a dropped
 // connection.
@@ -351,7 +804,7 @@ type RunBackupRequest struct {
 
 func (x *RunBackupRequest) Reset() {
 	*x = RunBackupRequest{}
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -363,7 +816,7 @@ func (x *RunBackupRequest) String() string {
 func (*RunBackupRequest) ProtoMessage() {}
 
 func (x *RunBackupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +829,7 @@ func (x *RunBackupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupRequest.ProtoReflect.Descriptor instead.
 func (*RunBackupRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{3}
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RunBackupRequest) GetBackupId() string {
@@ -429,7 +882,7 @@ type RunBackupResponse struct {
 
 func (x *RunBackupResponse) Reset() {
 	*x = RunBackupResponse{}
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -441,7 +894,7 @@ func (x *RunBackupResponse) String() string {
 func (*RunBackupResponse) ProtoMessage() {}
 
 func (x *RunBackupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -454,7 +907,7 @@ func (x *RunBackupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupResponse.ProtoReflect.Descriptor instead.
 func (*RunBackupResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{4}
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{11}
 }
 
 // BackupProgress is best-effort progress of a running backup.
@@ -471,7 +924,7 @@ type BackupProgress struct {
 
 func (x *BackupProgress) Reset() {
 	*x = BackupProgress{}
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -483,7 +936,7 @@ func (x *BackupProgress) String() string {
 func (*BackupProgress) ProtoMessage() {}
 
 func (x *BackupProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -496,7 +949,7 @@ func (x *BackupProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupProgress.ProtoReflect.Descriptor instead.
 func (*BackupProgress) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *BackupProgress) GetBackupId() string {
@@ -540,7 +993,7 @@ type RestoreBackupRequest struct {
 
 func (x *RestoreBackupRequest) Reset() {
 	*x = RestoreBackupRequest{}
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -552,7 +1005,7 @@ func (x *RestoreBackupRequest) String() string {
 func (*RestoreBackupRequest) ProtoMessage() {}
 
 func (x *RestoreBackupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -565,7 +1018,7 @@ func (x *RestoreBackupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreBackupRequest.ProtoReflect.Descriptor instead.
 func (*RestoreBackupRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RestoreBackupRequest) GetSubject() *BackupSubject {
@@ -598,7 +1051,7 @@ type RestoreBackupResponse struct {
 
 func (x *RestoreBackupResponse) Reset() {
 	*x = RestoreBackupResponse{}
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -610,7 +1063,7 @@ func (x *RestoreBackupResponse) String() string {
 func (*RestoreBackupResponse) ProtoMessage() {}
 
 func (x *RestoreBackupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_backup_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_backup_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -623,7 +1076,7 @@ func (x *RestoreBackupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreBackupResponse.ProtoReflect.Descriptor instead.
 func (*RestoreBackupResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{7}
+	return file_seylo_agent_v1_backup_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RestoreBackupResponse) GetRestoredBytes() uint64 {
@@ -654,9 +1107,44 @@ const file_seylo_agent_v1_backup_proto_rawDesc = "" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x18\n" +
 	"\x06volume\x18\x02 \x01(\tH\x00R\x06volume\x12:\n" +
 	"\bdatabase\x18\x03 \x01(\v2\x1c.seylo.agent.v1.DatabaseDumpH\x00R\bdatabaseB\x06\n" +
-	"\x04what\"*\n" +
+	"\x04what\"m\n" +
 	"\fDatabaseDump\x12\x1a\n" +
-	"\bdatabase\x18\x01 \x01(\tR\bdatabase\"\x84\x02\n" +
+	"\bdatabase\x18\x01 \x01(\tR\bdatabase\x12A\n" +
+	"\n" +
+	"selections\x18\x02 \x03(\v2!.seylo.agent.v1.DatabaseSelectionR\n" +
+	"selections\"a\n" +
+	"\x11DatabaseSelection\x12\x1a\n" +
+	"\bdatabase\x18\x01 \x01(\tR\bdatabase\x120\n" +
+	"\x06tables\x18\x02 \x03(\v2\x18.seylo.agent.v1.TableRefR\x06tables\"6\n" +
+	"\bTableRef\x12\x16\n" +
+	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"s\n" +
+	"\x0eBackupContents\x12!\n" +
+	"\fwhole_server\x18\x01 \x01(\bR\vwholeServer\x12>\n" +
+	"\tdatabases\x18\x02 \x03(\v2 .seylo.agent.v1.DatabaseContentsR\tdatabases\"\xe9\x01\n" +
+	"\x10DatabaseContents\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x1f\n" +
+	"\vapprox_rows\x18\x03 \x01(\x03R\n" +
+	"approxRows\x12\x1f\n" +
+	"\vtable_count\x18\x04 \x01(\rR\n" +
+	"tableCount\x125\n" +
+	"\x06tables\x18\x05 \x03(\v2\x1d.seylo.agent.v1.TableContentsR\x06tables\x12)\n" +
+	"\x10tables_truncated\x18\x06 \x01(\bR\x0ftablesTruncated\"{\n" +
+	"\rTableContents\x12\x16\n" +
+	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x03 \x01(\x04R\tsizeBytes\x12\x1f\n" +
+	"\vapprox_rows\x18\x04 \x01(\x03R\n" +
+	"approxRows\"S\n" +
+	"\x16InspectDatabaseRequest\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x1a\n" +
+	"\bdatabase\x18\x02 \x01(\tR\bdatabase\"U\n" +
+	"\x17InspectDatabaseResponse\x12:\n" +
+	"\bcontents\x18\x01 \x01(\v2\x1e.seylo.agent.v1.BackupContentsR\bcontents\"\x84\x02\n" +
 	"\x10RunBackupRequest\x12\x1b\n" +
 	"\tbackup_id\x18\x01 \x01(\tR\bbackupId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x127\n" +
@@ -699,30 +1187,42 @@ func file_seylo_agent_v1_backup_proto_rawDescGZIP() []byte {
 }
 
 var file_seylo_agent_v1_backup_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_seylo_agent_v1_backup_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_seylo_agent_v1_backup_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_seylo_agent_v1_backup_proto_goTypes = []any{
-	(BackupPhase)(0),              // 0: seylo.agent.v1.BackupPhase
-	(*BackupDestination)(nil),     // 1: seylo.agent.v1.BackupDestination
-	(*BackupSubject)(nil),         // 2: seylo.agent.v1.BackupSubject
-	(*DatabaseDump)(nil),          // 3: seylo.agent.v1.DatabaseDump
-	(*RunBackupRequest)(nil),      // 4: seylo.agent.v1.RunBackupRequest
-	(*RunBackupResponse)(nil),     // 5: seylo.agent.v1.RunBackupResponse
-	(*BackupProgress)(nil),        // 6: seylo.agent.v1.BackupProgress
-	(*RestoreBackupRequest)(nil),  // 7: seylo.agent.v1.RestoreBackupRequest
-	(*RestoreBackupResponse)(nil), // 8: seylo.agent.v1.RestoreBackupResponse
+	(BackupPhase)(0),                // 0: seylo.agent.v1.BackupPhase
+	(*BackupDestination)(nil),       // 1: seylo.agent.v1.BackupDestination
+	(*BackupSubject)(nil),           // 2: seylo.agent.v1.BackupSubject
+	(*DatabaseDump)(nil),            // 3: seylo.agent.v1.DatabaseDump
+	(*DatabaseSelection)(nil),       // 4: seylo.agent.v1.DatabaseSelection
+	(*TableRef)(nil),                // 5: seylo.agent.v1.TableRef
+	(*BackupContents)(nil),          // 6: seylo.agent.v1.BackupContents
+	(*DatabaseContents)(nil),        // 7: seylo.agent.v1.DatabaseContents
+	(*TableContents)(nil),           // 8: seylo.agent.v1.TableContents
+	(*InspectDatabaseRequest)(nil),  // 9: seylo.agent.v1.InspectDatabaseRequest
+	(*InspectDatabaseResponse)(nil), // 10: seylo.agent.v1.InspectDatabaseResponse
+	(*RunBackupRequest)(nil),        // 11: seylo.agent.v1.RunBackupRequest
+	(*RunBackupResponse)(nil),       // 12: seylo.agent.v1.RunBackupResponse
+	(*BackupProgress)(nil),          // 13: seylo.agent.v1.BackupProgress
+	(*RestoreBackupRequest)(nil),    // 14: seylo.agent.v1.RestoreBackupRequest
+	(*RestoreBackupResponse)(nil),   // 15: seylo.agent.v1.RestoreBackupResponse
 }
 var file_seylo_agent_v1_backup_proto_depIdxs = []int32{
-	3, // 0: seylo.agent.v1.BackupSubject.database:type_name -> seylo.agent.v1.DatabaseDump
-	2, // 1: seylo.agent.v1.RunBackupRequest.subject:type_name -> seylo.agent.v1.BackupSubject
-	1, // 2: seylo.agent.v1.RunBackupRequest.destination:type_name -> seylo.agent.v1.BackupDestination
-	0, // 3: seylo.agent.v1.BackupProgress.phase:type_name -> seylo.agent.v1.BackupPhase
-	2, // 4: seylo.agent.v1.RestoreBackupRequest.subject:type_name -> seylo.agent.v1.BackupSubject
-	1, // 5: seylo.agent.v1.RestoreBackupRequest.destination:type_name -> seylo.agent.v1.BackupDestination
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	3,  // 0: seylo.agent.v1.BackupSubject.database:type_name -> seylo.agent.v1.DatabaseDump
+	4,  // 1: seylo.agent.v1.DatabaseDump.selections:type_name -> seylo.agent.v1.DatabaseSelection
+	5,  // 2: seylo.agent.v1.DatabaseSelection.tables:type_name -> seylo.agent.v1.TableRef
+	7,  // 3: seylo.agent.v1.BackupContents.databases:type_name -> seylo.agent.v1.DatabaseContents
+	8,  // 4: seylo.agent.v1.DatabaseContents.tables:type_name -> seylo.agent.v1.TableContents
+	6,  // 5: seylo.agent.v1.InspectDatabaseResponse.contents:type_name -> seylo.agent.v1.BackupContents
+	2,  // 6: seylo.agent.v1.RunBackupRequest.subject:type_name -> seylo.agent.v1.BackupSubject
+	1,  // 7: seylo.agent.v1.RunBackupRequest.destination:type_name -> seylo.agent.v1.BackupDestination
+	0,  // 8: seylo.agent.v1.BackupProgress.phase:type_name -> seylo.agent.v1.BackupPhase
+	2,  // 9: seylo.agent.v1.RestoreBackupRequest.subject:type_name -> seylo.agent.v1.BackupSubject
+	1,  // 10: seylo.agent.v1.RestoreBackupRequest.destination:type_name -> seylo.agent.v1.BackupDestination
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_backup_proto_init() }
@@ -740,7 +1240,7 @@ func file_seylo_agent_v1_backup_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_backup_proto_rawDesc), len(file_seylo_agent_v1_backup_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

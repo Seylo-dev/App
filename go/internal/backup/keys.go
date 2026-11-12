@@ -20,9 +20,12 @@ const (
 	extRedis    = ".rdb.gz"
 	// ClickHouse BACKUP archives (already compressed).
 	extClickHouse = ".clickhouse.zip"
+	// Several chosen Postgres or MongoDB databases, one dump each
+	// (bundle.go).
+	extBundle = ".bundle"
 )
 
-var knownExts = []string{extClickHouse, extVolume, extSQL, extMongo, extRedis, extPgCustom}
+var knownExts = []string{extClickHouse, extVolume, extSQL, extMongo, extRedis, extPgCustom, extBundle}
 
 // formatOf returns the extension of a key we wrote, or "" for a key we
 // did not.
