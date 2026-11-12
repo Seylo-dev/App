@@ -80,7 +80,7 @@ export const watchConsole = defineOp({
   kind: "query",
   summary: "Watch the console of a service",
   description:
-    "Returns a one-minute ticket for a WebSocket with the console's output only, like terminals.console without stdin: recent output first, then live output; what is sent on it is dropped. Like reading logs it is not written to the audit log; the Overview's console card watches and opens terminals.console once someone types.",
+    "Returns a one-minute ticket for a WebSocket with the console's output only, like terminals.console without stdin: recent output first, then live output; what is sent on it is dropped. Like reading logs it is not written to the audit log; the Overview's console card watches and opens terminals.console once someone types, and the Console tab asks it which container it would attach to (target.containerId) before it reconnects by itself.",
   input: Type.Object({ ...serviceInput, tail: Type.Optional(Type.Integer({ minimum: 0, maximum: 5000, default: 100 })) }),
   output: TerminalTicket,
   permission: permission.service("terminals.console", (input: { serviceId: string }) => input.serviceId),

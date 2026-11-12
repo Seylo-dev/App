@@ -32,6 +32,8 @@ export default {
   waitStarting: "The app is starting. Its console connects when it is up.",
   /** The service's status is unknown: its node does not answer the panel. */
   waitUnknown: "The app's node is not answering. Its console connects when it is back.",
+  /** After several tries while the app runs: the panel sees no container of it to attach to. */
+  noContainer: "The app has no running container to attach to.",
   exited: "The process exited with code {code}.",
   search: "Search output",
   searchPlaceholder: "Find (Enter, Shift+Enter)",

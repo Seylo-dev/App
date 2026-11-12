@@ -7,16 +7,19 @@
 // closed when left, only the modes a member may open and a shell only when
 // asked, phone width), the console connecting by itself (after a drop while
 // the app runs, once a stopped or crashed app runs, a starting app once its
-// container is there, on the tab shown again
-// or the network back after an idle close, never after a refusal), and a
-// deploy that failed at Clone: its title and the private repo hint.
+// container is there, on the tab shown again, the network or the live
+// socket back after an idle close, never after a refusal, never in a hidden
+// tab; retries asking the watch ticket before the audited console, and
+// stopping at Reconnect after the tries an attach that is refused at once
+// came to, with one Connected line), and a deploy that failed at Clone: its
+// title and the private repo hint.
 // Screenshots go to $CONSOLE_SHOTS_DIR (default $SHOTS_DIR/console).
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { DemoRefusal } from "./demo/refusal";
-import { installDemo, pushLive, terminalSockets } from "./demo/routes";
+import { dropLive, installDemo, pushLive, terminalAgent, terminalSockets } from "./demo/routes";
 import { handlers as serviceHandlers, servicesById, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
@@ -26,6 +29,8 @@ const privateApi = `/p/${ids.acme}/s/${svc.privateApi}`;
 const consoleLine = "Listening on http://0.0.0.0:3000";
 const stdinPlaceholder = "Type a command for the app (goes to its stdin)";
 const notRunningNote = "The app is not running. Its console connects when it starts.";
+/** follow.ts retryLimit: tries in a row that came to nothing before a running app's console stops at Reconnect. */
+const retryLimit = 6;
 
 /** services.get with the api's status (and stopped) from `now`, the other services as in the demo. */
 function apiStatus(now: () => { status: string; stopped?: boolean }) {
@@ -396,7 +401,14 @@ test.describe("console and shell", () => {
     await expect.poll(() => openSockets()).toEqual(["console"]);
     await expect(terminal.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
     await expect(terminal.getByText("Disconnected.", { exact: true })).toHaveCount(0);
-    expect(tickets).toEqual(["terminals.console", "terminals.console", "terminals.console"]);
+    // Each try first asks which container the panel sees (the watch ticket, not audited), then opens the console.
+    expect(tickets).toEqual([
+      "terminals.console",
+      "terminals.watchConsole",
+      "terminals.console",
+      "terminals.watchConsole",
+      "terminals.console",
+    ]);
   });
 
   test("a stopped app: the Console tab says so, opens nothing, and connects when it is started", async ({ page }) => {
@@ -426,7 +438,7 @@ test.describe("console and shell", () => {
     await expect(terminal.getByText(consoleLine)).toBeVisible();
     await expect(terminal.getByText(notRunningNote)).toHaveCount(0);
     await expect.poll(() => openSockets()).toEqual(["console"]);
-    expect(tickets).toEqual(["terminals.console"]);
+    expect(tickets).toEqual(["terminals.watchConsole", "terminals.console"]);
   });
 
   test("the Overview card: after a crash it says the app is not running, and connects once it runs again", async ({ page }) => {
@@ -514,7 +526,137 @@ test.describe("console and shell", () => {
     await page.evaluate(() => window.dispatchEvent(new Event("online")));
     await expect.poll(() => terminalSockets.length, { timeout: 5000 }).toBe(3);
     await expect.poll(() => openSockets()).toEqual(["console"]);
-    expect(tickets).toEqual(["terminals.console", "terminals.console", "terminals.console"]);
+    expect(tickets).toEqual([
+      "terminals.console",
+      "terminals.watchConsole",
+      "terminals.console",
+      "terminals.watchConsole",
+      "terminals.console",
+    ]);
+  });
+
+  test("an idle console connects when the panel's live socket is back, as after a panel restart", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    await terminalSockets[0]?.drop({ code: 1000, reason: "idle", note: "The session was idle for too long." });
+    await expect(terminal.getByRole("button", { name: "Reconnect" })).toBeVisible();
+    await page.waitForTimeout(1500);
+    expect(terminalSockets).toHaveLength(1);
+    // The panel went away and came back: the page's live socket reconnects, and the console with it.
+    await dropLive();
+    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    await expect(terminal.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
+  });
+
+  test("a hidden browser tab connects nothing by itself; shown again, the console connects", async ({ page }) => {
+    await installDemo(page);
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    const setVisibility = (state: "hidden" | "visible") =>
+      page.evaluate((value) => {
+        Object.defineProperty(document, "visibilityState", { value, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, state);
+    await setVisibility("hidden");
+    // The socket drops while nobody looks: no retry, no ticket, until the tab is shown.
+    await terminalSockets[0]?.drop();
+    await page.waitForTimeout(3000);
+    expect(terminalSockets).toHaveLength(1);
+    expect(tickets).toEqual(["terminals.console"]);
+    await setVisibility("visible");
+    await expect.poll(() => terminalSockets.length, { timeout: 5000 }).toBe(2);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    expect(tickets).toEqual(["terminals.console", "terminals.watchConsole", "terminals.console"]);
+  });
+
+  test("the Console tab's retries ask the watch ticket until a container is there: no audited console for nothing", async ({ page }) => {
+    let container: string | null = "c0ffee";
+    let status = "running";
+    await installDemo(page, {
+      overrides: {
+        ...apiStatus(() => ({ status })),
+        // The panel's view of the node: no container while the app restarts or its image is pulled.
+        "terminals.watchConsole": (input) => {
+          const ticket = serviceHandlers["terminals.watchConsole"]?.(input) as { target: object };
+          return { ...ticket, target: { ...ticket.target, containerId: container } };
+        },
+      },
+    });
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    expect(tickets).toEqual(["terminals.console"]);
+    // A restart: the process exits while the status still says running, and the new container is not up yet.
+    container = null;
+    await terminalSockets[0]?.end(0);
+    await expect(terminal.getByText("Waiting for the new process…")).toBeVisible();
+    await expect.poll(() => tickets.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+    // Each try asked only the watch ticket, which is not audited, and opened no socket.
+    expect(new Set(tickets.slice(1))).toEqual(new Set(["terminals.watchConsole"]));
+    expect(terminalSockets).toHaveLength(1);
+    // The status moves on to starting: the Console tab keeps asking the watch ticket, still nothing audited.
+    status = "starting";
+    apiChanged();
+    await expect(terminal.getByText("The app is starting. Its console connects when it is up.")).toBeVisible();
+    const asked = tickets.length;
+    await expect.poll(() => tickets.length, { timeout: 15_000 }).toBeGreaterThan(asked);
+    expect(new Set(tickets.slice(1))).toEqual(new Set(["terminals.watchConsole"]));
+    // Its container is up: the next try opens the console, once.
+    container = "c0ffee";
+    await expect.poll(() => terminalSockets.length, { timeout: 15_000 }).toBe(2);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    expect(tickets.filter((op) => op === "terminals.console")).toHaveLength(2);
+    expect(tickets.at(-2)).toBe("terminals.watchConsole");
+    expect(tickets.at(-1)).toBe("terminals.console");
+  });
+
+  test("an attach refused at once while the app runs stops at Reconnect after its tries, with one Connected line", async ({ page }) => {
+    await page.clock.install();
+    await installDemo(page);
+    const tickets = ticketRequests(page);
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    const output = terminal.getByRole("application", { name: "Console" });
+    await expect(output.getByText(consoleLine)).toBeVisible();
+    // The session lasted, then the node the panel picks lost the service's container while another node serves
+    // it: the status stays running (partial), and every attach the agent answers at once with no container.
+    await page.clock.fastForward(11_000);
+    const refused = "The service has no running container on this node.";
+    terminalAgent.refuse = refused;
+    await terminalSockets[0]?.drop();
+    // It used to try every 8 s forever: here it stops after retryLimit tries.
+    await expect
+      .poll(
+        async () => {
+          await page.clock.fastForward(2000);
+          return terminalSockets.length;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(1 + retryLimit);
+    const reconnect = terminal.getByRole("button", { name: "Reconnect" });
+    await expect(reconnect).toBeVisible();
+    // The panel's words on the Reconnect line, not in the terminal; the terminal has the first session's line only.
+    await expect(reconnect.locator("xpath=..")).toContainText(refused);
+    await expect(output.getByText(refused)).toHaveCount(0);
+    await expect(output.getByText(/Connected to api/)).toHaveCount(1);
+    expect(tickets.filter((op) => op === "terminals.console")).toHaveLength(1 + retryLimit);
+    await page.clock.fastForward(60_000);
+    await page.waitForTimeout(1000);
+    expect(terminalSockets).toHaveLength(1 + retryLimit);
+    // Looking at the tab again tries again; once the agent attaches it stays.
+    terminalAgent.refuse = null;
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => terminalSockets.length).toBe(2 + retryLimit);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    await expect(reconnect).toHaveCount(0);
+    await expect(output.getByText(/Connected to api/)).toHaveCount(2);
   });
 
   test("a refused console ticket stops at Reconnect and is not asked for again by itself", async ({ page }) => {

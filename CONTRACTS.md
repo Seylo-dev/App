@@ -5593,27 +5593,50 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `useTerminalSession`; the decisions are the pure `consoleStep` in
   `terminal/follow.ts`). While a container runs or starts, a session that
   ended opens again by itself after 1 s, doubling to 8 s, with no time
-  limit while it runs (the waits start over after a session that stayed
-  up 10 s): an exit (restart, deploy), a dropped socket (network, panel
-  restart, agent stream error), a ticket op that answered UNAVAILABLE,
-  INTERNAL or RATE_LIMITED; for a starting app whose ticket names no
-  container (`target.containerId` null, the image still pulling) it opens
-  no socket and tries again after the wait ("The app is starting. Its
-  console connects when it is up."). While nothing runs (stopped,
-  crashed and left by the crash policy, never deployed, a first deploy
-  with nothing live) the overlay says "The app is not running. Its console connects when it
-  starts." (unknown status: the node is not answering) with no Reconnect,
-  asks for no ticket, and connects as soon as the status turns running or
-  starting or the generation or live deployment changes. Entering the
-  page or tab, the browser tab becoming visible again and the `online`
-  event connect a closed console whose service runs. A refusal that will
-  not change by itself stops at Reconnect: any other ticket op error
-  (FORBIDDEN, NOT_FOUND, NOT_IMPLEMENTED, ...) or the socket's 4401; so
-  does the panel's idle close (1000 "idle"), which shows the panel's
-  closed message and is opened again only by one of those nudges or a
-  click. One session at a time: a nudge leaves an open or opening session
-  alone, and leaving the page or switching to Shell cancels a pending
-  retry (the attempt counter). Both offer only the modes the person may
+  limit while it keeps attaching: an exit (restart, deploy), a dropped
+  socket (network, panel restart, agent stream error), a ticket op that
+  answered UNAVAILABLE, INTERNAL or RATE_LIMITED. A connect nobody clicked
+  (a retry, a nudge, entering the page while the app starts) first asks
+  `terminals.watchConsole`, which is not audited, which container the
+  panel sees (`TicketSource.probe`; its ticket goes unused and expires),
+  and calls the audited `terminals.console` only when `target.containerId`
+  names one; with none (the restart's new container not up yet, the
+  image still pulling, the first placed node without the service) it
+  opens no socket and tries again after the wait ("Waiting for the new
+  process…" after an exit, "The app is starting. Its console connects
+  when it is up." while it starts). The Overview card's own ticket is that
+  query, so it goes by its `target.containerId` the same way. After
+  `retryLimit` (6, about 25 s of waits) tries in a row that came to
+  nothing (a ticket op error, a session that ended within 10 s, no
+  container while the status says running) a running app's console stops
+  at Reconnect with the panel's note or "The app has no running container
+  to attach to."; a starting app's waits for its status instead. Waiting
+  for a starting app's container is no try. A session that stayed up 10 s
+  starts the waits and the tries over; a change of the status or
+  generation connects at once but does not, so a crash loop that flips
+  the status every cycle keeps backing off. A session that opened by
+  itself shows its ready state and Connected line only once its first
+  output arrives or it stayed up 1 s (`confirmMs`): one the panel ends at
+  once leaves no Connected or error line in the terminal. While nothing
+  runs (stopped, crashed and left by the crash policy, never deployed, a
+  first deploy with nothing live) the overlay says "The app is not
+  running. Its console connects when it starts." (unknown status: the
+  node is not answering) with no Reconnect, asks for no ticket, and
+  connects as soon as the status turns running or starting or the
+  generation or live deployment changes. Entering the page or tab, the
+  browser tab becoming visible again, the `online` event and the panel's
+  live socket coming back (`live.onUpChange`, a panel restart) connect a
+  closed console whose service runs and start the tries over. A hidden
+  browser tab connects nothing by itself: a session that ends there
+  waits until the tab is shown. A refusal that will not change by itself
+  stops at Reconnect: any other ticket op error (FORBIDDEN, NOT_FOUND,
+  NOT_IMPLEMENTED, ...) or the socket's 4401; so does the panel's idle
+  close (1000 "idle"), which shows the panel's closed message and is
+  opened again only by one of those nudges or a click. A click on
+  Reconnect asks `terminals.console` directly and starts the tries over.
+  One session at a time: a nudge leaves an open or opening session alone,
+  and leaving the page or switching to Shell cancels a pending retry (the
+  attempt counter). Both offer only the modes the person may
   open (`useTerminalModes`: owners and admins every mode, members what
   `grants.mine` allows on the service or its project); with none the card
   is hidden and the tab says so. The database shell and the node's host
@@ -5987,8 +6010,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the Overview card after a crash until the status turns running
   (`demo/routes.ts` `pushLive` sends the panel's invalidation), a starting
   app attaching once its ticket names a container, an idle
-  close waiting for visibilitychange or online, a refused ticket staying
-  at Reconnect (`terminalSockets[n].drop`); a failed clone's title and
+  close waiting for visibilitychange, online or the live socket back
+  (`dropLive`), a refused ticket staying at Reconnect
+  (`terminalSockets[n].drop`), no retry in a hidden tab, the Console
+  tab's retries asking only `terminals.watchConsole` while no container
+  is there, an attach the agent refuses at once
+  (`terminalAgent.refuse`) stopping at Reconnect after `retryLimit` tries
+  with one Connected line (`page.clock`); a failed clone's title and
   private repo hint),
   `repo-picker.spec.ts` (the New app dialog's Repository
   field with `demo/repos.ts`: Browse and pick, owner/repo an installation

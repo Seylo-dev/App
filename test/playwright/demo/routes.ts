@@ -220,8 +220,23 @@ export const terminalSockets: {
   drop: (how?: TerminalDrop) => Promise<void>;
 }[] = [];
 
+/**
+ * The fake agent's answer to a console socket that opens from now on: null
+ * attaches as usual; a string plays the panel when the agent refuses the
+ * attach at once (ready, then a closed message with this reason, then
+ * 1011 "closed"), as for a node that has no container of the service.
+ */
+export const terminalAgent: { refuse: string | null } = { refuse: null };
+
 /** The live sockets open now (one per page), for pushLive. */
 const liveSockets = new Set<WebSocketRoute>();
+
+/** Closes every open live socket from the panel's side, as a panel restart does; the page reconnects by itself. */
+export async function dropLive(): Promise<void> {
+  const open = [...liveSockets];
+  liveSockets.clear();
+  await Promise.all(open.map((ws) => ws.close({ code: 1012, reason: "restarting" }).catch(() => {})));
+}
 
 /**
  * Sends a live event on a topic to every open page, as the panel does when
@@ -243,6 +258,7 @@ function resetDemoState() {
   panelAccess = openPanelAccess();
   tailscaleStatus = runningTailscale();
   terminalSockets.length = 0;
+  terminalAgent.refuse = null;
   liveSockets.clear();
   resetGitDemo();
   resetAssistantDemo();
@@ -446,6 +462,11 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
       entry.closed = true;
     });
     ws.send(JSON.stringify({ type: "ready", containerId: "c0ffee", generation: 42, user: shell ? "bun" : "", workdir: shell ? "/app" : "" }));
+    if (!shell && terminalAgent.refuse !== null) {
+      ws.send(JSON.stringify({ type: "closed", reason: terminalAgent.refuse }));
+      void ws.close({ code: 1011, reason: "closed" });
+      return;
+    }
     if (shell) ws.send(encode("\x1b[32mbun@api\x1b[0m:\x1b[34m/app\x1b[0m$ "));
     else
       for (const line of [

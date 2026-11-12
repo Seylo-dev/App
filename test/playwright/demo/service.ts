@@ -681,8 +681,9 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "boxes.get": (input: Input) => ({ serviceId: input.serviceId, projectId: ids.project, name: "box", nodeId: de.id, nodeName: de.name, state: "sleeping", repository: "https://github.com/acme/shop-api", idleMinutes: 30, lastUsedAt: ago(5 * hour), createdAt: ago(5 * day) }),
   "compose.get": () => ({ stack: servicesById[ids.stack], source: { type: "inline", yaml: "services:\n  grafana:\n    image: grafana/grafana:11\n  prometheus:\n    image: prom/prometheus:v3\n" }, members: [] }),
   "logs.follow": () => ({ url: "/api/logs/follow?t=tk", ticket: "tk", expiresAt: ago(-min) }),
-  "terminals.watchConsole": () => ({ url: "/api/terminal/console?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: null, generation: null }, idleTimeoutSeconds: 1800 }),
-  "terminals.console": () => ({ url: "/api/terminal/console?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: null, generation: null }, idleTimeoutSeconds: 1800 }),
+  // The console's tickets name the container the panel found, as the panel's do while the service runs.
+  "terminals.watchConsole": () => ({ url: "/api/terminal/console?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: "c0ffee", generation: 42 }, idleTimeoutSeconds: 1800 }),
+  "terminals.console": () => ({ url: "/api/terminal/console?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: "c0ffee", generation: 42 }, idleTimeoutSeconds: 1800 }),
   "terminals.shell": () => ({ url: "/api/terminal/shell?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: null, generation: null }, idleTimeoutSeconds: 1800 }),
   "databases.openShell": (input: Input) => ({
     ticket: "tk",

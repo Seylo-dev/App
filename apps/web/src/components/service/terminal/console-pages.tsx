@@ -131,6 +131,10 @@ export function ServiceTerminal({
         idle.current = ticket.idleTimeoutSeconds;
         return ticket;
       },
+      // The audited console, when nobody clicked (a retry, a nudge): first which container the panel
+      // sees, from the watch ticket, which is not audited; the ticket itself goes unused and expires.
+      probe:
+        shell || watching ? undefined : async () => (await client.call(terminals.watchConsole, { serviceId: service.id, tail: 0 })).target,
     }),
     [client, service.id, shell, watching],
   );
