@@ -176,6 +176,28 @@ test.describe("database users", () => {
     await expect(dialog.getByRole("button", { name: "Change password" })).toBeEnabled();
   });
 
+  test("a stopped database says why and opens no dialog from a Change link", async ({ page }) => {
+    const message = "The database is stopped. Start it to see and change its users.";
+    const stopped = usersOf(svc.db);
+    await installDemo(page, {
+      overrides: {
+        "databases.users": () => ({
+          ...stopped,
+          signIn: "offline",
+          message,
+          users: [{ ...stopped.users[0], can: { passwordChange: false, rename: false, delete: false, makeMain: false }, why: message }],
+        }),
+      },
+    });
+    for (const change of ["password", "name"]) {
+      await page.goto(`${tab(svc.db, "users")}?change=${change}`);
+      await expect(page.getByRole("note").filter({ hasText: message })).toBeVisible();
+      await expect(page).toHaveURL(tab(svc.db, "users"));
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    }
+    await expect(page.getByRole("button", { name: "New user" })).toHaveCount(0);
+  });
+
   test("Redis has its one default user and says why", async ({ page }) => {
     await installDemo(page);
     await page.goto(tab(svc.redis, "connection"));

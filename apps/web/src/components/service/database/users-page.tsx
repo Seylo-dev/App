@@ -91,7 +91,11 @@ export function UsersPage({ service }: { service: ServiceDetail }) {
   // The Connection tab's Change links: the main user's dialog, once the list says how its name changes.
   useEffect(() => {
     if (!search.change || !data) return;
-    setOpen(search.change === "password" ? mainPasswordDialog(data) : mainNameDialog(data));
+    // Not while it cannot change (stopped, the node away): the tab says why instead.
+    const main = data.users.find((u) => u.main);
+    const allowed =
+      search.change === "password" ? main?.can.passwordChange : data.main.rename === "switch" ? data.signIn === "ok" : main?.can.rename;
+    if (allowed) setOpen(search.change === "password" ? mainPasswordDialog(data) : mainNameDialog(data));
     void navigate({ search: (prev) => ({ ...prev, change: undefined }), replace: true });
   }, [search.change, data, navigate]);
 
