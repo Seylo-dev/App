@@ -10049,7 +10049,7 @@
       "post": {
         "operationId": "backups.deleteRun",
         "summary": "Delete a backup",
-        "description": "Deletes a backup's object from the bucket and marks the run deleted. It can no longer be restored.",
+        "description": "Deletes a backup's object from the bucket and marks the run deleted. It can no longer be restored. When the backup's destination was deleted (destinationId null), the panel has no keys for that bucket: the run is only marked deleted, and its object stays in the bucket, to delete there by hand.",
         "tags": [
           "backups"
         ],
@@ -10937,7 +10937,7 @@
       "post": {
         "operationId": "backups.restore",
         "summary": "Restore a backup",
-        "description": "Restores a successful backup over the service's current data (database or volume). Current data is replaced and cannot be recovered unless backed up first. The service name must be repeated to confirm.",
+        "description": "Restores a successful backup over the service's current data (database or volume). Current data is replaced and cannot be recovered unless backed up first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
         "tags": [
           "backups"
         ],

@@ -47,4 +47,9 @@ export default {
   backupFirst: "Back up the current data first",
   deleteRunTitle: "Delete this backup?",
   deleteRunBody: "Its file is deleted from the bucket. It can no longer be restored.",
+  destinationDeleted: "Destination deleted",
+  forgetRun: "Remove from list",
+  forgetRunTitle: "Remove this backup from the list?",
+  forgetRunBody:
+    "Its destination was deleted, so the panel cannot reach its file. The backup is marked deleted here and the file stays in the bucket: delete it there by hand if you want it gone.",
 } as const;

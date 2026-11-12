@@ -75,6 +75,7 @@ export const Run = Type.Object({
   serviceId: Id,
   /** Null for manual runs. */
   policyId: Type.Union([Id, Type.Null()]),
+  /** Null once the destination was deleted: the backup can then no longer be restored or deleted from the bucket. */
   destinationId: Type.Union([Id, Type.Null()]),
   target: BackupTarget,
   volumeId: Type.Union([Id, Type.Null()]),
@@ -295,7 +296,7 @@ export const restore = defineOp({
   kind: "destructive",
   summary: "Restore a backup",
   description:
-    "Restores a successful backup over the service's current data (database or volume). Current data is replaced and cannot be recovered unless backed up first. The service name must be repeated to confirm.",
+    "Restores a successful backup over the service's current data (database or volume). Current data is replaced and cannot be recovered unless backed up first. The service name must be repeated to confirm. A backup whose destination was deleted (destinationId null) cannot be restored (CONFLICT, reason noDestination).",
   input: Type.Object({
     serviceId: Id,
     runId: Id,
@@ -313,7 +314,8 @@ export const deleteRun = defineOp({
   id: "backups.deleteRun",
   kind: "destructive",
   summary: "Delete a backup",
-  description: "Deletes a backup's object from the bucket and marks the run deleted. It can no longer be restored.",
+  description:
+    "Deletes a backup's object from the bucket and marks the run deleted. It can no longer be restored. When the backup's destination was deleted (destinationId null), the panel has no keys for that bucket: the run is only marked deleted, and its object stays in the bucket, to delete there by hand.",
   input: Type.Object({ serviceId: Id, runId: Id }),
   output: Run,
   permission: serviceScope("backups.edit"),

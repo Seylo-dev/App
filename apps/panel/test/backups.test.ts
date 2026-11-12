@@ -14,6 +14,8 @@ const signed = "backup.signed.v1";
 // A tiny path-style S3: PUT, GET and DELETE on /<bucket>/<key>, ListObjectsV2; access key "BADKEY" is refused.
 // On 127.0.0.1, the address the endpoint names (see fix-backup-signing.test.ts).
 const objects = new Map<string, string>();
+/** Every request the bucket got, as "METHOD /path". */
+const s3Requests: string[] = [];
 let s3: ReturnType<typeof Bun.serve>;
 beforeAll(() => {
   s3 = Bun.serve({
@@ -21,6 +23,7 @@ beforeAll(() => {
     port: 0,
     async fetch(req) {
       const path = new URL(req.url).pathname;
+      s3Requests.push(`${req.method} ${path}`);
       if ((req.headers.get("authorization") ?? "").includes("BADKEY")) {
         return new Response("<Error><Code>InvalidAccessKeyId</Code><Message>no</Message></Error>", { status: 403 });
       }
@@ -57,6 +60,7 @@ beforeEach(async () => {
   panel = testPanel();
   cookie = (await createUser(panel, "owner")).cookie;
   objects.clear();
+  s3Requests.length = 0;
 });
 afterEach(async () => {
   await settleDeploys(panel);
@@ -383,6 +387,48 @@ describe("schedules and runs", () => {
     expect(objects.has(`/backups/${key}`)).toBe(false);
     const gone = await callOp(panel, backupOps.restore, { serviceId: dbId, runId: run.body.id, confirmName: "db" }, { cookie });
     expect(gone.status).toBe(400);
+    agent.disconnect();
+  });
+
+  test("a backup whose destination was deleted cannot be restored, and delete only marks it deleted without touching a bucket", async () => {
+    const { node, dbId, destinationId } = await setup();
+    const policy = await callOp(
+      panel,
+      backupOps.createPolicy,
+      { serviceId: dbId, target: "database", destinationId, schedule: "0 3 * * *" },
+      { cookie },
+    );
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}), restoreBackup: () => ({ restoredBytes: 1n }) }, [], [signed]);
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    const key = keyFor(run.body.id);
+    objects.set(`/backups/${key}`, "dump bytes");
+    backupResult(node.id, run.body.id, true, key);
+
+    // A destination a schedule still writes to cannot be deleted, so no schedule is ever left without one.
+    const inUse = await callOp(panel, backupOps.deleteDestination, { destinationId }, { cookie });
+    expect(inUse.status).toBe(409);
+    expect(inUse.body.error.details).toMatchObject({ reason: "inUse" });
+    await callOp(panel, backupOps.deletePolicy, { serviceId: dbId, policyId: policy.body.id }, { cookie });
+    expect((await callOp(panel, backupOps.deleteDestination, { destinationId }, { cookie })).status).toBe(200);
+    const listed = await callOp(panel, backupOps.listRuns, { serviceId: dbId }, { cookie });
+    expect(listed.body.runs[0]).toMatchObject({ id: run.body.id, status: "succeeded", destinationId: null, deletedAt: null });
+
+    // Restore is refused at once: no failed restore run is left in the list.
+    const restore = await callOp(panel, backupOps.restore, { serviceId: dbId, runId: run.body.id, confirmName: "db" }, { cookie });
+    expect(restore.status).toBe(409);
+    expect(restore.body.error.details).toMatchObject({ reason: "noDestination" });
+    expect(panel.deps.db.select().from(backupRuns).where(eq(backupRuns.kind, "restore")).all()).toEqual([]);
+
+    s3Requests.length = 0;
+    const deleted = await callOp(panel, backupOps.deleteRun, { serviceId: dbId, runId: run.body.id }, { cookie });
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toMatchObject({ id: run.body.id, destinationId: null });
+    expect(deleted.body.deletedAt).not.toBeNull();
+    // The panel has no keys for that bucket any more: no request, and the object stays there.
+    expect(s3Requests).toEqual([]);
+    expect(objects.has(`/backups/${key}`)).toBe(true);
+    const after = await callOp(panel, backupOps.listRuns, { serviceId: dbId }, { cookie });
+    expect(after.body.runs[0].deletedAt).toBe(deleted.body.deletedAt);
     agent.disconnect();
   });
 

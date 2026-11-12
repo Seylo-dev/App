@@ -4926,6 +4926,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   hint for codes that mean the bucket was misaddressed (`MalformedXML`,
   ...), the wrong region or a redirect; retention and `deleteRun` errors
   name the request the same way.
+  A destination a schedule still writes to cannot be deleted
+  (`deleteDestination`: CONFLICT `inUse`; the schedules' foreign key
+  restricts it too), so no schedule is ever left without one. Deleting a
+  destination clears `destinationId` on its runs (foreign key, set null),
+  and the panel has no keys for that bucket from then on: `restore` of such
+  a backup is refused (CONFLICT `noDestination`, before any restore run is
+  recorded; the restore job checks again), and `deleteRun` only marks it
+  deleted, without a request to any bucket, so its object stays there to
+  delete by hand (before 0.2.15 `deleteRun` refused it, CONFLICT
+  `noDestination`, and `restore` recorded a failed restore run). The Backups tab shows such a backup as "Destination
+  deleted" with only "Remove from list".
 - Database engines (`modules/databases/engines.ts`, listed by the
   `databases.engines` op): Postgres 18 (default, data at
   `/var/lib/postgresql`), 17, 16, 15 and the `pgvector` variant of each

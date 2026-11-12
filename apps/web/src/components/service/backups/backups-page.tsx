@@ -1,6 +1,8 @@
 // The Backups tab (also on database pages): schedules of the database or a
 // volume to an S3/R2 destination, "Back up now", the run history with
-// restore (type the name to confirm) and delete.
+// restore (type the name to confirm) and delete. A failed restore or
+// delete says why inside its dialog, which stays open; nothing is left on
+// the card after it closes.
 
 import { backups, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -22,16 +24,16 @@ import { errorMessage } from "../../../lib/api";
 import { describeCron } from "../cron-text";
 import { CheckLabel } from "../field";
 import { volumesOf } from "../files/volumes";
-import { formatBytes, formatDateTime, formatDuration, formatRelative } from "../format";
+import { formatDateTime, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
-import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import { RowsSkeleton } from "../service-skeletons";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
 import { PolicyDialog } from "./policy-dialog";
+import { deleteRunCopy, type Run, RunRow } from "./run-row";
 
 type Policy = OpOutput<typeof backups.listPolicies>["policies"][number];
-type Run = OpOutput<typeof backups.listRuns>["runs"][number];
 
 const fail = (error: unknown) =>
   toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));
@@ -191,8 +193,8 @@ function RunsCard({ service }: { service: ServiceDetail }) {
     { serviceId: service.id, limit: 50 },
     { retry: retryOp, refetchInterval: (q) => (q.state.data?.runs.some((r) => r.status === "running") ? 3000 : false) },
   );
-  const [restoring, setRestoring] = useState<Run | null>(null);
-  const [deleting, setDeleting] = useState<Run | null>(null);
+  const restoring = useRunDialog();
+  const deleting = useRunDialog();
   const [backupFirst, setBackupFirst] = useState(true);
   const invalidate = useInvalidate();
   const restore = useOpMutation(backups.restore, {
@@ -228,10 +230,10 @@ function RunsCard({ service }: { service: ServiceDetail }) {
       ) : (
         <>
           {runs.map((r) => (
-            <RunRow key={r.id} run={r} onRestore={() => setRestoring(r)} onDelete={() => setDeleting(r)} />
+            <RunRow key={r.id} run={r} onRestore={() => restoring.show(r)} onDelete={() => deleting.show(r)} />
           ))}
           {before.map((b) => (
-            <OlderRuns key={b} serviceId={service.id} before={b} onRestore={setRestoring} onDelete={setDeleting} />
+            <OlderRuns key={b} serviceId={service.id} before={b} onRestore={restoring.show} onDelete={deleting.show} />
           ))}
           {more && oldest && (
             <div className="flex justify-center border-t border-divider py-3">
@@ -242,18 +244,19 @@ function RunsCard({ service }: { service: ServiceDetail }) {
           )}
         </>
       )}
+      {/* A failed restore or delete shows its message in the dialog, which stays open (ConfirmDialog). */}
       <ConfirmDialog
-        open={restoring !== null}
-        onOpenChange={(o) => !o && setRestoring(null)}
-        title={t("serviceBackups.restoreTitle", { when: restoring ? formatDateTime(restoring.startedAt) : "" })}
+        open={restoring.open}
+        onOpenChange={restoring.onOpenChange}
+        title={t("serviceBackups.restoreTitle", { when: restoring.run ? formatDateTime(restoring.run.startedAt) : "" })}
         description={t("serviceBackups.restoreBody", { name: service.name })}
         confirmText={service.name}
         confirmLabel={t("serviceBackups.restore")}
         destructive
         onConfirm={() =>
-          restoring
+          restoring.run
             ? restore
-                .mutateAsync({ serviceId: service.id, runId: restoring.id, confirmName: service.name, backupFirst })
+                .mutateAsync({ serviceId: service.id, runId: restoring.run.id, confirmName: service.name, backupFirst })
                 .then(() => undefined)
             : undefined
         }
@@ -267,17 +270,27 @@ function RunsCard({ service }: { service: ServiceDetail }) {
         </CheckLabel>
       </ConfirmDialog>
       <ConfirmDialog
-        open={deleting !== null}
-        onOpenChange={(o) => !o && setDeleting(null)}
-        title={t("serviceBackups.deleteRunTitle")}
-        description={t("serviceBackups.deleteRunBody")}
-        confirmLabel={t("service.remove")}
+        open={deleting.open}
+        onOpenChange={deleting.onOpenChange}
+        {...deleteRunCopy(deleting.run)}
         destructive
-        onConfirm={() => (deleting ? remove.mutateAsync({ serviceId: service.id, runId: deleting.id }).then(() => undefined) : undefined)}
+        onConfirm={() =>
+          deleting.run ? remove.mutateAsync({ serviceId: service.id, runId: deleting.run.id }).then(() => undefined) : undefined
+        }
       />
-      <MutationError error={restore.error ?? remove.error} />
     </Card>
   );
+}
+
+/** A dialog about one run. The run stays set while the dialog closes, so its words do not change on the way out. */
+function useRunDialog() {
+  const [run, setRun] = useState<Run | null>(null);
+  const [open, setOpen] = useState(false);
+  const show = (r: Run) => {
+    setRun(r);
+    setOpen(true);
+  };
+  return { run, open, show, onOpenChange: setOpen };
 }
 
 function OlderRuns({
@@ -298,56 +311,5 @@ function OlderRuns({
         <RunRow key={r.id} run={r} onRestore={() => onRestore(r)} onDelete={() => onDelete(r)} />
       ))}
     </>
-  );
-}
-
-function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: () => void; onDelete: () => void }) {
-  const failed = r.status === "failed";
-  const running = r.status === "running";
-  const took = r.finishedAt ? Date.parse(r.finishedAt) - Date.parse(r.startedAt) : null;
-  return (
-    <div className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-2.5 text-[13px]">
-      <span
-        aria-hidden="true"
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full",
-          failed ? "bg-chip-red-bg" : running ? "bg-chip-amber-bg" : "bg-chip-green-bg",
-        )}
-      >
-        <span
-          className={cn("size-2 rounded-full", failed ? "bg-status-error" : running ? "animate-pulse bg-status-busy" : "bg-status-ok")}
-        />
-      </span>
-      <b className="font-medium">{formatDateTime(r.startedAt)}</b>
-      {r.kind === "restore" && <Chip tone="violet">{t("serviceBackups.restoreRun")}</Chip>}
-      {r.deletedAt && <Chip tone="gray">{t("serviceBackups.deleted")}</Chip>}
-      {r.error && <span className="min-w-0 flex-1 truncate text-[12.5px] text-chip-red-fg">{r.error}</span>}
-      <span className="ml-auto text-[12.5px] text-muted-foreground">
-        {[
-          r.sizeBytes != null ? formatBytes(r.sizeBytes) : null,
-          took != null ? formatDuration(took) : running ? t("serviceBackups.running") : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </span>
-      {r.kind === "backup" && r.status === "succeeded" && !r.deletedAt ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
-              <IconDots size={15} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onRestore}>{t("serviceBackups.restore")}</DropdownMenuItem>
-            <DropdownMenuItem destructive onSelect={onDelete}>
-              {t("service.remove")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : (
-        // A row without actions keeps the menu's place, so sizes and times line up on the right.
-        <span aria-hidden="true" className="size-[30px] shrink-0" />
-      )}
-    </div>
   );
 }

@@ -507,6 +507,15 @@ const run = (i: number, status: string) => ({
   finishedAt: ago(i * day + 3 * hour - 12_000),
 });
 
+/** The Backups tab's runs; the oldest, a one-off, went to a destination deleted since (destinationId null). */
+export const demoRuns = () => [
+  run(0, "succeeded"),
+  run(1, "succeeded"),
+  run(2, "failed"),
+  run(3, "succeeded"),
+  { ...run(4, "succeeded"), policyId: null, destinationId: null },
+];
+
 export const handlers: Record<string, (input: Input) => unknown> = {
   "services.get": (input: Input) => servicesById[input.serviceId] ?? servicesById[ids.api],
   "deployments.list": (input: Input) => {
@@ -630,7 +639,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
       },
     ],
   }),
-  "backups.listRuns": () => ({ runs: [run(0, "succeeded"), run(1, "succeeded"), run(2, "failed"), run(3, "succeeded")], hasMore: false }),
+  "backups.listRuns": () => ({ runs: demoRuns(), hasMore: false }),
   "backups.listDestinations": () => ({ destinations: [], choices: [{ id: "x000000000000001", name: "acme-backups", provider: "r2", bucket: "acme-backups" }] }),
   "databases.get": (input: Input) => databaseOf(String(input.serviceId)),
   "databases.connection": (input: Input) => connectionOf(String(input.serviceId)),

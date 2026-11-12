@@ -317,6 +317,12 @@ export const listRuns = implement(backupOps.listRuns, (input, ctx) => {
   return { runs: rows.slice(0, limit).map(toRun), hasMore: rows.length > limit };
 });
 
+/** The destination a run wrote to; undefined once it was deleted (the run's destinationId is then null). */
+function destinationOf(ctx: OpContext, run: RunRow): DestinationRow | undefined {
+  if (!run.destinationId) return undefined;
+  return ctx.db.select().from(backupDestinations).where(eq(backupDestinations.id, run.destinationId)).get();
+}
+
 function requireRun(ctx: OpContext, serviceId: string, runId: string): RunRow {
   const row = ctx.db
     .select()
@@ -345,6 +351,12 @@ export const restore = implement(backupOps.restore, (input, ctx) => {
   if (running) throw new OpError("CONFLICT", "A restore of this service is already running.", { reason: "restoreRunning" });
   // An export reads the folder this writes, or an import still fills it.
   assertNoTransfer(ctx.db, service.id);
+  // Refused here, so no failed restore run is left in the list (the restore job checks again).
+  if (!destinationOf(ctx, source)) {
+    throw new OpError("CONFLICT", "The backup's destination was deleted, so the backup can no longer be restored from here.", {
+      reason: "noDestination",
+    });
+  }
 
   const row = ctx.db
     .insert(backupRuns)
@@ -375,15 +387,10 @@ export const deleteRun = implement(backupOps.deleteRun, async (input, ctx) => {
   const row = requireRun(ctx, input.serviceId, input.runId);
   if (row.kind !== "backup") throw new OpError("BAD_REQUEST", "Only backups have an object to delete.", { field: "runId" });
   if (row.status === "running") throw new OpError("CONFLICT", "The backup is still running.", { reason: "running" });
-  if (!row.deletedAt && row.objectKey) {
-    const destination = row.destinationId
-      ? ctx.db.select().from(backupDestinations).where(eq(backupDestinations.id, row.destinationId)).get()
-      : undefined;
-    if (!destination) {
-      throw new OpError("CONFLICT", "The backup's destination was deleted, so its object cannot be removed from here.", {
-        reason: "noDestination",
-      });
-    }
+  // Once the destination was deleted, and its keys with it, the run is only
+  // marked deleted: its object stays in the bucket, to delete there by hand.
+  const destination = row.deletedAt ? undefined : destinationOf(ctx, row);
+  if (destination && row.objectKey) {
     try {
       // A key recorded before the panel checked keys may name another
       // service's object: drop the row, leave that object alone.
