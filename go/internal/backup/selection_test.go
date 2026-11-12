@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -113,6 +114,19 @@ func TestInspectJobs(t *testing.T) {
 	// MySQL 8 caches sizes for a day unless the session says otherwise; MariaDB has no such variable.
 	if !hasExpiry(my) || hasExpiry(maria) {
 		t.Errorf("stats expiry: mysql %v mariadb %v", hasExpiry(my), hasExpiry(maria))
+	}
+	// MySQL before 8.0.3 has no such variable and fails the whole listing
+	// on it: it is set only inside a comment those servers skip, and what
+	// they run instead is still a statement.
+	var query string
+	for _, e := range my.env {
+		if v, ok := strings.CutPrefix(e, "DB_QUERY="); ok {
+			query = v
+		}
+	}
+	older := regexp.MustCompile(`/\*!8\d{4} [^*]*\*/`).ReplaceAllString(query, "")
+	if strings.Contains(older, "information_schema_stats_expiry") || !strings.HasPrefix(older, "SET  @seylo_listing = 1; SELECT ") {
+		t.Errorf("what MySQL 5.7 runs: %s", older)
 	}
 	if _, err := inspectJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS}); !errors.Is(err, ErrBadRequest) {
 		t.Error("redis listing accepted")

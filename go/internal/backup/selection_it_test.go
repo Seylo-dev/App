@@ -3,6 +3,7 @@
 package backup_test
 
 import (
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -31,6 +32,25 @@ type itEngine struct {
 	name, orders, notes, lead string
 	// change: customer 1, a new order, a note and the lead.
 	change func(tag string) [][2]string
+}
+
+// pullAMD64 fetches an amd64-only image (mysql:5.7) for the VM's emulation (the agent's
+// Docker client pulls the host's platform only). False when the host
+// cannot get or run it.
+func pullAMD64(t *testing.T, image string) bool {
+	t.Helper()
+	if exec.Command("docker", "image", "inspect", image).Run() != nil {
+		if out, err := exec.Command("docker", "pull", "--platform", "linux/amd64", image).CombinedOutput(); err != nil {
+			t.Logf("pulling %s: %v: %s", image, err, out)
+			return false
+		}
+	}
+	out, err := exec.Command("docker", "run", "--rm", "--entrypoint", "true", image).CombinedOutput()
+	if err != nil {
+		t.Logf("running %s: %v: %s", image, err, out)
+		return false
+	}
+	return true
 }
 
 func sqlQ(engine agentv1.DatabaseEngine) func(e *itest.Env, cont, db, stmt string) (string, int) {
@@ -302,7 +322,7 @@ func TestChosenDatabasesBackupRestore(t *testing.T) {
 
 			// Everything, as before: measured, and it still restores.
 			res = r.backup(e, db(), "all-"+name, 0, false)
-			if !res.GetContents().GetWholeServer() || len(res.GetContents().GetDatabases()) < 2 {
+			if !res.GetContents().GetWholeServer() || len(res.GetContents().GetDatabases()) < 2 || len(res.GetWarnings()) > 0 {
 				t.Fatalf("whole server contents = %v (%v)", res.GetContents(), res.GetWarnings())
 			}
 			snapshot = state()
@@ -313,5 +333,83 @@ func TestChosenDatabasesBackupRestore(t *testing.T) {
 			}
 			t.Logf("%s rows after all restores: %s", name, strconv.Quote(state()))
 		})
+	}
+}
+
+// MySQL before 8.0.3 has no information_schema_stats_expiry, and any tag
+// of the mysql image can be set: the listing (the schedule dialog's, and
+// the measurement before every backup) must work there too. mysql:5.7 has
+// no arm64 build, so it runs emulated (skipped where it cannot), alone and
+// with as few steps as the check needs.
+func TestMySQL57Listing(t *testing.T) {
+	const image = "mysql:5.7"
+	if !pullAMD64(t, image) {
+		t.Skipf("%s has no build for this host and it cannot run it emulated", image)
+	}
+	r := newRig(t)
+	e := r.e
+	mysql := agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL
+	q := sqlQ(mysql)
+	// ready waits for the server; false when the container stopped first
+	// (emulated, mysqld now and then dies while it initialises).
+	ready := func(cont string, limit time.Duration) bool {
+		for until := time.Now().Add(limit); time.Now().Before(until); time.Sleep(2 * time.Second) {
+			c, found, err := e.D.Inspect(e.Ctx(time.Minute), cont)
+			if err != nil || !found || !c.Running {
+				out, _ := exec.Command("docker", "logs", "--tail", "20", cont).CombinedOutput()
+				t.Logf("%s stopped before it was ready: %s", cont, out)
+				return false
+			}
+			if _, code := q(e, cont, "app", "SELECT 1"); code == 0 {
+				return true
+			}
+		}
+		t.Fatalf("%s not ready within %s", cont, limit)
+		return false
+	}
+	var spec *agentv1.ServiceSpec
+	var cont string
+	for attempt := 1; ; attempt++ {
+		id := "my57-" + strconv.Itoa(attempt)
+		spec = e.Spec(id, id, image)
+		spec.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
+		spec.Env = []*agentv1.EnvVar{{Name: "MYSQL_ROOT_PASSWORD", Value: pw}, {Name: "MYSQL_DATABASE", Value: "app"}}
+		spec.Volumes = []*agentv1.VolumeMount{{Name: "data", ContainerPath: "/var/lib/mysql"}}
+		spec.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{Engine: mysql,
+			Credentials: &agentv1.DatabaseCredentials{AdminUser: "root", AdminPassword: pw, Database: "app"}}}
+		r.add(spec)
+		cont = e.StartService(spec).Name
+		// The image restarts its server once after the first start.
+		if ready(cont, 6*time.Minute) {
+			time.Sleep(5 * time.Second)
+			if ready(cont, 3*time.Minute) {
+				break
+			}
+		}
+		if attempt == 3 {
+			t.Fatalf("%s never stayed up", image)
+		}
+	}
+	if out, code := q(e, cont, "app", "CREATE DATABASE shop; USE shop; CREATE TABLE orders (id int PRIMARY KEY, item varchar(50)) ENGINE=InnoDB; "+
+		"INSERT INTO orders VALUES (1, 'a'), (2, 'b'), (3, 'c'); ANALYZE TABLE orders"); code != 0 {
+		t.Fatalf("setup: %s", out)
+	}
+
+	list, err := r.runner.Inspect(e.Ctx(5*time.Minute), &agentv1.InspectDatabaseRequest{ServiceId: spec.GetId(), Database: "shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbs := list.GetContents().GetDatabases()
+	if len(dbs) != 1 || len(dbs[0].GetTables()) != 1 || dbs[0].GetTables()[0].GetName() != "orders" || dbs[0].GetTables()[0].GetSizeBytes() == 0 {
+		t.Fatalf("listing = %v", list.GetContents())
+	}
+	// A backup of everything is measured: no warning, shop in its contents.
+	res := r.backup(e, &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{}}}, "all-my57", 0, false)
+	var names []string
+	for _, d := range res.GetContents().GetDatabases() {
+		names = append(names, d.GetName())
+	}
+	if len(res.GetWarnings()) > 0 || !res.GetContents().GetWholeServer() || !strings.Contains(","+strings.Join(names, ",")+",", ",shop,") {
+		t.Fatalf("whole server contents = %v, warnings %v", res.GetContents(), res.GetWarnings())
 	}
 }

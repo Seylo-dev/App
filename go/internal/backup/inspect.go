@@ -139,6 +139,14 @@ const mysqlInspectSQL = `SELECT 'D', schema_name, '', 0, 0 FROM information_sche
 	`FROM information_schema.tables WHERE table_type = 'BASE TABLE' ` +
 	`AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')`
 
+// mysqlStatsExpiry turns off MySQL's day-long cache of information_schema
+// sizes. The variable exists from MySQL 8.0.3: older servers (any tag of
+// the mysql image can be set) answer "Unknown system variable" and the
+// client would stop before the listing. Inside the versioned comment it
+// is skipped there, and what is left, a user variable, is a statement
+// every server takes.
+const mysqlStatsExpiry = "SET /*!80003 SESSION information_schema_stats_expiry = 0, */ @seylo_listing = 1; "
+
 const mysqlInspect = mysqlPrelude + `exec $CLIENT --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --batch --skip-column-names --connect-timeout=10 -e "$DB_QUERY"`
 
 // MongoDB: mongosh prints one JSON document. Collections outside admin,
@@ -178,8 +186,7 @@ func inspectJob(t dbTarget) (dbJob, error) {
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
 		q := mysqlInspectSQL
 		if t.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL {
-			// MySQL 8 caches information_schema sizes for a day otherwise.
-			q = "SET SESSION information_schema_stats_expiry = 0; " + q
+			q = mysqlStatsExpiry + q
 		}
 		j.env = append(j.env, "DB_QUERY="+q)
 		j.script = mysqlInspect

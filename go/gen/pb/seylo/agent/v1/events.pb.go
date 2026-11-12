@@ -1548,8 +1548,10 @@ type BackupResult struct {
 	// added in 0.2.15: database backups only, what the object holds as
 	// measured right before the dump. Unset from older agents.
 	Contents *BackupContents `protobuf:"bytes,10,opt,name=contents,proto3" json:"contents,omitempty"`
-	// added in 0.2.15: chosen databases or tables that were skipped because
-	// they no longer exist, or why the contents could not be measured.
+	// added in 0.2.15: for a backup of chosen databases or tables, the
+	// chosen names that were skipped because they no longer exist; for a
+	// backup of everything, why the contents could not be measured (the
+	// backup itself is complete).
 	Warnings      []string `protobuf:"bytes,11,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

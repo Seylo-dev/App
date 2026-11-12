@@ -644,8 +644,10 @@ export type BackupResult = Message<"seylo.agent.v1.BackupResult"> & {
   contents?: BackupContents | undefined;
 
   /**
-   * added in 0.2.15: chosen databases or tables that were skipped because
-   * they no longer exist, or why the contents could not be measured.
+   * added in 0.2.15: for a backup of chosen databases or tables, the
+   * chosen names that were skipped because they no longer exist; for a
+   * backup of everything, why the contents could not be measured (the
+   * backup itself is complete).
    *
    * @generated from field: repeated string warnings = 11;
    */
