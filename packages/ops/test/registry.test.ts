@@ -103,6 +103,25 @@ describe("lintOp", () => {
     ]);
   });
 
+  test("modelApproval only on mutations models can call", () => {
+    const op = (kind: "query" | "mutation" | "destructive", mcp: boolean) =>
+      defineOp({
+        ...base,
+        id: "test.handOut",
+        kind,
+        mcp,
+        input: Type.Object({}),
+        permission: permission.signedIn(),
+        modelApproval: true,
+      });
+    expect(lintOp(op("mutation", true))).toEqual([]);
+    const refused = ["test.handOut: modelApproval is for mutations models can call (mcp: true)"];
+    // A query never waits for a person, a destructive op always does, and one models cannot call never asks.
+    expect(lintOp(op("query", true))).toEqual(refused);
+    expect(lintOp(op("destructive", true))).toEqual(refused);
+    expect(lintOp(op("mutation", false))).toEqual(refused);
+  });
+
   test("flags a missing description", () => {
     const op = defineOp({
       ...base,

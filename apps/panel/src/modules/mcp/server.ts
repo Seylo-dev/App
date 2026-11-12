@@ -116,8 +116,8 @@ async function handleMessage(ctx: MessageContext, message: unknown) {
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
       const panelName = readPanelName(ctx.deps.db);
       const destructive = readMcpSafety(ctx.deps.db).askBeforeDestructive
-        ? "Destructive actions are queued for a person to approve; use approvals_get to follow them."
-        : "Destructive actions run right away on this panel, without a person's approval: confirm with the user before you call one.";
+        ? "Destructive actions and backup download links are queued for a person to approve; use approvals_get to follow them."
+        : "Destructive actions and backup download links run right away on this panel, without a person's approval: confirm with the user before you call one.";
       return rpcResult(id, {
         protocolVersion: supportedProtocolVersions.includes(asked) ? asked : supportedProtocolVersions[0],
         capabilities: { tools: { listChanged: false } },

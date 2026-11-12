@@ -1,8 +1,9 @@
 // The Backups tab (also on database pages): schedules of the database or a
-// volume to an S3/R2 destination, "Back up now", the run history with
-// restore (type the name to confirm) and delete. A failed restore or
-// delete says why inside its dialog, which stays open; nothing is left on
-// the card after it closes.
+// volume to an S3/R2 destination, "Back up now" (every enabled schedule;
+// each schedule's menu backs up just that one), the run history with
+// restore (type the name to confirm), download (straight from the bucket)
+// and delete. A failed restore or delete says why inside its dialog, which
+// stays open; nothing is left on the card after it closes.
 
 import { backups, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -30,6 +31,7 @@ import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import { RowsSkeleton } from "../service-skeletons";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
+import { useBackUpNow } from "./back-up-now";
 import { PolicyDialog } from "./policy-dialog";
 import { deleteRunCopy, fileKept, type Run, RunRow } from "./run-row";
 
@@ -42,26 +44,12 @@ export function BackupsPage({ service }: { service: ServiceDetail }) {
   const policies = useOp(backups.listPolicies, { serviceId: service.id }, { retry: retryOp });
   const destinations = useOp(backups.listDestinations, {}, { retry: retryOp });
   const [editing, setEditing] = useState<Policy | "new" | null>(null);
-  const invalidate = useInvalidate();
-  const runNow = useOpMutation(backups.runNow, {
-    onSuccess: () => {
-      invalidate(backups.listRuns, backups.listPolicies);
-      toast.success(t("serviceBackups.started"));
-    },
-    onError: fail,
-  });
   const choices = destinations.data?.choices ?? [];
   const list = policies.data?.policies ?? [];
   const isDb = isDatabaseKind(service.kind);
   const canVolume = volumesOf(service).length > 0;
   const canCreate = choices.length > 0 && (isDb || canVolume);
-
-  const backUpNow = () => {
-    const first = list[0];
-    if (first) return runNow.mutate({ serviceId: service.id, policyId: first.id });
-    const destination = choices[0];
-    if (destination && isDb) runNow.mutate({ serviceId: service.id, target: "database", destinationId: destination.id });
-  };
+  const backUpNow = useBackUpNow(service, policies.data?.policies, choices);
 
   return (
     <div className="flex flex-col gap-4">
@@ -83,7 +71,7 @@ export function BackupsPage({ service }: { service: ServiceDetail }) {
           <h2 className="m-0 text-[15px] font-semibold">{t("serviceBackups.schedules")}</h2>
           <span className="text-[12.5px] text-muted-foreground">{t("serviceBackups.utc")}</span>
           <span className="ml-auto flex gap-2">
-            <Button size="sm" onClick={backUpNow} disabled={runNow.isPending || (list.length === 0 && !(isDb && choices.length > 0))}>
+            <Button size="sm" onClick={backUpNow.run} disabled={backUpNow.disabled}>
               {t("serviceBackups.backUpNow")}
             </Button>
             <Button size="sm" variant="primary" onClick={() => setEditing("new")} disabled={!canCreate}>
@@ -204,6 +192,8 @@ function RunsCard({ service }: { service: ServiceDetail }) {
     },
   });
   const remove = useOpMutation(backups.deleteRun, { onSuccess: () => invalidate(backups.listRuns) });
+  const download = useOpMutation(backups.downloadUrl, { onSuccess: (link) => openDownload(link.url), onError: fail });
+  const downloadRun = (r: Run) => download.mutate({ serviceId: service.id, runId: r.id });
   const lastPage = before[before.length - 1];
   const older = useOp(
     backups.listRuns,
@@ -230,10 +220,23 @@ function RunsCard({ service }: { service: ServiceDetail }) {
       ) : (
         <>
           {runs.map((r) => (
-            <RunRow key={r.id} run={r} onRestore={() => restoring.show(r)} onDelete={() => deleting.show(r)} />
+            <RunRow
+              key={r.id}
+              run={r}
+              onRestore={() => restoring.show(r)}
+              onDownload={() => downloadRun(r)}
+              onDelete={() => deleting.show(r)}
+            />
           ))}
           {before.map((b) => (
-            <OlderRuns key={b} serviceId={service.id} before={b} onRestore={restoring.show} onDelete={deleting.show} />
+            <OlderRuns
+              key={b}
+              serviceId={service.id}
+              before={b}
+              onRestore={restoring.show}
+              onDownload={downloadRun}
+              onDelete={deleting.show}
+            />
           ))}
           {more && oldest && (
             <div className="flex justify-center border-t border-divider py-3">
@@ -286,6 +289,20 @@ function RunsCard({ service }: { service: ServiceDetail }) {
   );
 }
 
+/**
+ * Opens a backup's download link: a plain navigation to the bucket, whose
+ * answer is an attachment (response-content-disposition), so the page
+ * stays and the bucket needs no CORS for the panel.
+ */
+function openDownload(url: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 /** A dialog about one run. The run stays set while the dialog closes, so its words do not change on the way out. */
 function useRunDialog() {
   const [run, setRun] = useState<Run | null>(null);
@@ -301,18 +318,20 @@ function OlderRuns({
   serviceId,
   before,
   onRestore,
+  onDownload,
   onDelete,
 }: {
   serviceId: string;
   before: string;
   onRestore: (r: Run) => void;
+  onDownload: (r: Run) => void;
   onDelete: (r: Run) => void;
 }) {
   const page = useOp(backups.listRuns, { serviceId, limit: 50, before }, { retry: retryOp });
   return (
     <>
       {page.data?.runs.map((r) => (
-        <RunRow key={r.id} run={r} onRestore={() => onRestore(r)} onDelete={() => onDelete(r)} />
+        <RunRow key={r.id} run={r} onRestore={() => onRestore(r)} onDownload={() => onDownload(r)} onDelete={() => onDelete(r)} />
       ))}
     </>
   );

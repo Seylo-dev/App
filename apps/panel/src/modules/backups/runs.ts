@@ -7,7 +7,7 @@ import { backups as backupOps, OpError } from "@seylo/ops";
 import type { BackupResult } from "@seylo/proto";
 import type { Static } from "@sinclair/typebox";
 import { Cron } from "croner";
-import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { backupDestinations, backupPolicies, backupRuns, services, volumes } from "../../db/schema";
 import type { Deps } from "../../deps";
@@ -26,8 +26,35 @@ export const restoreTimeoutMs = 6 * 60 * 60 * 1000;
 /** Backup id of one-off runs; scheduled runs use their policy id. */
 export const manualBackupId = "manual";
 
-export function toRun(row: RunRow): Run {
-  return {
+/**
+ * Runs as the ops return them, with what each one is about: the volume's
+ * name, and for a restore when its backup was started (one lookup each for
+ * all rows).
+ */
+export function toRuns(db: PanelDb, rows: readonly RunRow[]): Run[] {
+  const volumeIds = [...new Set(rows.map((r) => r.volumeId).filter((v): v is string => !!v))];
+  const sourceIds = [...new Set(rows.map((r) => r.sourceRunId).filter((v): v is string => !!v))];
+  const volumeNames = new Map(
+    volumeIds.length === 0
+      ? []
+      : db
+          .select({ id: volumes.id, name: volumes.name })
+          .from(volumes)
+          .where(inArray(volumes.id, volumeIds))
+          .all()
+          .map((v) => [v.id, v.name]),
+  );
+  const sourceStarts = new Map(
+    sourceIds.length === 0
+      ? []
+      : db
+          .select({ id: backupRuns.id, startedAt: backupRuns.startedAt })
+          .from(backupRuns)
+          .where(inArray(backupRuns.id, sourceIds))
+          .all()
+          .map((r) => [r.id, r.startedAt.toISOString()]),
+  );
+  return rows.map((row) => ({
     id: row.id,
     kind: row.kind,
     serviceId: row.serviceId,
@@ -35,7 +62,9 @@ export function toRun(row: RunRow): Run {
     destinationId: row.destinationId,
     target: row.target,
     volumeId: row.volumeId,
+    volumeName: row.target === "volume" && row.volumeId ? (volumeNames.get(row.volumeId) ?? null) : null,
     sourceRunId: row.sourceRunId,
+    sourceStartedAt: row.sourceRunId ? (sourceStarts.get(row.sourceRunId) ?? null) : null,
     status: row.status,
     objectKey: row.objectKey,
     sizeBytes: row.sizeBytes,
@@ -43,7 +72,11 @@ export function toRun(row: RunRow): Run {
     deletedAt: row.deletedAt?.toISOString() ?? null,
     startedAt: row.startedAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
-  };
+  }));
+}
+
+export function toRun(db: PanelDb, row: RunRow): Run {
+  return toRuns(db, [row])[0] as Run;
 }
 
 /** Next time a five-field UTC cron expression fires after `from`; BAD_REQUEST when it is not valid. */
@@ -80,9 +113,14 @@ export function ownObjectKey(run: Pick<RunRow, "id" | "serviceId">, key: string)
   const [service, backup, name] = parts.slice(-3) as [string, string, string];
   if (parts.slice(0, -3).some((p) => p === "" || p === "." || p === "..")) return false;
   if (service !== run.serviceId || !keySegment.test(backup)) return false;
-  const ext = objectExtensions.find((e) => name.endsWith(e));
+  const ext = objectExtension(name);
   if (!ext) return false;
   return keyTime.test(name.slice(0, 16)) && name.slice(16) === `-${run.id}${ext}`;
+}
+
+/** The extension the agent gave an object (".tar.gz", ".dump", ...), or null for a name it never writes. */
+export function objectExtension(key: string): string | null {
+  return objectExtensions.find((e) => key.endsWith(e)) ?? null;
 }
 
 /** Why a run's object is refused, for the run's error and the restore. */
@@ -96,6 +134,19 @@ export interface BackupWhat {
   policy: PolicyRow | null;
   stopService: boolean;
   keepLast: number;
+}
+
+/** A schedule's backup, as the scheduler, Back up now on its menu and backups.runAll start it. */
+export function policyBackup(policy: PolicyRow): BackupWhat {
+  return {
+    serviceId: policy.serviceId,
+    target: policy.target,
+    volumeId: policy.volumeId,
+    destinationId: policy.destinationId,
+    policy,
+    stopService: policy.stopService,
+    keepLast: policy.keepLast,
+  };
 }
 
 /** Checks the target exists on the service: a database service, or one of its data volumes. */

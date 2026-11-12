@@ -1,15 +1,31 @@
 // Backup op handlers: destinations (sealed secret keys, connection test),
-// schedules per database or volume, run now, the run list, restores and
-// deleting a backup.
+// schedules per database or volume, run now (one schedule, or every
+// enabled one), the run list, restores, download links and deleting a
+// backup.
 
 import { backups as backupOps, OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
+import { findDatabase } from "../databases/info";
 import { getService, invalidateService } from "../domains/lookup";
 import { assertNoTransfer } from "../services/copies";
-import { applyRetention, checkTarget, nextRun, ownObjectKey, type PolicyRow, queuePrune, type RunRow, startBackup, toRun } from "./runs";
+import { presign } from "./presign";
+import {
+  applyRetention,
+  checkTarget,
+  nextRun,
+  objectExtension,
+  ownObjectKey,
+  type PolicyRow,
+  policyBackup,
+  queuePrune,
+  type RunRow,
+  startBackup,
+  toRun,
+  toRuns,
+} from "./runs";
 import { type DestinationRow, deleteRunObject, type StorageConfig, storageConfig, testStorage } from "./storage";
 
 type Destination = Static<typeof backupOps.Destination>;
@@ -284,16 +300,7 @@ export const runNow = implement(backupOps.runNow, async (input, ctx) => {
   getService(ctx.db, input.serviceId);
   let what: Parameters<typeof startBackup>[1];
   if (input.policyId) {
-    const policy = requirePolicy(ctx, input.serviceId, input.policyId);
-    what = {
-      serviceId: input.serviceId,
-      target: policy.target,
-      volumeId: policy.volumeId,
-      destinationId: policy.destinationId,
-      policy,
-      stopService: policy.stopService,
-      keepLast: policy.keepLast,
-    };
+    what = policyBackup(requirePolicy(ctx, input.serviceId, input.policyId));
   } else {
     if (!input.target || !input.destinationId) {
       throw new OpError("BAD_REQUEST", "Pass policyId, or target and destinationId for a one-off backup.", { field: "policyId" });
@@ -309,7 +316,66 @@ export const runNow = implement(backupOps.runNow, async (input, ctx) => {
       keepLast: 0,
     };
   }
-  return toRun(await startBackup(ctx, what));
+  return toRun(ctx.db, await startBackup(ctx, what));
+});
+
+/**
+ * Back up now for the whole service: every enabled schedule, each as its
+ * own scheduled run would (its destination, its keepLast). A schedule
+ * with a backup still running is left out, so it never runs twice at once.
+ */
+export const runAll = implement(backupOps.runAll, async (input, ctx) => {
+  getService(ctx.db, input.serviceId);
+  const policies = ctx.db
+    .select()
+    .from(backupPolicies)
+    .where(eq(backupPolicies.serviceId, input.serviceId))
+    .orderBy(backupPolicies.createdAt)
+    .all();
+  if (policies.length === 0) {
+    throw new OpError("BAD_REQUEST", "This service has no backup schedule. Add one, or start a one-off backup with backups.runNow.", {
+      reason: "noSchedules",
+    });
+  }
+  const running = new Set(
+    ctx.db
+      .select({ policyId: backupRuns.policyId })
+      .from(backupRuns)
+      .where(
+        and(
+          eq(backupRuns.serviceId, input.serviceId),
+          eq(backupRuns.kind, "backup"),
+          eq(backupRuns.status, "running"),
+          inArray(
+            backupRuns.policyId,
+            policies.map((p) => p.id),
+          ),
+        ),
+      )
+      .all()
+      .map((r) => r.policyId),
+  );
+  const started: RunRow[] = [];
+  const skipped: { policyId: string; reason: "disabled" | "running" }[] = [];
+  let firstError: unknown;
+  for (const policy of policies) {
+    if (!policy.enabled) skipped.push({ policyId: policy.id, reason: "disabled" });
+    else if (running.has(policy.id)) skipped.push({ policyId: policy.id, reason: "running" });
+    else {
+      try {
+        started.push(await startBackup(ctx, policyBackup(policy)));
+      } catch (error) {
+        // startBackup stored the run as failed and hands it over with the error.
+        const failed = (error as { run?: RunRow }).run;
+        if (failed) started.push(failed);
+        firstError ??= error;
+      }
+    }
+  }
+  ctx.auditDetails?.({ runIds: started.map((r) => r.id), skipped });
+  // Nothing could start (the node offline, an old agent): the error a single Back up now gets.
+  if (firstError !== undefined && started.every((r) => r.status === "failed")) throw firstError;
+  return { runs: toRuns(ctx.db, started), skipped };
 });
 
 export const listRuns = implement(backupOps.listRuns, (input, ctx) => {
@@ -325,7 +391,7 @@ export const listRuns = implement(backupOps.listRuns, (input, ctx) => {
     .orderBy(desc(backupRuns.startedAt))
     .limit(limit + 1)
     .all();
-  return { runs: rows.slice(0, limit).map(toRun), hasMore: rows.length > limit };
+  return { runs: toRuns(ctx.db, rows.slice(0, limit)), hasMore: rows.length > limit };
 });
 
 /** The destination a run wrote to; undefined once it was deleted (the run's destinationId is then null). */
@@ -391,7 +457,7 @@ export const restore = implement(backupOps.restore, (input, ctx) => {
     { maxAttempts: 1, dedupeKey: `restore:${row.id}` },
   );
   invalidateService(ctx, input.serviceId, [backupOps.listRuns.id]);
-  return toRun(row);
+  return toRun(ctx.db, row);
 });
 
 export const deleteRun = implement(backupOps.deleteRun, async (input, ctx) => {
@@ -419,5 +485,67 @@ export const deleteRun = implement(backupOps.deleteRun, async (input, ctx) => {
     .returning()
     .get();
   invalidateService(ctx, input.serviceId, [backupOps.listRuns.id]);
-  return toRun(updated);
+  return toRun(ctx.db, updated);
+});
+
+/** "db-data-2026-11-13_0300.tar.gz": what the browser saves a downloaded backup as. */
+export function backupFileName(service: string, what: string, startedAt: Date, ext: string): string {
+  const safe = (part: string) =>
+    part
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^[-.]+|-+$/g, "") || "backup";
+  const at = startedAt.toISOString();
+  const when = `${at.slice(0, 10)}_${at.slice(11, 13)}${at.slice(14, 16)}`;
+  return `${safe(service)}-${safe(what)}-${when}${ext}`;
+}
+
+/**
+ * A short link to download one backup straight from its bucket: a GET
+ * presigned for that run's own object (ownObjectKey), so it reaches
+ * nothing else in the bucket, and saved under a readable name. The browser
+ * navigates to it; the bytes never pass through the panel.
+ */
+export const downloadUrl = implement(backupOps.downloadUrl, (input, ctx) => {
+  const service = getService(ctx.db, input.serviceId);
+  // Like a clone or an export of its data: a database's dump holds its logins.
+  if (findDatabase(ctx.db, service.id) && !ctx.access.can("databases.credentials", { type: "service", id: service.id })) {
+    throw new OpError(
+      "FORBIDDEN",
+      "A database backup holds the database's logins, so downloading one needs the databases.credentials permission.",
+      { action: "databases.credentials" },
+    );
+  }
+  const run = requireRun(ctx, input.serviceId, input.runId);
+  if (run.kind !== "backup" || run.status !== "succeeded" || !run.objectKey) {
+    throw new OpError("BAD_REQUEST", "Only a successful backup can be downloaded.", { field: "runId" });
+  }
+  if (run.deletedAt) throw new OpError("BAD_REQUEST", "That backup was deleted and can no longer be downloaded.", { field: "runId" });
+  const ext = objectExtension(run.objectKey);
+  // Rows recorded before the panel checked keys may name another service's object.
+  if (!ext || !ownObjectKey(run, run.objectKey)) {
+    throw new OpError("BAD_REQUEST", "That backup's file is outside its own folder, so the panel does not hand it out.", {
+      field: "runId",
+    });
+  }
+  const destination = destinationOf(ctx, run);
+  if (!destination) {
+    throw new OpError("CONFLICT", "The backup's destination was deleted, so the panel has no keys to download it.", {
+      reason: "noDestination",
+    });
+  }
+  const volumeName = run.volumeId
+    ? ctx.db.select({ name: volumes.name }).from(volumes).where(eq(volumes.id, run.volumeId)).get()?.name
+    : undefined;
+  const fileName = backupFileName(service.name, run.target === "database" ? "database" : (volumeName ?? "volume"), run.startedAt, ext);
+  const now = new Date();
+  const url = presign(storageConfig(ctx.secrets, destination), {
+    method: "GET",
+    key: run.objectKey,
+    query: { "response-content-disposition": `attachment; filename="${fileName}"` },
+    expiresIn: backupOps.downloadUrlSeconds,
+    now,
+  });
+  ctx.auditDetails?.({ fileName, destinationId: destination.id });
+  return { url, fileName, expiresAt: new Date(now.getTime() + backupOps.downloadUrlSeconds * 1000).toISOString() };
 });

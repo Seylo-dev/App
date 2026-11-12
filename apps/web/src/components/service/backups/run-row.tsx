@@ -1,8 +1,9 @@
-// One row of the Backups and restores card, and what it offers. A backup
-// that is there to restore has Restore and Delete. Once its destination
-// was deleted the panel has no keys for that bucket: the row says so and
-// only offers Remove from list, which marks it deleted and leaves the file
-// in the bucket.
+// One row of the Backups and restores card: when, what it backed up or
+// restored ("Volume data", "Database", "Restore of the <date> backup of
+// Database"), and what it offers. A backup that is there to restore has
+// Restore, Download and Delete. Once its destination was deleted the panel
+// has no keys for that bucket: the row says so and only offers Remove from
+// list, which marks it deleted and leaves the file in the bucket.
 
 import type { backups, OpOutput } from "@seylo/ops";
 import { Button } from "@seylo/ui/components/button";
@@ -22,6 +23,35 @@ export function runActions(r: Run): RunActions {
   if (r.kind !== "backup" || r.status !== "succeeded" || r.deletedAt) return "none";
   // The panel clears destinationId when the destination is deleted.
   return r.destinationId === null ? "destinationGone" : "restorable";
+}
+
+/** The menu of a row: Restore, Download and Remove while the backup is there; Remove from list once its destination is gone. */
+export type RunMenuItem = "restore" | "download" | "remove" | "forget";
+
+export function runMenu(r: Run): RunMenuItem[] {
+  switch (runActions(r)) {
+    case "restorable":
+      return ["restore", "download", "remove"];
+    case "destinationGone":
+      return ["forget"];
+    default:
+      return [];
+  }
+}
+
+/** What a backup holds: "Database", "Volume data" ("Deleted volume" once the volume is gone). */
+export function runSubject(r: Pick<Run, "target" | "volumeName">): string {
+  if (r.target === "database") return t("serviceBackups.database");
+  return r.volumeName ? t("serviceBackups.volume", { name: r.volumeName }) : t("serviceBackups.volumeGone");
+}
+
+/** The words next to a row's date: what it backed up, or for a restore which backup it restored. */
+export function runLabel(r: Run): string {
+  const what = runSubject(r);
+  if (r.kind !== "restore") return what;
+  return r.sourceStartedAt
+    ? t("serviceBackups.restoreOf", { when: formatDateTime(r.sourceStartedAt), what })
+    : t("serviceBackups.restoreOfUnknown", { what });
 }
 
 /** The delete dialog's words: Delete takes the file out of the bucket, Remove from list only forgets the backup here. */
@@ -46,10 +76,21 @@ export function fileKept(asked: Run, done: Run): boolean {
   return runActions(asked) === "restorable" && done.destinationId === null;
 }
 
-export function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: () => void; onDelete: () => void }) {
+export function RunRow({
+  run: r,
+  onRestore,
+  onDownload,
+  onDelete,
+}: {
+  run: Run;
+  onRestore: () => void;
+  onDownload: () => void;
+  onDelete: () => void;
+}) {
   const failed = r.status === "failed";
   const running = r.status === "running";
   const actions = runActions(r);
+  const menu = runMenu(r);
   const took = r.finishedAt ? Date.parse(r.finishedAt) - Date.parse(r.startedAt) : null;
   return (
     <div className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-2.5 text-[13px]">
@@ -65,6 +106,7 @@ export function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: (
         />
       </span>
       <b className="font-medium">{formatDateTime(r.startedAt)}</b>
+      <span className="min-w-0 truncate text-ink-strong">{runLabel(r)}</span>
       {r.kind === "restore" && <Chip tone="violet">{t("serviceBackups.restoreRun")}</Chip>}
       {r.deletedAt && <Chip tone="gray">{t("serviceBackups.deleted")}</Chip>}
       {actions === "destinationGone" && <Chip tone="gray">{t("serviceBackups.destinationDeleted")}</Chip>}
@@ -77,7 +119,7 @@ export function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: (
           .filter(Boolean)
           .join(" · ")}
       </span>
-      {actions !== "none" ? (
+      {menu.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
@@ -85,10 +127,21 @@ export function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: (
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {actions === "restorable" && <DropdownMenuItem onSelect={onRestore}>{t("serviceBackups.restore")}</DropdownMenuItem>}
-            <DropdownMenuItem destructive onSelect={onDelete}>
-              {actions === "restorable" ? t("service.remove") : t("serviceBackups.forgetRun")}
-            </DropdownMenuItem>
+            {menu.map((item) =>
+              item === "restore" ? (
+                <DropdownMenuItem key={item} onSelect={onRestore}>
+                  {t("serviceBackups.restore")}
+                </DropdownMenuItem>
+              ) : item === "download" ? (
+                <DropdownMenuItem key={item} onSelect={onDownload}>
+                  {t("serviceBackups.download")}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem key={item} destructive onSelect={onDelete}>
+                  {item === "remove" ? t("service.remove") : t("serviceBackups.forgetRun")}
+                </DropdownMenuItem>
+              ),
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (

@@ -1,12 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { backups as backupOps, databases as dbOps } from "@seylo/ops";
+import { allOps, backups as backupOps, databases as dbOps } from "@seylo/ops";
+import { buildAiTools } from "@seylo/ops/generators";
 import { EventSchema } from "@seylo/proto";
-import { eq } from "drizzle-orm";
-import { backupDestinations, backupPolicies, backupRuns, volumes } from "../src/db/schema";
+import { and, eq } from "drizzle-orm";
+import { auditLog, backupDestinations, backupPolicies, backupRuns, grants, volumes } from "../src/db/schema";
+import { backupFileName } from "../src/modules/backups/ops";
+import { presign } from "../src/modules/backups/presign";
 import { ownObjectKey } from "../src/modules/backups/runs";
 import { runDueBackups } from "../src/modules/backups/schedule";
-import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
+import { storageConfig } from "../src/modules/backups/storage";
+import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
 
 const signed = "backup.signed.v1";
@@ -42,7 +46,11 @@ beforeAll(() => {
       }
       if (req.method === "GET") {
         const body = objects.get(path);
-        return body === undefined ? new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 }) : new Response(body);
+        // Like S3, a presigned GET may set the saved file's name.
+        const disposition = url.searchParams.get("response-content-disposition");
+        return body === undefined
+          ? new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 })
+          : new Response(body, disposition ? { headers: { "content-disposition": disposition } } : {});
       }
       if (req.method === "DELETE") {
         objects.delete(path);
@@ -56,9 +64,12 @@ afterAll(() => s3.stop(true));
 
 let panel: TestPanel;
 let cookie: string;
+let ownerId: string;
 beforeEach(async () => {
   panel = testPanel();
-  cookie = (await createUser(panel, "owner")).cookie;
+  const owner = await createUser(panel, "owner");
+  cookie = owner.cookie;
+  ownerId = owner.user.id;
   objects.clear();
   s3Requests.length = 0;
 });
@@ -537,5 +548,330 @@ describe("schedules and runs", () => {
       "s1/20260101T030000Z-r1.dump",
     ])
       expect(ownObjectKey(run, key)).toBe(false);
+  });
+});
+
+/** An app with two scheduled volumes and a third whose schedule is off, like vault-warden's data and web-vault. */
+async function volumeSchedules() {
+  const { node, project, destinationId } = await setup();
+  const app = seedService(panel, { projectId: project.id, name: "vault-warden", nodeIds: [node.id] });
+  const volume = (name: string) =>
+    panel.deps.db
+      .insert(volumes)
+      .values({ serviceId: app.id, name, mountPath: `/${name}` })
+      .returning()
+      .get();
+  const schedule = async (volumeId: string, enabled: boolean) =>
+    (
+      await callOp(
+        panel,
+        backupOps.createPolicy,
+        { serviceId: app.id, target: "volume", volumeId, destinationId, schedule: "0 3 * * *", keepLast: 1, enabled },
+        { cookie },
+      )
+    ).body.id as string;
+  const data = await schedule(volume("data").id, true);
+  const webVault = await schedule(volume("web-vault").id, true);
+  const cache = await schedule(volume("cache").id, false);
+  return { node, app, destinationId, data, webVault, cache };
+}
+
+describe("Back up now for the whole service (runAll)", () => {
+  test("starts every enabled schedule at once, each toward its own keepLast; off and running ones are skipped", async () => {
+    const { node, app, data, webVault, cache } = await volumeSchedules();
+    const asked: { backupId: string; subject: { what: { value: string } } }[] = [];
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void asked.push(req) }, [], [signed]);
+
+    const first = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(first.status).toBe(200);
+    // Before, Back up now ran only the first schedule.
+    expect(
+      first.body.runs.map((r: { policyId: string; status: string; volumeName: string }) => [r.policyId, r.status, r.volumeName]),
+    ).toEqual([
+      [data, "running", "data"],
+      [webVault, "running", "web-vault"],
+    ]);
+    expect(first.body.skipped).toEqual([{ policyId: cache, reason: "disabled" }]);
+    expect(asked.map((r) => [r.backupId, r.subject.what.value])).toEqual([
+      [data, "data"],
+      [webVault, "web-vault"],
+    ]);
+
+    // Both still running: nothing is started twice.
+    const again = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(again.body).toEqual({
+      runs: [],
+      skipped: [
+        { policyId: data, reason: "running" },
+        { policyId: webVault, reason: "running" },
+        { policyId: cache, reason: "disabled" },
+      ],
+    });
+    expect(asked).toHaveLength(2);
+
+    // One finished: only that one starts.
+    const [dataRun, webVaultRun] = first.body.runs as { id: string }[];
+    backupResult(node.id, (dataRun as { id: string }).id, true, keyFor((dataRun as { id: string }).id, ".tar.gz"));
+    const third = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(third.body.runs.map((r: { policyId: string }) => r.policyId)).toEqual([data]);
+    expect(third.body.skipped).toEqual([
+      { policyId: webVault, reason: "running" },
+      { policyId: cache, reason: "disabled" },
+    ]);
+    // keepLast 1 per schedule: data's newer backup retires its older one, web-vault's is untouched.
+    backupResult(node.id, third.body.runs[0].id, true, keyFor(third.body.runs[0].id, ".tar.gz"));
+    backupResult(node.id, (webVaultRun as { id: string }).id, true, keyFor((webVaultRun as { id: string }).id, ".tar.gz"));
+    const deleted = (id: string) => panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, id)).get()?.deletedAt !== null;
+    expect(deleted((dataRun as { id: string }).id)).toBe(true);
+    expect(deleted(third.body.runs[0].id)).toBe(false);
+    expect(deleted((webVaultRun as { id: string }).id)).toBe(false);
+
+    // Audited with what it started and skipped.
+    const audited = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, backupOps.runAll.id)).all();
+    expect(audited).toHaveLength(3);
+    expect(audited[0]?.input).toMatchObject({ serviceId: app.id, runIds: first.body.runs.map((r: { id: string }) => r.id) });
+    agent.disconnect();
+  });
+
+  test("every schedule off starts nothing and says so; no schedule at all is refused", async () => {
+    const { node, app, data, webVault, cache } = await volumeSchedules();
+    const asked: unknown[] = [];
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void asked.push(req) }, [], [signed]);
+    for (const policyId of [data, webVault])
+      await callOp(panel, backupOps.updatePolicy, { serviceId: app.id, policyId, enabled: false }, { cookie });
+    const off = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(off.status).toBe(200);
+    expect(off.body).toEqual({
+      runs: [],
+      skipped: [data, webVault, cache].map((policyId) => ({ policyId, reason: "disabled" })),
+    });
+    expect(asked).toEqual([]);
+
+    const bare = seedService(panel, { projectId: app.projectId, name: "bare", nodeIds: [node.id] });
+    const none = await callOp(panel, backupOps.runAll, { serviceId: bare.id }, { cookie });
+    expect(none.status).toBe(400);
+    expect(none.body.error.details).toMatchObject({ reason: "noSchedules" });
+    agent.disconnect();
+  });
+
+  test("with the node offline it fails like a single Back up now, and records each failed start", async () => {
+    const { app } = await volumeSchedules();
+    const res = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(res.status).toBe(503);
+    const rows = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.serviceId, app.id)).all();
+    expect(rows.map((r) => r.status)).toEqual(["failed", "failed"]);
+  });
+
+  test("needs backups.run on the service", async () => {
+    const { app } = await volumeSchedules();
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", app.id, ["backups.view"]);
+    expect((await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie: member.cookie })).status).toBe(403);
+  });
+});
+
+describe("run labels", () => {
+  test("runs carry their volume's name, and a restore when its backup was taken", async () => {
+    const { node, app, data } = await volumeSchedules();
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}), restoreBackup: () => ({ restoredBytes: 1n }) }, [], [signed]);
+    const run = await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: data }, { cookie });
+    expect(run.body).toMatchObject({ target: "volume", volumeName: "data", sourceStartedAt: null });
+    backupResult(node.id, run.body.id, true, keyFor(run.body.id, ".tar.gz"));
+    const restore = await callOp(
+      panel,
+      backupOps.restore,
+      { serviceId: app.id, runId: run.body.id, confirmName: "vault-warden" },
+      { cookie },
+    );
+    expect(restore.body).toMatchObject({ kind: "restore", volumeName: "data", sourceStartedAt: run.body.startedAt });
+    const listed = await callOp(panel, backupOps.listRuns, { serviceId: app.id }, { cookie });
+    expect(
+      listed.body.runs.map((r: { kind: string; volumeName: string; sourceStartedAt: string | null }) => [
+        r.kind,
+        r.volumeName,
+        r.sourceStartedAt,
+      ]),
+    ).toEqual([
+      ["restore", "data", run.body.startedAt],
+      ["backup", "data", null],
+    ]);
+    await panel.runner.runDue(panel.deps);
+    agent.disconnect();
+  });
+});
+
+describe("download links", () => {
+  /** A finished database backup with its file in the bucket. */
+  async function databaseBackup() {
+    const { node, project, dbId, destinationId } = await setup();
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, [], [signed]);
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    const key = keyFor(run.body.id);
+    objects.set(`/backups/${key}`, "dump bytes");
+    backupResult(node.id, run.body.id, true, key);
+    return { node, project, dbId, destinationId, agent, runId: run.body.id as string, key };
+  }
+
+  test("a link signs a GET of that run's own object only, for 5 minutes, saved under a readable name", async () => {
+    const { dbId, destinationId, agent, runId, key } = await databaseBackup();
+    const started = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, runId)).get()?.startedAt as Date;
+    const res = await callOp(panel, backupOps.downloadUrl, { serviceId: dbId, runId }, { cookie });
+    expect(res.status).toBe(200);
+    const stamp = `${started.toISOString().slice(0, 10)}_${started.toISOString().slice(11, 13)}${started.toISOString().slice(14, 16)}`;
+    expect(res.body.fileName).toBe(`db-database-${stamp}.dump`);
+    const url = new URL(res.body.url);
+    expect(url.origin).toBe(`http://127.0.0.1:${s3.port}`);
+    expect(url.pathname).toBe(`/backups/${key}`);
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      "response-content-disposition": `attachment; filename="${res.body.fileName}"`,
+      "X-Amz-Expires": "300",
+      "X-Amz-SignedHeaders": "host",
+    });
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      "X-Amz-Algorithm",
+      "X-Amz-Credential",
+      "X-Amz-Date",
+      "X-Amz-Expires",
+      "X-Amz-Signature",
+      "X-Amz-SignedHeaders",
+      "response-content-disposition",
+    ]);
+    // No key in it but the presign's access key id; the secret never.
+    expect(res.body.url).not.toContain("super-secret-key");
+    expect(Date.parse(res.body.expiresAt) - Date.now()).toBeGreaterThan(290_000);
+    expect(Date.parse(res.body.expiresAt) - Date.now()).toBeLessThanOrEqual(300_000);
+
+    // The signature is the panel's presign of exactly that object and that file name.
+    const destination = panel.deps.db.select().from(backupDestinations).where(eq(backupDestinations.id, destinationId)).get();
+    const date = url.searchParams.get("X-Amz-Date") as string;
+    const now = new Date(
+      `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${date.slice(9, 11)}:${date.slice(11, 13)}:${date.slice(13, 15)}Z`,
+    );
+    const config = storageConfig(panel.deps.secrets, destination as never);
+    const query = { "response-content-disposition": `attachment; filename="${res.body.fileName}"` };
+    expect(res.body.url).toBe(presign(config, { method: "GET", key, query, expiresIn: 300, now }));
+
+    // The browser fetches it from the bucket itself.
+    const got = await fetch(res.body.url);
+    expect(await got.text()).toBe("dump bytes");
+    expect(got.headers.get("content-disposition")).toBe(`attachment; filename="${res.body.fileName}"`);
+
+    // Audited, with the name it was saved under.
+    const row = panel.deps.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.opId, backupOps.downloadUrl.id), eq(auditLog.outcome, "ok")))
+      .get();
+    expect(row?.input).toEqual({ serviceId: dbId, runId, fileName: res.body.fileName, destinationId });
+    expect(row).toMatchObject({ targetType: "service", targetId: dbId });
+    agent.disconnect();
+  });
+
+  test("no link for anything but a kept, successful backup of this service with its destination", async () => {
+    const { node, project, dbId, destinationId, agent, runId } = await databaseBackup();
+    const ask = (runId: string, serviceId = dbId) => callOp(panel, backupOps.downloadUrl, { serviceId, runId }, { cookie });
+
+    // Running, failed and restore runs.
+    const running = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    expect((await ask(running.body.id)).status).toBe(400);
+    const failed = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    backupResult(node.id, failed.body.id, false);
+    expect((await ask(failed.body.id)).status).toBe(400);
+    const restore = await callOp(panel, backupOps.restore, { serviceId: dbId, runId, confirmName: "db" }, { cookie });
+    expect((await ask(restore.body.id)).status).toBe(400);
+    await panel.runner.runDue(panel.deps);
+
+    // A run of another service, asked for through this one.
+    const other = await callOp(
+      panel,
+      dbOps.create,
+      { projectId: project.id, name: "db2", engine: "postgres", nodeId: node.id },
+      { cookie },
+    );
+    expect((await ask(runId, other.body.serviceId)).status).toBe(404);
+
+    // A row recorded before keys were checked, naming another service's object.
+    const foreign = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    const othersKey = `seylo/${other.body.serviceId}/manual/20260101T030000Z-${foreign.body.id}.dump`;
+    panel.deps.db.update(backupRuns).set({ status: "succeeded", objectKey: othersKey }).where(eq(backupRuns.id, foreign.body.id)).run();
+    const refused = await ask(foreign.body.id);
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).not.toContain("X-Amz");
+
+    // Deleted (the file is gone from the bucket).
+    const kept = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    backupResult(node.id, kept.body.id);
+    await callOp(panel, backupOps.deleteRun, { serviceId: dbId, runId }, { cookie });
+    expect((await ask(runId)).status).toBe(400);
+
+    // Its destination deleted: the panel has no keys for that bucket.
+    expect((await ask(kept.body.id)).status).toBe(200);
+    expect((await callOp(panel, backupOps.deleteDestination, { destinationId }, { cookie })).status).toBe(200);
+    const gone = await ask(kept.body.id);
+    expect(gone.status).toBe(409);
+    expect(gone.body.error.details).toMatchObject({ reason: "noDestination" });
+    agent.disconnect();
+  });
+
+  test("needs backups.restore, and on a database databases.credentials too; a volume backup only backups.restore", async () => {
+    const { dbId, agent, runId } = await databaseBackup();
+    const member = await createUser(panel, "member");
+    const ask = () => callOp(panel, backupOps.downloadUrl, { serviceId: dbId, runId }, { cookie: member.cookie });
+    const allow = (actions: string[]) => {
+      panel.deps.db.delete(grants).where(eq(grants.userId, member.user.id)).run();
+      grant(panel, member.user.id, "service", dbId, actions);
+    };
+    allow(["backups.view", "backups.run"]);
+    const view = await ask();
+    expect(view.status).toBe(403);
+    expect(view.body.error.details).toMatchObject({ action: "backups.restore" });
+    allow(["backups.view", "backups.restore"]);
+    const logins = await ask();
+    expect(logins.status).toBe(403);
+    expect(logins.body.error.details).toMatchObject({ action: "databases.credentials" });
+    allow(["backups.view", "backups.restore", "databases.credentials"]);
+    expect((await ask()).status).toBe(200);
+    // Refusals are in the audit log too.
+    const refusals = panel.deps.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.opId, backupOps.downloadUrl.id), eq(auditLog.errorCode, "FORBIDDEN")))
+      .all();
+    expect(refusals).toHaveLength(2);
+    agent.disconnect();
+
+    const { node, app, data } = await volumeSchedules();
+    const volumeAgent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, [], [signed]);
+    const run = await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: data }, { cookie });
+    backupResult(node.id, run.body.id, true, keyFor(run.body.id, ".tar.gz"));
+    const other = await createUser(panel, "member");
+    grant(panel, other.user.id, "service", app.id, ["backups.restore"]);
+    const volume = await callOp(panel, backupOps.downloadUrl, { serviceId: app.id, runId: run.body.id }, { cookie: other.cookie });
+    expect(volume.status).toBe(200);
+    expect(volume.body.fileName).toMatch(/^vault-warden-data-\d{4}-\d{2}-\d{2}_\d{4}\.tar\.gz$/);
+    volumeAgent.disconnect();
+  });
+
+  test("a model (MCP, AI) gets a link only after a person approved it", async () => {
+    const { dbId, agent, runId } = await databaseBackup();
+    const mcp = createApiKey(panel, ownerId, { kind: "mcp" });
+    const asked = await callOp(panel, backupOps.downloadUrl, { serviceId: dbId, runId }, { bearer: mcp });
+    expect(asked.status).toBe(403);
+    expect(asked.body.error.code).toBe("APPROVAL_REQUIRED");
+    // A plain API key is a person's own script: no approval.
+    const key = createApiKey(panel, ownerId);
+    expect((await callOp(panel, backupOps.downloadUrl, { serviceId: dbId, runId }, { bearer: key })).status).toBe(200);
+    // Back up now for every schedule is an ordinary change for MCP tokens.
+    expect(allOps.find((op) => op.id === backupOps.runAll.id)?.modelApproval).toBeUndefined();
+    // The assistant asks for every change.
+    expect(buildAiTools(allOps).find((tool) => tool.opId === backupOps.downloadUrl.id)?.needsApproval).toBe(true);
+    agent.disconnect();
+  });
+
+  test("file names keep to safe characters", () => {
+    const at = new Date("2026-11-13T03:00:41.000Z");
+    expect(backupFileName("vault-warden", "web-vault", at, ".tar.gz")).toBe("vault-warden-web-vault-2026-11-13_0300.tar.gz");
+    expect(backupFileName("my app", 'a"b/../c', at, ".dump")).toBe("my-app-a-b-..-c-2026-11-13_0300.dump");
+    expect(backupFileName("..", "", at, ".sql.gz")).toBe("backup-backup-2026-11-13_0300.sql.gz");
   });
 });

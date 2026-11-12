@@ -1,6 +1,7 @@
 // Backups: S3/R2 destinations (sealed keys, connection test), schedules per
-// database or volume, run now, the run list, restores (a job, optionally
-// after a safety backup) and deleting backups. Results come back from the
+// database or volume, run now (one schedule or all of them), the run list,
+// restores (a job, optionally after a safety backup), download links and
+// deleting backups. Results come back from the
 // agents as durable BackupResult events.
 
 import { defineJob } from "../../jobs/queue";
@@ -11,11 +12,13 @@ import {
   deleteDestination,
   deletePolicy,
   deleteRun,
+  downloadUrl,
   listDestinations,
   listPolicies,
   listRuns,
   restore,
   restoreJobType,
+  runAll,
   runNow,
   testDestination,
   updateDestination,
@@ -65,9 +68,11 @@ export default defineModule({
     updatePolicy,
     deletePolicy,
     runNow,
+    runAll,
     listRuns,
     restore,
     deleteRun,
+    downloadUrl,
   ],
   jobs: [scheduleJob, restoreJob, pruneJob],
   start(deps) {

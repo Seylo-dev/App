@@ -1612,7 +1612,9 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   whether the caller may.
 - Model callers (transport `mcp` or `ai`, or any `mcp` token on any
   transport) only reach ops with `mcp: true`; everything else is FORBIDDEN.
-- Approval: a destructive op from a model fails with `APPROVAL_REQUIRED`
+- Approval: a destructive op from a model, and a mutation marked
+  `modelApproval` (0.2.15; `backups.downloadUrl`, data leaving the panel;
+  lint allows it only on `mcp: true` mutations), fails with `APPROVAL_REQUIRED`
   (403) unless the call carries
   `approvalId`, which only the approvals module sets when it replays a call
   a person approved (the approvals module checks that the approval matches the op and input).
@@ -4940,6 +4942,47 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   delete by hand (before 0.2.15 `deleteRun` refused it, CONFLICT
   `noDestination`, and `restore` recorded a failed restore run). The Backups tab shows such a backup as "Destination
   deleted" with only "Remove from list".
+  Back up now for a whole service is `backups.runAll` (0.2.15): every
+  enabled schedule of the service, one `startBackup` each (its
+  destination, its `keepLast`, as a scheduled run), in the schedules'
+  order; disabled schedules and schedules with a backup run still
+  `running` are skipped (`skipped`, reason `disabled` or `running`, so a
+  schedule never runs twice at once; one stuck `running` waits for the
+  12-hour sweep); no schedule at all is BAD_REQUEST `noSchedules`. When
+  no backup could start it throws the first start error, as `runNow`
+  does, after recording each failed run; when some did, `runs` holds the
+  failed ones too. `backups.runNow` with a `policyId` still starts that
+  one schedule (enabled or not). The Backups tab's header Back up now
+  and the database Connection tab's both call `runAll`
+  (`web/.../backups/back-up-now.ts`; before 0.2.15 they ran only the
+  first schedule), and a database without a schedule still gets a
+  one-off `runNow` to the first destination; each schedule's menu keeps
+  its single `runNow`. Runs carry `volumeName` (volume runs, null once
+  the volume is gone) and `sourceStartedAt` (restores: when their backup
+  started), looked up per page in `toRuns`; each row of "Backups and
+  restores" names what it holds next to its date ("Database", "Volume
+  data", "Deleted volume", "Restore of the <date> backup of <what>").
+  `backups.downloadUrl` (0.2.15, a mutation with `modelApproval`) returns
+  a GET of one backup's object presigned with the destination's keys
+  (`presign`, the same addressing as the nodes' URLs) for 300 s
+  (`backups.downloadUrlSeconds`), with `response-content-disposition:
+  attachment; filename="<service>-<volume name or database>-<UTC start
+  YYYY-MM-DD_HHmm><ext>"` (`backupFileName`: only `[A-Za-z0-9._-]`), only
+  for a succeeded, not deleted backup run of that service whose key passes
+  `ownObjectKey` and whose destination still exists (else BAD_REQUEST, or
+  CONFLICT `noDestination`). It needs `backups.restore`, and on a
+  database service `databases.credentials` as well (FORBIDDEN, details
+  `action`), like a clone or export of a database's data; it is audited
+  with `fileName` and `destinationId`, refusals included. Its `url` is
+  not `sensitive`: a model's call waits for a person's approval and then
+  gets the link (the approval's result keeps it, dead after 300 s);
+  the destination's secret is never in it. The web app
+  opens the link with a plain anchor navigation (no `download` attribute
+  across origins, no bucket CORS); the bytes never pass through the
+  panel, so the bucket must be reachable from the browser (an http
+  MinIO behind an https panel may be refused as an insecure download).
+  The row menu shows Download only for a backup that is there to restore
+  (`runMenu`: Restore, Download, Remove).
 - Database engines (`modules/databases/engines.ts`, listed by the
   `databases.engines` op): Postgres 18 (default, data at
   `/var/lib/postgresql`), 17, 16, 15 and the `pgvector` variant of each

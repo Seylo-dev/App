@@ -49,6 +49,13 @@ export interface OpDefinition<Kind extends OpKind, Input extends TObject, Output
   readonly sensitive?: SensitiveFields;
   /** Exposed to models: the MCP server and the AI assistant. */
   readonly mcp: boolean;
+  /**
+   * A mutation that model callers (MCP, AI) may only run once a person
+   * approved it, like a destructive op, though it deletes nothing: it hands
+   * data out of the panel (backups.downloadUrl). MCP tokens skip it while
+   * "Ask before destructive actions" is off, as they skip destructive ones.
+   */
+  readonly modelApproval?: true;
   /** Written to the audit log. Every mutation and destructive op must audit. */
   readonly audit: boolean;
   readonly rateLimit?: RateLimitClass;

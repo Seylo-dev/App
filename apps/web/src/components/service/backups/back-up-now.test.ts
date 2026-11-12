@@ -1,0 +1,76 @@
+// "Back up now" at the top of the Backups tab (and on a database's
+// Connection tab) ran only the first schedule: a service with two volume
+// schedules got one backup. It now backs up every enabled schedule
+// (backups.runAll) and says how many started; a database with no schedule
+// still gets a one-off dump to the first destination.
+
+import { expect, test } from "bun:test";
+import { backUpNowPlan, type RunAllResult, runAllToast } from "./back-up-now";
+
+type Run = RunAllResult["runs"][number];
+
+const run = (over: Partial<Run> = {}): Run => ({
+  id: "r000000000000001",
+  kind: "backup",
+  serviceId: "s000000000000001",
+  policyId: "b000000000000001",
+  destinationId: "x000000000000001",
+  target: "volume",
+  volumeId: "v000000000000001",
+  volumeName: "data",
+  sourceRunId: null,
+  sourceStartedAt: null,
+  status: "running",
+  objectKey: null,
+  sizeBytes: null,
+  error: null,
+  deletedAt: null,
+  startedAt: "2026-11-13T09:00:00.000Z",
+  finishedAt: null,
+  ...over,
+});
+
+const policy = { id: "b000000000000001" } as never;
+const choice = { id: "x000000000000001", name: "acme-backups", provider: "r2" as const, bucket: "acme-backups" };
+
+test("with schedules it backs up all of them; a database without one dumps once to the first destination", () => {
+  expect(backUpNowPlan({ kind: "app" }, [policy, policy], [choice])).toEqual({ kind: "schedules" });
+  expect(backUpNowPlan({ kind: "postgres" }, [policy], [choice])).toEqual({ kind: "schedules" });
+  expect(backUpNowPlan({ kind: "postgres" }, [], [choice])).toEqual({ kind: "oneOff", destinationId: choice.id });
+  // Nothing to back up to, an app without a schedule, or schedules not loaded yet: the button is off.
+  expect(backUpNowPlan({ kind: "postgres" }, [], [])).toBeNull();
+  expect(backUpNowPlan({ kind: "app" }, [], [choice])).toBeNull();
+  expect(backUpNowPlan({ kind: "postgres" }, undefined, [choice])).toBeNull();
+});
+
+test("the toast counts the backups it started and says why nothing started", () => {
+  const two = { runs: [run(), run({ id: "r000000000000002", volumeName: "web-vault" })], skipped: [] };
+  expect(runAllToast(two)).toEqual({ tone: "success", text: "Started 2 backups." });
+  // A schedule that is off is left out quietly while others start.
+  expect(runAllToast({ runs: [run()], skipped: [{ policyId: "b000000000000002", reason: "disabled" }] })).toEqual({
+    tone: "success",
+    text: "Started 1 backup.",
+  });
+  expect(runAllToast({ runs: [run()], skipped: [{ policyId: "b000000000000002", reason: "running" }] })).toEqual({
+    tone: "success",
+    text: "Started 1 backup. 1 was already running.",
+  });
+  expect(runAllToast({ runs: [], skipped: [{ policyId: "b000000000000002", reason: "disabled" }] })).toEqual({
+    tone: "info",
+    text: "Every schedule is off, so nothing was backed up. Turn one on, or start it from its own menu.",
+  });
+  expect(
+    runAllToast({
+      runs: [],
+      skipped: [
+        { policyId: "b000000000000001", reason: "running" },
+        { policyId: "b000000000000002", reason: "disabled" },
+      ],
+    }),
+  ).toEqual({ tone: "info", text: "Every schedule that is on is already backing up." });
+  // One could not start (its node refused it): said, with the reason.
+  expect(runAllToast({ runs: [run(), run({ status: "failed", error: "The node is offline." })], skipped: [] })).toEqual({
+    tone: "warning",
+    text: "Started 1 backup. 1 could not start: The node is offline.",
+  });
+});

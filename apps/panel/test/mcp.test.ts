@@ -423,7 +423,7 @@ test("Ask before destructive actions off: an MCP token's destructive call runs r
     capabilities: {},
     clientInfo: { name: "t", version: "1" },
   });
-  expect(init.body.result.instructions).toContain("Destructive actions run right away");
+  expect(init.body.result.instructions).toContain("Destructive actions and backup download links run right away");
 
   // Off: it runs at once, with no approval, and the activity log has it.
   const temp = await createProject("Temp");

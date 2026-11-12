@@ -5,8 +5,9 @@
 //     -> rate limit -> run -> check output -> audit
 //
 // Calls a model made (MCP and AI transports, or any MCP token) only reach
-// ops marked mcp: true, and destructive ones need a person's approval
-// (MCP tokens skip it while "Ask before destructive actions" is off).
+// ops marked mcp: true, and destructive ones (and modelApproval ones, which
+// hand data out of the panel) need a person's approval (MCP tokens skip it
+// while "Ask before destructive actions" is off).
 //
 // Input is validated before the permission check because project and
 // service permissions read the resource id from the input. Anonymous
@@ -126,7 +127,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
         // Counted until its audit row is written, so a move that starts meanwhile waits for both.
         written = beginWrite(deps.db);
       }
-      if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId && !autoMode && !approvalWaived(deps, principal)) {
+      if (needsPerson(op) && fromModel(call, principal) && !call.approvalId && !autoMode && !approvalWaived(deps, principal)) {
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
       }
 
@@ -155,6 +156,11 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       written?.();
     }
   };
+}
+
+/** Ops a model's call waits on a person for: destructive ones, and modelApproval ones (data leaving the panel). */
+function needsPerson(op: AnyOpContract): boolean {
+  return op.kind === "destructive" || op.modelApproval === true;
 }
 
 /** Calls a model made: MCP and AI transports, and MCP tokens on any transport. */

@@ -5,7 +5,7 @@
 import { and, eq, lte } from "drizzle-orm";
 import { backupPolicies } from "../../db/schema";
 import type { Deps } from "../../deps";
-import { nextRun, startBackup } from "./runs";
+import { nextRun, policyBackup, startBackup } from "./runs";
 
 export async function runDueBackups(deps: Pick<Deps, "db" | "secrets" | "agents" | "live" | "logger">, now = new Date()): Promise<number> {
   const due = deps.db
@@ -21,15 +21,7 @@ export async function runDueBackups(deps: Pick<Deps, "db" | "secrets" | "agents"
       .where(eq(backupPolicies.id, policy.id))
       .run();
     try {
-      await startBackup(deps, {
-        serviceId: policy.serviceId,
-        target: policy.target,
-        volumeId: policy.volumeId,
-        destinationId: policy.destinationId,
-        policy,
-        stopService: policy.stopService,
-        keepLast: policy.keepLast,
-      });
+      await startBackup(deps, policyBackup(policy));
     } catch (error) {
       deps.logger.warn({ err: error, policyId: policy.id, serviceId: policy.serviceId }, "scheduled backup did not start");
     }

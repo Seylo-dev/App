@@ -25,6 +25,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { useBackUpNow } from "../backups/back-up-now";
 import { describeCron } from "../cron-text";
 import { Field } from "../field";
 import { formatBytes, formatDateTime, formatRelative } from "../format";
@@ -571,28 +572,18 @@ function ToolRow({
   );
 }
 
+/** The Backups card: its Back up now is the Backups tab's (every enabled schedule, or a one-off dump without one). */
 function BackupsSummary({ service }: { service: ServiceDetail }) {
   const policies = useOp(backups.listPolicies, { serviceId: service.id }, { retry: retryOp });
+  const destinations = useOp(backups.listDestinations, {}, { retry: retryOp });
   const runs = useOp(backups.listRuns, { serviceId: service.id, limit: 3 }, { retry: retryOp });
-  const invalidate = useInvalidate();
   const policy = policies.data?.policies[0];
-  const run = useOpMutation(backups.runNow, {
-    onSuccess: () => {
-      invalidate(backups.listRuns);
-      toast.success(t("serviceBackups.started"));
-    },
-    onError: fail,
-  });
+  const backUpNow = useBackUpNow(service, policies.data?.policies, destinations.data?.choices ?? []);
   return (
     <section aria-label={t("service.tabs.backups")} className="flex flex-col gap-1 rounded-card bg-card px-5 pt-[18px] pb-2 shadow-card">
       <div className="flex items-center">
         <h2 className="m-0 text-[15px] font-semibold">{t("service.tabs.backups")}</h2>
-        <Button
-          size="sm"
-          className="ml-auto bg-muted shadow-none"
-          disabled={!policy || run.isPending}
-          onClick={() => policy && run.mutate({ serviceId: service.id, policyId: policy.id })}
-        >
+        <Button size="sm" className="ml-auto bg-muted shadow-none" disabled={backUpNow.disabled} onClick={backUpNow.run}>
           {t("serviceBackups.backUpNow")}
         </Button>
       </div>

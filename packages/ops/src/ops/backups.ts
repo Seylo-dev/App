@@ -79,8 +79,12 @@ export const Run = Type.Object({
   destinationId: Type.Union([Id, Type.Null()]),
   target: BackupTarget,
   volumeId: Type.Union([Id, Type.Null()]),
+  /** Volume runs: the volume's name; null for database runs and once the volume was deleted. */
+  volumeName: Type.Union([Type.String(), Type.Null()]),
   /** Restores: the backup run they restored. */
   sourceRunId: Type.Union([Id, Type.Null()]),
+  /** Restores: when the backup they restored was started. */
+  sourceStartedAt: Type.Union([Timestamp, Type.Null()]),
   status: RunStatus,
   objectKey: Type.Union([Type.String(), Type.Null()]),
   sizeBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
@@ -259,7 +263,7 @@ export const runNow = defineOp({
   kind: "mutation",
   summary: "Back up now",
   description:
-    "Starts a backup right away: of a schedule (policyId), or a one-off of the database or a volume to a destination. Returns the run; follow it with backups.listRuns or the live service topic.",
+    "Starts one backup right away: of one schedule (policyId; also a disabled one, counted toward its keepLast), or a one-off of the database or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
   input: Type.Object({
     serviceId: Id,
     policyId: Type.Optional(Id),
@@ -268,6 +272,26 @@ export const runNow = defineOp({
     destinationId: Type.Optional(Id),
   }),
   output: Run,
+  permission: serviceScope("backups.run"),
+  mcp: true,
+  audit: true,
+});
+
+/** Why backups.runAll left a schedule out. */
+export const RunAllSkip = Type.Union([Type.Literal("disabled"), Type.Literal("running")]);
+
+export const runAll = defineOp({
+  id: "backups.runAll",
+  kind: "mutation",
+  summary: "Back up every schedule now",
+  description:
+    "Starts a backup of every enabled schedule of a service at once (its database and each scheduled volume), each to its own destination and counted toward its own keepLast, as when it runs on time. Disabled schedules are skipped, and so is a schedule with a backup still running (never started twice); skipped says which and why, and runs is empty when every schedule was skipped. A service with no schedule is refused (BAD_REQUEST, reason noSchedules): start a one-off with backups.runNow. When no backup could start (the node offline, an agent too old) it fails as backups.runNow does; when only some could, runs also lists those that failed to start, with their error. backups.runNow with a policyId starts a single schedule.",
+  input: Type.Object({ serviceId: Id }),
+  output: Type.Object({
+    /** The runs it started, in the schedules' order: running, or failed when the node could not start one. */
+    runs: Type.Array(Run),
+    skipped: Type.Array(Type.Object({ policyId: Id, reason: RunAllSkip })),
+  }),
   permission: serviceScope("backups.run"),
   mcp: true,
   audit: true,
@@ -319,6 +343,27 @@ export const deleteRun = defineOp({
   input: Type.Object({ serviceId: Id, runId: Id }),
   output: Run,
   permission: serviceScope("backups.edit"),
+  mcp: true,
+  audit: true,
+});
+
+/** How long a backups.downloadUrl link works. */
+export const downloadUrlSeconds = 300;
+
+export const downloadUrl = defineOp({
+  id: "backups.downloadUrl",
+  kind: "mutation",
+  summary: "Get a backup's download link",
+  description:
+    "Returns a link that downloads one successful backup's file straight from its bucket for 5 minutes: a GET presigned with the destination's keys for that backup's own object only, saved as fileName (<service>-<volume name or database>-<UTC start, YYYY-MM-DD_HHmm>.<the file's extension>). The browser or tool that opens it reaches the bucket itself, so the bucket must be reachable from there; the link carries no key, only its signature. Needs backups.restore, and on a database service databases.credentials too (a dump holds the database's logins). Refused for a run that is not a successful backup or was deleted (BAD_REQUEST) and for a backup whose destination was deleted (CONFLICT, reason noDestination). Model callers (MCP, AI) need a person's approval first, as the file leaves the panel.",
+  input: Type.Object({ serviceId: Id, runId: Id }),
+  output: Type.Object({
+    url: Type.String(),
+    fileName: Type.String(),
+    expiresAt: Timestamp,
+  }),
+  permission: serviceScope("backups.restore"),
+  modelApproval: true,
   mcp: true,
   audit: true,
 });

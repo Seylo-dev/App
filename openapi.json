@@ -10103,7 +10103,9 @@
                     "destinationId",
                     "target",
                     "volumeId",
+                    "volumeName",
                     "sourceRunId",
+                    "sourceStartedAt",
                     "status",
                     "objectKey",
                     "sizeBytes",
@@ -10183,11 +10185,32 @@
                         }
                       ]
                     },
+                    "volumeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "sourceRunId": {
                       "anyOf": [
                         {
                           "pattern": "^[a-z0-9]{16}$",
                           "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sourceStartedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
                           "type": "string"
                         },
                         {
@@ -10279,6 +10302,86 @@
         },
         "x-op-kind": "destructive",
         "x-permission": "service:backups.edit",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/backups.downloadUrl": {
+      "post": {
+        "operationId": "backups.downloadUrl",
+        "summary": "Get a backup's download link",
+        "description": "Returns a link that downloads one successful backup's file straight from its bucket for 5 minutes: a GET presigned with the destination's keys for that backup's own object only, saved as fileName (<service>-<volume name or database>-<UTC start, YYYY-MM-DD_HHmm>.<the file's extension>). The browser or tool that opens it reaches the bucket itself, so the bucket must be reachable from there; the link carries no key, only its signature. Needs backups.restore, and on a database service databases.credentials too (a dump holds the database's logins). Refused for a run that is not a successful backup or was deleted (BAD_REQUEST) and for a backup whose destination was deleted (CONFLICT, reason noDestination). Model callers (MCP, AI) need a person's approval first, as the file leaves the panel.",
+        "tags": [
+          "backups"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "runId"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "runId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "url",
+                    "fileName",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "fileName": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:backups.restore",
         "x-mcp": true
       }
     },
@@ -10748,7 +10851,9 @@
                           "destinationId",
                           "target",
                           "volumeId",
+                          "volumeName",
                           "sourceRunId",
+                          "sourceStartedAt",
                           "status",
                           "objectKey",
                           "sizeBytes",
@@ -10828,11 +10933,32 @@
                               }
                             ]
                           },
+                          "volumeName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "sourceRunId": {
                             "anyOf": [
                               {
                                 "pattern": "^[a-z0-9]{16}$",
                                 "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sourceStartedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
                                 "type": "string"
                               },
                               {
@@ -10999,7 +11125,9 @@
                     "destinationId",
                     "target",
                     "volumeId",
+                    "volumeName",
                     "sourceRunId",
+                    "sourceStartedAt",
                     "status",
                     "objectKey",
                     "sizeBytes",
@@ -11079,11 +11207,32 @@
                         }
                       ]
                     },
+                    "volumeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "sourceRunId": {
                       "anyOf": [
                         {
                           "pattern": "^[a-z0-9]{16}$",
                           "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sourceStartedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
                           "type": "string"
                         },
                         {
@@ -11178,11 +11327,306 @@
         "x-mcp": true
       }
     },
+    "/api/v1/backups.runAll": {
+      "post": {
+        "operationId": "backups.runAll",
+        "summary": "Back up every schedule now",
+        "description": "Starts a backup of every enabled schedule of a service at once (its database and each scheduled volume), each to its own destination and counted toward its own keepLast, as when it runs on time. Disabled schedules are skipped, and so is a schedule with a backup still running (never started twice); skipped says which and why, and runs is empty when every schedule was skipped. A service with no schedule is refused (BAD_REQUEST, reason noSchedules): start a one-off with backups.runNow. When no backup could start (the node offline, an agent too old) it fails as backups.runNow does; when only some could, runs also lists those that failed to start, with their error. backups.runNow with a policyId starts a single schedule.",
+        "tags": [
+          "backups"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "runs",
+                    "skipped"
+                  ],
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "kind",
+                          "serviceId",
+                          "policyId",
+                          "destinationId",
+                          "target",
+                          "volumeId",
+                          "volumeName",
+                          "sourceRunId",
+                          "sourceStartedAt",
+                          "status",
+                          "objectKey",
+                          "sizeBytes",
+                          "error",
+                          "deletedAt",
+                          "startedAt",
+                          "finishedAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "backup",
+                                "type": "string"
+                              },
+                              {
+                                "const": "restore",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "serviceId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "policyId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "destinationId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "target": {
+                            "anyOf": [
+                              {
+                                "const": "database",
+                                "type": "string"
+                              },
+                              {
+                                "const": "volume",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "volumeId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "volumeName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sourceRunId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sourceStartedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "const": "running",
+                                "type": "string"
+                              },
+                              {
+                                "const": "succeeded",
+                                "type": "string"
+                              },
+                              {
+                                "const": "failed",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "objectKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sizeBytes": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "deletedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "startedAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "policyId",
+                          "reason"
+                        ],
+                        "properties": {
+                          "policyId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "const": "disabled",
+                                "type": "string"
+                              },
+                              {
+                                "const": "running",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:backups.run",
+        "x-mcp": true
+      }
+    },
     "/api/v1/backups.runNow": {
       "post": {
         "operationId": "backups.runNow",
         "summary": "Back up now",
-        "description": "Starts a backup right away: of a schedule (policyId), or a one-off of the database or a volume to a destination. Returns the run; follow it with backups.listRuns or the live service topic.",
+        "description": "Starts one backup right away: of one schedule (policyId; also a disabled one, counted toward its keepLast), or a one-off of the database or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
         "tags": [
           "backups"
         ],
@@ -11257,7 +11701,9 @@
                     "destinationId",
                     "target",
                     "volumeId",
+                    "volumeName",
                     "sourceRunId",
+                    "sourceStartedAt",
                     "status",
                     "objectKey",
                     "sizeBytes",
@@ -11337,11 +11783,32 @@
                         }
                       ]
                     },
+                    "volumeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "sourceRunId": {
                       "anyOf": [
                         {
                           "pattern": "^[a-z0-9]{16}$",
                           "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sourceStartedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
                           "type": "string"
                         },
                         {

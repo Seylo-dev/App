@@ -34,6 +34,8 @@ export function lintOp(op: AnyOpContract): string[] {
   }
   if (op.kind !== "query" && !op.audit) problem(`${op.kind} ops must be audited`);
   if (op.kind === "destructive" && op.permission.kind === "public") problem("destructive ops cannot be public");
+  // Queries never wait for a person, destructive ops always do, and an op models cannot call needs no approval.
+  if (op.modelApproval && (op.kind !== "mutation" || !op.mcp)) problem("modelApproval is for mutations models can call (mcp: true)");
 
   for (const [side, schema] of [
     ["input", op.input],
