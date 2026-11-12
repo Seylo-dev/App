@@ -223,7 +223,7 @@ function crossNodeDiagnostic(
 }
 
 /** The public counterpart of an internal variable: INTERNAL_URL -> EXPOSED_URL, else URL. */
-function pickPublicVariable(target: ReferenceTarget, variable: string | null): string | null {
+export function pickPublicVariable(target: ReferenceTarget, variable: string | null): string | null {
   const isPublic = (name: string) => target.variables.some((v) => v.name === name && v.scope === "public");
   const candidates = [variable?.replace(/^INTERNAL_/, "EXPOSED_"), variable?.replace(/^INTERNAL_/, ""), "EXPOSED_URL", "URL"].filter(
     (c): c is string => !!c && c !== variable,

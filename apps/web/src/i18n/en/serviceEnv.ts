@@ -30,6 +30,7 @@ export default {
     internalOnly: "internal only",
     notReachable: "Not reachable from {nodes}.",
     unreachable: "Only for services on {nodes}",
+    unreachableUse: "Only for services on {nodes}. {self} runs on {selfNodes}, so use {variable}.",
   },
   hover: {
     becomes: "Becomes",

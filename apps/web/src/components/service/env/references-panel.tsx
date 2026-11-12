@@ -1,11 +1,12 @@
 // The References side panel (Environment.dc.html): every service of the
 // project and the shared variables, with buttons that insert
 // ${{target.VARIABLE}} at the cursor. Internal variables of services on
-// other nodes are struck through; services with no way in get an Expose
+// other nodes are struck through, exposed ones too (their tip names the
+// exposed variable to use instead); services with no way in get an Expose
 // link instead.
 
 import type { AnalyzeContext, ReferenceTarget, ReferenceVariable } from "@seylo/env-analyzer";
-import { formatReference, missingNodes } from "@seylo/env-analyzer";
+import { formatReference, missingNodes, pickPublicVariable } from "@seylo/env-analyzer";
 import { Tip } from "@seylo/ui/components/tooltip";
 import { cn } from "@seylo/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
@@ -71,7 +72,6 @@ function TargetGroup({
 }) {
   const missing = target.kind === "service" ? missingNodes(context.self.nodes, target.nodes) : [];
   const sameNode = missing.length === 0;
-  const variables = target.variables.filter((v) => v.scope !== "internal" || sameNode || !target.exposed);
   const anyReachable = target.variables.some((v) => v.scope !== "internal" || sameNode);
   const kind = target.serviceKind as ServiceKind | null;
   const look = kind && kind in kindLook ? kindLook[kind] : null;
@@ -117,12 +117,13 @@ function TargetGroup({
         </div>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          {variables.map((v) => (
+          {target.variables.map((v) => (
             <VariableButton
               key={v.name}
               target={target}
               variable={v}
               reachable={v.scope !== "internal" || sameNode}
+              self={context.self}
               reveal={reveal}
               onInsert={onInsert}
             />
@@ -137,12 +138,14 @@ function VariableButton({
   target,
   variable,
   reachable,
+  self,
   reveal,
   onInsert,
 }: {
   target: ReferenceTarget;
   variable: ReferenceVariable;
   reachable: boolean;
+  self: AnalyzeContext["self"];
   reveal: boolean;
   onInsert: (text: string) => void;
 }) {
@@ -158,7 +161,7 @@ function VariableButton({
       <span className="font-mono text-xs break-all">{value}</span>
     </span>
   ) : (
-    t("serviceEnv.refs.unreachable", { nodes: target.nodes.map((n) => n.name).join(", ") })
+    unreachableTip(target, variable, self)
   );
   return (
     <Tip content={tip}>
@@ -177,4 +180,17 @@ function VariableButton({
       </button>
     </Tip>
   );
+}
+
+/** Why an internal variable is struck through, and what to use instead when the target is exposed. */
+function unreachableTip(target: ReferenceTarget, variable: ReferenceVariable, self: AnalyzeContext["self"]): string {
+  const nodes = target.nodes.map((n) => n.name).join(", ");
+  const instead = target.exposed ? pickPublicVariable(target, variable.name) : null;
+  if (!instead) return t("serviceEnv.refs.unreachable", { nodes });
+  return t("serviceEnv.refs.unreachableUse", {
+    nodes,
+    self: self.name,
+    selfNodes: self.nodes.map((n) => n.name).join(", "),
+    variable: instead,
+  });
 }

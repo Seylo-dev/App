@@ -6,7 +6,7 @@
 //   const { parsed, diagnostics } = analyzeEnv(text, context); // context from the env.references op
 //   const { values } = resolveEnv(parsed, context);
 
-export { analyzeEnv, analyzeParsed, missingNodes } from "./analyze";
+export { analyzeEnv, analyzeParsed, missingNodes, pickPublicVariable } from "./analyze";
 export { appVariables, type BuiltinVariable, builtinVariablesFor, clickhouseVariables, databaseVariables } from "./builtins";
 export { type HostMention, hostMentions } from "./hosts";
 export { parseEnv, stringifyEnv } from "./parse";
