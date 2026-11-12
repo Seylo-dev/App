@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"regexp"
@@ -81,12 +82,54 @@ func mentionedSecretArgs(output string, args []string) []string {
 
 var (
 	directiveRe = regexp.MustCompile(`^#\s*([A-Za-z]+)\s*=\s*(.*?)\s*$`)
-	heredocRe   = regexp.MustCompile(`<<(-?)(["']?)([A-Za-z_][A-Za-z0-9_]*)(["']?)`)
+	// heredocWordRe is BuildKit's heredoc word (frontend/dockerfile/parser): a whole shell word
+	// of optional fd digits, "<<", an optional "-" and the delimiter, which has no "<" ("<<<" is
+	// a here-string).
+	heredocWordRe = regexp.MustCompile(`^(\d*)<<(-?)([^<]*)$`)
 )
 
 type heredoc struct {
 	word      string
 	stripTabs bool
+}
+
+// heredocInstructions may carry heredocs, as in BuildKit; ONBUILD takes the one after it.
+var heredocInstructions = map[string]bool{"RUN": true, "COPY": true, "ADD": true}
+
+// heredocsOf are the heredocs one RUN, COPY or ADD line starts, in order, found as BuildKit
+// finds them: the line is split into words at unquoted white space (quotes and backslash
+// escapes kept), a word that is all of heredocWordRe starts one, and its delimiter is the rest
+// of the word with quotes and escapes removed ("<<'END-X'" ends at a line END-X). An "<<" inside
+// a word ("$((1<<N))", "a<<b") or in quotes is none, nor is any in the JSON form.
+func heredocsOf(fields []string, line string) []heredoc {
+	name := strings.ToUpper(fields[0])
+	if name == "ONBUILD" && len(fields) > 1 {
+		name = strings.ToUpper(fields[1])
+	}
+	if !heredocInstructions[name] || !strings.Contains(line, "<<") {
+		return nil
+	}
+	rest := strings.TrimSpace(line[strings.Index(line, fields[0])+len(fields[0]):])
+	if strings.EqualFold(fields[0], "ONBUILD") && len(fields) > 1 {
+		rest = strings.TrimSpace(rest[len(fields[1]):])
+	}
+	var exec []string
+	if strings.HasPrefix(rest, "[") && json.Unmarshal([]byte(rest), &exec) == nil {
+		return nil
+	}
+	var out []heredoc
+	for _, word := range splitWords(line, '\\', true) {
+		m := heredocWordRe.FindStringSubmatch(word)
+		if m == nil || m[3] == "" {
+			continue
+		}
+		delimiter := shellWords(m[3], '\\')
+		if len(delimiter) != 1 || delimiter[0] == "" {
+			continue
+		}
+		out = append(out, heredoc{word: delimiter[0], stripTabs: m[2] == "-"})
+	}
+	return out
 }
 
 // dockerfileArgs returns the names the ARG instructions of a Dockerfile
@@ -128,17 +171,8 @@ func dockerfileArgs(text string) []string {
 					out = append(out, name)
 				}
 			}
-		case "RUN", "COPY", "ADD":
-			for _, m := range heredocRe.FindAllStringSubmatchIndex(line, -1) {
-				// "<<<" is a here-string, not a heredoc; the quotes must match.
-				if m[0] > 0 && line[m[0]-1] == '<' {
-					continue
-				}
-				if line[m[4]:m[5]] != line[m[8]:m[9]] {
-					continue
-				}
-				pending = append(pending, heredoc{word: line[m[6]:m[7]], stripTabs: m[3] > m[2]})
-			}
+		default:
+			pending = append(pending, heredocsOf(fields, line)...)
 		}
 	}
 	for _, raw := range lines {
@@ -180,19 +214,33 @@ func dockerfileArgs(text string) []string {
 // shellWords splits an instruction's arguments at unquoted white space,
 // keeping quoted parts (ARG A="x y" B=1 is two words).
 func shellWords(s string, escape byte) []string {
+	return splitWords(s, escape, false)
+}
+
+// splitWords splits s at unquoted white space. Quotes and escapes are
+// removed, or with raw kept in the words (BuildKit's RawQuotes and
+// RawEscapes, how it looks for heredocs).
+func splitWords(s string, escape byte, raw bool) []string {
 	var (
 		words []string
 		word  strings.Builder
 		quote byte
 		in    bool
 	)
+	keep := func(c byte) {
+		if raw {
+			word.WriteByte(c)
+		}
+	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case quote != 0:
 			if c == quote {
 				quote = 0
+				keep(c)
 			} else if c == escape && quote == '"' && i+1 < len(s) {
+				keep(c)
 				i++
 				word.WriteByte(s[i])
 			} else {
@@ -200,7 +248,9 @@ func shellWords(s string, escape byte) []string {
 			}
 		case c == '"' || c == '\'':
 			quote, in = c, true
+			keep(c)
 		case c == escape && i+1 < len(s):
+			keep(c)
 			i++
 			word.WriteByte(s[i])
 			in = true

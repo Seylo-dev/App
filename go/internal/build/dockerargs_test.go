@@ -35,6 +35,21 @@ func TestDockerfileArgs(t *testing.T) {
 				"COPY <<A <<B /dst/\nARG IN_A\nA\nARG IN_B\nB\nARG LAST\n",
 			want: []string{"AFTER", "LAST"},
 		},
+		// BuildKit takes "<<" only at the start of a shell word: a shift, a word with "<<" inside,
+		// a quoted one or "<< EOF" with a space starts no heredoc, so the ARGs after it count.
+		"<< inside a word or in quotes": {
+			text: "FROM a\nRUN x=$((1<<N)) && echo $x\nARG S1\nRUN echo \"<<EOF\" a<<b '<<Q' \\\n  && cat << EOF\nARG S2\nENV A=<<EOF\nARG S3\n",
+			want: []string{"S1", "S2", "S3"},
+		},
+		// The delimiter is the rest of the word, quotes removed, not only letters and digits.
+		"delimiter to the end of the word": {
+			text: "FROM a\nRUN cat <<END-X\nARG S1\nEND-X\nARG S2\nRUN 3<<\"a.b\" cat /dev/fd/3\nARG IN\na.b\nARG S3\n",
+			want: []string{"S2", "S3"},
+		},
+		"JSON form and ONBUILD": {
+			text: "FROM a\nRUN [\"sh\", \"-c\", \"cat <<EOF\"]\nARG J\nONBUILD RUN <<EOF\nARG IN_ONBUILD\nEOF\nARG AFTER\n",
+			want: []string{"J", "AFTER"},
+		},
 		"escape directive": {
 			text: "# escape=`\nFROM mcr.microsoft.com/windows/servercore\nARG WIN_A `\n  WIN_B\nRUN dir c:\\\nARG WIN_C\n",
 			want: []string{"WIN_A", "WIN_B", "WIN_C"},
@@ -94,7 +109,8 @@ func TestBuildLogNamesSecretArgs(t *testing.T) {
 		{Name: "NPM_TOKEN", Value: secretValue, Secret: true},
 		{Name: "UNUSED_TOKEN", Value: secretValue, Secret: true},
 	}
-	dockerfile := "FROM node:22 AS deps\nARG NPM_TOKEN\nFROM deps AS build\nARG PUBLIC_URL\nARG SITE_KEY=placeholder\nRUN : \"${SITE_KEY:?is a required build arg}\"\n"
+	// A shift is no heredoc: the ARGs after it still get their notes.
+	dockerfile := "FROM node:22 AS deps\nARG NPM_TOKEN\nRUN echo $((1<<N))\nFROM deps AS build\nARG PUBLIC_URL\nARG SITE_KEY=placeholder\nRUN : \"${SITE_KEY:?is a required build arg}\"\n"
 	inline := func(id string) *agentv1.BuildRequest {
 		return &agentv1.BuildRequest{
 			BuildId: id, ServiceId: "svc1", ImageReference: DefaultRegistry + "/svc1:" + id,
