@@ -5616,10 +5616,18 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   for a starting app's container is no try. A session that stayed up 10 s
   starts the waits and the tries over; a change of the status or
   generation connects at once but does not, so a crash loop that flips
-  the status every cycle keeps backing off. A session that opened by
-  itself shows its ready state and Connected line only once its first
-  output arrives or it stayed up 1 s (`confirmMs`): one the panel ends at
-  once leaves no Connected or error line in the terminal. While nothing
+  the status every cycle keeps backing off. Every session, a clicked one
+  too and a shell's, shows its ready state and Connected line only once
+  its first output arrives, its process exits or it stayed up 1 s after
+  ready (`confirmMs`): the panel sends ready before it closes an attach
+  the agent refused at once (`startTerminal`'s `end()`; the container
+  between a restart's stop and start, a new one not up yet), so one the
+  panel ends at once leaves no Connected or error line in the terminal;
+  the console tries again by itself, and a shell's Reconnect line shows
+  the panel's closed note (as for the idle close) instead of the socket's
+  close reason. That is the "click Reconnect twice" of 0.2.14, where that
+  ready also cut the restart's follow short and Reconnect showed while it
+  waited, its click a single try. While nothing
   runs (stopped, crashed and left by the crash policy, never deployed, a
   first deploy with nothing live) the overlay says "The app is not
   running. Its console connects when it starts." (unknown status: the
@@ -6018,8 +6026,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   tab's retries asking only `terminals.watchConsole` while no container
   is there, an attach the agent refuses at once
   (`terminalAgent.refuse`) stopping at Reconnect after `retryLimit` tries
-  with one Connected line (`page.clock`); a failed clone's title and
-  private repo hint),
+  with one Connected line (`page.clock`), one Reconnect click connecting
+  although the agent refuses its first attach
+  (`terminalAgent.refuseNext`, either kind of socket) with no Connected
+  line for that try, a shell's refused Reconnect showing the panel's
+  words; a failed clone's title and private repo hint),
   `repo-picker.spec.ts` (the New app dialog's Repository
   field with `demo/repos.ts`: Browse and pick, owner/repo an installation
   reads or not, pasted URLs and page addresses (a self-managed GitLab's

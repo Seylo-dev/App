@@ -225,8 +225,11 @@ export const terminalSockets: {
  * attaches as usual; a string plays the panel when the agent refuses the
  * attach at once (ready, then a closed message with this reason, then
  * 1011 "closed"), as for a node that has no container of the service.
+ * `refuseNext`: reasons for the next sockets of either kind, one each and
+ * before `refuse`, as for an attach that comes while the container is
+ * between a restart's stop and start.
  */
-export const terminalAgent: { refuse: string | null } = { refuse: null };
+export const terminalAgent: { refuse: string | null; refuseNext: string[] } = { refuse: null, refuseNext: [] };
 
 /** The live sockets open now (one per page), for pushLive. */
 const liveSockets = new Set<WebSocketRoute>();
@@ -259,6 +262,7 @@ function resetDemoState() {
   tailscaleStatus = runningTailscale();
   terminalSockets.length = 0;
   terminalAgent.refuse = null;
+  terminalAgent.refuseNext = [];
   liveSockets.clear();
   resetGitDemo();
   resetAssistantDemo();
@@ -462,8 +466,9 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
       entry.closed = true;
     });
     ws.send(JSON.stringify({ type: "ready", containerId: "c0ffee", generation: 42, user: shell ? "bun" : "", workdir: shell ? "/app" : "" }));
-    if (!shell && terminalAgent.refuse !== null) {
-      ws.send(JSON.stringify({ type: "closed", reason: terminalAgent.refuse }));
+    const refusal = terminalAgent.refuseNext.shift() ?? (shell ? null : terminalAgent.refuse);
+    if (refusal !== null) {
+      ws.send(JSON.stringify({ type: "closed", reason: refusal }));
       void ws.close({ code: 1011, reason: "closed" });
       return;
     }

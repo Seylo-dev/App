@@ -231,3 +231,77 @@ test("a ticket that arrives after a newer click opens no socket; the newer one c
   h.sockets[0]?.output("hello\r\n");
   expect(h.state().status).toBe("ready");
 });
+
+// The cause: the panel answers every socket with "ready" before the agent's refusal (startTerminal's end()), so
+// an attach the agent refuses at once (the container between a restart's stop and start, a new one not up yet)
+// looked like a session that opened and closed: "Connected to …", the refusal, then Reconnect again. On 0.2.14
+// that ready also cut the restart's follow short, and a click on Reconnect while it waited was a single try.
+test("a Reconnect the agent refuses at once leaves no Connected line, and the console tries again by itself: one click connects", async () => {
+  const h = harness({ follow: running, probe: true });
+  await h.click();
+  h.sockets[0]?.refuse();
+  // Nothing in the terminal for a session that never opened, and no Reconnect: it tries again.
+  expect(h.notes).toEqual([]);
+  expect(h.state()).toEqual({ status: "waiting", reason: "Disconnected. Connecting again…" });
+  await h.clock.advance(1000);
+  expect(h.asked).toEqual(["open", "probe", "open"]);
+  const second = h.sockets[1];
+  second?.open();
+  second?.ready();
+  second?.output("Listening on :3000\r\n");
+  expect(h.state().status).toBe("ready");
+  expect(h.notes).toEqual(["Connected (generation 42)"]);
+  expect(h.output).toEqual(["Listening on :3000\r\n"]);
+});
+
+test("a shell's Reconnect the agent refuses at once says why in the panel's words, with nothing in the terminal; the next click connects", async () => {
+  const h = harness();
+  await h.click();
+  h.sockets[0]?.refuse();
+  expect(h.state()).toEqual({ status: "closed", reason: refused });
+  expect(h.notes).toEqual([]);
+  // A shell never tries again by itself: each session is a new audited process.
+  await h.clock.advance(30_000);
+  expect(h.sockets).toHaveLength(1);
+  await h.click();
+  h.sockets[1]?.open();
+  h.sockets[1]?.ready();
+  h.sockets[1]?.output("bun@api:/app$ ");
+  expect(h.state().status).toBe("ready");
+  expect(h.notes).toEqual(["Connected (generation 42)"]);
+});
+
+test("a clicked session shows once its first output arrives, or a second after ready for a quiet one", async () => {
+  const h = harness({ follow: running });
+  await h.click();
+  const ws = h.sockets[0];
+  ws?.open();
+  ws?.ready();
+  expect(h.state()).toEqual({ status: "connecting" });
+  await h.clock.advance(999);
+  expect(h.notes).toEqual([]);
+  await h.clock.advance(1);
+  expect(h.state().status).toBe("ready");
+  expect(h.notes).toEqual(["Connected (generation 42)"]);
+  // A process that exits at once still attached: Connected, then the exit.
+  const quick = harness();
+  await quick.click();
+  quick.sockets[0]?.open();
+  quick.sockets[0]?.ready();
+  quick.sockets[0]?.control({ type: "exit", exitCode: 127 });
+  quick.sockets[0]?.finish(1000, "exited");
+  expect(quick.notes).toEqual(["Connected (generation 42)", "The process exited with code 127."]);
+  expect(quick.state()).toEqual({ status: "closed", reason: "exited" });
+});
+
+test("the panel's idle close shows its words on a shell's Reconnect line too", async () => {
+  const h = harness();
+  await h.click();
+  const ws = h.sockets[0];
+  ws?.open();
+  ws?.ready();
+  ws?.output("$ ");
+  ws?.control({ type: "closed", reason: "The session was idle for too long." });
+  ws?.finish(1000, "idle");
+  expect(h.state()).toEqual({ status: "closed", reason: "The session was idle for too long." });
+});

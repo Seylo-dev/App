@@ -67,13 +67,13 @@ export interface ConsoleFollow {
 /**
  * How connect was asked for: "click" (Reconnect, a start button, entering
  * the page while the app runs) or "auto" (a retry after a wait, a nudge,
- * entering the page while it starts), which asks the probe first and shows
- * in the terminal only once it is a real session (follow.ts confirmMs).
+ * entering the page while it starts), which asks the probe first. Either
+ * shows in the terminal only once it is a real session (follow.ts confirmMs).
  */
 export type ConnectHow = "click" | "auto";
 
 /** The part of a browser WebSocket a session uses (openSocket in ../socket.ts). */
-export type SessionSocket = Pick<WebSocket, "readyState" | "send" | "close" | "onopen" | "onmessage" | "onclose">;
+export type SessionSocket = Pick<WebSocket, "readyState" | "send" | "close" | "onmessage" | "onclose">;
 
 /** The part of the terminal view a session writes to. */
 export type SessionTerm = Pick<XtermHandle, "write" | "note" | "size">;
@@ -224,9 +224,11 @@ export function createTerminalSession(host: SessionHost): TerminalSession {
     let readyAt = 0;
     // The panel's own words for why it closed the session (idle, node offline), for the Reconnect line.
     let closedNote = "";
-    // A session nobody clicked for shows (ready, its Connected line) once its first output
-    // arrives or it stayed up confirmMs; one that ends sooner leaves nothing in the terminal.
-    let shown = !auto;
+    // A session shows (ready, its Connected line) once its first output arrives, its process
+    // exits or it stayed up confirmMs after ready, a clicked one too: the panel sends ready
+    // before it closes an attach the agent refused at once, which never opened, so that one
+    // leaves nothing in the terminal and its close shows the panel's words.
+    let shown = false;
     let info: ReadyInfo | null = null;
     let hold: Timer | undefined;
     const show = () => {
@@ -256,12 +258,8 @@ export function createTerminalSession(host: SessionHost): TerminalSession {
         info = message;
         const now = host.term()?.size();
         if (now) send({ type: "resize", columns: now.columns, rows: now.rows });
-        if (!shown) {
-          hold = clock.setTimeout(show, confirmMs);
-          return;
-        }
-        host.setState({ status: "ready", info: message });
-        host.term()?.note(host.describe(message));
+        clock.clearTimeout(hold);
+        if (!shown) hold = clock.setTimeout(show, confirmMs);
       } else if (message.type === "exit") {
         exited = true;
         show();
@@ -271,17 +269,14 @@ export function createTerminalSession(host: SessionHost): TerminalSession {
         if (shown) host.term()?.note(message.reason);
       }
     };
-    ws.onopen = () => {
-      if (shown) host.setState((s) => (s.status === "connecting" ? { status: "ready", info: null } : s));
-    };
     ws.onclose = (event) => {
       clock.clearTimeout(hold);
       if (socket !== ws) return;
       socket = null;
       // A session that lasted starts the waits and the tries over; one that ends as it opens keeps backing off.
       const lasted = readyAt > 0 && clock.now() - readyAt >= stableMs;
-      // A shell shows the socket's reason as before; a console the panel's note, which says it in words.
-      const reason = (host.follow() && closedNote) || event.reason || t("serviceTerminal.disconnected");
+      // The panel's note says why in words (idle, the agent's refusal), for a shell too; else the socket's reason.
+      const reason = closedNote || event.reason || t("serviceTerminal.disconnected");
       settle(mine, socketClose(event, exited), { status: "closed", reason }, lasted ? "lasted" : "failed");
     };
   };

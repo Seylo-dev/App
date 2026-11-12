@@ -128,10 +128,10 @@ export const retryMaxMs = 8000;
 /** A session that stayed up this long starts the waits and the tries over when it ends. */
 export const stableMs = 10_000;
 /**
- * How long a session that opened by itself (a retry or a nudge, not a
- * click) waits for its first output before it shows in the terminal: one
- * the panel ends at once (ready, then "no running container", then the
- * close) leaves no Connected line and no error line behind on every try.
+ * How long a session waits after ready for its first output before it
+ * shows in the terminal (a clicked one too): one the panel ends at once
+ * (ready, then "no running container", then the close) leaves no
+ * Connected line and no error line behind, and is no session that opened.
  */
 export const confirmMs = 1000;
 
