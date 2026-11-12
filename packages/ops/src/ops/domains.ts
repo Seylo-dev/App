@@ -64,6 +64,23 @@ export const DnsStatus = Type.Union([
  */
 export const OriginStatus = Type.Union([Type.Literal("node"), Type.Literal("elsewhere"), Type.Literal("unknown")]);
 
+/**
+ * Why the last origin check of a domain behind Cloudflare's proxy did not
+ * reach the node, from Cloudflare's own answer (a response with Cloudflare's
+ * cf-ray or server header). cloudflareCertificate: 525 or 526, SSL/TLS Full
+ * (strict) refuses the node's temporary certificate (Traefik's default one,
+ * served until Let's Encrypt issues the domain's). cloudflareUnreachable:
+ * 521 or 522, Cloudflare cannot connect to the node on port 443 or 80.
+ * notFound: 404, the server Cloudflare reached has nothing for the check
+ * (the record there points at another server, or the node has no route for
+ * the domain yet). Absent for every other answer.
+ */
+export const OriginReason = Type.Union([
+  Type.Literal("cloudflareCertificate"),
+  Type.Literal("cloudflareUnreachable"),
+  Type.Literal("notFound"),
+]);
+
 export const CertificateStatus = Type.Union([Type.Literal("none"), Type.Literal("pending"), Type.Literal("valid"), Type.Literal("failed")]);
 
 export const DomainRedirect = Type.Object({
@@ -133,6 +150,12 @@ export const Domain = Type.Object({
   origin: Type.Optional(OriginStatus),
   /** When origin was checked. */
   originCheckedAt: Type.Optional(Timestamp),
+  /**
+   * Why that check did not reach the node, when Cloudflare said (see
+   * OriginReason); only with origin unknown or elsewhere. The panel keeps
+   * it in memory: after a restart it is absent until the next check.
+   */
+  originReason: Type.Optional(OriginReason),
   certificate: Type.Object({
     status: CertificateStatus,
     expiresAt: Type.Union([Timestamp, Type.Null()]),
@@ -195,6 +218,8 @@ export const DnsCheck = Type.Object({
    * absent otherwise.
    */
   origin: Type.Optional(OriginStatus),
+  /** Why that origin check did not reach the node, when Cloudflare said (see OriginReason). */
+  originReason: Type.Optional(OriginReason),
   checkedAt: Timestamp,
 });
 

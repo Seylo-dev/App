@@ -7,10 +7,14 @@
 // what the panel's origin check found: that requests reach this node, or
 // that something else answers (a red chip and the record to fix, below).
 // Until the panel has seen a custom domain reach the node its certificate
-// waits for DNS (Certificate waits for DNS, no certificate meanwhile); every
-// note about a pending certificate has Check again, which runs the DNS and
-// origin check at once, and a waiting domain is checked once a minute
-// while the tab is open, so a fixed record starts the certificate.
+// waits for DNS (Certificate waits for DNS, no certificate meanwhile), or
+// behind Cloudflare's proxy for the check through it (Certificate waits
+// for Cloudflare, with what Cloudflare answered when it said: SSL/TLS Full
+// (strict) refusing the node's temporary certificate, the node out of its
+// reach, or a 404); every note about a pending certificate has Check
+// again, which runs the DNS and origin check at once, and a waiting domain
+// is checked once a minute while the tab is open, so a fixed record starts
+// the certificate.
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -271,12 +275,22 @@ function DnsChip({ d }: { d: Domain }) {
 const slowCertMs = 10 * 60_000;
 
 /**
+ * Why the latest origin check through Cloudflare did not reach the node,
+ * when Cloudflare's answer said (525/526, 521/522, 404): from the row's own
+ * domains.checkDns once it has run, else from domains.list.
+ */
+function originReason(d: Domain, check: OpOutput<typeof domains.checkDns> | undefined): Domain["originReason"] {
+  return check ? check.originReason : d.originReason;
+}
+
+/**
  * Why a certificate can stay on "Generating" or wait for DNS: Let's Encrypt
  * reaches the host over its DNS. While the certificate waits for DNS (the
  * panel has not seen the domain reach the node), it says so and what to
  * point where. Behind Cloudflare's proxy, until the panel's origin check
  * reached the node, it says the record there must point at the node (at
- * once, with the node's address); once it has, and with the record on the
+ * once, with the node's address), or, when Cloudflare's answer to the last
+ * check said why (originReason), that instead; once it has, and with the record on the
  * node, what else can stop it (once it takes longer than usual):
  * Cloudflare's settings, or something in front of port 80. The node
  * reports a failure it sees in Traefik's log on its own; this covers the
@@ -300,12 +314,15 @@ function PendingCertNote({ serviceId, d, held }: { serviceId: string; d: Domain;
   const ip = d.pointsTo?.[0];
   if (!ip) return null;
   const proxied = d.dnsStatus === "proxied";
-  const note = (text: string) => (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="pending-cert-note">
+  const note = (text: string, reason?: string) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="pending-cert-note" data-reason={reason}>
       <p className="m-0 min-w-0 flex-1 basis-64 text-xs text-muted-foreground">{text}</p>
       <CheckAgainButton check={check} />
     </div>
   );
+  // What Cloudflare answered the last check says more than the general note.
+  const reason = proxied && !reaches ? originReason(d, check.data) : undefined;
+  if (reason) return note(t(`serviceDomains.originReason.${reason}`, { host: d.host, ip }), reason);
   if (held) return note(t(proxied ? "serviceDomains.certWaitsProxiedHint" : "serviceDomains.certWaitsHint", { host: d.host, ip }));
   if (proxied && !reaches) return note(t("serviceDomains.certProxiedHint", { host: d.host, ip }));
   if (Date.now() - Date.parse(d.createdAt) < slowCertMs) return null;
@@ -333,11 +350,17 @@ function OriginHelp({ serviceId, d, held }: { serviceId: string; d: Domain; held
   const proxied = d.dnsStatus === "proxied";
   const data = check.data;
   const record = data?.expected.find((r) => r.value === ip) ?? data?.expected[0];
+  const reason = proxied ? originReason(d, data) : undefined;
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-[10px] bg-card px-3.5 py-3 shadow-control" data-testid="origin-help">
       <span className="text-[12.5px] text-ink-strong">
         {t(proxied ? "serviceDomains.originFixProxied" : "serviceDomains.originFixDirect", { host: d.host, ip })}
       </span>
+      {reason && (
+        <span className="w-full text-xs text-muted-foreground" data-testid="origin-reason" data-reason={reason}>
+          {t(`serviceDomains.originReason.${reason}`, { host: d.host, ip })}
+        </span>
+      )}
       {proxied && record && (
         <>
           <span className="flex gap-1.5 font-mono text-[12.5px]">
@@ -413,7 +436,7 @@ function RowStatus({
       </span>
     );
   }
-  if (held) return <WaitingForDnsChip />;
+  if (held) return <WaitingForDnsChip cloudflare={d.dnsStatus === "proxied"} />;
   if (generating) return <GeneratingChip />;
   if (d.https === "acme" && d.certificate.status === "failed")
     return (

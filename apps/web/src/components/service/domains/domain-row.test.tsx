@@ -2,7 +2,10 @@
 // seen the domain reach the node, the row says the certificate waits for
 // DNS (not Generating SSL certificate) and how to fix the record; every
 // such note has Check again. Before, the Cloudflare-proxied note had no
-// way to check again at all.
+// way to check again at all. Behind Cloudflare's proxy it waits for
+// Cloudflare instead, and says what Cloudflare answered the panel's check
+// when that tells why (before, every such domain read "Certificate waits
+// for DNS" with the same general note, whatever stopped it).
 
 import { expect, test } from "bun:test";
 import { renderStatic } from "../../../test/render";
@@ -47,7 +50,9 @@ test("behind Cloudflare's proxy, waiting for DNS: the record to set, Cloudflare'
     domain({ certificate: { status: "pending", expiresAt: null, issuer: null, error: null, waitingForDns: true } }),
   );
   const shown = text(html);
-  expect(shown).toContain("Certificate waits for DNS");
+  // The record in Cloudflare is set: what it waits for is the check through Cloudflare.
+  expect(shown).toContain("Certificate waits for Cloudflare");
+  expect(shown).not.toContain("Certificate waits for DNS");
   expect(shown).not.toContain("Generating SSL certificate");
   expect(shown).toContain("point that record in Cloudflare at 159.195.35.141");
   // The record may be right already: Full (strict) refuses the node's certificate over Always Use HTTPS's redirect.
@@ -72,7 +77,7 @@ test("a failure from before the wait shows the wait, not the failure", async () 
       }),
     ),
   );
-  expect(shown).toContain("Certificate waits for DNS");
+  expect(shown).toContain("Certificate waits for Cloudflare");
   expect(shown).not.toContain("Certificate failed");
   expect(shown).not.toContain("Regenerate certificate");
 });
@@ -86,6 +91,49 @@ test("a record still missing says the certificate waits for it", async () => {
   expect(shown).toContain("Waiting for DNS");
   expect(shown).toContain("The certificate is asked for once this record points at the node");
   expect(shown).toContain("Check now");
+});
+
+const waitingCert = { status: "pending" as const, expiresAt: null, issuer: null, error: null, waitingForDns: true };
+const checkedNow = { originCheckedAt: new Date().toISOString() };
+
+test("a record still missing keeps Certificate waits for DNS", async () => {
+  const shown = text(await render(domain({ dnsStatus: "missing", certificate: waitingCert })));
+  expect(shown).toContain("Waiting for DNS");
+  expect(shown).not.toContain("Certificate waits for Cloudflare");
+});
+
+test("behind Cloudflare, what Cloudflare answered the check: Full (strict), out of reach, a 404", async () => {
+  // 526 or 525: the node's temporary certificate is refused.
+  let html = await render(domain({ certificate: waitingCert, origin: "unknown", originReason: "cloudflareCertificate", ...checkedNow }));
+  let shown = text(html);
+  expect(shown).toContain("Certificate waits for Cloudflare");
+  expect(shown).toContain(
+    "Cloudflare's SSL mode Full (strict) refuses the node's temporary certificate until Let's Encrypt issues one: set SSL/TLS to Full for a few minutes, or turn off Always Use HTTPS, then Check again.",
+  );
+  expect(html).toContain('data-reason="cloudflareCertificate"');
+  // Not the general sentence besides.
+  expect(shown).not.toContain("cannot see where its record points");
+  expect(html).toMatch(/<button[^>]*>.*?Check again<\/button>/);
+
+  // 521 or 522: Cloudflare cannot connect.
+  shown = text(await render(domain({ certificate: waitingCert, origin: "unknown", originReason: "cloudflareUnreachable", ...checkedNow })));
+  expect(shown).toContain("Cloudflare cannot reach the node on port 443/80.");
+  expect(shown).toContain("must point at 159.195.35.141");
+
+  // 404 while the node may not have the domain yet.
+  shown = text(await render(domain({ certificate: waitingCert, origin: "unknown", originReason: "notFound", ...checkedNow })));
+  expect(shown).toContain("get 404 from the server they reach");
+
+  // 404 with the node's route in place: another server answers, and the help below the row says the 404 too.
+  html = await render(domain({ certificate: waitingCert, origin: "elsewhere", originReason: "notFound", ...checkedNow }));
+  shown = text(html);
+  expect(shown).toContain("Cloudflare proxy, not this node");
+  expect(html).toContain('data-testid="origin-reason"');
+  expect(shown).toContain("get 404 from the server they reach");
+
+  // No reason: the general note, as before.
+  shown = text(await render(domain({ certificate: waitingCert, origin: "unknown", ...checkedNow })));
+  expect(shown).toContain("If it already does and SSL/TLS is on Full (strict), turn off Always Use HTTPS");
 });
 
 test("once the origin check reached the node and the certificate is new, no note yet", async () => {

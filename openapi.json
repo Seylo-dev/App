@@ -29245,6 +29245,22 @@
                           "format": "date-time",
                           "type": "string"
                         },
+                        "originReason": {
+                          "anyOf": [
+                            {
+                              "const": "cloudflareCertificate",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cloudflareUnreachable",
+                              "type": "string"
+                            },
+                            {
+                              "const": "notFound",
+                              "type": "string"
+                            }
+                          ]
+                        },
                         "certificate": {
                           "type": "object",
                           "required": [
@@ -29493,6 +29509,22 @@
                             },
                             {
                               "const": "unknown",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "originReason": {
+                          "anyOf": [
+                            {
+                              "const": "cloudflareCertificate",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cloudflareUnreachable",
+                              "type": "string"
+                            },
+                            {
+                              "const": "notFound",
                               "type": "string"
                             }
                           ]
@@ -29843,6 +29875,22 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -30147,6 +30195,22 @@
                         },
                         {
                           "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
                           "type": "string"
                         }
                       ]
@@ -30483,6 +30547,22 @@
                           "originCheckedAt": {
                             "format": "date-time",
                             "type": "string"
+                          },
+                          "originReason": {
+                            "anyOf": [
+                              {
+                                "const": "cloudflareCertificate",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cloudflareUnreachable",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notFound",
+                                "type": "string"
+                              }
+                            ]
                           },
                           "certificate": {
                             "type": "object",
@@ -30986,6 +31066,22 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -31419,6 +31515,22 @@
                     "originCheckedAt": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
+                          "type": "string"
+                        }
+                      ]
                     },
                     "certificate": {
                       "type": "object",
@@ -31950,6 +32062,22 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -32370,6 +32498,22 @@
                     "originCheckedAt": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
+                          "type": "string"
+                        }
+                      ]
                     },
                     "certificate": {
                       "type": "object",
@@ -32855,6 +32999,22 @@
                     "originCheckedAt": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "originReason": {
+                      "anyOf": [
+                        {
+                          "const": "cloudflareCertificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cloudflareUnreachable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "notFound",
+                          "type": "string"
+                        }
+                      ]
                     },
                     "certificate": {
                       "type": "object",

@@ -28,6 +28,17 @@
 //              a node that may have answered without the proof (an older
 //              agent, one without the route yet, one offline).
 //
+// When Cloudflare itself answered (its cf-ray or server header), the check
+// also says why it did not reach the node (OriginReason): 525 and 526 are
+// SSL/TLS Full (strict) refusing the node's temporary certificate (Traefik's
+// default one, until Let's Encrypt issues the domain's: behind Always Use
+// HTTPS the check, like Let's Encrypt, is redirected to https and
+// Cloudflare connects to port 443), 521 and 522 are a node Cloudflare
+// cannot connect to, and 404 is a server with nothing for the check. The
+// reason is kept in memory with the domain's id (lastOriginReason): a hint
+// for the Domains row, gone after a restart until the next check (the tab
+// checks a waiting domain when it opens, recheck.ts the others).
+//
 // It runs for custom domains (not automatic, not redirect-only) whose DNS
 // is ok or proxied: in domains.checkDns, a few seconds after domains.add as
 // the domains.checkOrigin job once the nodes have the route, and before
@@ -107,7 +118,35 @@ const maxRedirects = 3;
 /** A proof is 87 bytes; an app's page that answers instead is never read past this. */
 const maxBodyBytes = 1024;
 
-export type OriginAnswer = { kind: "proof"; nodeId: string } | { kind: "other" } | { kind: "none" };
+/** Why Cloudflare's proxy did not bring the check to the node (the contract's OriginReason). */
+export type OriginReason = "cloudflareCertificate" | "cloudflareUnreachable" | "notFound";
+
+export type OriginAnswer =
+  | { kind: "proof"; nodeId: string }
+  | { kind: "other"; reason?: OriginReason }
+  | { kind: "none"; reason?: OriginReason };
+
+/** The reason in an answer that Cloudflare gave itself (cf-ray, or server: cloudflare); undefined for any other. */
+export function cloudflareReason(response: Pick<Response, "status" | "headers">): OriginReason | undefined {
+  const headers = response.headers;
+  if (!headers.has("cf-ray") && headers.get("server")?.toLowerCase() !== "cloudflare") return undefined;
+  switch (response.status) {
+    case 525:
+    case 526:
+      return "cloudflareCertificate";
+    case 521:
+    case 522:
+      return "cloudflareUnreachable";
+    case 404:
+      return "notFound";
+    default:
+      return undefined;
+  }
+}
+
+function withReason<T extends { kind: "other" | "none" }>(answer: T, reason: OriginReason | undefined): T & { reason?: OriginReason } {
+  return reason ? { ...answer, reason } : answer;
+}
 
 /**
  * Fetches the origin path of host with a fresh challenge and checks the
@@ -142,16 +181,17 @@ export async function probeOrigin(
         url = next.toString();
         continue;
       }
+      const reason = cloudflareReason(response);
       if (response.status >= 500) {
         await response.body?.cancel();
-        return { kind: "none" };
+        return withReason({ kind: "none" }, reason);
       }
       const body = (await readCapped(response, maxBodyBytes)).trim();
-      if (!/^[A-Za-z0-9_-]{86}$/.test(body)) return { kind: "other" };
+      if (!/^[A-Za-z0-9_-]{86}$/.test(body)) return withReason({ kind: "other" }, reason);
       const signature = Buffer.from(body, "base64url");
       const message = originSignedBytes(host, challenge);
       const signer = keys.find((key) => verifyEd25519(key.publicKey, message, signature));
-      return signer ? { kind: "proof", nodeId: signer.id } : { kind: "other" };
+      return signer ? { kind: "proof", nodeId: signer.id } : withReason({ kind: "other" }, reason);
     }
   } catch {
     return { kind: "none" };
@@ -182,6 +222,8 @@ export interface OriginCheck {
   waiting: boolean;
   /** Some node of the service answers the check, so it can prove the domain (acme-hold.ts). */
   provable: boolean;
+  /** Why it did not reach the node, when Cloudflare said (origin unknown or elsewhere). */
+  reason?: OriginReason;
 }
 
 /** Whether some node the service is placed on answers origin checks (the capability, live or as last advertised). */
@@ -216,25 +258,44 @@ export async function checkOrigin(
   if (!placed.some((n) => n.capable)) return { origin: "unknown", waiting: false, provable: false };
   const answer = await probeOrigin(row.host, placed, fetcher);
   if (answer.kind === "proof") return { origin: "node", waiting: false, provable: true };
+  const reason = answer.reason ? { reason: answer.reason } : {};
   // Only a node that answers the check and has the route gives the proof for certain.
-  if (answer.kind === "other" && placed.every((n) => n.capable && n.routed)) return { origin: "elsewhere", waiting: false, provable: true };
-  return { origin: "unknown", waiting, provable: true };
+  if (answer.kind === "other" && placed.every((n) => n.capable && n.routed)) {
+    return { origin: "elsewhere", waiting: false, provable: true, ...reason };
+  }
+  return { origin: "unknown", waiting, provable: true, ...reason };
 }
 
-/** Stores an origin (null clears it); tells open screens when it changed. Returns whether it did. */
+/** The reason of each domain's last stored check, while it gives one (see the top of this file). */
+const lastReasons = new Map<string, OriginReason>();
+
+/** Why the domain's last origin check did not reach the node, when Cloudflare said; undefined after a restart until the next check. */
+export function lastOriginReason(domainId: string): OriginReason | undefined {
+  return lastReasons.get(domainId);
+}
+
+/**
+ * Stores an origin (null clears it) and the check's reason; tells open
+ * screens when either changed. Returns whether the origin did.
+ */
 export function saveOrigin(
   deps: Pick<Deps, "db" | "live">,
   row: Pick<DomainRow, "id" | "serviceId" | "originStatus">,
   origin: OriginStatus | null,
   at = new Date(),
+  reason?: OriginReason,
 ): boolean {
   deps.db
     .update(domains)
     .set({ originStatus: origin, originCheckedAt: origin ? at : null })
     .where(eq(domains.id, row.id))
     .run();
+  const before = lastReasons.get(row.id);
+  const kept = origin && origin !== "node" ? reason : undefined;
+  if (kept) lastReasons.set(row.id, kept);
+  else lastReasons.delete(row.id);
   const changed = (row.originStatus ?? null) !== origin;
-  if (changed) invalidateService(deps, row.serviceId, [domainOps.list.id]);
+  if (changed || before !== kept) invalidateService(deps, row.serviceId, [domainOps.list.id]);
   return changed;
 }
 
@@ -273,7 +334,7 @@ export const originCheckJob = defineJob<{ domainId: string; tries?: number }>({
       enqueueNext(ctx, originCheckJobType, new Date(Date.now() + 10_000), { domainId: row.id, tries: tries + 1 });
       return;
     }
-    saveOrigin(ctx, row, check.origin);
+    saveOrigin(ctx, row, check.origin, new Date(), check.reason);
     settleHold(ctx, row, { dnsStatus: row.dnsStatus, origin: check.origin, provable: check.provable });
   },
 });

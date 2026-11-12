@@ -77,6 +77,21 @@ function fakeFetch(answer: (url: string) => Response | Promise<Response>): Origi
 
 const text = (body: string, status = 200) => new Response(body, { status, headers: { "content-type": "text/plain" } });
 
+/** An answer of Cloudflare's own, as its edge sends it (cf-ray, server: cloudflare). */
+const cloudflare = (status: number, body = `error code: ${status}`) =>
+  new Response(body, { status, headers: { "content-type": "text/plain", "cf-ray": "8f1c2a3b4d5e6f70-FRA", server: "cloudflare" } });
+
+/** Always Use HTTPS: http:// gets Cloudflare's redirect to https, and https gets `answer`. */
+const alwaysHttps = (answer: (url: string) => Response) =>
+  fakeFetch((url) =>
+    url.startsWith("http://")
+      ? new Response(null, {
+          status: 301,
+          headers: { location: url.replace("http://", "https://"), "cf-ray": "8f1c2a3b4d5e6f70-FRA", server: "cloudflare" },
+        })
+      : answer(url),
+  );
+
 /** shop.example.com behind Cloudflare's proxy, on a service placed on one node whose agent answers the check. */
 async function proxiedDomain(options: { capable?: boolean; routed?: boolean; handlers?: Parameters<typeof fakeAgent>[2] } = {}) {
   const key = nodeKey();
@@ -111,6 +126,7 @@ const listed = async (serviceId: string) =>
     host: string;
     origin?: string;
     originCheckedAt?: string;
+    originReason?: string;
   }[];
 
 describe("origin proofs", () => {
@@ -198,6 +214,32 @@ describe("origin proofs", () => {
     const loop = fakeFetch((url) => new Response(null, { status: 307, headers: { location: url } }));
     expect(await probeOrigin("shop.example.com", keys, loop)).toEqual({ kind: "none" });
     expect(loop.urls).toHaveLength(4);
+  });
+
+  test("probeOrigin: why Cloudflare's own answers did not reach the node", async () => {
+    const keys = [{ id: "n1", publicKey: nodeKey().publicKey }];
+    const probe = (answer: (url: string) => Response) => probeOrigin("shop.example.com", keys, alwaysHttps(answer));
+    // SSL/TLS Full (strict) refuses the node's temporary certificate over Always Use HTTPS' redirect.
+    expect(await probe(() => cloudflare(526))).toEqual({ kind: "none", reason: "cloudflareCertificate" });
+    expect(await probe(() => cloudflare(525))).toEqual({ kind: "none", reason: "cloudflareCertificate" });
+    // Cloudflare cannot connect to the node.
+    expect(await probe(() => cloudflare(521))).toEqual({ kind: "none", reason: "cloudflareUnreachable" });
+    expect(await probe(() => cloudflare(522))).toEqual({ kind: "none", reason: "cloudflareUnreachable" });
+    // A server behind Cloudflare with nothing for the check.
+    expect(await probe(() => cloudflare(404, "404 page not found"))).toEqual({ kind: "other", reason: "notFound" });
+    // Cloudflare's other errors, and the same codes from a server that is not Cloudflare, say no more than before.
+    expect(await probe(() => cloudflare(524))).toEqual({ kind: "none" });
+    expect(await probe(() => cloudflare(503))).toEqual({ kind: "none" });
+    expect(await probe(() => text("error code: 526", 526))).toEqual({ kind: "none" });
+    expect(await probe(() => text("404 page not found", 404))).toEqual({ kind: "other" });
+    // Cloudflare's server header alone counts too.
+    expect(
+      await probeOrigin(
+        "shop.example.com",
+        keys,
+        fakeFetch(() => new Response("error code: 526", { status: 526, headers: { server: "cloudflare" } })),
+      ),
+    ).toEqual({ kind: "none", reason: "cloudflareCertificate" });
   });
 
   test("probeOrigin over a real connection: Bun's fetch hands the redirect over, then the proof", async () => {
@@ -319,6 +361,61 @@ describe("domains.checkDns and the origin", () => {
     expect((await listed(service.id))[0]?.origin).toBeUndefined();
   });
 
+  test("behind Cloudflare it says why the check did not reach the node, and a proof clears it", async () => {
+    const { key, service, ref } = await proxiedDomain();
+    const check = async () => (await callOp(panel, domainOps.checkDns, ref, { cookie })).body;
+    const row = async () => (await listed(service.id))[0];
+
+    // SSL/TLS Full (strict) with Always Use HTTPS: 526, or 525.
+    setOriginFetch(alwaysHttps(() => cloudflare(526)));
+    expect(await check()).toMatchObject({ status: "proxied", origin: "unknown", originReason: "cloudflareCertificate" });
+    expect(await row()).toMatchObject({ origin: "unknown", originReason: "cloudflareCertificate" });
+    setOriginFetch(alwaysHttps(() => cloudflare(525)));
+    expect((await check()).originReason).toBe("cloudflareCertificate");
+
+    // Cloudflare cannot connect to the node: 521, or 522.
+    setOriginFetch(alwaysHttps(() => cloudflare(521)));
+    expect(await check()).toMatchObject({ origin: "unknown", originReason: "cloudflareUnreachable" });
+    setOriginFetch(alwaysHttps(() => cloudflare(522)));
+    expect(await check()).toMatchObject({ origin: "unknown", originReason: "cloudflareUnreachable" });
+    expect((await row())?.originReason).toBe("cloudflareUnreachable");
+
+    // A 404 through Cloudflare while the node has the route: another server answers.
+    setOriginFetch(alwaysHttps(() => cloudflare(404, "404 page not found\n")));
+    expect(await check()).toMatchObject({ origin: "elsewhere", originReason: "notFound" });
+    expect(await row()).toMatchObject({ origin: "elsewhere", originReason: "notFound" });
+
+    // No answer at all says nothing: the reason goes with the answer it came with.
+    setOriginFetch(() => Promise.reject(new TypeError("timed out")));
+    const timedOut = await check();
+    expect(timedOut.origin).toBe("unknown");
+    expect(timedOut.originReason).toBeUndefined();
+    expect((await row())?.originReason).toBeUndefined();
+
+    // The node proves itself over https: no reason.
+    setOriginFetch(alwaysHttps(() => cloudflare(526)));
+    await check();
+    setOriginFetch(alwaysHttps((url) => text(proofFor(key.privateKey, url))));
+    const proven = await check();
+    expect(proven.origin).toBe("node");
+    expect(proven.originReason).toBeUndefined();
+    expect(await row()).toMatchObject({ origin: "node" });
+    expect((await row())?.originReason).toBeUndefined();
+  });
+
+  test("the reason without an origin to go with it is not listed", async () => {
+    const { service, ref } = await proxiedDomain();
+    setOriginFetch(alwaysHttps(() => cloudflare(526)));
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.originReason).toBe("cloudflareCertificate");
+    // The record moved: DNS missing clears the origin, and the reason with it.
+    setDnsLookups({ resolve4: async () => [], resolve6: async () => [], resolveCname: async () => [], resolveNs: async () => [] });
+    const missing = await callOp(panel, domainOps.checkDns, ref, { cookie });
+    expect(missing.body.originReason).toBeUndefined();
+    const [row] = await listed(service.id);
+    expect(row?.origin).toBeUndefined();
+    expect(row?.originReason).toBeUndefined();
+  });
+
   test("an agent that does not answer the check yet: unknown, without a request", async () => {
     const { ref } = await proxiedDomain({ capable: false });
     const fetcher = fakeFetch(() => text("<p>app</p>"));
@@ -403,6 +500,13 @@ describe("the check after domains.add", () => {
     setOriginFetch(fakeFetch((url) => text(proofFor(key.privateKey, url))));
     await due();
     expect((await listed(service.id))[0]?.origin).toBe("node");
+  });
+
+  test("stores why Cloudflare did not bring it to the node", async () => {
+    const { service } = await proxiedDomain();
+    setOriginFetch(alwaysHttps(() => cloudflare(526)));
+    await due();
+    expect((await listed(service.id))[0]).toMatchObject({ origin: "unknown", originReason: "cloudflareCertificate" });
   });
 
   test("a domain still waiting for DNS is not checked", async () => {

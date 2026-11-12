@@ -7,7 +7,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { domains } from "../../db/schema";
 import { acmeHeld } from "./acme-hold";
-import { originApplies } from "./origin";
+import { lastOriginReason, originApplies } from "./origin";
 
 export type DomainRow = typeof domains.$inferSelect;
 export type Domain = Static<typeof domainOps.Domain>;
@@ -27,6 +27,12 @@ export function issuerName(raw: string): string {
   if (/^(Y?[RE]\d{1,2})$/.test(raw)) return `Let's Encrypt (${raw})`;
   if (raw.startsWith("(STAGING)")) return `Let's Encrypt staging`;
   return raw;
+}
+
+/** originReason of the domain's last origin check, when it gave one (origin.ts keeps it in memory). */
+function originReasonOf(domainId: string): Pick<Domain, "originReason"> {
+  const reason = lastOriginReason(domainId);
+  return reason ? { originReason: reason } : {};
 }
 
 export function toDomain(row: DomainRow): Domain {
@@ -54,7 +60,7 @@ export function toDomain(row: DomainRow): Domain {
     dnsCheckedAt: row.dnsCheckedAt?.toISOString() ?? null,
     // Said only while it can be true: a record that moved since (missing, wrong target) makes it stale.
     ...(row.originStatus && row.originCheckedAt && originApplies(row, row.dnsStatus)
-      ? { origin: row.originStatus, originCheckedAt: row.originCheckedAt.toISOString() }
+      ? { origin: row.originStatus, originCheckedAt: row.originCheckedAt.toISOString(), ...originReasonOf(row.id) }
       : {}),
     certificate: {
       status: row.https === "off" ? "none" : row.certStatus,

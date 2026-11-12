@@ -43,6 +43,7 @@ export default {
   certProxiedSlowHint:
     "Still no certificate, though requests through Cloudflare reach this node. In Cloudflare, set SSL/TLS to Full (strict) and turn off Always Use HTTPS, so Let's Encrypt reaches http://{host}. Regenerate certificate in the menu tries again.",
   certWaiting: "Certificate waits for DNS",
+  certWaitingCloudflare: "Certificate waits for Cloudflare",
   certWaitsProxiedHint:
     "{host} is behind Cloudflare's proxy, so the panel cannot see where its record points. The certificate is asked for once requests through Cloudflare reach this node: point that record in Cloudflare at {ip}. If it already does and SSL/TLS is on Full (strict), turn off Always Use HTTPS until the certificate is issued: Cloudflare refuses the node's temporary certificate. Until then {host} is served over plain HTTP.",
   certWaitsHint: "The certificate is asked for once {host} points at {ip}. Until then {host} is served over plain HTTP.",
@@ -56,6 +57,15 @@ export default {
   originElsewhereProxiedHint:
     "{host} is behind Cloudflare's proxy, and requests through it reach another server, not this node. Its record in Cloudflare must point at {ip}.",
   originElsewhereShort: "Not reaching this node",
+  // Why the panel's check through Cloudflare's proxy did not reach the node, from Cloudflare's own answer.
+  originReason: {
+    cloudflareCertificate:
+      "Cloudflare's SSL mode Full (strict) refuses the node's temporary certificate until Let's Encrypt issues one: set SSL/TLS to Full for a few minutes, or turn off Always Use HTTPS, then Check again.",
+    cloudflareUnreachable:
+      "Cloudflare cannot reach the node on port 443/80. Its record for {host} must point at {ip}, and a firewall in front of the node must let Cloudflare in on those ports. Then Check again.",
+    notFound:
+      "Requests to {host} through Cloudflare get 404 from the server they reach, not the node's answer: its record in Cloudflare must point at {ip}. If it already does, the node may not have the domain yet: Check again in a minute.",
+  },
   theNode: "the node",
   originFixProxied:
     "The record for {host} in Cloudflare must point at {ip}, this service's node. Requests through Cloudflare reach another server now, so Let's Encrypt cannot reach the node either.",

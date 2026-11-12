@@ -151,8 +151,15 @@ export const add = implement(domainOps.add, async (input, ctx) => {
 export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
   const row = requireDomain(ctx.db, input.serviceId, input.domainId);
   // A domain whose certificate waited for this check: its node asks Let's Encrypt now (acme-hold.ts).
-  const { dns, origin, checkedAt } = await checkDomain(ctx, row);
-  return { domainId: row.id, host: row.host, checkedAt: checkedAt.toISOString(), ...dns, ...(origin ? { origin } : {}) };
+  const { dns, origin, reason, checkedAt } = await checkDomain(ctx, row);
+  return {
+    domainId: row.id,
+    host: row.host,
+    checkedAt: checkedAt.toISOString(),
+    ...dns,
+    ...(origin ? { origin } : {}),
+    ...(origin && reason ? { originReason: reason } : {}),
+  };
 });
 
 export const update = implement(domainOps.update, (input, ctx) => {

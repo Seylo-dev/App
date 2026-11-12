@@ -188,6 +188,37 @@ describe("a domain whose DNS does not reach the node yet", () => {
     expect(s.route(domainId)).toMatchObject(acme);
   });
 
+  test("behind Cloudflare with SSL/TLS Full (strict): held, and the row says why, until the node proves itself", async () => {
+    const s = setup();
+    setDnsLookups(dns({ "shop.example.com": ["104.16.1.1"] }));
+    const { domainId, ref } = await s.add("shop.example.com");
+    const cf = { "cf-ray": "8f1c2a3b4d5e6f70-FRA", server: "cloudflare" };
+    // Always Use HTTPS redirects the check to https; Full (strict) refuses Traefik's default certificate there.
+    let strict = true;
+    setOriginFetch(async (url, init) => {
+      if (url.startsWith("http://"))
+        return new Response(null, { status: 301, headers: { location: url.replace("http://", "https://"), ...cf } });
+      if (strict) return new Response("error code: 526", { status: 526, headers: cf });
+      return proof(s.key.privateKey)(url, init);
+    });
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body).toMatchObject({
+      origin: "unknown",
+      originReason: "cloudflareCertificate",
+    });
+    expect(s.route(domainId)).toMatchObject(held);
+    expect(await s.listed(domainId)).toMatchObject({ originReason: "cloudflareCertificate", certificate: { waitingForDns: true } });
+
+    // SSL/TLS set to Full: the check passes over https and the certificate starts.
+    strict = false;
+    s.dirty();
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.origin).toBe("node");
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject(acme);
+    const released = await s.listed(domainId);
+    expect(released).not.toHaveProperty("originReason");
+    expect(released?.certificate.waitingForDns).toBeUndefined();
+  });
+
   test("the origin check a few seconds after domains.add releases it too", async () => {
     const s = setup();
     setDnsLookups(dns({ "shop.example.com": ["104.16.1.1"] }));

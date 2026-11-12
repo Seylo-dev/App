@@ -16,7 +16,7 @@ import { defineJob } from "../../jobs/queue";
 import { acmeHeld, keepsLastAnswer, settleHold } from "./acme-hold";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, serviceNodes } from "./lookup";
-import { checkOrigin, originApplies, originProvable, saveOrigin } from "./origin";
+import { checkOrigin, type OriginReason, originApplies, originProvable, saveOrigin } from "./origin";
 import type { DomainRow } from "./rows";
 
 /**
@@ -27,7 +27,7 @@ import type { DomainRow } from "./rows";
 export async function checkDomain(
   deps: Pick<Deps, "db" | "agents" | "live">,
   row: DomainRow,
-): Promise<{ dns: DnsResult; origin: OriginStatus | null; checkedAt: Date }> {
+): Promise<{ dns: DnsResult; origin: OriginStatus | null; reason?: OriginReason; checkedAt: Date }> {
   const dns = await checkHost(row.host, serviceNodes(deps.db, row.serviceId), dnsLookups());
   if (keepsLastAnswer(row, dns.status)) {
     // The lookup failed: the last answer stands, and only the time moves on, for the re-check's pacing.
@@ -40,10 +40,10 @@ export async function checkDomain(
   const origin = check?.origin ?? null;
   const checkedAt = new Date();
   deps.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
-  const originChanged = saveOrigin(deps, row, origin, checkedAt);
+  const originChanged = saveOrigin(deps, row, origin, checkedAt, check?.reason);
   if (dns.status !== row.dnsStatus && !originChanged) invalidateService(deps, row.serviceId, [domainOps.list.id]);
   settleHold(deps, row, { dnsStatus: dns.status, origin, provable: check?.provable ?? originProvable(deps, row.serviceId) }, checkedAt);
-  return { dns, origin, checkedAt };
+  return { dns, origin, ...(check?.reason ? { reason: check.reason } : {}), checkedAt };
 }
 
 /** How long a waiting domain of this age goes between checks. */

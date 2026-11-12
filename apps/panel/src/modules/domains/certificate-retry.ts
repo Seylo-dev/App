@@ -117,7 +117,7 @@ async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): P
   }
   // Behind Cloudflare's proxy the DNS answer hides where the record points; the origin check sees through it (origin.ts).
   const check = originApplies(row, dns.status) ? await checkOrigin(ctx, row) : null;
-  if (check) saveOrigin(ctx, row, check.origin);
+  if (check) saveOrigin(ctx, row, check.origin, new Date(), check.reason);
   const hold = settleHold(ctx, row, {
     dnsStatus: dns.status,
     origin: check?.origin ?? null,

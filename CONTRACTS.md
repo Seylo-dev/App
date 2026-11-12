@@ -76,7 +76,7 @@ packages use. "Built" means implemented and tested.
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
-| `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
+| `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; every ACME route answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.12; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with Always Use HTTPS and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareAlwaysHTTPS`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), a TLS check on exposed Postgres, MySQL and MariaDB (0.2.9, `Listener.RequireTLS`, `requiretls.go`: Postgres must open with an SSLRequest, a direct TLS ClientHello or a CancelRequest, a GSSENCRequest gets "N" from the gate and the next message must ask for TLS, and a database that answers the SSLRequest "N" gets no plain login either; MySQL and MariaDB: the server's greeting must offer TLS (CLIENT_SSL; read whole, up to 1 KiB) or the client gets an ERR 3159 "TLS is not on in this database yet" in its place (MariaDB 10.11 has no TLS), and the client's first packet must be a 4.1 SSLRequest, payload exactly 32 bytes with CLIENT_SSL, since a whole handshake response with the flag set goes in the clear and a server without TLS masks the flag off; anything else gets the protocol's error, a Postgres ErrorResponse FATAL 28000 "this port only accepts TLS connections: connect with sslmode=require" or a MySQL ERR 3159 HY000, and the connection closes; 10 s for Postgres' first bytes, 30 s for MySQL's greeting and answer, at most the 8 bytes (Postgres) or the greeting and 6 bytes (MySQL) checked are buffered and go on unchanged, and a refused startup message is read to its end, up to Postgres' 10000 bytes or 64 KiB, so the client reads the error before the close), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM; psql `sslmode=require` and `prefer`, mysql `--ssl-mode=REQUIRED` and mariadb `--ssl` pass, `sslmode=disable`, `--ssl-mode=DISABLED`, `--skip-ssl` and `prefer` to a Postgres with TLS off get the gate's error, MariaDB 10.11 refuses `--ssl`, `--skip-ssl` and a plain response with CLIENT_SSL, and 120 refused MySQL logins in a row do not block the gate's address, verified in the VM: `TestIntegrationDatabaseTLSInProtocol`) |
 | `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
@@ -1072,12 +1072,28 @@ local API, join and resume. The areas:
   `/handoff`, `/probe`). Every route with hosts also sends
   `/.well-known/<slug>-origin/` (`proxy.OriginPath`) to the edge, in every
   mode (running, stopped, maintenance), on web without the HTTPS redirect
-  and on websecure with the route's TLS, at priority 1999998000 (above
+  and on websecure with the route's TLS (Traefik's default certificate,
+  `tls: {}`, for a route with HTTPS off, since 0.2.12: behind Cloudflare's
+  Always Use HTTPS with SSL/TLS Full the check reaches 443 whatever the
+  route serves), at priority 1999998000 (above
   every router of the hosts, owned ones included; Traefik's ACME challenge
   router never matches the path), without the route's middlewares (an
   allowlist or basic auth would hide the node from the check); routes of a
-  service on the same hosts share them, the tool host and the LB file get
-  none. The edge answers `GET <OriginPath><challenge>` (16 to 128
+  service on the same hosts share them (the TLS of the first route with
+  HTTPS on), the tool host and the LB file get none. Every ACME route
+  (held or not, the tool host too) also sends
+  `/.well-known/acme-challenge/` (`proxy.AcmeChallengePath`) on websecure
+  to Traefik's own challenge handler `acme-http@internal`
+  (`proxy.AcmeChallengeService`, there whenever a resolver has the HTTP
+  challenge on, as the agent's Traefik and the Wings fork's `le` both do),
+  with `tls: {}`, no middlewares, at priority 1999997000 (above every
+  router of the hosts but the origin ones), since 0.2.12: Let's Encrypt
+  follows a redirect from http to https without checking the certificate,
+  so behind Cloudflare's Always Use HTTPS with SSL/TLS Full its request
+  reaches 443, where before only the app (or Traefik's 404) answered and
+  the first certificate never came (Traefik's own challenge router is on
+  web only). Routes on the same hosts share it; the LB file and the
+  database certificate router get none. The edge answers `GET <OriginPath><challenge>` (16 to 128
   base64url characters, anything else 404, before the tool header is
   looked at) with the node key's Ed25519 signature over
   `<slug>-origin-v1` 0x00 host 0x00 challenge (host from the Host header,
@@ -4792,7 +4808,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `routing.origin-proof.v1`, is online and reported the domain's route.
   `unknown`: no node with the capability (nothing is fetched), a network
   error, timeout, 5xx (Cloudflare's 52x), a redirect off the host or path,
-  or a node that may have answered without the proof. Stored in
+  or a node that may have answered without the proof. When the last answer
+  came from Cloudflare itself (a `cf-ray` or `server: cloudflare` header)
+  the check also says why it did not reach the node (0.2.12,
+  `OriginReason`, `cloudflareReason`): `cloudflareCertificate` for 525/526
+  (SSL/TLS Full (strict) refuses the node's temporary certificate, Traefik's
+  default one, until Let's Encrypt issues the domain's), `cloudflareUnreachable`
+  for 521/522 (Cloudflare cannot connect to the node on 443 or 80),
+  `notFound` for 404 (with `unknown` or `elsewhere`); any other answer
+  gives none. `Domain.originReason` (while `origin` is listed) and
+  `DnsCheck.originReason` carry it; the panel keeps it in memory per
+  domain id (`lastOriginReason`, set and cleared with every stored origin,
+  dropped for `node`), so after a restart it is absent until the next
+  check (no column, no migration). Stored in
   `domains.origin_status`/`origin_checked_at` (migration
   `0007_domain_origin`), cleared when DNS leaves ok/proxied, and an
   `elsewhere` is cleared when an ACME route turns ACTIVE (Let's Encrypt
@@ -4806,13 +4834,23 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   certificate is generating and the origin is not `node`, and below a row
   whose origin is `elsewhere`; every minute while the certificate waits
   for DNS, and Check again (on every pending-certificate note) runs it at
-  once and refreshes the row.
+  once and refreshes the row. A held domain whose DNS is `proxied` reads
+  "Certificate waits for Cloudflare" (not "... for DNS": its record there
+  is set, the check through Cloudflare is what holds it, since 0.2.12),
+  and its note, like the one below an `elsewhere` row, says the
+  `originReason` in place of the general sentence when there is one
+  (`apps/web/src/i18n/en/serviceDomains.ts` `originReason.*`).
 - Let's Encrypt waits for DNS (0.2.8, `modules/domains/acme-hold.ts`): an
   `https: acme` custom domain's route goes out with `Route.acme_hold`
   (ACME without the certificate resolver: plain HTTP without the HTTPS
   redirect, and HTTPS with Traefik's default certificate plus the origin
   routers on both entry points, so the origin check reaches the node when
-  Cloudflare's proxy connects on 443; an agent from before 0.2.8 ignores
+  Cloudflare's proxy connects on 443 with SSL/TLS Full; Full (strict)
+  refuses that certificate with 525/526, which the check reports as
+  `originReason: cloudflareCertificate`, and the challenge router on
+  websecure is in place for the first order after the release, so behind
+  Always Use HTTPS with Full that certificate can be issued, since 0.2.12;
+  an agent from before 0.2.8 ignores
   the field and asks the CA at once), and `Domain.certificate` has
   `waitingForDns: true`, while the last check said `missing` or
   `wrongTarget`, `proxied` with the origin not `node`, or `ok` with the

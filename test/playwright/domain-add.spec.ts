@@ -6,7 +6,9 @@
 // choice, off. A working domain's chip names where its DNS points, and what
 // the panel's origin check found: that requests reach the node (behind
 // Cloudflare's proxy too), or a red chip with the record to set in
-// Cloudflare when another server answers. Screenshots go to
+// Cloudflare when another server answers. Behind the proxy a certificate
+// waits for Cloudflare, with what Cloudflare answered the check when that
+// says why (Full (strict), the node out of its reach). Screenshots go to
 // $SHOTS_DIR/domain-add.
 
 import { mkdirSync } from "node:fs";
@@ -165,7 +167,7 @@ test("a certificate on its way behind Cloudflare: the proxied-record sentence on
   await expect(blog.getByRole("button", { name: "Check again" })).toBeVisible();
 });
 
-test("behind Cloudflare the certificate waits for DNS; Check again runs the check at once and the certificate starts", async ({ page }) => {
+test("behind Cloudflare the certificate waits for Cloudflare; Check again runs the check at once and the certificate starts", async ({ page }) => {
   const calls = watchOps(page);
   const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
   const pending = { status: "pending", expiresAt: null, issuer: null, error: null };
@@ -209,7 +211,8 @@ test("behind Cloudflare the certificate waits for DNS; Check again runs the chec
   await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
   const row = page.locator('[data-domain="verifly.example.com"]');
   // Not Generating: nothing asks Let's Encrypt until the domain reaches the node.
-  await expect(row.getByTestId("certificate-waiting")).toHaveText("Certificate waits for DNS");
+  // The record in Cloudflare is set; what the certificate waits for is the check through Cloudflare.
+  await expect(row.getByTestId("certificate-waiting")).toHaveText("Certificate waits for Cloudflare");
   await expect(row.getByText("Generating SSL certificate")).toHaveCount(0);
   await expect(row.getByText(/point that record in Cloudflare at 203\.0\.113\.10\. If it already does and SSL\/TLS is on Full \(strict\), turn off Always Use HTTPS/)).toBeVisible();
   // The note checks on opening; the button waits for that check, then runs one at once.
@@ -229,6 +232,68 @@ test("behind Cloudflare the certificate waits for DNS; Check again runs the chec
   await expect(row.getByTestId("certificate-waiting")).toHaveCount(0);
   expect(calls("domains.checkDns")).toHaveLength(opened + 1);
   expect(calls("domains.checkDns").at(-1)).toEqual({ serviceId: svc.api, domainId: "m00000000000000b" });
+});
+
+test("behind Cloudflare the row says what Cloudflare answered the check: Full (strict), then the node out of reach", async ({ page }) => {
+  const base = (handlers["domains.list"]?.({}) as { domains: Input[] }).domains;
+  const pending = { status: "pending", expiresAt: null, issuer: null, error: null };
+  // SSL/TLS Full (strict) with Always Use HTTPS: Cloudflare refused the node's temporary certificate (526).
+  let reason: string | undefined = "cloudflareCertificate";
+  const waiting = () => ({
+    ...base[0],
+    id: "m00000000000000c",
+    host: "strict.example.com",
+    url: "https://strict.example.com",
+    origin: reason ? "unknown" : "node",
+    originCheckedAt: new Date().toISOString(),
+    ...(reason ? { originReason: reason } : {}),
+    liveAt: null,
+    certificate: reason ? { ...pending, waitingForDns: true } : pending,
+    createdAt: new Date().toISOString(),
+  });
+  await installDemo(page, {
+    overrides: {
+      "domains.list": () => ({ domains: [waiting()], autoDomainSuggestion: null }),
+      "domains.checkDns": (input) => ({
+        domainId: input.domainId,
+        host: "strict.example.com",
+        status: "proxied",
+        message: "strict.example.com is proxied by Cloudflare, so the panel cannot see where it points.",
+        expected: [{ type: "A", name: "strict", value: "203.0.113.10" }],
+        found: [{ type: "A", name: "strict", value: "104.16.1.1" }],
+        zone: "example.com",
+        cloudflareManaged: true,
+        cloudflareDnsUrl: "https://dash.cloudflare.com/?to=/:account/example.com/dns",
+        origin: reason ? "unknown" : "node",
+        ...(reason ? { originReason: reason } : {}),
+        checkedAt: new Date().toISOString(),
+      }),
+    },
+  });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
+  const row = page.locator('[data-domain="strict.example.com"]');
+  await expect(row.getByTestId("certificate-waiting")).toHaveText("Certificate waits for Cloudflare");
+  const note = row.getByTestId("pending-cert-note");
+  await expect(note).toHaveAttribute("data-reason", "cloudflareCertificate");
+  await expect(note).toContainText(
+    "Cloudflare's SSL mode Full (strict) refuses the node's temporary certificate until Let's Encrypt issues one: set SSL/TLS to Full for a few minutes, or turn off Always Use HTTPS, then Check again.",
+  );
+  // Not the general sentence besides.
+  await expect(row.getByText(/cannot see where its record points/)).toHaveCount(0);
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/certificate-waits-for-cloudflare.png` });
+
+  // SSL/TLS set to Full, but now Cloudflare cannot connect to the node (521).
+  reason = "cloudflareUnreachable";
+  await note.getByRole("button", { name: "Check again" }).click();
+  await expect(note).toHaveAttribute("data-reason", "cloudflareUnreachable");
+  await expect(note).toContainText("Cloudflare cannot reach the node on port 443/80. Its record for strict.example.com must point at 203.0.113.10");
+
+  // The firewall lets Cloudflare in: the check reaches the node and the certificate starts.
+  reason = undefined;
+  await note.getByRole("button", { name: "Check again" }).click();
+  await expect(row.getByText("Generating SSL certificate")).toBeVisible();
+  await expect(row.getByTestId("certificate-waiting")).toHaveCount(0);
 });
 
 test("the Overview's domains card flags a domain that does not reach the node", async ({ page }) => {

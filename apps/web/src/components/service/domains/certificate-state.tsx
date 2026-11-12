@@ -66,12 +66,18 @@ export function GeneratingChip() {
   );
 }
 
-/** A clock and "Certificate waits for DNS". */
-export function WaitingForDnsChip() {
+/**
+ * A clock and "Certificate waits for DNS", or behind Cloudflare's proxy
+ * "Certificate waits for Cloudflare": the record there is set, and what
+ * holds the certificate up is the panel's check through the proxy not
+ * reaching the node yet (the record there, or Cloudflare's SSL/TLS
+ * settings, originReason).
+ */
+export function WaitingForDnsChip({ cloudflare = false }: { cloudflare?: boolean }) {
   return (
     <Chip tone="amber" data-testid="certificate-waiting">
       <IconClock size={12} stroke={2.2} aria-hidden="true" />
-      {t("serviceDomains.certWaiting")}
+      {t(cloudflare ? "serviceDomains.certWaitingCloudflare" : "serviceDomains.certWaiting")}
     </Chip>
   );
 }
