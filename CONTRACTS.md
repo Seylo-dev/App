@@ -5590,8 +5590,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   card, never a shell: each shell is a new audited process and its exit
   is someone typing exit, so it stays at Reconnect) follows the service's
   live status from `services.get` (`TerminalPanel`'s `follow`,
-  `useTerminalSession`; the decisions are the pure `consoleStep` in
-  `terminal/follow.ts`). While a container runs or starts, a session that
+  `useTerminalSession` over `createTerminalSession` in
+  `terminal/session.ts`, which has no React and is tested with a fake
+  socket, ticket source and clock; the decisions are the pure
+  `consoleStep` in `terminal/follow.ts`). While a container runs or starts, a session that
   ended opens again by itself after 1 s, doubling to 8 s, with no time
   limit while it keeps attaching: an exit (restart, deploy), a dropped
   socket (network, panel restart, agent stream error), a ticket op that
@@ -5926,8 +5928,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   is reachable and the exposed variable a struck-through tip names go by the
   chips shown. References to an empty variable stay valid in the editor and
   resolve once it has a value), `terminal/xterm-view.tsx` +
-  `terminal/use-terminal-session.ts` (ticketed terminal sockets, one xterm
-  write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
+  `terminal/session.ts` + `terminal/use-terminal-session.ts` (ticketed
+  terminal sockets, one xterm write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
   `copy/` (the header's "..." `ServiceMenu` with the Clone and Move to
   project dialogs, and `DataCopyNote` under the header while a clone's
   data is copied). In
