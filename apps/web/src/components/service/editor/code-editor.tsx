@@ -7,6 +7,7 @@ import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import type * as MonacoApi from "monaco-editor/editor/editor.api";
 import { useEffect, useRef, useState } from "react";
+import { EchoTracker } from "./echo";
 import type { Monaco } from "./monaco";
 import { pickTheme } from "./theme";
 
@@ -58,6 +59,8 @@ export function CodeEditor({
   const latest = useRef({ onChange, onSave });
   latest.current = { onChange, onSave };
   const editorRef = useRef<CodeEditorInstance | null>(null);
+  // Texts reported through onChange, so an older one coming back as value is not taken for a reload.
+  const echoes = useRef(new EchoTracker());
 
   // Mount once per language; later value changes from outside go through the effect below.
   // biome-ignore lint/correctness/useExhaustiveDependencies: value, onReady and options seed the editor only on mount.
@@ -97,7 +100,11 @@ export function CodeEditor({
             ...options,
           });
           editorRef.current = editor;
-          editor.onDidChangeModelContent(() => latest.current.onChange?.(editor?.getValue() ?? ""));
+          editor.onDidChangeModelContent(() => {
+            const text = editor?.getValue() ?? "";
+            echoes.current.emitted(text);
+            latest.current.onChange?.(text);
+          });
           editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave?.());
           cleanup = onReady?.(editor, monaco);
           setReady(true);
@@ -113,10 +120,13 @@ export function CodeEditor({
     };
   }, [language]);
 
-  // Replace the text when the parent hands in a different value (a reload), keeping undo.
+  // Replace the text when the parent hands in a different value (a reload), keeping undo. A
+  // value the editor reported itself is an echo of typing, maybe an old one (echo.ts): replacing
+  // the text with it would drop the keys typed since.
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || editor.getValue() === value) return;
+    const echo = echoes.current.isEcho(value);
+    if (!editor || echo || editor.getValue() === value) return;
     const model = editor.getModel();
     if (!model) return;
     editor.executeEdits("reload", [{ range: model.getFullModelRange(), text: value }]);
