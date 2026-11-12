@@ -26,6 +26,9 @@ import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 import { joinAgent, listen, seedProject, seedService } from "./hub-helpers";
 
 // A path-style bucket that keeps what a presigned PUT sends and answers GETs.
+// On 127.0.0.1, the address the URLs name: on macOS a wildcard listener on
+// port 0 can be handed a port another program holds on 127.0.0.1, and a
+// fetch to 127.0.0.1 then reaches that program (Malformed_HTTP_Response).
 const objects = new Map<string, string>();
 const steps: string[] = [];
 const completed: string[] = [];
@@ -33,6 +36,7 @@ let failComplete = false;
 let s3: ReturnType<typeof Bun.serve>;
 beforeAll(() => {
   s3 = Bun.serve({
+    hostname: "127.0.0.1",
     port: 0,
     async fetch(req) {
       const url = new URL(req.url);

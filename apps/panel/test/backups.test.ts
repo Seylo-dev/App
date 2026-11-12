@@ -12,10 +12,12 @@ import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./
 const signed = "backup.signed.v1";
 
 // A tiny path-style S3: PUT, GET and DELETE on /<bucket>/<key>, ListObjectsV2; access key "BADKEY" is refused.
+// On 127.0.0.1, the address the endpoint names (see fix-backup-signing.test.ts).
 const objects = new Map<string, string>();
 let s3: ReturnType<typeof Bun.serve>;
 beforeAll(() => {
   s3 = Bun.serve({
+    hostname: "127.0.0.1",
     port: 0,
     async fetch(req) {
       const path = new URL(req.url).pathname;

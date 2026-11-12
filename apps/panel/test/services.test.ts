@@ -495,7 +495,9 @@ describe("git and registry credentials", () => {
 
   test("git.branches reads a smart-HTTP repository", async () => {
     const pkt = (s: string) => `${(s.length + 4).toString(16).padStart(4, "0")}${s}`;
+    // On 127.0.0.1, the address the URL names (see fix-backup-signing.test.ts).
     const server = Bun.serve({
+      hostname: "127.0.0.1",
       port: 0,
       fetch(req) {
         if (!new URL(req.url).pathname.endsWith("/info/refs")) return new Response("no", { status: 404 });
