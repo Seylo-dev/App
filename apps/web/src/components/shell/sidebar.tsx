@@ -81,20 +81,30 @@ export function Sidebar() {
         <button
           type="button"
           onClick={shell.openPalette}
-          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-field pr-2.5 pl-3 text-[13px] text-muted-foreground transition-interactive hover:text-foreground"
+          className="flex h-[38px] w-full shrink-0 cursor-pointer items-center gap-2 rounded-control border-0 bg-field pr-2.5 pl-3 text-[13px] text-muted-foreground transition-interactive hover:text-foreground"
         >
           <IconSearch size={15} stroke={1.8} aria-hidden="true" />
           <span className="truncate">{t("nav.search")}</span>
           <Kbd className="ml-auto">{isMac ? "⌘K" : "Ctrl K"}</Kbd>
         </button>
 
-        <MainNavLinks nodeCount={info.data?.nodes.total} />
+        <div className="shrink-0">
+          <MainNavLinks nodeCount={info.data?.nodes.total} />
+        </div>
 
-        <ProjectsTree />
+        {/*
+          Only the projects scroll: with many projects the search, the links, the nodes card and the
+          user row keep their size (flex items shrink by default, which squashed the search box).
+        */}
+        <div className="-mx-1 flex min-h-0 flex-col gap-3.5 overflow-y-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <ProjectsTree />
+        </div>
 
         <div className="flex-1" />
-        <NodesCard online={info.data?.nodes.online} total={info.data?.nodes.total} loading={info.isPending} />
-        <UserRow />
+        <div className="flex shrink-0 flex-col gap-3.5">
+          <NodesCard online={info.data?.nodes.online} total={info.data?.nodes.total} loading={info.isPending} />
+          <UserRow />
+        </div>
       </div>
     </m.nav>
   );

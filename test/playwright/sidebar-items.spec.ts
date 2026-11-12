@@ -6,6 +6,7 @@
 // turned off still shows while a request waits for the viewer.
 
 import type { Page } from "@playwright/test";
+import { projects } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { api, expect, stateFile, test } from "./helpers";
 
@@ -143,5 +144,41 @@ test.describe("sidebar items", () => {
     } finally {
       await resetItems(page);
     }
+  });
+
+  // Owner report: with many projects the Search box got squashed (every flex item of the menu shrank).
+  test("with many projects the search, links and user row keep their size and only the projects scroll", async ({ page }) => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      ...projects[1],
+      id: `pm${String(i).padStart(14, "0")}`,
+      name: `project-${i + 1}`,
+      position: i,
+      collapsed: true,
+    }));
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await installDemo(page, { overrides: { "projects.list": () => ({ projects: many }) } });
+    await page.goto("/");
+    const sidebar = sidebarOf(page);
+    await expect(sidebar.getByRole("link", { name: "project-40" })).toBeAttached();
+
+    const search = sidebar.getByRole("button", { name: /Search/ });
+    expect((await search.boundingBox())?.height).toBe(38);
+    for (const name of ["Dashboard", "Templates"]) expect((await navLink(page, name).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(34);
+
+    // The user row stays on screen, below the projects, and the projects list scrolls on its own.
+    const list = sidebar.getByRole("list", { name: "Projects" });
+    const scroller = list.locator("xpath=..");
+    const { scrolls, sidebarScrolls } = await scroller.evaluate((el) => {
+      const nav = el.closest("nav") as HTMLElement;
+      return { scrolls: el.scrollHeight > el.clientHeight + 1, sidebarScrolls: nav.scrollHeight > nav.clientHeight + 1 };
+    });
+    expect(scrolls).toBe(true);
+    expect(sidebarScrolls).toBe(false);
+    const listBox = await scroller.boundingBox();
+    const userRow = sidebar.locator('a[href="/settings/profile"]');
+    const userBox = await userRow.boundingBox();
+    expect(userBox && listBox && userBox.y >= listBox.y + listBox.height - 1).toBe(true);
+    expect(userBox && userBox.y + userBox.height <= 800).toBe(true);
+    await sidebar.screenshot({ path: `${shots}/sidebar-many-projects.png` });
   });
 });
