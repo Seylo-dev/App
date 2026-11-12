@@ -53,6 +53,8 @@ export default {
   status: {
     idle: "Not deployed",
     building: "Building",
+    /** Building, and the build waits for a free slot of its node's Builds at once. */
+    waitingForBuild: "Waiting for a build slot",
     deploying: "Deploying",
     starting: "Starting",
     running: "Running",

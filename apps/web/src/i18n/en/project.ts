@@ -24,11 +24,15 @@ export default {
   notPlaced: "no node",
   placedMore: "{node} +{count}",
   buildingNow: "building now",
+  waitingNow: "waiting for a build slot",
+  /** The sidebar's busy badge of a service whose build waits for a slot (the full words are its title). */
+  waitingShort: "waiting",
   deployingNow: "deploying now",
   createdAgo: "created {when}",
   status: {
     idle: "Not deployed",
     building: "Building",
+    waitingForBuild: "Waiting for a build slot",
     deploying: "Deploying",
     starting: "Starting",
     running: "Running",

@@ -4516,6 +4516,38 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   machine on the deployment row, kicked by ops, agent events and the
   `deployments.tick` job (timeouts, recovery after a restart). A deploy
   switches `services.target_deployment_id` and marks the service dirty.
+- Build rows (since 0.2.14): a build is `queued` (`started_at` null) from
+  the moment the runner dispatches it until its node's agent reports a
+  stage after its slot of Builds at once (`BUILD_STAGE_FETCHING_SOURCE` or
+  later: agents of every supported version send FETCHING_SOURCE right
+  after `build.Queue.Acquire`, for every source), then `running` with
+  `started_at` set then (`engine.ts` `recordBuildProgress`).
+  `BUILD_STAGE_QUEUED` keeps it queued whatever its message says; nothing
+  parses the message. A final stage with no start seen (its progress was
+  lost, only the durable result came) still ends it, with `started_at` the
+  agent's duration back from then. `builds/slots.ts` `buildQueue(db,
+  nodeIds?)` reads where queued builds stand: per node, by dispatch time
+  (`created_at`), the order the agent serves them in; `position` is the
+  1-based place among the node's queued builds and `waiting` is true when
+  its running builds and the queued ones ahead fill its Builds at once
+  (`max_parallel_builds`, at least 1; 0 without Can build, which the agent
+  runs as 1). `builds.queue` (queued = waiting for a free slot, or about to
+  start in one, with its place among them; running = started on the
+  agent), `builds.getSettings` nodes (`running`, `waiting`),
+  `Deployment.buildWait` with the clone step's "Waiting for a build slot on
+  <node> - N ahead" (computed when the deployment is read, never stored)
+  and `ServiceSummary.buildWaiting` all read it; `store.ts`
+  `publishBuildQueue(deps, nodeId)` sends the node's queued deployments
+  out again when a build there starts, ends or is cancelled, or its Builds
+  at once or Can build changes. "Built in Xs" counts from `started_at`
+  (the agent's duration, which holds the wait, only without one), and the
+  clone step's time leaves out the wait when this process handed the build
+  over. Timeouts (`engine.ts` `buildTimeout`): a running build fails 90
+  minutes after its start; a queued one waits while its node's queue moves
+  and fails once no build started or ended on that node for 90 minutes
+  (the node lost it), with `cancelBuild` sent either way.
+  `deployments.cancel` of a queued build sends `cancelBuild` too, which
+  takes it out of the agent's queue.
 - `services/desired.ts` `serviceSpecFor(db, secrets, serviceId, nodeId)`:
   the services part of the desired state (the compiler calls it).
 - `services/delete.ts` `deleteServiceTree(deps, row)`: a service with its

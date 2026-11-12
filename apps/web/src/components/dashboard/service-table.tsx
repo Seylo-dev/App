@@ -356,7 +356,7 @@ function ProjectName({ project, hidden }: { project: Project; hidden: boolean })
 }
 
 function StatusChip({ service }: { service: ServiceSummary }) {
-  const status = statusDisplay(service.status);
+  const status = statusDisplay(service.status, service.buildWaiting);
   return (
     <Chip tone={status.tone} className="px-[7px] py-0.5 text-[11.5px]">
       <StatusDot status={status.dot} pulse={status.dot === "busy"} />

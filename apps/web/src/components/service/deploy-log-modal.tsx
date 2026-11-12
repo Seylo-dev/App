@@ -100,7 +100,7 @@ function ModalBody({ serviceId, source, initial }: { serviceId: string; source?:
                     {t("serviceDeploys.healthFailed")}
                   </span>
                 ) : (
-                  <DeploymentStatusChip status={d.status} />
+                  <DeploymentStatusChip status={d.status} buildWaiting={d.buildWait != null} />
                 )}
                 <span>{meta.join(" · ")}</span>
               </div>

@@ -39,6 +39,14 @@ describe("service display", () => {
     );
   });
 
+  test("a service whose build waits for a slot says so in lists, not Building", () => {
+    expect(statusDisplay("building", true)).toMatchObject({ label: "Waiting for a build slot", tone: "gray", dot: "off" });
+    expect(statusDisplay("building", false).label).toBe("Building");
+    expect(statusDisplay("running", true).label).toBe("Running");
+    const waiting = { status: "building" as const, buildWaiting: true, liveDeployment: null, lastDeployedAt: null };
+    expect(lastActivity({ ...waiting, createdAt: new Date().toISOString() })).toBe("waiting for a build slot");
+  });
+
   test("deploy on push for every source that has the switch", () => {
     expect(deploysOnPush({ type: "github", deployOnPush: true })).toBe(true);
     expect(deploysOnPush({ type: "git", deployOnPush: false })).toBe(false);

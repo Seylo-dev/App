@@ -78,6 +78,7 @@ function deployLine(d: Recent): { tone: Tone; text: string } {
   switch (d.status) {
     case "queued":
     case "building":
+      if (d.buildWait) return { tone: "run", text: t("dashboard.deploy.waitingForBuild", { node: d.buildWait.node.name }) };
       return { tone: "run", text: t("dashboard.deploy.building", { node }) };
     case "deploying":
       return { tone: "run", text: t("dashboard.deploy.deploying", { node }) };

@@ -41,7 +41,7 @@ import { formatClock, formatRelative, formatTimeOfDay } from "./format";
 import { useInvalidate } from "./invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "./op-state";
 import { PrivateRepoHint } from "./private-repo-hint";
-import { isActiveDeployment } from "./status";
+import { deploymentLook, isActiveDeployment } from "./status";
 import { DeploymentStatusChip } from "./status-chip";
 import { deploymentsPageSize } from "./tab-prefetch";
 import { useNow } from "./use-now";
@@ -250,7 +250,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
               {t("serviceDeploys.healthFailed")}
             </span>
           ) : (
-            d.status !== "superseded" && <DeploymentStatusChip status={d.status} />
+            d.status !== "superseded" && <DeploymentStatusChip status={d.status} buildWaiting={d.buildWait != null} />
           )}
           <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
             {running && d.startedAt ? formatClock(now - Date.parse(d.startedAt)) : formatRelative(d.createdAt, now)}
@@ -368,7 +368,7 @@ function SideLog({ service, d }: { service: ServiceDetail; d: Deployment }) {
             running ? (
               <span className="flex items-center gap-1.5 rounded-chip bg-status-busy/12 px-2 py-0.5 text-xs font-medium text-ansi-yellow">
                 <span className="size-1.5 animate-pulse rounded-full bg-status-busy" />
-                {t(`serviceDeploys.status.${d.status}`)} · {formatClock(took ?? 0)}
+                {t(deploymentLook(d.status, d.buildWait != null).label)} · {formatClock(took ?? 0)}
               </span>
             ) : (
               <span className="text-xs text-terminal-muted">{t(`serviceDeploys.status.${d.status}`)}</span>

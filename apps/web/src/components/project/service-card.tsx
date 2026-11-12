@@ -62,7 +62,7 @@ export function ServiceCard({
 }) {
   const size = sizes[compact ? "compact" : "regular"];
   const tag = kindTag(service);
-  const status = statusDisplay(service.status);
+  const status = statusDisplay(service.status, service.buildWaiting);
   const cpu = service.cpuPercent;
   const memory = service.memoryBytes;
   const memoryOf = service.memoryLimitBytes ?? memoryTotal;

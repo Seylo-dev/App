@@ -39,6 +39,7 @@ const baseService = (over: Input) => ({
   projectId: ids.project,
   parentId: null,
   status: "running",
+  buildWaiting: false,
   source: { type: "github", label: "acme/shop-api", branch: "main", builder: "railpack" },
   address: null,
   placements: [{ nodeId: de.id, nodeName: de.name, replicas: 1 }],
@@ -157,8 +158,8 @@ export const servicesById = {
     kind: "compose",
     source: { type: "compose", label: "compose.yml", branch: null, builder: null },
     members: [
-      { id: "s000000000000007", name: "grafana", status: "running" },
-      { id: "s000000000000008", name: "prometheus", status: "unhealthy" },
+      { id: "s000000000000007", name: "grafana", status: "running", buildWaiting: false },
+      { id: "s000000000000008", name: "prometheus", status: "unhealthy", buildWaiting: false },
     ],
   }),
 };
@@ -178,6 +179,7 @@ const deployments = [
     source: "main",
     builder: "railpack",
     builtOn: de,
+    buildWait: null,
     shippedTo: [us],
     image: null,
     steps: [
@@ -213,6 +215,7 @@ const deployments = [
     source: "main",
     builder: "railpack",
     builtOn: de,
+    buildWait: null,
     shippedTo: [us],
     image: { reference: "registry.local/worker", digest: `sha256:4be1a9${i}7c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e07c3`, sizeBytes: 121_000_000, shippedBytes: mb * 1_000_000 },
     steps: [
@@ -251,6 +254,7 @@ export const privateApiDeploy = {
   source: "main",
   builder: "railpack",
   builtOn: de,
+  buildWait: null,
   shippedTo: [],
   image: { reference: `127.0.0.1:5755/${ids.privateApi}:1`, digest: null, sizeBytes: null, shippedBytes: null },
   steps: [
@@ -530,8 +534,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "builds.getSettings": (input: Input) => ({
     settings: servicesById[input.serviceId]?.build ?? servicesById[ids.api].build,
     nodes: [
-      { id: de.id, name: de.name, canBuild: true, online: true, hasBuildx: true, queued: 1 },
-      { id: us.id, name: us.name, canBuild: false, online: true, hasBuildx: true, queued: 0 },
+      { id: de.id, name: de.name, canBuild: true, online: true, hasBuildx: true, queued: 1, running: 1, waiting: 0 },
+      { id: us.id, name: us.name, canBuild: false, online: true, hasBuildx: true, queued: 0, running: 0, waiting: 0 },
     ],
   }),
   "metrics.service": (input: Input) => {

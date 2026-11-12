@@ -87,6 +87,14 @@ export const Deployment = Type.Object({
   builder: Type.Union([Builder, Type.Null()]),
   /** null for image sources and rollbacks (nothing was built). */
   builtOn: Type.Union([NodeRef, Type.Null()]),
+  /**
+   * Set while the deploy's build waits for a free slot of its node's Builds
+   * at once: the node and the build's place among that node's queued builds
+   * (builds.queue position, 1 = next to start). The clone step then says
+   * "Waiting for a build slot on <node> - 2 ahead". null otherwise, also
+   * while a queued build is about to start in a free slot. Added in 0.2.14.
+   */
+  buildWait: Type.Union([Type.Object({ node: NodeRef, position: Type.Integer({ minimum: 1 }) }), Type.Null()]),
   shippedTo: Type.Array(NodeRef),
   image: Type.Union([
     Type.Object({

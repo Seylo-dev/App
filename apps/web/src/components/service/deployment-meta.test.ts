@@ -14,6 +14,7 @@ const base: Deployment = {
   source: "main",
   builder: "railpack",
   builtOn: { id: "n1", name: "de-fsn-1" },
+  buildWait: null,
   shippedTo: [],
   image: { reference: "127.0.0.1:5755/sqotz5yg2zs1u5nn:1", digest: null, sizeBytes: null, shippedBytes: null },
   steps: [],

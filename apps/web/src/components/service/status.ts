@@ -43,6 +43,31 @@ export const deploymentStatusLook: Record<DeploymentStatus, StatusLook> = {
 };
 
 /**
+ * A deploy whose build waits for a free slot of its node's Builds at once
+ * (Deployment.buildWait, ServiceSummary.buildWaiting): it looks like a
+ * queued deploy and says "Waiting for a build slot" where it would say
+ * "Building".
+ */
+export const waitingForBuildLook: StatusLook = {
+  tone: "gray",
+  dot: "off",
+  pulse: true,
+  label: "serviceDeploys.status.waitingForBuild",
+};
+
+/** How a service's status looks; buildWaiting turns "Building" into "Waiting for a build slot". */
+export function serviceLook(status: ServiceStatus, buildWaiting = false): StatusLook {
+  return status === "building" && buildWaiting
+    ? { ...waitingForBuildLook, label: "service.status.waitingForBuild" }
+    : serviceStatusLook[status];
+}
+
+/** How a deployment's status looks; a building one whose build waits for a slot says so. */
+export function deploymentLook(status: DeploymentStatus, buildWaiting = false): StatusLook {
+  return status === "building" && buildWaiting ? waitingForBuildLook : deploymentStatusLook[status];
+}
+
+/**
  * Whether a container of the service runs now, so a console can attach:
  * running, partly running or failing its health check, or a deploy going on
  * while the live version still runs. Not while it starts, crashes, stops or

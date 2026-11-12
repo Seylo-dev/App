@@ -20,6 +20,8 @@ export default {
   status: {
     queued: "Queued",
     building: "Building",
+    /** A building deploy whose build waits for a free slot of its node's Builds at once. */
+    waitingForBuild: "Waiting for a build slot",
     deploying: "Deploying",
     live: "Live",
     superseded: "Succeeded",

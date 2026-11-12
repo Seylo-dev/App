@@ -9,6 +9,7 @@ import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
+import { waitingBuilds } from "../builds/slots";
 import { serviceImageHealthCheck } from "../deployments/image-health";
 import { appPort } from "../domains/lookup";
 import { latestCopy, latestTransfer } from "./copies";
@@ -108,6 +109,8 @@ export function gitLabel(url: string): string {
 
 interface Context {
   activeDeploy: Map<string, "queued" | "building" | "deploying">;
+  /** Services whose building deploy's build waits for a free build slot. */
+  buildWaiting: Set<string>;
   live: Map<string, { id: string; label: string; createdAt: Date }>;
   lastDeployedAt: Map<string, Date>;
   primaryHosts: Map<string, string>;
@@ -118,6 +121,7 @@ function loadContext(db: PanelDb, rows: readonly ServiceRow[]): Context {
   const ids = rows.map((r) => r.id);
   const ctx: Context = {
     activeDeploy: new Map(),
+    buildWaiting: new Set(),
     live: new Map(),
     lastDeployedAt: new Map(),
     primaryHosts: new Map(),
@@ -125,14 +129,19 @@ function loadContext(db: PanelDb, rows: readonly ServiceRow[]): Context {
   };
   if (ids.length === 0) return ctx;
 
+  const building = new Map<string, string>();
   for (const d of db
-    .select({ serviceId: deployments.serviceId, status: deployments.status })
+    .select({ id: deployments.id, serviceId: deployments.serviceId, status: deployments.status })
     .from(deployments)
     .where(and(inArray(deployments.serviceId, ids), inArray(deployments.status, [...activeStatuses])))
     .all()) {
     // building/deploying win over queued.
     const prev = ctx.activeDeploy.get(d.serviceId);
     if (!prev || prev === "queued") ctx.activeDeploy.set(d.serviceId, d.status as "queued" | "building" | "deploying");
+    if (d.status === "building") building.set(d.id, d.serviceId);
+  }
+  for (const deploymentId of waitingBuilds(db, [...building.keys()]).keys()) {
+    ctx.buildWaiting.add(building.get(deploymentId) as string);
   }
 
   const liveIds = rows.map((r) => r.liveDeploymentId).filter((id): id is string => id !== null);
@@ -187,6 +196,7 @@ function summarize(agents: AgentHub, row: ServiceRow, ctx: Context): ServiceSumm
       activeDeploy: ctx.activeDeploy.get(row.id) ?? null,
       nodeIds: placements.map((p) => p.nodeId),
     }),
+    buildWaiting: ctx.activeDeploy.get(row.id) === "building" && ctx.buildWaiting.has(row.id),
     source: sourceSummary(row, spec),
     address: ctx.primaryHosts.get(row.id) ?? (firstPort ? `${row.name}:${firstPort.containerPort}` : null),
     placements,
@@ -235,7 +245,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     stickySessions: spec.stickySessions,
     entryNodeId: entryNodeOf(spec.entryNodeId, summary.placements),
     notes: row.notes,
-    members: all.slice(1).map((m) => ({ id: m.id, name: m.name, status: m.status })),
+    members: all.slice(1).map((m) => ({ id: m.id, name: m.name, status: m.status, buildWaiting: m.buildWaiting })),
     volumes: volumesOf(db, row.id),
     watchPaths: spec.watchPaths,
     dataCopy: latestCopy(db, row.id),

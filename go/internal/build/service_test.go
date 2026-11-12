@@ -329,6 +329,81 @@ func TestServiceFailureAndQueue(t *testing.T) {
 	}
 }
 
+// stagesOf lists the stages emitted for one build, in order.
+func (r *reports) stagesOf(buildID string) []agentv1.BuildStage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var s []agentv1.BuildStage
+	for _, e := range r.events {
+		if p := e.GetBuildProgress(); p.GetBuildId() == buildID {
+			s = append(s, p.GetStage())
+		}
+	}
+	return s
+}
+
+// The panel keeps a build queued until a stage after BUILD_STAGE_QUEUED
+// arrives, without reading the message (apps/panel deployments/engine.ts
+// recordBuildProgress): a build waiting for a slot sends QUEUED and nothing
+// else, FETCHING_SOURCE comes first once it has the slot, and cancelling it
+// while it waits takes it out of the queue.
+func TestServiceWaitingBuildSendsOnlyQueuedUntilItsSlot(t *testing.T) {
+	fr := &fakeRunner{}
+	release := make(chan struct{})
+	var once sync.Once
+	fr.build = func(ctx context.Context, c Cmd) error {
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			<-release
+		}
+		return nil
+	}
+	rep := newReports()
+	svc := newTestService(t, fr, rep)
+	if _, err := svc.Start(inlineRequest("w1")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { r, _ := svc.Queue().Stats(); return r == 1 })
+	for _, id := range []string{"w2", "w3"} {
+		if _, err := svc.Start(inlineRequest(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor(t, func() bool { _, w := svc.Queue().Stats(); return w == 2 })
+	queued := []agentv1.BuildStage{agentv1.BuildStage_BUILD_STAGE_QUEUED}
+	for _, id := range []string{"w2", "w3"} {
+		if got := rep.stagesOf(id); !slices.Equal(got, queued) {
+			t.Fatalf("%s waiting sent %v, want %v", id, got, queued)
+		}
+	}
+
+	if err := svc.Cancel("w2"); err != nil {
+		t.Fatal(err)
+	}
+	if p := finalOf(t, rep); p.GetBuildId() != "w2" || p.GetStage() != agentv1.BuildStage_BUILD_STAGE_CANCELLED {
+		t.Fatalf("final %v", p)
+	}
+	waitFor(t, func() bool { _, w := svc.Queue().Stats(); return w == 1 })
+
+	close(release)
+	for range 2 {
+		if p := finalOf(t, rep); p.GetStage() != agentv1.BuildStage_BUILD_STAGE_SUCCEEDED {
+			t.Fatalf("final %v", p)
+		}
+	}
+	want := []agentv1.BuildStage{
+		agentv1.BuildStage_BUILD_STAGE_QUEUED, agentv1.BuildStage_BUILD_STAGE_FETCHING_SOURCE,
+		agentv1.BuildStage_BUILD_STAGE_BUILDING, agentv1.BuildStage_BUILD_STAGE_PUSHING,
+	}
+	if got := rep.stagesOf("w3"); !slices.Equal(got, want) {
+		t.Fatalf("w3 sent %v, want %v", got, want)
+	}
+	if got := rep.stagesOf("w2"); !slices.Equal(got, queued) {
+		t.Fatalf("cancelled w2 sent %v, want %v", got, queued)
+	}
+}
+
 func TestServiceRejectsInvalid(t *testing.T) {
 	rep := newReports()
 	svc := newTestService(t, &fakeRunner{}, rep)

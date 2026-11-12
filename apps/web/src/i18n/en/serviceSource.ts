@@ -168,6 +168,9 @@ export default {
     offline: "offline",
     noBuildx: "no docker buildx",
     queued: { one: "{count} build queued", other: "{count} builds queued" },
+    // Of a node's builds in flight: the ones holding a slot of its Builds at once, and the ones waiting for one.
+    running: "{count} running",
+    waiting: "{count} waiting",
     nextDeploy: "Applies on the next deploy.",
     envNixpacks:
       "Nixpacks writes the variables it builds with into the image, so variables that look secret (names with KEY, TOKEN, SECRET or PASS, database credentials, URLs with a password, long random values) are left out of the build. The service still gets them when it runs. Names with a framework's public prefix (NEXT_PUBLIC_, VITE_, PUBLIC_, ...) are not secret, unless they hold a password: every browser gets them. Put # @public on the line above a variable in Environment to give it to the build, or use Railpack, which mounts every variable as a build secret.",

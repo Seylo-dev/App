@@ -10,6 +10,7 @@ import { defineModule } from "../module";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
+import { buildQueue } from "./slots";
 
 const queue = implement(buildOps.queue, (input, ctx) => {
   const rows = ctx.db
@@ -38,18 +39,14 @@ const queue = implement(buildOps.queue, (input, ctx) => {
         ? and(inArray(builds.status, ["queued", "running"]), eq(builds.nodeId, input.nodeId))
         : inArray(builds.status, ["queued", "running"]),
     )
-    .orderBy(asc(builds.createdAt))
+    .orderBy(asc(builds.createdAt), asc(builds.id))
     .all()
     .filter((r) => ctx.access.can("services.view", { type: "service", id: r.serviceId }));
-  const positions = new Map<string, number>();
+  // Places count every queued build of the node, also the ones the caller cannot view.
+  const { places } = buildQueue(ctx.db, input.nodeId ? [input.nodeId] : undefined);
   return {
     builds: rows.map((r) => {
-      let position: number | null = null;
-      if (r.status === "queued") {
-        const key = r.nodeId ?? "";
-        position = (positions.get(key) ?? 0) + 1;
-        positions.set(key, position);
-      }
+      const place = r.status === "queued" ? places.get(r.id) : undefined;
       return {
         id: r.id,
         deploymentId: r.deploymentId,
@@ -61,7 +58,8 @@ const queue = implement(buildOps.queue, (input, ctx) => {
         nodeName: r.nodeName,
         builder: r.builder,
         status: r.status,
-        position,
+        position: place?.position ?? null,
+        waiting: place?.waiting ?? false,
         commitSha: r.commitSha,
         queuedAt: r.createdAt.toISOString(),
         startedAt: r.startedAt?.toISOString() ?? null,
@@ -71,21 +69,19 @@ const queue = implement(buildOps.queue, (input, ctx) => {
 });
 
 function buildNodes(ctx: Parameters<typeof queue.run>[1]) {
-  const busy = new Map<string, number>();
-  for (const b of ctx.db
-    .select({ nodeId: builds.nodeId })
-    .from(builds)
-    .where(inArray(builds.status, ["queued", "running"]))
-    .all()) {
-    if (b.nodeId) busy.set(b.nodeId, (busy.get(b.nodeId) ?? 0) + 1);
-  }
+  const slots = buildQueue(ctx.db).nodes;
   // hasBuildx: the same rule pickBuildNode and updateSettings use, so the picker shows what they refuse.
   return ctx.db
     .select({ id: nodes.id, name: nodes.name, canBuild: nodes.canBuild })
     .from(nodes)
     .orderBy(asc(nodes.name))
     .all()
-    .map((n) => ({ ...n, online: ctx.agents.isOnline(n.id), hasBuildx: hasBuildx(ctx, n.id), queued: busy.get(n.id) ?? 0 }));
+    .map((n) => {
+      const s = slots.get(n.id);
+      const queued = s ? s.running + s.queued : 0;
+      const waiting = s?.waiting ?? 0;
+      return { ...n, online: ctx.agents.isOnline(n.id), hasBuildx: hasBuildx(ctx, n.id), queued, running: queued - waiting, waiting };
+    });
 }
 
 const getSettings = implement(buildOps.getSettings, (input, ctx) => {

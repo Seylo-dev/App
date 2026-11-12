@@ -39,8 +39,8 @@ test.describe("build settings", () => {
         "builds.getSettings": () => ({
           settings,
           nodes: [
-            { id: svc.nodeDe, name: "de-fsn-1", canBuild: true, online: true, hasBuildx: false, queued: 0 },
-            { id: svc.nodeUs, name: "us-ash-1", canBuild: true, online: true, hasBuildx: true, queued: 0 },
+            { id: svc.nodeDe, name: "de-fsn-1", canBuild: true, online: true, hasBuildx: false, queued: 0, running: 0, waiting: 0 },
+            { id: svc.nodeUs, name: "us-ash-1", canBuild: true, online: true, hasBuildx: true, queued: 0, running: 0, waiting: 0 },
           ],
         }),
         "builds.updateSettings": (input: Input) => {

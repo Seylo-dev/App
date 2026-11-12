@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { hasRunningInstance, type ServiceStatus } from "./status";
+import { t } from "../../i18n/t";
+import { deploymentLook, hasRunningInstance, type ServiceStatus, serviceLook } from "./status";
 
 const live = { id: "d1", label: "3b8d2aa", createdAt: "2026-11-09T10:00:00Z" };
 
@@ -17,4 +18,16 @@ test("a console can attach while a container runs, and not before", () => {
   expect(runs("building", { liveDeployment: null })).toBe(false);
   expect(runs("deploying", { stopped: true })).toBe(false);
   for (const status of ["idle", "starting", "crashed", "stopped", "unknown"] as const) expect(runs(status)).toBe(false);
+});
+
+test("a building deploy or service whose build waits for a slot says so instead of Building", () => {
+  expect(t(serviceLook("building").label)).toBe("Building");
+  expect(t(serviceLook("building", true).label)).toBe("Waiting for a build slot");
+  expect(t(deploymentLook("building").label)).toBe("Building");
+  expect(t(deploymentLook("building", true).label)).toBe("Waiting for a build slot");
+  // It looks like a queued deploy: nothing runs for it yet.
+  expect(deploymentLook("building", true)).toMatchObject({ tone: "gray", dot: "off" });
+  // Only a building one: the flag means nothing for the other states.
+  expect(t(serviceLook("running", true).label)).toBe("Running");
+  expect(t(deploymentLook("deploying", true).label)).toBe("Deploying");
 });

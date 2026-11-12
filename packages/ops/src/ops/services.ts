@@ -296,6 +296,11 @@ export const ServiceSummary = Type.Object({
   /** Compose members: the stack's service id. */
   parentId: Type.Union([Id, Type.Null()]),
   status: ServiceStatus,
+  /**
+   * True while status is building and the deploy's build waits for a free
+   * slot of its node's Builds at once (Deployment.buildWait). Added in 0.2.14.
+   */
+  buildWaiting: Type.Boolean(),
   source: SourceSummary,
   /** Main domain, or the internal "name:port" when it has none; null without ports. */
   address: Type.Union([Type.String(), Type.Null()]),
@@ -420,7 +425,15 @@ export const ServiceDetail = Type.Object({
   entryNodeId: Type.Union([Id, Type.Null()]),
   notes: Type.String(),
   /** Members of a compose stack (kind "compose"); empty for other kinds. */
-  members: Type.Array(Type.Object({ id: Id, name: ServiceName, status: ServiceStatus })),
+  members: Type.Array(
+    Type.Object({
+      id: Id,
+      name: ServiceName,
+      status: ServiceStatus,
+      /** As ServiceSummary.buildWaiting. Added in 0.2.14. */
+      buildWaiting: Type.Boolean(),
+    }),
+  ),
   volumes: Type.Array(Volume),
   /** Patterns a push must touch to deploy (services.setWatchPaths); empty = every push deploys. */
   watchPaths: WatchPaths,

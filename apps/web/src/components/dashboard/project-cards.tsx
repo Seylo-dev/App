@@ -339,7 +339,7 @@ function ServiceRowSkeleton() {
 
 function ServiceRow({ service }: { service: ServiceSummary }) {
   const tag = kindTag(service);
-  const status = statusDisplay(service.status);
+  const status = statusDisplay(service.status, service.buildWaiting);
   const detail = [service.source.label, service.source.branch, placementLine(service)].filter(Boolean).join(t("format.separator"));
   const usage = formatUsage(service.cpuPercent, service.memoryBytes);
   return (

@@ -22,6 +22,20 @@ export function cantBuildNote(node: BuildNode): string | null {
 
 const usable = (node: BuildNode) => cantBuildNote(node) === null;
 
+/**
+ * The node's builds in flight for the picker: "2 running, 1 waiting" (waiting
+ * for a free slot of its Builds at once); null with none. A fixture without
+ * running and waiting says "3 builds queued" as before.
+ */
+export function buildLoadNote(node: Pick<BuildNode, "queued"> & { running?: number; waiting?: number }): string | null {
+  if (node.queued === 0) return null;
+  if (node.running === undefined || node.waiting === undefined) return t("serviceSource.build.queued", { count: node.queued });
+  const parts: string[] = [];
+  if (node.running > 0) parts.push(t("serviceSource.build.running", { count: node.running }));
+  if (node.waiting > 0) parts.push(t("serviceSource.build.waiting", { count: node.waiting }));
+  return parts.join(", ");
+}
+
 /** The "Builds on" fact of the Deployments page; null for services that are not built. */
 export function buildNodeText(
   data: Settings | undefined,

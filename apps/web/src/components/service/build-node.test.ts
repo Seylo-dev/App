@@ -1,7 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { buildNodeText, cantBuildNote } from "./build-node";
+import { buildLoadNote, buildNodeText, cantBuildNote } from "./build-node";
 
-type Node = { id: string; name: string; canBuild: boolean; online: boolean; hasBuildx: boolean; queued: number };
+type Node = {
+  id: string;
+  name: string;
+  canBuild: boolean;
+  online: boolean;
+  hasBuildx: boolean;
+  queued: number;
+  running: number;
+  waiting: number;
+};
 
 const node = (name: string, over: Partial<Node> = {}): Node => ({
   id: `node-${name}`.padEnd(16, "0"),
@@ -10,6 +19,8 @@ const node = (name: string, over: Partial<Node> = {}): Node => ({
   online: true,
   hasBuildx: true,
   queued: 0,
+  running: 0,
+  waiting: 0,
   ...over,
 });
 
@@ -73,4 +84,12 @@ test("the picker's note: Can build first, then online, then buildx", () => {
   expect(cantBuildNote(node("a", { online: false, hasBuildx: false }))).toBe("offline");
   expect(cantBuildNote(node("a", { hasBuildx: false }))).toBe("no docker buildx");
   expect(cantBuildNote(node("a"))).toBeNull();
+});
+
+test("the picker's load note says how many builds run and how many wait for a slot", () => {
+  expect(buildLoadNote(node("a"))).toBeNull();
+  expect(buildLoadNote(node("a", { queued: 2, running: 2 }))).toBe("2 running");
+  expect(buildLoadNote(node("a", { queued: 3, running: 1, waiting: 2 }))).toBe("1 running, 2 waiting");
+  // A panel answer without the split (fixtures from before 0.2.14) keeps the old words.
+  expect(buildLoadNote({ queued: 3 })).toBe("3 builds queued");
 });

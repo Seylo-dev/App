@@ -35,11 +35,19 @@ export interface FakeBuild {
 
 export type BuildScript = (build: FakeBuild) => {
   logs?: string[];
-  result: "succeeded" | "failed" | "hang";
+  /** held: after its first stages it waits for endBuild (or a cancel). */
+  result: "succeeded" | "failed" | "hang" | "held";
   digest?: string;
   message?: string;
   /** The commit the node says it checked out (BuildSourceInfo, sent for git sources once fetched). */
   sourceInfo?: { commit: string; subject?: string; author?: string };
+  /**
+   * Like the agent's build queue: BUILD_STAGE_QUEUED with queuedMessage
+   * first, then nothing until grantSlot (or a cancel), then the stages
+   * after the slot. Left out: the build starts at once, without QUEUED.
+   */
+  queued?: boolean;
+  queuedMessage?: string;
 };
 
 const allCapabilities = new Set([
@@ -86,6 +94,11 @@ export class FakeFleet {
   /** Called with every chunk an ExportVolume hands out (to look at the panel meanwhile). */
   onExportChunk: ((nodeId: string, key: string) => void) | null = null;
   private seq = new Map<string, bigint>();
+  /** Streams of builds that wait for their slot or their end, by build id. */
+  private readonly slotGates = new Map<string, Set<() => void>>();
+  private readonly endGates = new Map<string, Set<(result: "succeeded" | "failed") => void>>();
+  /** Builds whose slot was granted: a stream opened again for one does not wait again. */
+  private readonly granted = new Set<string>();
   readonly hub: AgentHub;
 
   constructor(private readonly panel: TestPanel) {
@@ -136,11 +149,25 @@ export class FakeFleet {
     return row.id;
   }
 
+  /** The build held in BUILD_STAGE_QUEUED gets its slot: it goes on with the stages after it. */
+  grantSlot(buildId: string): void {
+    this.granted.add(buildId);
+    for (const open of this.slotGates.get(buildId) ?? []) open();
+    this.slotGates.delete(buildId);
+  }
+
+  /** A held build (result "held") ends. */
+  endBuild(buildId: string, result: "succeeded" | "failed" = "succeeded"): void {
+    for (const end of this.endGates.get(buildId) ?? []) end(result);
+    this.endGates.delete(buildId);
+  }
+
   private buildStream(build: FakeBuild) {
     this.builds.push(build);
     const script = this.buildScript(build);
+    const buildId = build.request.buildId;
     const progress = (stage: BuildStage, extra: Record<string, unknown> = {}) =>
-      ({ output: { case: "progress", value: create(BuildProgressSchema, { buildId: build.request.buildId, stage, ...extra }) } }) as const;
+      ({ output: { case: "progress", value: create(BuildProgressSchema, { buildId, stage, ...extra }) } }) as const;
     const messages: unknown[] = [progress(BuildStage.FETCHING_SOURCE)];
     if (script.sourceInfo) {
       messages.push({
@@ -152,13 +179,15 @@ export class FakeFleet {
     }
     messages.push(progress(BuildStage.BUILDING));
     for (const line of script.logs ?? []) messages.push({ output: { case: "log", value: new TextEncoder().encode(`${line}\n`) } });
+    const ending = (result: "succeeded" | "failed") =>
+      result === "succeeded"
+        ? [
+            progress(BuildStage.PUSHING),
+            progress(BuildStage.SUCCEEDED, { imageDigest: script.digest ?? "", duration: durationFromMs(4000) }),
+          ]
+        : [progress(BuildStage.FAILED, { message: script.message ?? "exit code 1" })];
     let hang: (() => void) | null = null;
-    if (script.result === "succeeded") {
-      messages.push(progress(BuildStage.PUSHING));
-      messages.push(progress(BuildStage.SUCCEEDED, { imageDigest: script.digest ?? "", duration: durationFromMs(4000) }));
-    } else if (script.result === "failed") {
-      messages.push(progress(BuildStage.FAILED, { message: script.message ?? "exit code 1" }));
-    }
+    if (script.result === "succeeded" || script.result === "failed") messages.push(...ending(script.result));
     let cancelled = false;
     let dropped = false;
     this.drops.push(() => {
@@ -166,6 +195,15 @@ export class FakeFleet {
       cancelled = true;
       (hang as (() => void) | null)?.();
     });
+    const fleet = this;
+    /** Waits on a gate of this build; a cancel or a drop opens it too. */
+    const wait = <T>(gates: Map<string, Set<(v: T) => void>>, fallback: T) =>
+      new Promise<T>((res) => {
+        const set = gates.get(buildId) ?? new Set();
+        gates.set(buildId, set);
+        set.add(res);
+        hang = () => res(fallback);
+      });
     let resolveDone!: () => void;
     let rejectDone!: (e: unknown) => void;
     const done = new Promise<{ message: string }>((res, rej) => {
@@ -174,10 +212,22 @@ export class FakeFleet {
     });
     done.catch(() => undefined);
     const iterator = async function* () {
-      for (const m of messages) {
+      if (script.queued) {
+        await Bun.sleep(0);
+        yield progress(BuildStage.QUEUED, { message: script.queuedMessage ?? "Waiting for 1 build(s) on this node" });
+        if (!fleet.granted.has(buildId) && !cancelled) await wait(fleet.slotGates, undefined);
+      }
+      for (const m of cancelled ? [] : messages) {
         if (cancelled) break;
         await Bun.sleep(0);
         yield m;
+      }
+      if (script.result === "held" && !cancelled) {
+        const result = await wait(fleet.endGates, "succeeded" as const);
+        for (const m of cancelled ? [] : ending(result)) {
+          await Bun.sleep(0);
+          yield m;
+        }
       }
       if (script.result === "hang" && !cancelled) await new Promise<void>((res) => (hang = res));
       if (cancelled) {

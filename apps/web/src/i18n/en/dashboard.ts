@@ -76,6 +76,7 @@ export default {
   noDeploys: "Nothing deployed yet.",
   deploy: {
     building: "Building, then running on {node}",
+    waitingForBuild: "Waiting for a build slot on {node}",
     deploying: "Deploying to {node}",
     failed: "Deploy failed, the previous version kept running",
     cancelled: "Cancelled",

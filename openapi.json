@@ -12696,7 +12696,9 @@
                           "canBuild",
                           "online",
                           "hasBuildx",
-                          "queued"
+                          "queued",
+                          "running",
+                          "waiting"
                         ],
                         "properties": {
                           "id": {
@@ -12717,6 +12719,14 @@
                             "type": "boolean"
                           },
                           "queued": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "running": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "waiting": {
                             "minimum": 0,
                             "type": "integer"
                           }
@@ -12741,7 +12751,7 @@
       "get": {
         "operationId": "builds.queue",
         "summary": "List the build queue",
-        "description": "Lists builds that are queued or running on every node (or one node), oldest first, with their place in the queue. Only builds of services the caller can view are returned.",
+        "description": "Lists builds that are queued or running on every node (or one node), oldest first, with their place in the queue. queued = waiting for a free slot of its node's Builds at once (waiting true), or about to start in one; position is its place among the node's queued builds (1 = next to start). running = started on the node's agent; startedAt is when it started, queuedAt when it was dispatched. Only builds of services the caller can view are returned.",
         "tags": [
           "builds"
         ],
@@ -12793,6 +12803,7 @@
                           "builder",
                           "status",
                           "position",
+                          "waiting",
                           "commitSha",
                           "queuedAt",
                           "startedAt"
@@ -12896,6 +12907,9 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "waiting": {
+                            "type": "boolean"
                           },
                           "commitSha": {
                             "anyOf": [
@@ -14554,6 +14568,7 @@
                         "kind",
                         "parentId",
                         "status",
+                        "buildWaiting",
                         "source",
                         "address",
                         "placements",
@@ -14697,6 +14712,9 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "buildWaiting": {
+                          "type": "boolean"
                         },
                         "source": {
                           "type": "object",
@@ -14932,6 +14950,7 @@
                           "kind",
                           "parentId",
                           "status",
+                          "buildWaiting",
                           "source",
                           "address",
                           "placements",
@@ -15075,6 +15094,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           },
                           "source": {
                             "type": "object",
@@ -15366,6 +15388,7 @@
                         "kind",
                         "parentId",
                         "status",
+                        "buildWaiting",
                         "source",
                         "address",
                         "placements",
@@ -15527,6 +15550,9 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "buildWaiting": {
+                          "type": "boolean"
                         },
                         "source": {
                           "type": "object",
@@ -16525,7 +16551,8 @@
                             "required": [
                               "id",
                               "name",
-                              "status"
+                              "status",
+                              "buildWaiting"
                             ],
                             "properties": {
                               "id": {
@@ -16583,6 +16610,9 @@
                                     "type": "string"
                                   }
                                 ]
+                              },
+                              "buildWaiting": {
+                                "type": "boolean"
                               }
                             }
                           }
@@ -16992,6 +17022,7 @@
                           "kind",
                           "parentId",
                           "status",
+                          "buildWaiting",
                           "source",
                           "address",
                           "placements",
@@ -17135,6 +17166,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           },
                           "source": {
                             "type": "object",
@@ -23395,6 +23429,7 @@
                     "source",
                     "builder",
                     "builtOn",
+                    "buildWait",
                     "shippedTo",
                     "image",
                     "steps",
@@ -23596,6 +23631,43 @@
                             },
                             "name": {
                               "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "buildWait": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "node",
+                            "position"
+                          ],
+                          "properties": {
+                            "node": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "position": {
+                              "minimum": 1,
+                              "type": "integer"
                             }
                           }
                         },
@@ -23917,6 +23989,7 @@
                     "source",
                     "builder",
                     "builtOn",
+                    "buildWait",
                     "shippedTo",
                     "image",
                     "steps",
@@ -24118,6 +24191,43 @@
                             },
                             "name": {
                               "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "buildWait": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "node",
+                            "position"
+                          ],
+                          "properties": {
+                            "node": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "position": {
+                              "minimum": 1,
+                              "type": "integer"
                             }
                           }
                         },
@@ -24441,6 +24551,7 @@
                         "source",
                         "builder",
                         "builtOn",
+                        "buildWait",
                         "shippedTo",
                         "image",
                         "steps",
@@ -24642,6 +24753,43 @@
                                 },
                                 "name": {
                                   "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "buildWait": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "node",
+                                "position"
+                              ],
+                              "properties": {
+                                "node": {
+                                  "type": "object",
+                                  "required": [
+                                    "id",
+                                    "name"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "position": {
+                                  "minimum": 1,
+                                  "type": "integer"
                                 }
                               }
                             },
@@ -24991,6 +25139,7 @@
                           "source",
                           "builder",
                           "builtOn",
+                          "buildWait",
                           "shippedTo",
                           "image",
                           "steps",
@@ -25192,6 +25341,43 @@
                                   },
                                   "name": {
                                     "type": "string"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "buildWait": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "node",
+                                  "position"
+                                ],
+                                "properties": {
+                                  "node": {
+                                    "type": "object",
+                                    "required": [
+                                      "id",
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "position": {
+                                    "minimum": 1,
+                                    "type": "integer"
                                   }
                                 }
                               },
@@ -25676,6 +25862,7 @@
                           "source",
                           "builder",
                           "builtOn",
+                          "buildWait",
                           "shippedTo",
                           "image",
                           "steps",
@@ -25879,6 +26066,43 @@
                                   },
                                   "name": {
                                     "type": "string"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "buildWait": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "node",
+                                  "position"
+                                ],
+                                "properties": {
+                                  "node": {
+                                    "type": "object",
+                                    "required": [
+                                      "id",
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "position": {
+                                    "minimum": 1,
+                                    "type": "integer"
                                   }
                                 }
                               },
@@ -26210,6 +26434,7 @@
                     "source",
                     "builder",
                     "builtOn",
+                    "buildWait",
                     "shippedTo",
                     "image",
                     "steps",
@@ -26411,6 +26636,43 @@
                             },
                             "name": {
                               "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "buildWait": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "node",
+                            "position"
+                          ],
+                          "properties": {
+                            "node": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "position": {
+                              "minimum": 1,
+                              "type": "integer"
                             }
                           }
                         },
@@ -26816,6 +27078,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -26977,6 +27240,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -27975,7 +28241,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -28033,6 +28300,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -39614,6 +39884,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -39775,6 +40046,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -40773,7 +41047,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -40831,6 +41106,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -42724,6 +43002,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -42885,6 +43164,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -43883,7 +44165,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -43941,6 +44224,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -63023,6 +63309,7 @@
                         "kind",
                         "parentId",
                         "status",
+                        "buildWaiting",
                         "source",
                         "address",
                         "placements",
@@ -63184,6 +63471,9 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "buildWaiting": {
+                          "type": "boolean"
                         },
                         "source": {
                           "type": "object",
@@ -64182,7 +64472,8 @@
                             "required": [
                               "id",
                               "name",
-                              "status"
+                              "status",
+                              "buildWaiting"
                             ],
                             "properties": {
                               "id": {
@@ -64240,6 +64531,9 @@
                                     "type": "string"
                                   }
                                 ]
+                              },
+                              "buildWaiting": {
+                                "type": "boolean"
                               }
                             }
                           }
@@ -65440,6 +65734,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -65601,6 +65896,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -66599,7 +66897,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -66657,6 +66956,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -67060,6 +67362,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -67221,6 +67524,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -68219,7 +68525,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -68277,6 +68584,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -68625,6 +68935,7 @@
                           "kind",
                           "parentId",
                           "status",
+                          "buildWaiting",
                           "source",
                           "address",
                           "placements",
@@ -68768,6 +69079,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           },
                           "source": {
                             "type": "object",
@@ -70977,6 +71291,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -71138,6 +71453,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -72136,7 +72454,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -72194,6 +72513,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -73043,6 +73365,7 @@
                     "kind",
                     "parentId",
                     "status",
+                    "buildWaiting",
                     "source",
                     "address",
                     "placements",
@@ -73204,6 +73527,9 @@
                           "type": "string"
                         }
                       ]
+                    },
+                    "buildWaiting": {
+                      "type": "boolean"
                     },
                     "source": {
                       "type": "object",
@@ -74202,7 +74528,8 @@
                         "required": [
                           "id",
                           "name",
-                          "status"
+                          "status",
+                          "buildWaiting"
                         ],
                         "properties": {
                           "id": {
@@ -74260,6 +74587,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -75681,6 +76011,7 @@
                         "kind",
                         "parentId",
                         "status",
+                        "buildWaiting",
                         "source",
                         "address",
                         "placements",
@@ -75842,6 +76173,9 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "buildWaiting": {
+                          "type": "boolean"
                         },
                         "source": {
                           "type": "object",
@@ -76840,7 +77174,8 @@
                             "required": [
                               "id",
                               "name",
-                              "status"
+                              "status",
+                              "buildWaiting"
                             ],
                             "properties": {
                               "id": {
@@ -76898,6 +77233,9 @@
                                     "type": "string"
                                   }
                                 ]
+                              },
+                              "buildWaiting": {
+                                "type": "boolean"
                               }
                             }
                           }
@@ -86330,6 +86668,7 @@
                           "kind",
                           "parentId",
                           "status",
+                          "buildWaiting",
                           "source",
                           "address",
                           "placements",
@@ -86473,6 +86812,9 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           },
                           "source": {
                             "type": "object",

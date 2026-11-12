@@ -30,7 +30,7 @@ export function ServiceHeader({ service }: { service: ServiceDetail }) {
     <header className="flex flex-wrap items-center gap-3">
       <KindBadge kind={service.kind} />
       <h1 className="m-0 text-2xl font-semibold tracking-[-0.02em]">{service.name}</h1>
-      <ServiceStatusChip status={service.status} />
+      <ServiceStatusChip status={service.status} buildWaiting={service.buildWaiting} />
       {service.placements.map((p) => (
         <Chip key={p.nodeId} tone="track">
           <IconServer2 size={13} stroke={1.8} aria-hidden="true" className="shrink-0 text-muted-foreground" />

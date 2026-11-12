@@ -52,6 +52,13 @@ export const BuildNode = Type.Object({
   hasBuildx: Type.Boolean(),
   /** Builds waiting or running there now. */
   queued: Type.Integer({ minimum: 0 }),
+  /**
+   * Of those, the builds that hold a slot of the node's Builds at once:
+   * started on the node, or about to start in a free slot. Added in 0.2.14.
+   */
+  running: Type.Integer({ minimum: 0 }),
+  /** Of those, the builds waiting for a free slot (queued minus running). Added in 0.2.14. */
+  waiting: Type.Integer({ minimum: 0 }),
 });
 
 export const BuildStatus = Type.Union([
@@ -69,13 +76,26 @@ export const QueuedBuild = Type.Object({
   serviceName: Type.String(),
   projectId: Id,
   projectName: Type.String(),
-  /** Node that runs (or will run) the build; null while none is free. */
+  /** Node that runs (or will run) the build; null once that node was removed. */
   nodeId: Type.Union([Id, Type.Null()]),
   nodeName: Type.Union([Type.String(), Type.Null()]),
   builder: Builder,
+  /**
+   * queued: not started on its node yet. Since 0.2.14 a build stays queued
+   * while it waits for a free slot of its node's Builds at once, and is
+   * running only once the node's agent really started it (it fetches the
+   * source); before, it read running from the moment it was dispatched.
+   */
   status: BuildStatus,
-  /** 1-based place in the queue of its node; null once running. */
+  /** 1-based place among the queued builds of its node, oldest first (1 = next to start); null once running. */
   position: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+  /**
+   * True for a queued build with no free slot: the node's running builds and
+   * the queued ones ahead of it fill its Builds at once. False for a queued
+   * build about to start in a free slot, and for running builds. Added in
+   * 0.2.14.
+   */
+  waiting: Type.Boolean(),
   commitSha: Type.Union([Type.String(), Type.Null()]),
   queuedAt: Timestamp,
   startedAt: Type.Union([Timestamp, Type.Null()]),
@@ -88,7 +108,7 @@ export const queue = defineOp({
   kind: "query",
   summary: "List the build queue",
   description:
-    "Lists builds that are queued or running on every node (or one node), oldest first, with their place in the queue. Only builds of services the caller can view are returned.",
+    "Lists builds that are queued or running on every node (or one node), oldest first, with their place in the queue. queued = waiting for a free slot of its node's Builds at once (waiting true), or about to start in one; position is its place among the node's queued builds (1 = next to start). running = started on the node's agent; startedAt is when it started, queuedAt when it was dispatched. Only builds of services the caller can view are returned.",
   input: Type.Object({ nodeId: Type.Optional(Id) }),
   output: Type.Object({ builds: Type.Array(QueuedBuild) }),
   // The handler filters rows by services.view.

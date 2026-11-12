@@ -6,7 +6,10 @@
 //
 //   queued     waits until no other deploy of the service runs, then starts
 //   building   a node builds and pushes to the panel registry; its stream
-//              gives log lines, and the durable BuildProgress gives the result
+//              gives log lines, and the durable BuildProgress gives the result.
+//              The build row is queued until the node's agent has a slot
+//              for it (Builds at once) and reports a stage after the slot,
+//              then running (builds/slots.ts)
 //   deploying  the service's target deployment is switched to this one and
 //              the desired state is marked dirty; each node reports the
 //              rollout (DeployProgress, then its state)
@@ -57,7 +60,7 @@ import { reportedHealth, reportedWaitMs } from "./image-health";
 import { appendLog, LineSplitter } from "./logs";
 import { registryGcJobType } from "./registry-gc";
 import { pickBuildNode, resolveBuild, sourceBranch } from "./source";
-import { closeSteps, type DeploymentRow, initialSteps, isFinal, publishDeploymentChange, setStep } from "./store";
+import { closeSteps, type DeploymentRow, initialSteps, isFinal, publishBuildQueue, publishDeploymentChange, setStep } from "./store";
 
 /** A build that has not finished after this long failed. */
 export const buildTimeoutMs = 90 * 60_000;
@@ -80,6 +83,8 @@ interface EngineState {
   streams: Map<string, { cancel(): void }>;
   /** Builds this process already tried to re-attach to after a restart. */
   reattached: Set<string>;
+  /** When this process handed a queued build to its node, by build id: the clone step leaves out the wait for a slot. */
+  handedOver: Map<string, number>;
   pending: Set<Promise<void>>;
 }
 
@@ -88,7 +93,7 @@ const engines = new WeakMap<object, EngineState>();
 export function engineFor(deps: Deps): Engine {
   let state = engines.get(deps.db);
   if (!state) {
-    state = { deps, chains: new Map(), streams: new Map(), reattached: new Set(), pending: new Set() };
+    state = { deps, chains: new Map(), streams: new Map(), reattached: new Set(), handedOver: new Map(), pending: new Set() };
     engines.set(deps.db, state);
   }
   // The latest deps win: tests swap deps.agents for a fake before any op runs.
@@ -238,14 +243,16 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
   } catch (error) {
     return void finish(s, base, "failed", error instanceof OpError ? error.message : "No node can build.");
   }
+  // Queued until the node's agent starts it: with every slot of its Builds at once taken it waits there.
   const buildRow = db
     .insert(builds)
     .values({
       deploymentId: d.id,
       nodeId: buildNode.id,
       builder: spec.source.type === "inline" ? "dockerfile" : spec.build.builder,
-      status: "running",
-      startedAt: now,
+      status: "queued",
+      startedAt: null,
+      createdAt: now,
     })
     .returning()
     .get();
@@ -314,8 +321,10 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
 
   let stream: AgentStream<"build">;
   try {
+    s.handedOver.set(buildRow.id, Date.now());
     stream = s.deps.agents.open(buildNode.id, "build", resolved.request);
   } catch (error) {
+    s.handedOver.delete(buildRow.id);
     db.update(builds)
       .set({ status: "failed", finishedAt: new Date(), error: messageOf(error) })
       .where(eq(builds.id, buildRow.id))
@@ -411,9 +420,25 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
   const finished = build.status === "succeeded" || build.status === "failed" || build.status === "cancelled";
   if (finished) return d.id;
 
+  const now = new Date();
+  const handedOver = engines.get(db)?.handedOver;
   let steps = d.steps;
   const patch: Partial<typeof deployments.$inferInsert> = {};
-  const seconds = progress.duration ? Number(progress.duration.seconds) : null;
+  // The agent's duration runs from its Build call, so it holds the wait for a slot too.
+  const agentMs = progress.duration ? Number(progress.duration.seconds) * 1000 + Math.floor(progress.duration.nanos / 1e6) : null;
+  // Any stage after the slot (agents of every supported version send FETCHING_SOURCE right after it):
+  // the build runs from now. QUEUED keeps it queued, whatever its message says.
+  const start =
+    progress.stage === BuildStage.FETCHING_SOURCE || progress.stage === BuildStage.BUILDING || progress.stage === BuildStage.PUSHING;
+  let queueMoved = false;
+  if (start && build.status === "queued") {
+    db.update(builds).set({ status: "running", startedAt: now }).where(eq(builds.id, build.id)).run();
+    // The clone step's time leaves out the wait between the hand-over and the slot.
+    const handed = handedOver?.get(build.id);
+    if (handed !== undefined) steps = delayStart(steps, "clone", now.getTime() - handed, now.getTime());
+    handedOver?.delete(build.id);
+    queueMoved = true;
+  }
   switch (progress.stage) {
     case BuildStage.FETCHING_SOURCE:
       steps = setStep(steps, "clone", "running");
@@ -425,13 +450,19 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
       steps = setStep(setStep(steps, "clone", "ok"), "build", "running", { detail: "Pushing the image to the panel registry" });
       break;
     case BuildStage.SUCCEEDED: {
-      const took = seconds === null ? "" : ` in ${seconds}s`;
+      // From the real start; a start the panel never saw (its progress was lost) takes the agent's duration.
+      const ms = build.startedAt ? now.getTime() - build.startedAt.getTime() : agentMs;
+      const took = ms === null ? "" : ` in ${Math.max(0, Math.round(ms / 1000))}s`;
       steps = setStep(setStep(steps, "clone", "ok"), "build", "ok", {
         detail: `${labelOf(build.builder)} on ${nodeNameOf(s, nodeId)}${took}`,
       });
       patch.imageDigest = progress.imageDigest || null;
       Object.assign(patch, recordResultCommit(s, d, progress.commit));
-      db.update(builds).set({ status: "succeeded", finishedAt: new Date() }).where(eq(builds.id, build.id)).run();
+      db.update(builds)
+        .set({ status: "succeeded", finishedAt: now, startedAt: startedAtOf(build, agentMs, now) })
+        .where(eq(builds.id, build.id))
+        .run();
+      queueMoved = true;
       break;
     }
     case BuildStage.FAILED:
@@ -442,14 +473,22 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
         detail: progress.message || (cancelled ? "Cancelled" : "Build failed"),
       });
       db.update(builds)
-        .set({ status: cancelled ? "cancelled" : "failed", finishedAt: new Date(), error: progress.message || null })
+        .set({
+          status: cancelled ? "cancelled" : "failed",
+          finishedAt: now,
+          // A build stopped while it waited never started.
+          startedAt: build.status === "queued" && cancelled ? null : startedAtOf(build, agentMs, now),
+          error: progress.message || null,
+        })
         .where(eq(builds.id, build.id))
         .run();
+      queueMoved = true;
       break;
     }
     default:
       break;
   }
+  if (progress.stage >= BuildStage.SUCCEEDED) handedOver?.delete(build.id);
   db.update(deployments)
     .set({ ...patch, steps })
     .where(eq(deployments.id, d.id))
@@ -459,12 +498,14 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
       s.deps,
       d.serviceId,
       d.id,
-      progress.stage === BuildStage.FETCHING_SOURCE ? "clone" : "build",
+      progress.stage === BuildStage.FETCHING_SOURCE || progress.stage === BuildStage.QUEUED ? "clone" : "build",
       [progress.message],
       progress.stage === BuildStage.FAILED,
     );
   }
   publishDeploymentChange(s.deps, d.serviceId, d.id);
+  // The builds behind it on the node moved up (or one of them now has the free slot).
+  if (queueMoved) publishBuildQueue(s.deps, build.nodeId);
   return d.id;
 }
 
@@ -479,6 +520,26 @@ function recordResultCommit(s: Pick<EngineState, "deps">, d: DeploymentRow, comm
   if (!commit) return {};
   recordBuiltCommit(s.deps, d.id, commit);
   return d.commitSha ? {} : { commitSha: commit };
+}
+
+/**
+ * startedAt of a build that ends: the start the panel saw, else (its progress
+ * was lost, only the durable result came) the agent's duration back from
+ * now, never before the dispatch.
+ */
+function startedAtOf(build: typeof builds.$inferSelect, agentMs: number | null, now: Date): Date {
+  if (build.startedAt) return build.startedAt;
+  if (agentMs === null) return now;
+  return new Date(Math.max(build.createdAt.getTime(), now.getTime() - agentMs));
+}
+
+/** Moves the start of a running step later by ms (never past now), so its time leaves out a wait. */
+function delayStart(steps: readonly DeployStep[], key: DeployStep["key"], ms: number, now: number): DeployStep[] {
+  return steps.map((st) =>
+    st.key === key && st.status === "running" && st.durationMs !== null && st.durationMs < 0 && ms > 0
+      ? { ...st, durationMs: Math.max(st.durationMs - ms, -now) }
+      : st,
+  );
 }
 
 function labelOf(builder: string): string {
@@ -508,14 +569,42 @@ async function checkBuild(s: EngineState, d: DeploymentRow): Promise<void> {
     s.reattached.add(build.id);
     await reattachBuild(s, d, build.id, build.nodeId);
   }
-  const started = (d.phaseStartedAt ?? d.createdAt).getTime();
-  if (Date.now() - started > buildTimeoutMs) {
+  const timedOut = buildTimeout(s, build);
+  if (timedOut) {
     s.deps.db.update(builds).set({ status: "failed", finishedAt: new Date(), error: "timed out" }).where(eq(builds.id, build.id)).run();
     if (build.nodeId && s.deps.agents.supports(build.nodeId, "cancelBuild")) {
       void s.deps.agents.call(build.nodeId, "cancelBuild", { buildId: build.id }).catch(() => undefined);
     }
-    return void finish(s, d, "failed", `The build did not finish within ${buildTimeoutMs / 60_000} minutes.`);
+    return void finish(s, d, "failed", timedOut);
   }
+}
+
+/**
+ * Why a build in flight timed out, or null. A running build has
+ * buildTimeoutMs from its real start. A queued one waits as long as the
+ * builds ahead of it on its node run, each with its own timeout; it fails
+ * once nothing started or ended on that node for buildTimeoutMs, which
+ * means the node lost it (its agent restarted, say).
+ */
+function buildTimeout(s: EngineState, build: typeof builds.$inferSelect): string | null {
+  const now = Date.now();
+  const minutes = buildTimeoutMs / 60_000;
+  if (build.status === "running") {
+    const started = (build.startedAt ?? build.createdAt).getTime();
+    return now - started > buildTimeoutMs ? `The build did not finish within ${minutes} minutes.` : null;
+  }
+  let moved = build.createdAt.getTime();
+  if (build.nodeId) {
+    const last = s.deps.db
+      .select({ started: max(builds.startedAt), finished: max(builds.finishedAt) })
+      .from(builds)
+      .where(eq(builds.nodeId, build.nodeId))
+      .get();
+    moved = Math.max(moved, last?.started?.getTime() ?? 0, last?.finished?.getTime() ?? 0);
+  }
+  if (now - moved <= buildTimeoutMs) return null;
+  const node = build.nodeId ? nodeName(s, build.nodeId) : "its node";
+  return `The build never started: no build started or finished on ${node} for ${minutes} minutes while it waited for a build slot.`;
 }
 
 /** Calling Build again with the same build id re-attaches to a running build and replays its output. */
@@ -830,6 +919,14 @@ export function finish(
   const now = new Date();
   let reverted = false;
   let projectBack: string | null = null;
+  // Its build's node: a build that ends here (cancelled, timed out, failed) lets the ones queued behind it move up.
+  const lastBuild = db
+    .select({ id: builds.id, nodeId: builds.nodeId })
+    .from(builds)
+    .where(eq(builds.deploymentId, d.id))
+    .orderBy(desc(builds.createdAt))
+    .get();
+  if (lastBuild) engines.get(db)?.handedOver.delete(lastBuild.id);
   db.transaction((tx) => {
     tx.update(deployments)
       .set({
@@ -879,6 +976,7 @@ export function finish(
   if (reverted) s.deps.agents.desired.markDirty({ serviceId: d.serviceId });
   if (reverted && d.trigger === "move") for (const nodeId of d.targetNodeIds) s.deps.agents.desired.markDirty({ nodeId });
   publishDeploymentChange(s.deps, d.serviceId, d.id);
+  if (lastBuild) publishBuildQueue(s.deps, lastBuild.nodeId);
   // Failures the panel itself saw (no builder, source, timeouts); the alerts module covers what agents report.
   if (outcome === "failed" && options.alert !== false) {
     const name = s.deps.db.select({ name: services.name }).from(services).where(eq(services.id, d.serviceId)).get()?.name;

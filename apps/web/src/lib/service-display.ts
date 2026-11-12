@@ -56,7 +56,9 @@ const statusTones: Record<Status, { tone: Tone; dot: Dot }> = {
   unknown: { tone: "gray", dot: "off" },
 };
 
-export function statusDisplay(status: Status): { label: string; tone: Tone; dot: Dot } {
+/** buildWaiting (ServiceSummary.buildWaiting): a building service whose build waits for a free build slot says so. */
+export function statusDisplay(status: Status, buildWaiting = false): { label: string; tone: Tone; dot: Dot } {
+  if (status === "building" && buildWaiting) return { label: t("project.status.waitingForBuild"), tone: "gray", dot: "off" };
   return { label: t(`project.status.${status}`), ...statusTones[status] };
 }
 
@@ -90,9 +92,11 @@ export function placementLine(service: Pick<Summary, "placements">): string {
   return rest.length > 0 ? t("project.placedMore", { node: first.nodeName, count: rest.length }) : first.nodeName;
 }
 
-/** "a1c9e2f · 2 h ago", "building now", "created 12 days ago". */
-export function lastActivity(service: Pick<Summary, "status" | "liveDeployment" | "lastDeployedAt" | "createdAt">): string {
-  if (service.status === "building") return t("project.buildingNow");
+/** "a1c9e2f · 2 h ago", "building now", "waiting for a build slot", "created 12 days ago". */
+export function lastActivity(
+  service: Pick<Summary, "status" | "liveDeployment" | "lastDeployedAt" | "createdAt"> & { buildWaiting?: boolean },
+): string {
+  if (service.status === "building") return t(service.buildWaiting ? "project.waitingNow" : "project.buildingNow");
   if (service.status === "deploying") return t("project.deployingNow");
   if (service.liveDeployment && service.lastDeployedAt) {
     return `${service.liveDeployment.label}${t("format.separator")}${formatAgo(service.lastDeployedAt)}`;

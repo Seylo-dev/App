@@ -233,7 +233,7 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
     <SortableGroup ids={rows.map((service) => service.id)} onMove={(ids) => prefs.setServiceOrder(projectId, ids)} disabled={!sortable}>
       <ul className="m-0 flex list-none flex-col gap-px p-0">
         {rows.map((service) => {
-          const status = statusDisplay(service.status);
+          const status = statusDisplay(service.status, service.buildWaiting);
           return (
             <SortableService key={service.id} id={service.id} name={service.name}>
               <Link
@@ -248,8 +248,12 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
                     <StatusDot status={status.dot} />
                     <span className="truncate">{service.name}</span>
                     {isBusy(service.status) && (
-                      <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
-                        {status.label.toLowerCase()}
+                      <span
+                        title={status.label}
+                        className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg"
+                      >
+                        {/* "waiting for a build slot" does not fit next to a name: the badge says "waiting". */}
+                        {service.status === "building" && service.buildWaiting ? t("project.waitingShort") : status.label.toLowerCase()}
                       </span>
                     )}
                   </>

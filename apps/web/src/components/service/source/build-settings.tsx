@@ -14,7 +14,7 @@ import { FieldSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/ske
 import { toast } from "@seylo/ui/components/toast";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
-import { cantBuildNote } from "../build-node";
+import { buildLoadNote, cantBuildNote } from "../build-node";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
@@ -179,11 +179,11 @@ function BuildForm({ service, data, dockerfileOnly }: { service: ServiceDetail; 
             <SelectContent>
               <SelectItem value={auto}>{t("service.automatic")}</SelectItem>
               {data.nodes.map((n) => {
-                const note = cantBuildNote(n);
+                const note = cantBuildNote(n) ?? buildLoadNote(n);
                 return (
-                  <SelectItem key={n.id} value={n.id} disabled={note !== null}>
+                  <SelectItem key={n.id} value={n.id} disabled={cantBuildNote(n) !== null}>
                     {n.name}
-                    {note ? ` · ${note}` : n.queued > 0 ? ` · ${t("serviceSource.build.queued", { count: n.queued })}` : ""}
+                    {note ? ` · ${note}` : ""}
                   </SelectItem>
                 );
               })}

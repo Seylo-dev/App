@@ -5,8 +5,18 @@ import { builds as buildOps, deployments as deploymentOps, projects as projectOp
 import type { Static } from "@sinclair/typebox";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { builds, type DeployStep, type DeployStepKey, type DeployStepStatus, deployments, services, sourceUploads } from "../../db/schema";
+import {
+  buildInFlight,
+  builds,
+  type DeployStep,
+  type DeployStepKey,
+  type DeployStepStatus,
+  deployments,
+  services,
+  sourceUploads,
+} from "../../db/schema";
 import type { Deps } from "../../deps";
+import { waitingBuilds, waitingDetail } from "../builds/slots";
 import { databaseKinds } from "../domains/lookup";
 import { nodeNames } from "../services/rows";
 
@@ -145,6 +155,12 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
     for (const id of r.targetNodeIds) nodeIds.add(id);
     for (const s of r.steps) if (s.nodeId) nodeIds.add(s.nodeId);
   }
+  // Builds waiting for a free slot on their node: their clone step says so instead of "Fetching source".
+  const waits = waitingBuilds(
+    db,
+    rows.filter((r) => r.status === "building").map((r) => r.id),
+  );
+  for (const w of waits.values()) nodeIds.add(w.nodeId);
   const names = nodeNames(db, [...nodeIds]);
   const ref = (id: string | null) => (id ? { id, name: names.get(id) ?? "removed node" } : null);
   const kept = new Map<string, Set<string>>();
@@ -183,6 +199,8 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
     }
     if (!databaseImages.has(r.serviceId)) databaseImages.set(r.serviceId, databaseRollbackImage(db, r.serviceId));
     const databaseImage = databaseImages.get(r.serviceId);
+    const wait = waits.get(r.id);
+    const buildWait = wait ? { node: ref(wait.nodeId) as { id: string; name: string }, position: wait.position } : null;
     return {
       id: r.id,
       serviceId: r.serviceId,
@@ -195,6 +213,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       source: deploymentSource(r, archives),
       builder: builders.get(r.id) ?? null,
       builtOn: ref(r.builtOnNodeId),
+      buildWait,
       shippedTo: r.targetNodeIds.map((id) => ref(id) as { id: string; name: string }),
       image: r.imageRef
         ? { reference: r.imageRef, digest: deploymentDigest(r), sizeBytes: r.imageSizeBytes, shippedBytes: r.shippedBytes }
@@ -203,7 +222,9 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
         key: s.key,
         status: s.status,
         node: ref(s.nodeId),
-        detail: s.detail,
+        // Read from the queue each time: deployments whose build waits on a node are published again when it moves.
+        detail:
+          buildWait && s.key === "clone" && s.status === "running" ? waitingDetail(buildWait.node.name, buildWait.position) : s.detail,
         // A running step stores its start as a negative number: show the time
         // so far. On a finished step a negative number is a duration measured
         // across a wall clock step back (stored before setStep clamped it): 0.
@@ -282,6 +303,23 @@ export function publishDeploymentChange(deps: Pick<Deps, "db" | "live">, service
     deps.live.publish(`project:${svc.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, projectOps.get.id] });
   }
   deps.live.publish("panel", { type: "invalidate", ops: [buildOps.queue.id, deploymentOps.recent.id] });
+}
+
+/**
+ * A build on this node started, ended or was cancelled, or the node's
+ * Builds at once changed: the deployments whose build is still queued there
+ * go out again, with their new place in line (Deployment.buildWait and the
+ * clone step's "Waiting for a build slot on <node> - 2 ahead").
+ */
+export function publishBuildQueue(deps: Pick<Deps, "db" | "live">, nodeId: string | null): void {
+  if (!nodeId) return;
+  const rows = deps.db
+    .select({ id: deployments.id, serviceId: deployments.serviceId, status: builds.status })
+    .from(builds)
+    .innerJoin(deployments, eq(deployments.id, builds.deploymentId))
+    .where(and(eq(builds.nodeId, nodeId), buildInFlight))
+    .all();
+  for (const r of rows) if (r.status === "queued") publishDeploymentChange(deps, r.serviceId, r.id);
 }
 
 /**
