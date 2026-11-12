@@ -189,7 +189,10 @@ describe("env editor model", () => {
 
   test("chips: a commit id set as GIT_SHA is Public, as builds pass it; # @secret or a secret reference still make it a Secret", () => {
     const sha = "ff9410c96aa507f27425f3c5dbb8e6bf8c4c37f9";
-    const env = analyzeEnv([`GIT_SHA=${sha}`, `COMMIT=${sha}`, "# @secret", `GIT_SHA=${sha}`, "GIT_SHA=${{db.INTERNAL_URL}}", ""].join("\n"), context);
+    const env = analyzeEnv(
+      [`GIT_SHA=${sha}`, `COMMIT=${sha}`, "# @secret", `GIT_SHA=${sha}`, "GIT_SHA=${{db.INTERNAL_URL}}", ""].join("\n"),
+      context,
+    );
     const chips = secretChips(env.parsed, context, "worker");
     expect(chips.map((c) => [c.line, c.secret])).toEqual([
       [1, false],
