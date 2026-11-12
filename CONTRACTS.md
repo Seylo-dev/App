@@ -2534,20 +2534,36 @@ never type the ids by hand.
   running version. Databases and Boxes (no deployment) get the current env.
 - PORT (0.2.2, `env/desired.ts` `withPortEnv`): an app built from a
   repository (a `github`, `provider` or `git` source; not a compose member,
-  not a cron service) with a port gets `PORT=<its first port>` in the env
-  its deploy starts with, which the desired-state compile hands its
+  not a cron service) gets `PORT=<its first TCP port>` (without one, the
+  port its domains point at, else 80: `builtAppPort`) in the env its
+  deploy starts with, which the desired-state compile hands its
   containers, unless that env already has `PORT` (the service's own `.env`
   or the project's shared variables win). Railpack and Nixpacks start
   commands and most frameworks listen on `$PORT`, so the app listens where
   domains and health checks look. It is part of the deployment's env
   snapshot (like every env change, it applies on the next deploy), so a
   panel update never recreates a running app for it. Images, inline
-  Dockerfiles and uploads get none. Only services created from 0.2.2 on get
-  it (`spec.portEnv`, which `insertService` sets; a clone or preview keeps
-  its source's): rows an older panel wrote read false, so an app deployed
-  before keeps the env it had, whatever its image's own `ENV PORT` points
-  at. The New app dialog's Set up later sends no port (it shows no Port
-  field), so an empty app opens no first-run IP:port access.
+  Dockerfiles and uploads get none. Since 0.2.3 every such app gets it,
+  also those created before 0.2.2 (`spec.portEnv` is no longer read; 0.2.2
+  gave it only to services created from 0.2.2 on). The New app dialog's
+  Set up later sends no port (it shows no Port field), so an empty app
+  opens no first-run IP:port access.
+- NODE_ENV (0.2.14, `env/desired.ts` `withNodeEnv`): every app (kind
+  `app`: built from a repository, an image, an inline Dockerfile or an
+  upload, compose members and PR previews) gets `NODE_ENV=production` in
+  the env its deploy starts with, next to PORT, unless that env already has
+  `NODE_ENV` with any value, also empty (the service's own `.env`, which
+  a compose member's `environment:` block is written to, or the project's
+  shared variables). Databases, Boxes, cron services and the panel's own
+  service (`panelServiceId`, whose env `panelContributor` sets) get none.
+  Like PORT it is part of the deployment's env snapshot: an app gets it on
+  its next deploy (a restart or start runs the sealed env of its last
+  deploy), and a panel update recreates nothing for it. As a container
+  variable it wins over an image's own `ENV NODE_ENV`. Builds never get it:
+  the build request's env is `resolveServiceEnv` (without PORT or
+  NODE_ENV), since `npm ci` under `NODE_ENV=production` skips the
+  devDependencies a Dockerfile's build step needs; a `NODE_ENV` the
+  service sets reaches its build like its other variables.
 - Agent versions: the hello and `NodeFacts.agent_version` carry the bare
   version ("0.1.1"); `parseVersion` also accepts the older
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by

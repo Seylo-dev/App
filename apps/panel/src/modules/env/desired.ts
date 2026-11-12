@@ -2,7 +2,9 @@
 // project's shared variables first, then the service's own .env with
 // ${{svc.VAR}} references resolved (own keys win), and for databases the
 // engine variables that create the first user (they win over both); Boxes
-// get BOX_REPOSITORY.
+// get BOX_REPOSITORY. What a deploy seals for an app also gets PORT
+// (withPortEnv) and NODE_ENV=production (withNodeEnv) unless that env sets
+// them; builds get neither (deployments/source.ts reads resolveServiceEnv).
 // Unresolvable references stay as written so the problem shows in the app.
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
@@ -13,6 +15,7 @@ import { boxEnv } from "../boxes/desired";
 import { containerEnv } from "../databases/engines";
 import { findDatabase, loadDatabase } from "../databases/info";
 import { databaseKinds, domainPort, getService } from "../domains/lookup";
+import { panelServiceId } from "../nodes/panel-service";
 import { builtAppPort, readSpec, type ServiceSpecJson } from "../services/spec";
 import { buildEnvGraph, type EnvGraph } from "./graph";
 
@@ -21,17 +24,17 @@ type EnvVar = MessageInitShape<typeof EnvVarSchema>;
 /**
  * The resolved env sealed for a deployment row (deployments.envSealed),
  * which the desired-state compile hands the deployment's containers, with
- * PORT for apps built from a repository (withPortEnv).
+ * PORT for apps built from a repository (withPortEnv) and NODE_ENV for
+ * every app (withNodeEnv).
  */
 export function sealDeploymentEnv(deps: Pick<Deps, "db" | "secrets">, serviceId: string): string {
   const service = getService(deps.db, serviceId);
-  const vars = withPortEnv(resolveServiceEnv(deps, serviceId), service, readSpec(service.spec), domainPort(deps.db, serviceId)).map(
-    (v) => ({
-      name: v.name,
-      value: v.value,
-      secret: v.secret,
-    }),
-  );
+  const env = withPortEnv(resolveServiceEnv(deps, serviceId), service, readSpec(service.spec), domainPort(deps.db, serviceId));
+  const vars = withNodeEnv(env, service).map((v) => ({
+    name: v.name,
+    value: v.value,
+    secret: v.secret,
+  }));
   return deps.secrets.seal(JSON.stringify(vars), "deployment.env");
 }
 
@@ -57,6 +60,24 @@ export function withPortEnv(
   const port = builtAppPort(service, spec, domainPortFallback);
   if (port === null || env.some((v) => v.name === "PORT")) return env;
   return [...env, { name: "PORT", value: String(port), secret: false }];
+}
+
+/**
+ * NODE_ENV=production for every app (kind "app": built from a repository,
+ * an image, an inline Dockerfile or an upload, compose members and PR
+ * previews), unless its env already has NODE_ENV, whatever the value, also
+ * empty (its own .env or the project's shared variables). Databases, Boxes,
+ * cron services and the panel's own service get none. It wins over an
+ * image's own `ENV NODE_ENV` the way any container variable does. Runtime
+ * only, like PORT: part of the env a deploy starts with, so it takes effect
+ * on an app's next deploy (a restart keeps the container's env), and never
+ * of its build env (resolveServiceEnv), since `npm ci` under
+ * NODE_ENV=production skips the devDependencies a build needs. A NODE_ENV
+ * the service sets reaches its builds as before.
+ */
+export function withNodeEnv(env: EnvVar[], service: { id: string; kind: string }): EnvVar[] {
+  if (service.kind !== "app" || service.id === panelServiceId || env.some((v) => v.name === "NODE_ENV")) return env;
+  return [...env, { name: "NODE_ENV", value: "production", secret: false }];
 }
 
 /** A deployment's env snapshot, or null when it has none (older rows, own-runtime kinds). */
