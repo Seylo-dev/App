@@ -70,6 +70,52 @@
 {"kind":"grant","user_name":"boss","access_type":"ALTER ROLE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"boss","access_type":"DROP ROLE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"boss","access_type":"IMPERSONATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"READ","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"WRITE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"TABLE ENGINE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CHECK","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SHOW","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SELECT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"INSERT","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"UNDROP TABLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"TRUNCATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"OPTIMIZE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"BACKUP","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"KILL QUERY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"KILL TRANSACTION","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"MOVE PARTITION BETWEEN SHARDS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ROLE ADMIN","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP ROW POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP MASKING POLICY","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP QUOTA","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP SETTINGS PROFILE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALLOW SQL SECURITY NONE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SHOW ACCESS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SHOW HANDLERS","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SYSTEM","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"dictGet","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"displaySecretsInShowAndSelect","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"INTROSPECTION","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CLUSTER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"SET DEFINER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP USER","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"CREATE ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"ALTER ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"DROP ROLE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"sadmin","access_type":"IMPERSONATE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"writer2","access_type":"SHOW","database":"app","grant_option":0}
 {"kind":"grant","user_name":"writer2","access_type":"SELECT","database":"app","grant_option":0}
 {"kind":"grant","user_name":"writer2","access_type":"INSERT","database":"app","grant_option":0}
@@ -130,49 +176,3 @@
 {"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM LOAD PRIMARY KEY","database":"app","grant_option":1}
 {"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM UNLOAD PRIMARY KEY","database":"app","grant_option":1}
 {"kind":"grant","user_name":"dbadmin","access_type":"dictGet","database":"app","grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"READ","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"WRITE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"TABLE ENGINE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CHECK","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"SHOW","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"SELECT","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"INSERT","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"UNDROP TABLE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"TRUNCATE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"OPTIMIZE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"BACKUP","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"KILL QUERY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"KILL TRANSACTION","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"MOVE PARTITION BETWEEN SHARDS","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ROLE ADMIN","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE ROW POLICY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER ROW POLICY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP ROW POLICY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE MASKING POLICY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER MASKING POLICY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP MASKING POLICY","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE QUOTA","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER QUOTA","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP QUOTA","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE SETTINGS PROFILE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER SETTINGS PROFILE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP SETTINGS PROFILE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALLOW SQL SECURITY NONE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"SHOW ACCESS","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"SHOW HANDLERS","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"SYSTEM","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"dictGet","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"displaySecretsInShowAndSelect","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"INTROSPECTION","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CLUSTER","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"SET DEFINER","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE USER","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER USER","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP USER","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"CREATE ROLE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"ALTER ROLE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"DROP ROLE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"sadmin","access_type":"IMPERSONATE","database":null,"grant_option":1}

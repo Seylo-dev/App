@@ -753,7 +753,10 @@ function RenameMainDialog({
   });
   const main = users.users.find((u) => u.main);
   const needsPassword = main?.renameNeedsPassword ?? false;
-  const valid = namePattern.test(name) && name !== users.main.user && (!withPassword || password !== null);
+  const definers = main?.definerObjects ?? 0;
+  const [acceptDefiners, setAcceptDefiners] = useState(false);
+  const valid =
+    namePattern.test(name) && name !== users.main.user && (!withPassword || password !== null) && (definers === 0 || acceptDefiners);
   return (
     <ConfirmDialog
       open
@@ -773,6 +776,7 @@ function RenameMainDialog({
             name,
             ...(pw ? { password: pw } : {}),
             ...(users.engine === "postgres" && !restart ? { deploy: false } : {}),
+            ...(acceptDefiners ? { acceptOrphanDefiners: true } : {}),
           })
           .then(() => undefined);
       }}
@@ -801,6 +805,12 @@ function RenameMainDialog({
         <p role="note" className="m-0 text-[12.5px] leading-normal text-ink-strong">
           {t("serviceDatabaseUsers.renameMain.restartClickHouse")}
         </p>
+      )}
+      {definers > 0 && (
+        <label htmlFor="drm-definers" className="flex cursor-pointer items-start gap-2.5 text-[13px] leading-normal text-ink-strong">
+          <Checkbox id="drm-definers" className="mt-0.5" checked={acceptDefiners} onCheckedChange={(v) => setAcceptDefiners(v === true)} />
+          {t("serviceDatabaseUsers.renameUser.definers", { count: definers })} {t("serviceDatabaseUsers.renameUser.acceptDefiners")}
+        </label>
       )}
     </ConfirmDialog>
   );

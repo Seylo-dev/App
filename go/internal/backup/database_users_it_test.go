@@ -287,10 +287,19 @@ func runUsersScenario(r *rig, e *itest.Env, sc usersScenario) {
 	refused("a deleted user", v["reader"], v["readerPassword2"], q.read)
 	works("the data stays", v["main"], v["initial"], q.read, "kept")
 	if sc.Engine == "postgres" {
+		// A backup that names writer2 as the owner of w.
+		subject := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: sc.Database}}}
+		before := r.backup(e, subject, "users-owner-"+sc.Engine, 0, false)
 		must("deleteWriter2")
 		refused("a deleted owner", v["writer2"], writer2Password, q.readOwn)
 		works("its table stays", v["main"], v["initial"], q.readOwn, "w")
 		works("and belongs to the main user", v["main"], v["initial"], "select tableowner from pg_tables where tablename = 'w'", v["main"])
+		// Restoring it fails on the missing owner, in one transaction: nothing was dropped.
+		if _, err := r.runner.Restore(e.Ctx(5*time.Minute), &agentv1.RestoreBackupRequest{Subject: subject, Destination: r.dest, ObjectKey: before.GetObjectKey()}); err == nil {
+			t.Fatal("a restore naming a deleted owner succeeded")
+		}
+		works("the data after the failed restore", v["main"], v["initial"], q.read, "kept")
+		works("and the other table", v["main"], v["initial"], q.readOwn, "w")
 	}
 	list2 := must("list2")
 	if strings.Contains(list2, `"`+v["reader"]+`"`) {

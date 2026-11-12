@@ -367,8 +367,11 @@ func restoreJob(t dbTarget, ext, run string) (dbJob, error) {
 				return dbJob{}, fmt.Errorf("%w: a single-database Postgres dump needs a target database", ErrBadRequest)
 			}
 			// --clean --if-exists replaces what the dump contains and leaves
-			// other objects alone.
-			j.script = `exec pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_NAME" --no-password --clean --if-exists --exit-on-error`
+			// other objects alone. --single-transaction: a dump that names a
+			// user the database no longer has (renamed or deleted on the
+			// Users tab) fails with nothing changed, not part way after the
+			// drops. It implies --exit-on-error.
+			j.script = `exec pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_NAME" --no-password --clean --if-exists --exit-on-error --single-transaction`
 		case extSQL:
 			// pg_dumpall output; "role already exists" errors are expected
 			// and harmless, so psql does not stop on errors.

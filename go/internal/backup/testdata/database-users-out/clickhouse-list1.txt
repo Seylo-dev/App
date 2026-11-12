@@ -71,6 +71,66 @@
 {"kind":"grant","user_name":"ch_admin","access_type":"ALTER ROLE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"ch_admin","access_type":"DROP ROLE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"ch_admin","access_type":"IMPERSONATE","database":null,"grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CHECK","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SHOW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SELECT","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"INSERT","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER DATABASE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER VIEW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE DATABASE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE VIEW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE DICTIONARY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP DATABASE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP VIEW","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP DICTIONARY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"UNDROP TABLE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"TRUNCATE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"OPTIMIZE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"BACKUP","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"CREATE ROW POLICY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"ALTER ROW POLICY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"DROP ROW POLICY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SHOW ROW POLICIES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM MERGES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM TTL MERGES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FETCHES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM MOVES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM PULLING REPLICATION LOG","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM CLEANUP","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM BACKGROUND","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SENDS","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM REPLICATION QUEUES","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM VIRTUAL PARTS UPDATE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM REDUCE BLOCKING PARTS","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM DROP REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SYNC REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTART REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTORE REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTORE DATABASE REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM WAIT LOADING PARTS","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM WAIT QUERY RUNNER","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SYNC DATABASE REPLICA","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FLUSH DISTRIBUTED","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FLUSH OBJECT STORAGE QUEUE","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM LOAD PRIMARY KEY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM UNLOAD PRIMARY KEY","database":"app","grant_option":1}
+{"kind":"grant","user_name":"dbadmin","access_type":"dictGet","database":"app","grant_option":1}
+{"kind":"grant","user_name":"writer","access_type":"SHOW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"SELECT","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"INSERT","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"ALTER TABLE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"ALTER DATABASE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"ALTER VIEW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"CREATE TABLE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"CREATE VIEW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"CREATE DICTIONARY","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"DROP TABLE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"DROP VIEW","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"TRUNCATE","database":"app","grant_option":0}
+{"kind":"grant","user_name":"writer","access_type":"OPTIMIZE","database":"app","grant_option":0}
 {"kind":"grant","user_name":"sadmin","access_type":"READ","database":null,"grant_option":1}
 {"kind":"grant","user_name":"sadmin","access_type":"WRITE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"sadmin","access_type":"TABLE ENGINE","database":null,"grant_option":1}
@@ -139,65 +199,5 @@
 {"kind":"grant","user_name":"sadmin","access_type":"ALTER ROLE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"sadmin","access_type":"DROP ROLE","database":null,"grant_option":1}
 {"kind":"grant","user_name":"sadmin","access_type":"IMPERSONATE","database":null,"grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"CHECK","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SHOW","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SELECT","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"INSERT","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"ALTER TABLE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"ALTER DATABASE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"ALTER VIEW","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"CREATE DATABASE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"CREATE TABLE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"CREATE VIEW","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"CREATE DICTIONARY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"DROP DATABASE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"DROP TABLE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"DROP VIEW","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"DROP DICTIONARY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"UNDROP TABLE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"TRUNCATE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"OPTIMIZE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"BACKUP","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"CREATE ROW POLICY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"ALTER ROW POLICY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"DROP ROW POLICY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SHOW ROW POLICIES","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM MERGES","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM TTL MERGES","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FETCHES","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM MOVES","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM PULLING REPLICATION LOG","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM CLEANUP","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM BACKGROUND","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SENDS","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM REPLICATION QUEUES","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM VIRTUAL PARTS UPDATE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM REDUCE BLOCKING PARTS","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM DROP REPLICA","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SYNC REPLICA","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTART REPLICA","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTORE REPLICA","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM RESTORE DATABASE REPLICA","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM WAIT LOADING PARTS","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM WAIT QUERY RUNNER","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM SYNC DATABASE REPLICA","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FLUSH DISTRIBUTED","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM FLUSH OBJECT STORAGE QUEUE","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM LOAD PRIMARY KEY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"SYSTEM UNLOAD PRIMARY KEY","database":"app","grant_option":1}
-{"kind":"grant","user_name":"dbadmin","access_type":"dictGet","database":"app","grant_option":1}
-{"kind":"grant","user_name":"writer","access_type":"SHOW","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"SELECT","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"INSERT","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"ALTER TABLE","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"ALTER DATABASE","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"ALTER VIEW","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"CREATE TABLE","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"CREATE VIEW","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"CREATE DICTIONARY","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"DROP TABLE","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"DROP VIEW","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"TRUNCATE","database":"app","grant_option":0}
-{"kind":"grant","user_name":"writer","access_type":"OPTIMIZE","database":"app","grant_option":0}
 {"kind":"grant","user_name":"reader","access_type":"SHOW","database":"app","grant_option":0}
 {"kind":"grant","user_name":"reader","access_type":"SELECT","database":"app","grant_option":0}

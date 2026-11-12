@@ -200,6 +200,11 @@ func TestDumpCommands(t *testing.T) {
 	if _, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES}, extPgCustom, "s"); !errors.Is(err, ErrBadRequest) {
 		t.Error("custom dump without target database accepted")
 	}
+	// A dump naming a user the database no longer has fails with nothing changed, not after the drops.
+	if j, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, database: "app"}, extPgCustom, "s"); err != nil ||
+		!strings.Contains(j.script, "--clean --if-exists --exit-on-error --single-transaction") {
+		t.Errorf("postgres restore = %q, %v", j.script, err)
+	}
 	for _, e := range []agentv1.DatabaseEngine{agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY} {
 		if j, err := restoreJob(dbTarget{engine: e}, extRedis, "s"); err != nil || j.script != "" {
 			t.Errorf("%v RDB restore job = %+v, %v (the RDB swap does it)", e, j, err)

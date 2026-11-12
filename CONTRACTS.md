@@ -4181,7 +4181,108 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the container's password and the admin with the new one; two resets
   before a deploy; MySQL's mysql_native_password check between a reset
   and its deploy; an out-of-step database), not yet through a real
-  panel.
+  panel. Since 0.2.12 a reset is `users.ts` `changeMainPassword`, shared
+  with `databases.setUserPassword` on the main user, one at a time per
+  database (`withUserLock`): Postgres and MongoDB sign in with the stored
+  login (`user-scripts.ts` `mainPasswordExec`; `changePasswordExec` is
+  null for them now), not the container's first one, which the container
+  keeps until its next deploy (MongoDB's `-p "$MONGO_INITDB_ROOT_PASSWORD"`
+  failed a second reset before a deploy; Postgres signed in as
+  `$POSTGRES_USER`), and Postgres gets a SCRAM verifier, not the password.
+  ClickHouse and Dragonfly stored a new password without anything
+  restarting them (the env is sealed per deployment, so the container
+  kept the old one), and Redis, Valkey and KeyDB changed theirs with
+  `CONFIG SET` only, which a restart undid: these now queue a deploy
+  (`deploymentId` in the output; services.deploy, else FORBIDDEN before
+  anything changes).
+- Database users (`modules/databases/users.ts`, `user-scripts.ts`,
+  0.2.12): the Users tab. Seylo keeps no table of users: `databases.users`
+  reads them from the running engine through `Exec` (no agent change)
+  and Seylo still stores only the main user (`admin_user`,
+  `admin_password`), the one the shell, web UI, backups, TLS jobs, env
+  built-ins and URLs use. Every script follows one protocol: stdin line 1
+  is the stored main password (moved into the client's env by the
+  script, never argv), the rest is SQL or JavaScript; names are quoted by
+  `pgIdent`/`pgLiteral`, `mysqlString`/`mysqlAccount` (database-level
+  grants escape `_` and `%`, `mysqlGrantDatabase`), `chIdent`/`chString`
+  and JSON for mongosh; listed names with control characters or
+  backslashes are shown read only (`manageableName`). List output is one
+  JSON object a line (mongosh's prompt before the first one is skipped);
+  at most 500 users. Sign-in: Postgres as the main user on the trusted
+  socket (`psql -X -At -v ON_ERROR_STOP=1`, `PGPASSWORD` for a pg_hba
+  edited by hand); MySQL and MariaDB as root on the socket with the
+  container's root password, then the main user's, then (root as the
+  main user) root@% over TCP, an optional second SQL line whose output
+  runs with `--force` (a deleted account's `KILL`s); MongoDB as the main
+  user inside the script (`admin.auth`, `quit(code)` at the end);
+  ClickHouse as the container's own `CLICKHOUSE_USER` (the image makes it
+  from the env at every start). Exit `signInFailedCode` (10) when the
+  engine refused the sign-in: `signIn: "failed"`, or for MySQL with only
+  the main user signing in over TCP (root out of step) that user alone
+  and nothing else changes. `signIn: "offline"` (stopped, not placed,
+  node away) lists the stored main user only. Presets: `readOnly`,
+  `readWrite`, `databaseAdmin` (not Postgres), `serverAdmin`; Postgres
+  uses `pg_read_all_data`/`pg_write_all_data` (every database of the
+  server; only from 14, else serverAdmin only) plus CONNECT, CREATE and
+  `public`'s USAGE, CREATE for readWrite; MySQL grants on the database
+  (readWrite without GRANT OPTION, routines or events), MongoDB `read`,
+  `readWrite`, `dbOwner` and `root@admin`, ClickHouse grants on the
+  database and `GRANT CURRENT GRANTS ON *.*` for serverAdmin (the image's
+  user lacks a few privileges of ALL). Postgres passwords go as SCRAM
+  verifiers (`scramVerifier`, RFC 7677 vectors in the tests), so a failed
+  statement in the container's log holds none. Renames: Postgres keeps
+  ownership and grants, an md5 password is cleared so one is needed
+  (`renameNeedsPassword`); the main user is the session user, renamed
+  through a temporary `SUPERUSER NOLOGIN` role that takes the session
+  (`SET SESSION AUTHORIZATION`) in one transaction, and the database
+  restarts so its health check has the new `POSTGRES_USER` (`deploy:
+  false` skips it). MySQL and MariaDB `RENAME USER` (host too), refused
+  while views, routines, triggers or events have it as DEFINER unless
+  `acceptOrphanDefiners`; the main user in place unless it is root.
+  MongoDB has no rename: a new user with the same roles and a new
+  password, then the old one goes; its main user and MySQL's root
+  refuse with `useSwitchMainUser`. ClickHouse SQL users `ALTER USER
+  RENAME`; its main user is stored and the database restarts (refused
+  when a SQL user has the name). Deletes keep the data: Postgres refuses
+  an owner (`ownsObjects`, details.count) unless `reassignOwned`, then in
+  every database that takes connections `REASSIGN OWNED BY` to the main
+  user and `DROP OWNED BY` (grants only by then), ends its sessions and
+  drops the role; never the main user (`mainUser`), Postgres's bootstrap
+  role or MySQL's root@localhost (`systemUser`), MongoDB's last user with
+  root (`lastAdmin`). `databases.switchMainUser` (Postgres, MySQL,
+  MariaDB, MongoDB): a new user with full rights or an existing one with a
+  new password (`grantAdmin` when it lacks them, else `notAdmin`), proved
+  by signing in as it the way the tools do (`proofExec`: Postgres over the
+  container's own address, where the image checks passwords; MySQL over
+  TCP; MongoDB `auth`) before anything is stored; a user made for it is
+  dropped again when that fails. MySQL and MariaDB then give root the new
+  password (root always has the main user's, `containerEnv`) and drop the
+  old main user with `oldUser: delete` (root: root@% only). Main user
+  changes store `admin_user`/`admin_password` after the engine took them,
+  mark the service dirty (agent tools follow at once) and list
+  `affectedServiceIds` from env references to `USER`, `PASSWORD` and the
+  URLs (`servicesUsing`). Every change refuses while a deploy of the
+  database runs or it is stopped (`deployRunning`, `notRunning`,
+  `noNode`); all six need `databases.credentials`; the four destructive
+  ones wait for a person's approval for MCP and AI callers; passwords are
+  `sensitive` and nothing an engine prints is logged (exit codes only) or
+  shown unscrubbed (`scrub`). Postgres restores run `pg_restore
+  --single-transaction` (Go `backup/engines.go`): a dump that names a
+  role renamed or deleted since fails with nothing changed (before, it
+  stopped after the drops: VM-tested both ways); a schema too large for
+  `max_locks_per_transaction` needs that raised. Tested: the scripts
+  under sh and dash against fake clients and mongosh's JavaScript
+  against a fake db (`database-users-scripts.test.ts`), the ops against
+  a fake agent (`database-users.test.ts`), and on the real images of
+  Postgres 18, MySQL 8.4, MariaDB 11.8, MongoDB 9.0 and ClickHouse 26.8
+  (`go/internal/backup` `TestDatabaseUsers`, the panel's own scripts from
+  `testdata/database-users.json`, which `database-users-vm.test.ts` keeps
+  equal to what the panel builds and whose recorded list outputs it
+  parses): every preset's rights with the engine's own client, password,
+  rename and delete, the main password twice before a deploy, the main
+  name in place, by a switch or a restart, then after a redeploy the
+  shell, a backup and its restore as the new main user. Not yet through a
+  real panel.
 - Version changes (`modules/databases/version.ts`, 0.2.9):
   `databases.versionChoices` lists the catalog lines of the database's
   engine and variant with `kind` (current, patch, upgrade, major,
@@ -4872,7 +4973,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   dir plus Vite and runs `smoke.spec.ts` (setup, sign-in, real panel),
   `databases.spec.ts` (the New database form with every engine, versions
   from the real panel's `databases.engines` and pgvector; the ClickHouse
-  and pgvector Connection tabs), `database-version.spec.ts` (the Version
+  and pgvector Connection tabs), `database-users.spec.ts` (the Users tab
+  on the demo data: the Connection tab's Change links opening the main
+  user's dialogs, a new user's password once, a Postgres owner's delete,
+  Redis's one user, a MongoDB switch), `database-version.spec.ts` (the Version
   card on the demo data: choices with reasons, a patch update, a MongoDB
   upgrade that waits for Back up now or the checkbox, Postgres refusals),
   `flows.spec.ts` (CLI sign-in approval, keys, invites, 2FA, appearance,
