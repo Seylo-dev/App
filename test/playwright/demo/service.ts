@@ -534,8 +534,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "builds.getSettings": (input: Input) => ({
     settings: servicesById[input.serviceId]?.build ?? servicesById[ids.api].build,
     nodes: [
-      { id: de.id, name: de.name, canBuild: true, online: true, hasBuildx: true, queued: 1, running: 1, waiting: 0 },
-      { id: us.id, name: us.name, canBuild: false, online: true, hasBuildx: true, queued: 0, running: 0, waiting: 0 },
+      { id: de.id, name: de.name, canBuild: true, online: true, hasBuildx: true, queued: 1, running: 1, waiting: 0, buildsAtOnce: 1 },
+      { id: us.id, name: us.name, canBuild: false, online: true, hasBuildx: true, queued: 0, running: 0, waiting: 0, buildsAtOnce: 1 },
     ],
   }),
   "metrics.service": (input: Input) => {
@@ -638,8 +638,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "previews.getSettings": () => ({ settings: { enabled: true, domainPattern: "", maxPreviews: 5 }, available: true, unavailableReason: null }),
   "previews.list": () => ({
     previews: [
-      { id: "q000000000000001", prNumber: 42, prTitle: "New checkout flow", branch: "feat/checkout", commitSha: "a1b2c3d4", previewServiceId: "s000000000000009", url: "https://pr-42-web.de1.example.com", status: "live", closedAt: null, createdAt: ago(day) },
-      { id: "q000000000000002", prNumber: 39, prTitle: "Fix cart totals", branch: "fix/cart", commitSha: "e5f6a7b8", previewServiceId: null, url: null, status: "superseded", closedAt: ago(3 * day), createdAt: ago(6 * day) },
+      { id: "q000000000000001", prNumber: 42, prTitle: "New checkout flow", branch: "feat/checkout", commitSha: "a1b2c3d4", previewServiceId: "s000000000000009", url: "https://pr-42-web.de1.example.com", status: "live", buildWaiting: false, closedAt: null, createdAt: ago(day) },
+      { id: "q000000000000002", prNumber: 39, prTitle: "Fix cart totals", branch: "fix/cart", commitSha: "e5f6a7b8", previewServiceId: null, url: null, status: "superseded", buildWaiting: false, closedAt: ago(3 * day), createdAt: ago(6 * day) },
     ],
   }),
   "cron.list": (input: Input) => ({

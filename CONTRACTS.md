@@ -564,7 +564,11 @@ Summary; the full rules are in `proto/README.md` and the comments of
   before migration 0004 have `can_build` false. It is a
   choice, because a build node gets the source, git credentials and build
   env of whatever it builds, from any project (the service's own node
-  first, else the least busy builder; automatic picks skip a node whose
+  first, else the builder with the most free build slots, its Builds at
+  once minus its builds running or queued, then the fewest builds in
+  flight, then by name, since 0.2.14: before, the fewest builds in
+  flight, which put a build behind a one-slot node's build while an
+  eight-slot node had free slots; automatic picks skip a node whose
   agent reports no docker buildx, `NodeFacts.buildx.installed` false;
   unset, from agents before 0.2.1, counts as installed), and pushes the
   images other nodes run; a deployment records it as `builtOn`. An
@@ -2174,7 +2178,11 @@ never type the ids by hand.
   holds the last look, failed looks included). Commit statuses
   (`statusNotes`, per connection) are posted by the
   `gitProviders.commitStatus` job from `onDeploymentChange`
-  (`deployments/store.ts`): pending, running, success, failed, cancelled,
+  (`deployments/store.ts`): pending ("Deploy queued"), pending "Waiting
+  for a build slot" while the deploy builds but its build waits for a
+  free slot on its node (`builds/slots.ts` `waitingBuilds`, since 0.2.14;
+  before, running from the dispatch), running ("Building and deploying")
+  once the build has its slot, success, failed, cancelled,
   with fixed descriptions (never the deploy's error: repository
   collaborators need not be panel members; the link leads to the
   deployments page); a commit shown as queued whose deploy a newer push
@@ -4539,16 +4547,30 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (`max_parallel_builds`, at least 1; 0 without Can build, which the agent
   runs as 1). `builds.queue` (queued = waiting for a free slot, or about to
   start in one, with its place among them; running = started on the
-  agent), `builds.getSettings` nodes (`running`, `waiting`),
+  agent), `builds.getSettings` nodes (`running`, `waiting`, and
+  `buildsAtOnce`, the limit as the agent applies it, so the web app's
+  "Builds on" names the node `pickBuildNode` picks),
   `Deployment.buildWait` with the clone step's "Waiting for a build slot on
   <node> - N ahead" (computed when the deployment is read, never stored)
-  and `ServiceSummary.buildWaiting` all read it; `store.ts`
+  `ServiceSummary.buildWaiting`, `Preview.buildWaiting` (`previews.list`,
+  the preview's latest deploy) and the commit statuses all read it. The
+  limit comes from one helper, `slots.ts` `buildSlotLimits(db, nodeIds)`,
+  which `buildQueue` and `pickBuildNode` (free slots = limit minus running
+  and queued) both use. The web app's step strips (Overview Deploys card,
+  Deployments rows, the log modal) put a pending Queued step with the
+  place in line before Clone while `buildWait` is set and show Clone
+  pending; that step is the web app's, not a step key of the API.
+  `store.ts`
   `publishBuildQueue(deps, nodeId)` sends the node's queued deployments
   out again when a build there starts, ends or is cancelled, or its Builds
   at once or Can build changes. "Built in Xs" counts from `started_at`
   (the agent's duration, which holds the wait, only without one), and the
   clone step's time leaves out the wait from `handed_over_at` to the
-  start, also after a panel restart. Timeouts (`engine.ts`
+  start, also after a panel restart. A re-attached stream replays the
+  build's stages from its start: a FETCHING_SOURCE when the clone step is
+  already done leaves it done with its time (before, the replay started
+  it again and the clone of a build that ran across a panel restart read
+  0s). Timeouts (`engine.ts`
   `buildTimeout`): a running build fails 90 minutes after its start; a
   queued one waits while its node's queue moves and fails once no build
   started or ended on that node for 90 minutes (the node lost it), and in
@@ -4575,7 +4597,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `POST /api/hooks/deploy/<token>` (deploy trigger URLs),
   `POST /api/uploads/services/<serviceId>` (a `.tar.gz` source, then a deploy).
 - Live: deployment log lines on `deployment:<id>` (`{ type: "log", lines }`),
-  invalidations on `service:<id>`, `project:<id>` and `panel`
+  invalidations on `service:<id>`, `project:<id>` (`services.list`,
+  `projects.get`, and since 0.2.14 `previews.list`: a preview is a service
+  of the project, and the Previews tab shows its latest deploy) and `panel`
   (`deployments.recent`, `builds.queue`).
 - Templates run only in `apps/panel/src/template-runner` (QuickJS-wasm,
   32 MiB, 1 s); the catalog format is `templates/README.md`.

@@ -10,7 +10,7 @@ import { defineModule } from "../module";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
-import { buildQueue, queueOrder } from "./slots";
+import { buildQueue, buildSlotLimits, queueOrder } from "./slots";
 
 const queue = implement(buildOps.queue, (input, ctx) => {
   const rows = ctx.db
@@ -71,18 +71,27 @@ const queue = implement(buildOps.queue, (input, ctx) => {
 
 function buildNodes(ctx: Parameters<typeof queue.run>[1]) {
   const slots = buildQueue(ctx.db).nodes;
+  const rows = ctx.db.select({ id: nodes.id, name: nodes.name, canBuild: nodes.canBuild }).from(nodes).orderBy(asc(nodes.name)).all();
+  // The limit pickBuildNode compares free slots by, so the Deployments page names the node it picks.
+  const limits = buildSlotLimits(
+    ctx.db,
+    rows.map((n) => n.id),
+  );
   // hasBuildx: the same rule pickBuildNode and updateSettings use, so the picker shows what they refuse.
-  return ctx.db
-    .select({ id: nodes.id, name: nodes.name, canBuild: nodes.canBuild })
-    .from(nodes)
-    .orderBy(asc(nodes.name))
-    .all()
-    .map((n) => {
-      const s = slots.get(n.id);
-      const queued = s ? s.running + s.queued : 0;
-      const waiting = s?.waiting ?? 0;
-      return { ...n, online: ctx.agents.isOnline(n.id), hasBuildx: hasBuildx(ctx, n.id), queued, running: queued - waiting, waiting };
-    });
+  return rows.map((n) => {
+    const s = slots.get(n.id);
+    const queued = s ? s.running + s.queued : 0;
+    const waiting = s?.waiting ?? 0;
+    return {
+      ...n,
+      online: ctx.agents.isOnline(n.id),
+      hasBuildx: hasBuildx(ctx, n.id),
+      queued,
+      running: queued - waiting,
+      waiting,
+      buildsAtOnce: limits.get(n.id) ?? 1,
+    };
+  });
 }
 
 const getSettings = implement(buildOps.getSettings, (input, ctx) => {

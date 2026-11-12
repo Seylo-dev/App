@@ -2,8 +2,10 @@
 // page say it. Both follow the panel's pickBuildNode
 // (apps/panel/src/modules/deployments/source.ts): the build node from the
 // build settings, else the service's own node when it can build, else the
-// least busy node that can. A node can build when Can build is on, it is
-// online and its agent has docker buildx.
+// node that can with the most free build slots (Builds at once minus its
+// builds in flight), then the fewest builds in flight, then by name. A
+// node can build when Can build is on, it is online and its agent has
+// docker buildx.
 
 import type { builds, OpOutput } from "@seylo/ops";
 import { t } from "../../i18n/t";
@@ -21,6 +23,20 @@ export function cantBuildNote(node: BuildNode): string | null {
 }
 
 const usable = (node: BuildNode) => cantBuildNote(node) === null;
+
+/**
+ * Free build slots, as pickBuildNode counts them: below 0 when builds wait
+ * there. A panel answer without buildsAtOnce (before 0.2.14) counts 0, so
+ * the order falls back to the fewest builds in flight.
+ */
+function freeSlots(node: Pick<BuildNode, "queued"> & { buildsAtOnce?: number }): number {
+  return (node.buildsAtOnce ?? 0) - node.queued;
+}
+
+/** The automatic pick's order: most free slots, then fewest builds in flight, then by name. */
+function byFreeSlots(a: BuildNode, b: BuildNode): number {
+  return freeSlots(b) - freeSlots(a) || a.queued - b.queued || a.name.localeCompare(b.name);
+}
 
 /**
  * The node's builds in flight for the picker: "2 running, 1 waiting" (waiting
@@ -51,7 +67,7 @@ export function buildNodeText(
   const placed = service.placements.flatMap((p) => data.nodes.filter((n) => n.id === p.nodeId));
   const own = placed.find(usable);
   if (own) return t("serviceDeploys.facts.buildsOn", { node: own.name });
-  const builder = data.nodes.filter(usable).sort((a, b) => a.queued - b.queued || a.name.localeCompare(b.name))[0];
+  const builder = data.nodes.filter(usable).sort(byFreeSlots)[0];
   if (!builder) return t("serviceDeploys.facts.noBuilder");
   const target = placed[0];
   if (!target) return t("serviceDeploys.facts.buildsOn", { node: builder.name });

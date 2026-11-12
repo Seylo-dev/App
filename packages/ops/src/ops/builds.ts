@@ -59,6 +59,12 @@ export const BuildNode = Type.Object({
   running: Type.Integer({ minimum: 0 }),
   /** Of those, the builds waiting for a free slot (queued minus running). Added in 0.2.14. */
   waiting: Type.Integer({ minimum: 0 }),
+  /**
+   * Builds at once as the node's agent applies it (at least 1; a node
+   * without Can build runs 1). Its free slots are this minus queued, which
+   * the automatic build node pick prefers the most of. Added in 0.2.14.
+   */
+  buildsAtOnce: Type.Integer({ minimum: 1 }),
 });
 
 export const BuildStatus = Type.Union([

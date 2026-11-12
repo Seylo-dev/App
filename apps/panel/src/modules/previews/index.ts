@@ -5,6 +5,7 @@ import { OpError, previews as previewOps } from "@seylo/ops";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { deployments, previews } from "../../db/schema";
 import { implement } from "../../ops/implement";
+import { waitingBuilds } from "../builds/slots";
 import { defineModule } from "../module";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService, toSummaries } from "../services/rows";
@@ -58,17 +59,22 @@ const list = implement(previewOps.list, (input, ctx) => {
   loadService(ctx.db, input.serviceId);
   const rows = ctx.db.select().from(previews).where(eq(previews.serviceId, input.serviceId)).orderBy(desc(previews.createdAt)).all();
   const ids = rows.map((r) => r.previewServiceId).filter((id): id is string => id !== null);
-  const latest = new Map<string, (typeof deployments.$inferSelect)["status"]>();
+  const latest = new Map<string, { id: string; status: (typeof deployments.$inferSelect)["status"] }>();
   if (ids.length > 0) {
     for (const d of ctx.db
-      .select({ serviceId: deployments.serviceId, status: deployments.status })
+      .select({ id: deployments.id, serviceId: deployments.serviceId, status: deployments.status })
       .from(deployments)
       .where(inArray(deployments.serviceId, ids))
       .orderBy(desc(deployments.createdAt))
       .all()) {
-      if (!latest.has(d.serviceId)) latest.set(d.serviceId, d.status);
+      if (!latest.has(d.serviceId)) latest.set(d.serviceId, { id: d.id, status: d.status });
     }
   }
+  // Latest deploys that build, but whose build waits for a free build slot on its node.
+  const waiting = waitingBuilds(
+    ctx.db,
+    [...latest.values()].filter((d) => d.status === "building").map((d) => d.id),
+  );
   const addresses = new Map(
     toSummaries(
       ctx.db,
@@ -78,6 +84,7 @@ const list = implement(previewOps.list, (input, ctx) => {
   );
   const out = rows.map((r) => {
     const address = r.previewServiceId ? (addresses.get(r.previewServiceId) ?? null) : null;
+    const deploy = r.previewServiceId ? latest.get(r.previewServiceId) : undefined;
     return {
       id: r.id,
       prNumber: r.prNumber,
@@ -86,7 +93,8 @@ const list = implement(previewOps.list, (input, ctx) => {
       commitSha: r.commitSha,
       previewServiceId: r.previewServiceId,
       url: address?.includes(".") && !address.includes(":") ? `https://${address}` : null,
-      status: r.previewServiceId ? (latest.get(r.previewServiceId) ?? null) : null,
+      status: deploy?.status ?? null,
+      buildWaiting: deploy ? waiting.has(deploy.id) : false,
       closedAt: r.closedAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
     };

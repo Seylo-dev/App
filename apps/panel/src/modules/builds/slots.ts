@@ -61,6 +61,26 @@ export const queueOrder = [
 ] as const;
 
 /**
+ * Builds at once of these nodes as their agents apply it, by node id: the
+ * number the panel sends (max_parallel_builds, desired/compile.ts), at
+ * least 1. A node without Can build gets 0, which its agent runs as 1. The
+ * one place the panel reads a node's slot count; the queue places and the
+ * automatic build node pick (deployments/source.ts pickBuildNode) both go
+ * through it.
+ */
+export function buildSlotLimits(db: PanelDb, nodeIds: readonly string[]): Map<string, number> {
+  if (nodeIds.length === 0) return new Map();
+  return new Map(
+    db
+      .select({ id: nodes.id, canBuild: nodes.canBuild, maxParallelBuilds: nodes.maxParallelBuilds })
+      .from(nodes)
+      .where(inArray(nodes.id, [...nodeIds]))
+      .all()
+      .map((n) => [n.id, Math.max(1, n.canBuild ? n.maxParallelBuilds : 0)]),
+  );
+}
+
+/**
  * The build queue of every node, or of the given ones, with queued builds
  * in the order their agent serves them (queueOrder).
  */
@@ -76,15 +96,7 @@ export function buildQueue(db: PanelDb, nodeIds?: readonly string[]): BuildQueue
     .all();
   const ids = [...new Set(rows.flatMap((r) => (r.nodeId ? [r.nodeId] : [])))];
   if (ids.length === 0) return out;
-  const limits = new Map(
-    db
-      .select({ id: nodes.id, canBuild: nodes.canBuild, maxParallelBuilds: nodes.maxParallelBuilds })
-      .from(nodes)
-      .where(inArray(nodes.id, ids))
-      .all()
-      // The panel sends 0 to a node without Can build (desired/compile.ts); its agent runs 0 as 1.
-      .map((n) => [n.id, Math.max(1, n.canBuild ? n.maxParallelBuilds : 0)]),
-  );
+  const limits = buildSlotLimits(db, ids);
   for (const id of ids) {
     const running = rows.filter((r) => r.nodeId === id && r.status === "running").length;
     out.nodes.set(id, { limit: limits.get(id) ?? 1, running, queued: 0, waiting: 0 });

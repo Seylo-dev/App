@@ -1,7 +1,8 @@
 // Commit statuses back to the provider: each deploy of a service with a
 // provider source (push deploys, previews, manual ones of a known commit)
 // shows as a check on the commit, and so on its merge or pull request:
-// pending while queued, running while it builds and rolls out, then
+// pending while queued and while its build waits for a free slot of its
+// node's Builds at once, running while it builds and rolls out, then
 // success or failed. Optional per connection (statusNotes). One job per
 // deployment posts whatever the deployment's state is when it runs and
 // repeats until nothing changed, so states never arrive out of order.
@@ -15,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { deployments, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
+import { waitingBuilds } from "../builds/slots";
 import type { DeploymentRow } from "../deployments/store";
 import { panelBaseUrl } from "../github/app";
 import { readSpec } from "../services/spec";
@@ -23,12 +25,20 @@ import { loadProvider } from "./rows";
 
 export const commitStatusJobType = "gitProviders.commitStatus";
 
-/** The status a deployment shows, or null for states that post nothing. */
-export function statusFor(row: Pick<DeploymentRow, "status">): CommitStatusState | null {
+/**
+ * Where a deployment stands for its commit status: its state, or "waiting"
+ * while it builds but its build waits for a free build slot on its node
+ * (builds/slots.ts, Deployment.buildWait), which posts as pending.
+ */
+export type StatusPhase = CommitStatusState | "waiting";
+
+/** The phase a deployment shows, or null for states that post nothing. */
+export function statusFor(row: Pick<DeploymentRow, "status">, buildWaiting = false): StatusPhase | null {
   switch (row.status) {
     case "queued":
       return "pending";
     case "building":
+      return buildWaiting ? "waiting" : "running";
     case "deploying":
       return "running";
     case "live":
@@ -42,13 +52,20 @@ export function statusFor(row: Pick<DeploymentRow, "status">): CommitStatusState
   }
 }
 
-const descriptions: Record<CommitStatusState, string> = {
-  pending: "Deploy queued",
-  running: "Building and deploying",
-  success: "Deployed",
-  failed: "Deploy failed",
-  cancelled: "Deploy cancelled",
+/** What each phase posts. */
+const statusPosts: Record<StatusPhase, { state: CommitStatusState; description: string }> = {
+  pending: { state: "pending", description: "Deploy queued" },
+  waiting: { state: "pending", description: "Waiting for a build slot" },
+  running: { state: "running", description: "Building and deploying" },
+  success: { state: "success", description: "Deployed" },
+  failed: { state: "failed", description: "Deploy failed" },
+  cancelled: { state: "cancelled", description: "Deploy cancelled" },
 };
+
+/** The deployment's phase now: a building one asks the build queue whether its build waits. */
+function phaseOf(deps: Pick<Deps, "db">, row: DeploymentRow): StatusPhase | null {
+  return statusFor(row, row.status === "building" && waitingBuilds(deps.db, [row.id]).has(row.id));
+}
 
 const supersededDescription = "Superseded by a newer push";
 
@@ -72,10 +89,9 @@ function shownOf(deps: Pick<Deps, "db">, deploymentId: string): { key: string; s
   return { key, state: key.slice(0, at), sha: key.slice(at + 1) };
 }
 
-/** The key a deployment shows now, or null when it shows nothing. */
-function keyOf(row: DeploymentRow): string | null {
-  const state = statusFor(row);
-  return state && row.commitSha ? `${state}:${row.commitSha}` : null;
+/** The key a deployment shows now ("<phase>:<sha>"), or null when it shows nothing. */
+function keyOf(phase: StatusPhase | null, row: DeploymentRow): string | null {
+  return phase && row.commitSha ? `${phase}:${row.commitSha}` : null;
 }
 
 /** A queued deploy that a newer push took over: the commit it showed as queued is not deployed by it any more. */
@@ -85,7 +101,7 @@ function supersededSha(row: DeploymentRow, shown: { state: string; sha: string }
 
 /** Deployment listener: queues a status post when a provider deploy of a known commit changes state. */
 export function observeDeployment(deps: Pick<Deps, "db" | "jobs">, row: DeploymentRow): void {
-  const key = keyOf(row);
+  const key = keyOf(phaseOf(deps, row), row);
   const shown = shownOf(deps, row.id);
   if (key === null ? !supersededSha(row, shown) : shown?.key === key) return;
   const svc = deps.db.select({ spec: services.spec }).from(services).where(eq(services.id, row.serviceId)).get();
@@ -103,8 +119,8 @@ export async function postCommitStatus(deps: Deps, deploymentId: string): Promis
   for (let round = 0; round < 5; round++) {
     const row = deps.db.select().from(deployments).where(eq(deployments.id, deploymentId)).get();
     if (!row) return sent;
-    const state = statusFor(row);
-    const key = keyOf(row);
+    const phase = phaseOf(deps, row);
+    const key = keyOf(phase, row);
     const done = postedFor(deps);
     const shown = shownOf(deps, row.id);
     const superseded = supersededSha(row, shown);
@@ -130,9 +146,9 @@ export async function postCommitStatus(deps: Deps, deploymentId: string): Promis
       await client.setStatus(source.repo, superseded, { ...base, state: "cancelled", description: supersededDescription });
       sent++;
     }
-    if (key && state && row.commitSha) {
+    if (key && phase && row.commitSha) {
       // Never the deploy's error: the repository's collaborators are not necessarily panel members.
-      await client.setStatus(source.repo, row.commitSha, { ...base, state, description: descriptions[state] });
+      await client.setStatus(source.repo, row.commitSha, { ...base, ...statusPosts[phase] });
       sent++;
     }
     remember();

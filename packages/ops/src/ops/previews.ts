@@ -30,6 +30,12 @@ export const Preview = Type.Object({
   url: Type.Union([Type.String(), Type.Null()]),
   /** Status of the preview's latest deployment; null before the first one. */
   status: Type.Union([DeploymentStatus, Type.Null()]),
+  /**
+   * True while that deployment is building but its build waits for a free
+   * slot of its node's Builds at once (its Deployment.buildWait is set).
+   * Added in 0.2.14.
+   */
+  buildWaiting: Type.Boolean(),
   closedAt: Type.Union([Timestamp, Type.Null()]),
   createdAt: Timestamp,
 });

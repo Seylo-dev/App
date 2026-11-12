@@ -12698,7 +12698,8 @@
                           "hasBuildx",
                           "queued",
                           "running",
-                          "waiting"
+                          "waiting",
+                          "buildsAtOnce"
                         ],
                         "properties": {
                           "id": {
@@ -12728,6 +12729,10 @@
                           },
                           "waiting": {
                             "minimum": 0,
+                            "type": "integer"
+                          },
+                          "buildsAtOnce": {
+                            "minimum": 1,
                             "type": "integer"
                           }
                         }
@@ -60328,6 +60333,7 @@
                           "previewServiceId",
                           "url",
                           "status",
+                          "buildWaiting",
                           "closedAt",
                           "createdAt"
                         ],
@@ -60417,6 +60423,9 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "buildWaiting": {
+                            "type": "boolean"
                           },
                           "closedAt": {
                             "anyOf": [

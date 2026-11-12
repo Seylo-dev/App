@@ -451,7 +451,8 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
   }
   switch (progress.stage) {
     case BuildStage.FETCHING_SOURCE:
-      steps = setStep(steps, "clone", "running");
+      // A re-attached stream replays the build's stages from its start: a clone already done keeps its time.
+      if (steps.find((st) => st.key === "clone")?.status !== "ok") steps = setStep(steps, "clone", "running");
       break;
     case BuildStage.BUILDING:
       steps = setStep(setStep(steps, "clone", "ok"), "build", "running", { detail: `${labelOf(build.builder)} build running` });

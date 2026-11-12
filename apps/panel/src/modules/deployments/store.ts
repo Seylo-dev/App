@@ -1,7 +1,13 @@
 // Deployment rows: the step timeline, mapping to the op shape, and the
 // live invalidations screens follow.
 
-import { builds as buildOps, deployments as deploymentOps, projects as projectOps, services as serviceOps } from "@seylo/ops";
+import {
+  builds as buildOps,
+  deployments as deploymentOps,
+  previews as previewOps,
+  projects as projectOps,
+  services as serviceOps,
+} from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
@@ -300,7 +306,8 @@ export function publishDeploymentChange(deps: Pick<Deps, "db" | "live">, service
     ops: [deploymentOps.list.id, deploymentOps.get.id, deploymentOps.log.id, serviceOps.get.id, buildOps.queue.id],
   });
   if (svc) {
-    deps.live.publish(`project:${svc.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, projectOps.get.id] });
+    // previews.list: a preview is a service of the project, and the Previews tab shows its latest deploy.
+    deps.live.publish(`project:${svc.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, projectOps.get.id, previewOps.list.id] });
   }
   deps.live.publish("panel", { type: "invalidate", ops: [buildOps.queue.id, deploymentOps.recent.id] });
 }

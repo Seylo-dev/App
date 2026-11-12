@@ -5,9 +5,9 @@
 import { create } from "@bufbuild/protobuf";
 import { OpError } from "@seylo/ops";
 import { Builder, type BuildRequest, BuildRequestSchema } from "@seylo/proto";
-import { and, count, inArray } from "drizzle-orm";
-import { builds, nodes } from "../../db/schema";
+import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { buildQueue, buildSlotLimits } from "../builds/slots";
 import { resolveServiceEnv } from "../env/desired";
 import { openCredential } from "../git/credentials";
 import { listRemoteRefs, targetUrl } from "../git/remote";
@@ -240,8 +240,10 @@ export async function resolveBuild(
 
 /**
  * Picks the build node: the one set in the build settings, else the
- * service's own node when it can build, else the least busy online node
- * with Can build on. Automatic picks skip nodes whose agent reports no
+ * service's own node when it can build, else the online node with Can build
+ * on that has the most free build slots (its Builds at once minus the
+ * builds running or queued there, builds/slots.ts), then the fewest builds
+ * in flight, then by name. Automatic picks skip nodes whose agent reports no
  * docker buildx (every build needs it); agents that report nothing about
  * buildx (before 0.2.1) count as able to build.
  */
@@ -279,24 +281,16 @@ export function pickBuildNode(deps: Deps, spec: ServiceSpecJson, targetNodeIds: 
         : "No online node can build. Turn on Can build for a node (Nodes) or use an image source.";
     throw new OpError("CONFLICT", message, { reason: "noBuilder" });
   }
-  const busy = new Map(
-    deps.db
-      .select({ nodeId: builds.nodeId, n: count() })
-      .from(builds)
-      .where(
-        and(
-          inArray(builds.status, ["queued", "running"]),
-          inArray(
-            builds.nodeId,
-            ready.map((n) => n.id),
-          ),
-        ),
-      )
-      .groupBy(builds.nodeId)
-      .all()
-      .map((r) => [r.nodeId, r.n]),
-  );
-  return [...ready].sort((a, b) => (busy.get(a.id) ?? 0) - (busy.get(b.id) ?? 0) || a.name.localeCompare(b.name))[0] as {
+  const ids = ready.map((n) => n.id);
+  const limits = buildSlotLimits(deps.db, ids);
+  const slots = buildQueue(deps.db, ids).nodes;
+  const inFlight = (id: string) => {
+    const s = slots.get(id);
+    return s ? s.running + s.queued : 0;
+  };
+  // Below 0 when builds wait there for a slot: the node where fewer wait starts the new one sooner.
+  const free = (id: string) => (limits.get(id) ?? 1) - inFlight(id);
+  return [...ready].sort((a, b) => free(b.id) - free(a.id) || inFlight(a.id) - inFlight(b.id) || a.name.localeCompare(b.name))[0] as {
     id: string;
     name: string;
   };

@@ -10,6 +10,7 @@ type Node = {
   queued: number;
   running: number;
   waiting: number;
+  buildsAtOnce: number;
 };
 
 const node = (name: string, over: Partial<Node> = {}): Node => ({
@@ -21,6 +22,7 @@ const node = (name: string, over: Partial<Node> = {}): Node => ({
   queued: 0,
   running: 0,
   waiting: 0,
+  buildsAtOnce: 1,
   ...over,
 });
 
@@ -54,6 +56,18 @@ describe("buildNodeText", () => {
     const own = node("own", { canBuild: false });
     const nodes = [node("a", { queued: 2 }), node("b", { queued: 0, hasBuildx: false }), node("c", { queued: 1 }), own];
     expect(buildNodeText(settings(nodes), git(own.id))).toBe("Builds on: c (own can't build)");
+  });
+
+  test("the automatic pick has the most free build slots, not the fewest builds, as pickBuildNode", () => {
+    const own = node("own", { canBuild: false });
+    // a runs 8 at once with 3 builds (5 free), b runs 1 with 1 (none free).
+    const nodes = [node("a", { buildsAtOnce: 8, queued: 3 }), node("b", { buildsAtOnce: 1, queued: 1 }), own];
+    expect(buildNodeText(settings(nodes), git(own.id))).toBe("Builds on: a (own can't build)");
+    // The same free slots: fewer builds in flight; then by name.
+    const even = [node("a", { buildsAtOnce: 4, queued: 3 }), node("b", { buildsAtOnce: 2, queued: 1 }), own];
+    expect(buildNodeText(settings(even), git(own.id))).toBe("Builds on: b (own can't build)");
+    const tied = [node("b", { buildsAtOnce: 2, queued: 1 }), node("a", { buildsAtOnce: 2, queued: 1 }), own];
+    expect(buildNodeText(settings(tied), git(own.id))).toBe("Builds on: a (own can't build)");
   });
 
   test("with only builders that lack buildx no node can build", () => {

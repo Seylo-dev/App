@@ -20,7 +20,7 @@ import {
 import { DeployStage } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
 import { freshSignInMs } from "../src/auth/fresh";
-import { deploymentLogs, deployments, gitProviderWebhooks, services, sessions, webhookDeliveries } from "../src/db/schema";
+import { builds, deploymentLogs, deployments, gitProviderWebhooks, services, sessions, webhookDeliveries } from "../src/db/schema";
 import { resolveBuild } from "../src/modules/deployments/source";
 import { gitlabNeedsHttps, repairHooks } from "../src/modules/gitProviders/hooks";
 import { pollProviderBranches } from "../src/modules/gitProviders/poll";
@@ -1040,6 +1040,51 @@ describe("commit statuses", () => {
     expect(statusesOf("7".repeat(40)).at(-1)).toMatchObject({ state: "error", description: "Superseded by a newer push" });
     expect(statusesOf("8".repeat(40)).at(-1)).toMatchObject({ state: "pending" });
     expect(deploymentsOf(id)).toHaveLength(2);
+  });
+
+  test("a deploy whose build waits for a build slot posts pending until its build starts", async () => {
+    // node-a builds one at a time (Builds at once 1): each build waits in its agent's queue until it has the slot.
+    fleet.buildScript = () => ({ queued: true, result: "held", digest: `sha256:${"b".repeat(64)}` });
+    const web = await connectedService("gitea", "web");
+    const api = await connectedService("gitea", "api", web.providerId);
+    await deliver("gitea", web.hook, web.secret, "push", payloadFixture("gitea-push"));
+    await deliver("gitea", api.hook, api.secret, "push", payloadFixture("gitea-push"));
+    const buildOf = (serviceId: string) => {
+      const d = deploymentsOf(serviceId)[0];
+      return panel.deps.db
+        .select()
+        .from(builds)
+        .where(eq(builds.deploymentId, d?.id as string))
+        .get()?.id as string;
+    };
+    const [first, second] = [buildOf(web.id), buildOf(api.id)];
+    const statusesOf = (context: string) =>
+      fake.sent
+        .filter((r) => r.method === "POST" && r.path === `/api/v1/repos/acme/shop/statuses/${giteaHead}`)
+        .map((r) => r.body as { state: string; context: string; description: string })
+        .filter((b) => b.context === context);
+    const lastOf = async (context: string, state: string) => {
+      for (let i = 0; i < 50 && statusesOf(context).at(-1)?.state !== state; i++) {
+        await panel.runner.runDue(panel.deps);
+        await Bun.sleep(5);
+      }
+      return statusesOf(context).at(-1);
+    };
+    fleet.grantSlot(first);
+    await fleet.settle();
+    expect(await lastOf("seylo/web", "running")).toMatchObject({ description: "Building and deploying" });
+    // api's build waits behind web's: pending, never running yet.
+    expect(await lastOf("seylo/api", "pending")).toMatchObject({ description: "Waiting for a build slot" });
+    expect(statusesOf("seylo/api").map((b) => b.state)).not.toContain("running");
+
+    // web's build ends and api's starts: running from then.
+    fleet.endBuild(first, "failed");
+    await fleet.settle();
+    fleet.grantSlot(second);
+    await fleet.settle();
+    expect(await lastOf("seylo/api", "running")).toMatchObject({ description: "Building and deploying" });
+    fleet.endBuild(second, "failed");
+    await fleet.settle();
   });
 
   test("a connection with statuses off posts none", async () => {

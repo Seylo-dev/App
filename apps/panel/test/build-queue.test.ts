@@ -14,11 +14,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
-import { builds as buildOps, deployments as deploymentOps, nodes as nodeOps, projects, services as serviceOps } from "@seylo/ops";
+import {
+  builds as buildOps,
+  deployments as deploymentOps,
+  nodes as nodeOps,
+  previews as previewOps,
+  projects,
+  services as serviceOps,
+} from "@seylo/ops";
 import { BuildProgressSchema, BuildStage } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { builds, nodes, services, sourceUploads } from "../src/db/schema";
+import { builds, nodes, previews, services, sourceUploads } from "../src/db/schema";
 import { buildTimeoutMs, engineFor, queuedBuildTimeoutMs, unfinishedDeployments } from "../src/modules/deployments/engine";
+import { pickBuildNode } from "../src/modules/deployments/source";
+import { defaultSpec } from "../src/modules/services/spec";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
@@ -560,4 +569,82 @@ test("after a panel restart the clone step still leaves out the wait for a slot"
   const d = await deployment(web, deploymentId);
   expect(d.steps.find((s: { key: string }) => s.key === "clone").durationMs).toBeLessThan(60_000);
   expect(d.steps.find((s: { key: string }) => s.key === "build").detail).toBe("Dockerfile on il-ra in 30s");
+});
+
+test("the automatic build node has the most free build slots, then the fewest builds in flight, then the first name", async () => {
+  const auto = defaultSpec();
+  // il-ra runs 8 builds at once and has 3, il-tlv runs 1 and has 1: il-ra has 5 free slots and il-tlv none.
+  panel.deps.db.update(nodes).set({ maxParallelBuilds: 8 }).where(eq(nodes.id, ra)).run();
+  for (const name of ["a", "b", "c"]) await deploy(await app(name, ra));
+  await deploy(await app("d", tlv));
+  expect(pickBuildNode(panel.deps, auto, [target])).toMatchObject({ id: ra, name: "il-ra" });
+  // The Source tab's node list gives the web app the same numbers, so it names the same node.
+  const listed = (await callOp(panel, buildOps.getSettings, { serviceId: await app("e", ra) }, { cookie })).body.nodes;
+  expect(listed.find((n: { id: string }) => n.id === ra)).toMatchObject({ queued: 3, buildsAtOnce: 8 });
+  expect(listed.find((n: { id: string }) => n.id === tlv)).toMatchObject({ queued: 1, buildsAtOnce: 1 });
+
+  // One free slot each (3 of 4 and 1 of 2): the node with fewer builds in flight.
+  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ maxParallelBuilds: 2 }).where(eq(nodes.id, tlv)).run();
+  expect(pickBuildNode(panel.deps, auto, [target]).id).toBe(tlv);
+  // Three builds on each, both full: 2 wait for il-ra's one slot and 1 for il-tlv's two, so il-tlv starts it sooner.
+  await deploy(await app("f", tlv));
+  await deploy(await app("g", tlv));
+  panel.deps.db.update(nodes).set({ maxParallelBuilds: 1 }).where(eq(nodes.id, ra)).run();
+  expect(pickBuildNode(panel.deps, auto, [target]).id).toBe(tlv);
+  // The same free slots and builds in flight: by name.
+  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, tlv)).run();
+  expect(pickBuildNode(panel.deps, auto, [target]).id).toBe(ra);
+});
+
+test("a re-attached build replays its stages: the clone it finished before a panel restart keeps its time", async () => {
+  const t0 = Date.now();
+  setSystemTime(new Date(t0));
+  const web = await app("web", ra);
+  const { deploymentId, buildId } = await deploy(web);
+  const progress = (stage: BuildStage) => fleet.emit(ra, { case: "buildProgress", value: create(BuildProgressSchema, { buildId, stage }) });
+  // The clone takes 20 seconds, then the build runs.
+  setSystemTime(new Date(t0 + 5_000));
+  progress(BuildStage.FETCHING_SOURCE);
+  await fleet.settle();
+  setSystemTime(new Date(t0 + 25_000));
+  progress(BuildStage.BUILDING);
+  await fleet.settle();
+  const clone = async () => (await deployment(web, deploymentId)).steps.find((s: { key: string }) => s.key === "clone");
+  expect(await clone()).toMatchObject({ status: "ok", durationMs: 20_000 });
+
+  // The panel restarts; the new runner opens the build again and the agent sends its output from the start.
+  setSystemTime(new Date(t0 + 60_000));
+  await restartPanel();
+  await tick();
+  setSystemTime(new Date(t0 + 70_000));
+  await start(buildId);
+  expect(fleet.calls.filter((c) => c.method === "build")).toHaveLength(1);
+  expect(await clone()).toMatchObject({ status: "ok", durationMs: 20_000 });
+  expect((await deployment(web, deploymentId)).steps.find((s: { key: string }) => s.key === "build").status).toBe("running");
+  await end(buildId);
+});
+
+test("a preview whose deploy waits for a build slot says so in previews.list, and the list follows it", async () => {
+  const [a, pr] = [await app("a", ra), await app("web-pr-7", ra)];
+  const parent = await app("web", tlv);
+  panel.deps.db.insert(previews).values({ serviceId: parent, previewServiceId: pr, prNumber: 7, branch: "feature" }).run();
+  const first = await deploy(a);
+  await start(first.buildId);
+  const preview = await deploy(pr);
+  const listed = async () => (await callOp(panel, previewOps.list, { serviceId: parent }, { cookie })).body.previews[0];
+  expect(await listed()).toMatchObject({ prNumber: 7, status: "building", buildWaiting: true });
+
+  // The project's screens hear that the preview's deploy moved, so the Previews tab refetches.
+  const events: { type: string; ops?: string[] }[] = [];
+  panel.deps.live.subscribe(
+    { id: "tab", send: (m) => events.push((m as { event: (typeof events)[number] }).event) },
+    `project:${projectId}`,
+  );
+  await end(first.buildId);
+  await start(preview.buildId);
+  expect(await listed()).toMatchObject({ status: "building", buildWaiting: false });
+  expect(events.some((e) => e.type === "invalidate" && e.ops?.includes(previewOps.list.id))).toBe(true);
+  await end(preview.buildId);
 });
