@@ -50,7 +50,8 @@ type worker struct {
 	last        *agentv1.ServiceStatus
 	// routeErr is why the last write of the route file failed, and
 	// routeErrSince the first failure of the run (ServiceStatus.
-	// route_write_error); both empty once a write works.
+	// route_write_error); both empty once a write works or the routes
+	// wanted need no write (already on file, or no file at all).
 	routeErr      string
 	routeErrSince time.Time
 	// digests caches image id -> repo digest for Instance.image_digest.

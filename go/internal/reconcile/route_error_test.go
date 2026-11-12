@@ -50,3 +50,44 @@ func TestRouteWriteErrorInStatus(t *testing.T) {
 	h.apply(4, withShop)
 	h.waitFor("the route error cleared", func() bool { return h.state.get("svc").GetRouteWriteError() == nil })
 }
+
+// Taking back the change whose routes could not be written leaves the
+// routes the file already holds: there is nothing to write, and the error
+// goes with the change. It used to stay until a later change forced a
+// write, so `seylo status` kept listing it and the next domain added to the
+// service showed the old error about the removed host. The router keeps
+// failing here: the error goes without a write.
+func TestRouteWriteErrorClearsOnRevert(t *testing.T) {
+	h := newHarness(t)
+	s1 := appSpec("svc", 1, "app:v1")
+	h.apply(1, s1)
+	h.deployResult("svc", 1)
+
+	h.router.failApply(fmt.Errorf("%w: shop.example.com (service other)", proxy.ErrHostTaken))
+	h.apply(2, cloneSpec(s1, 1, func(s *agentv1.ServiceSpec) {
+		s.Routing.Routes = append(s.Routing.Routes, &agentv1.Route{Id: "r2", Hosts: []string{"shop.example.com"}, TargetPort: 80})
+	}))
+	h.waitFor("the route error in the status", func() bool { return h.state.get("svc").GetRouteWriteError() != nil })
+
+	h.apply(3, s1)
+	h.waitFor("the route error cleared", func() bool { return h.state.get("svc").GetRouteWriteError() == nil })
+}
+
+// The same for a service whose first routes ever could not be written:
+// with the route taken out it needs no route file, so nothing failed.
+func TestRouteWriteErrorClearsWhenFirstRoutesRemoved(t *testing.T) {
+	h := newHarness(t)
+	h.router.failApply(fmt.Errorf("%w: route r1: no host", proxy.ErrInvalidRoute))
+	s1 := appSpec("svc", 1, "app:v1")
+	h.apply(1, s1)
+	if p := h.deployResult("svc", 1); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
+		t.Fatalf("deploy with an unwritable route: %v", p)
+	}
+	h.waitFor("the route error in the status", func() bool { return h.state.get("svc").GetRouteWriteError() != nil })
+
+	h.apply(2, cloneSpec(s1, 2, func(s *agentv1.ServiceSpec) { s.Routing = nil }))
+	if p := h.deployResult("svc", 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("deploy without routes: %v", p)
+	}
+	h.waitFor("the route error cleared", func() bool { return h.state.get("svc").GetRouteWriteError() == nil })
+}

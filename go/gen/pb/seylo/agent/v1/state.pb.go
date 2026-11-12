@@ -555,7 +555,9 @@ type ServiceStatus struct {
 	// Set while the agent cannot write the service's route file (Traefik's
 	// dynamic file of its domains): the routes did not build, a host belongs
 	// to another service on the node, or the write failed. The agent tries
-	// again every 10 seconds and clears it once the file is written.
+	// again every 10 seconds and clears it once the file is written, or once
+	// the wanted routes are the ones the file already holds (the change that
+	// failed was taken back) or need no file.
 	// Meanwhile the node serves the routes of the file it last wrote (none
 	// when it never wrote one), so `routes` lists only those, and a domain
 	// added since has no route there. Agents from 0.2.12; older ones only

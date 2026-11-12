@@ -108,12 +108,17 @@ func (w *worker) syncRoutes(ctx context.Context, spec *agentv1.ServiceSpec, live
 	}
 	key := keyOf(spec.GetRouting(), spec.GetLoadBalancer(), spec.GetStopped(), w.rec.Sleeping, fmt.Sprint(ups), databaseRouteInputs(spec))
 	if !force && key == w.lastSync.route {
+		// The file already holds these routes: a write that failed for a
+		// change since reverted has nothing left to report.
+		w.noteRouteWrite(ctx, nil)
 		return nil
 	}
 	if !proxy.HasRouteFile(spec) && w.lastSync.route == "" {
 		// Never routed: no file to write or remove. (Tool hosts and
 		// database certificates need a file without routes of their own.)
+		// Neither is there a failed write to report.
 		w.lastSync.route = key
+		w.noteRouteWrite(ctx, nil)
 		return nil
 	}
 	if err := rt.Apply(ctx, spec, ups); err != nil {
