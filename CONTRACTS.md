@@ -4526,8 +4526,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   parses the message. A final stage with no start seen (its progress was
   lost, only the durable result came) still ends it, with `started_at` the
   agent's duration back from then. `builds/slots.ts` `buildQueue(db,
-  nodeIds?)` reads where queued builds stand: per node, by dispatch time
-  (`created_at`), the order the agent serves them in; `position` is the
+  nodeIds?)` reads where queued builds stand: per node, in `queueOrder`,
+  by `handed_over_at` (set when the runner first opens the build's Build
+  stream, the order the agent serves them in, first come, first served;
+  not `created_at`, since fetching the source or sending an archive between
+  the dispatch and the hand-over takes longer for some builds), builds not
+  handed over yet last; a re-attach keeps the time (the agent re-attaches to
+  the build it has) and sets it only on a build never handed over (the
+  panel stopped before its Build call). `position` is the
   1-based place among the node's queued builds and `waiting` is true when
   its running builds and the queued ones ahead fill its Builds at once
   (`max_parallel_builds`, at least 1; 0 without Can build, which the agent
@@ -4541,11 +4547,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   out again when a build there starts, ends or is cancelled, or its Builds
   at once or Can build changes. "Built in Xs" counts from `started_at`
   (the agent's duration, which holds the wait, only without one), and the
-  clone step's time leaves out the wait when this process handed the build
-  over. Timeouts (`engine.ts` `buildTimeout`): a running build fails 90
-  minutes after its start; a queued one waits while its node's queue moves
-  and fails once no build started or ended on that node for 90 minutes
-  (the node lost it), with `cancelBuild` sent either way.
+  clone step's time leaves out the wait from `handed_over_at` to the
+  start, also after a panel restart. Timeouts (`engine.ts`
+  `buildTimeout`): a running build fails 90 minutes after its start; a
+  queued one waits while its node's queue moves and fails once no build
+  started or ended on that node for 90 minutes (the node lost it), and in
+  any case 6 hours after its dispatch (`queuedBuildTimeoutMs`, for a node
+  that lost it but keeps building others), with `cancelBuild` sent every
+  time.
   `deployments.cancel` of a queued build sends `cancelBuild` too, which
   takes it out of the agent's queue.
 - `services/desired.ts` `serviceSpecFor(db, secrets, serviceId, nodeId)`:

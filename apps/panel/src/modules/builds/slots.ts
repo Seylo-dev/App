@@ -6,7 +6,7 @@
 // later, deployments/engine.ts recordBuildProgress), then "running". This
 // file reads, from those rows, where each queued build stands on its node.
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { buildInFlight, builds, nodes } from "../../db/schema";
 
@@ -45,9 +45,24 @@ export interface BuildQueue {
 }
 
 /**
- * The build queue of every node, or of the given ones. Queued builds are
- * ordered by when the panel dispatched them, which is the order the agent
- * queues them in (it serves waiters first come, first served).
+ * The order a node's agent takes builds in: by when the runner handed each
+ * one over (opened its Build stream, builds.handed_over_at), since the
+ * agent serves waiters first come, first served. Not by created_at: between
+ * the dispatch and the hand-over the runner fetches the source (a GitHub
+ * lookup) or sends an uploaded archive, which takes longer for some builds
+ * than for others. Builds not handed over yet come last, as they will join
+ * the agent's queue behind every build it has now.
+ */
+export const queueOrder = [
+  asc(sql`${builds.handedOverAt} is null`),
+  asc(builds.handedOverAt),
+  asc(builds.createdAt),
+  asc(builds.id),
+] as const;
+
+/**
+ * The build queue of every node, or of the given ones, with queued builds
+ * in the order their agent serves them (queueOrder).
  */
 export function buildQueue(db: PanelDb, nodeIds?: readonly string[]): BuildQueue {
   const out: BuildQueue = { places: new Map(), nodes: new Map() };
@@ -57,7 +72,7 @@ export function buildQueue(db: PanelDb, nodeIds?: readonly string[]): BuildQueue
     .from(builds)
     // buildInFlight, written with literals, so builds_in_flight_idx answers it.
     .where(nodeIds ? and(inArray(builds.nodeId, [...nodeIds]), buildInFlight) : buildInFlight)
-    .orderBy(asc(builds.createdAt), asc(builds.id))
+    .orderBy(...queueOrder)
     .all();
   const ids = [...new Set(rows.flatMap((r) => (r.nodeId ? [r.nodeId] : [])))];
   if (ids.length === 0) return out;

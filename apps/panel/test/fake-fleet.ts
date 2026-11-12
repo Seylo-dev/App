@@ -99,6 +99,8 @@ export class FakeFleet {
   private readonly endGates = new Map<string, Set<(result: "succeeded" | "failed") => void>>();
   /** Builds whose slot was granted: a stream opened again for one does not wait again. */
   private readonly granted = new Set<string>();
+  /** Uploaded archives whose UploadBuildContext answers only once released, by upload id. */
+  private readonly uploadGates = new Map<string, { gate: Promise<void>; open: () => void }>();
   readonly hub: AgentHub;
 
   constructor(private readonly panel: TestPanel) {
@@ -154,6 +156,23 @@ export class FakeFleet {
     this.granted.add(buildId);
     for (const open of this.slotGates.get(buildId) ?? []) open();
     this.slotGates.delete(buildId);
+  }
+
+  /** The next UploadBuildContext of this archive answers only once releaseUpload is called (a slow upload). */
+  holdUpload(uploadId: string): void {
+    let open!: () => void;
+    const gate = new Promise<void>((res) => (open = res));
+    this.uploadGates.set(uploadId, { gate, open });
+  }
+
+  releaseUpload(uploadId: string): void {
+    this.uploadGates.get(uploadId)?.open();
+    this.uploadGates.delete(uploadId);
+  }
+
+  /** Every held upload answers (before a test ends). */
+  releaseUploads(): void {
+    for (const id of [...this.uploadGates.keys()]) this.releaseUpload(id);
   }
 
   /** A held build (result "held") ends. */
@@ -301,7 +320,9 @@ export class FakeFleet {
         finish = res;
         abort = rej;
       });
-      const response = ended.then(() => {
+      const held = method === "uploadBuildContext" ? fleet.uploadGates.get(request.uploadId)?.gate : undefined;
+      const response = ended.then(async () => {
+        await held;
         const all = Buffer.concat(chunks);
         // Like the agent: another sha256 fails and leaves the volume empty.
         if (method === "importVolume" && request.sha256) {

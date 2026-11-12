@@ -87,7 +87,12 @@ export const QueuedBuild = Type.Object({
    * source); before, it read running from the moment it was dispatched.
    */
   status: BuildStatus,
-  /** 1-based place among the queued builds of its node, oldest first (1 = next to start); null once running. */
+  /**
+   * 1-based place among the queued builds of its node, in the order the
+   * node's agent got them (1 = next to start); null once running. Builds the
+   * panel is still sending to the node (fetching the source, uploading an
+   * archive) come last.
+   */
   position: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
   /**
    * True for a queued build with no free slot: the node's running builds and
@@ -108,7 +113,7 @@ export const queue = defineOp({
   kind: "query",
   summary: "List the build queue",
   description:
-    "Lists builds that are queued or running on every node (or one node), oldest first, with their place in the queue. queued = waiting for a free slot of its node's Builds at once (waiting true), or about to start in one; position is its place among the node's queued builds (1 = next to start). running = started on the node's agent; startedAt is when it started, queuedAt when it was dispatched. Only builds of services the caller can view are returned.",
+    "Lists builds that are queued or running on every node (or one node), in the order their nodes got them, with their place in the queue. queued = waiting for a free slot of its node's Builds at once (waiting true), or about to start in one; position is its place among the node's queued builds, in the order the node's agent got them, which is the order it starts them in (1 = next to start). running = started on the node's agent; startedAt is when it started, queuedAt when it was dispatched. Only builds of services the caller can view are returned.",
   input: Type.Object({ nodeId: Type.Optional(Id) }),
   output: Type.Object({ builds: Type.Array(QueuedBuild) }),
   // The handler filters rows by services.view.

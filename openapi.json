@@ -12751,7 +12751,7 @@
       "get": {
         "operationId": "builds.queue",
         "summary": "List the build queue",
-        "description": "Lists builds that are queued or running on every node (or one node), oldest first, with their place in the queue. queued = waiting for a free slot of its node's Builds at once (waiting true), or about to start in one; position is its place among the node's queued builds (1 = next to start). running = started on the node's agent; startedAt is when it started, queuedAt when it was dispatched. Only builds of services the caller can view are returned.",
+        "description": "Lists builds that are queued or running on every node (or one node), in the order their nodes got them, with their place in the queue. queued = waiting for a free slot of its node's Builds at once (waiting true), or about to start in one; position is its place among the node's queued builds, in the order the node's agent got them, which is the order it starts them in (1 = next to start). running = started on the node's agent; startedAt is when it started, queuedAt when it was dispatched. Only builds of services the caller can view are returned.",
         "tags": [
           "builds"
         ],

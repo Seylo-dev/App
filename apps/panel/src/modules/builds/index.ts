@@ -10,7 +10,7 @@ import { defineModule } from "../module";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
-import { buildQueue } from "./slots";
+import { buildQueue, queueOrder } from "./slots";
 
 const queue = implement(buildOps.queue, (input, ctx) => {
   const rows = ctx.db
@@ -39,7 +39,8 @@ const queue = implement(buildOps.queue, (input, ctx) => {
         ? and(inArray(builds.status, ["queued", "running"]), eq(builds.nodeId, input.nodeId))
         : inArray(builds.status, ["queued", "running"]),
     )
-    .orderBy(asc(builds.createdAt), asc(builds.id))
+    // The order the nodes take them in, so a node's queued builds read top to bottom by position.
+    .orderBy(...queueOrder)
     .all()
     .filter((r) => ctx.access.can("services.view", { type: "service", id: r.serviceId }));
   // Places count every queued build of the node, also the ones the caller cannot view.

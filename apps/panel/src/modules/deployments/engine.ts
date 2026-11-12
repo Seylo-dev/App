@@ -62,8 +62,16 @@ import { registryGcJobType } from "./registry-gc";
 import { pickBuildNode, resolveBuild, sourceBranch } from "./source";
 import { closeSteps, type DeploymentRow, initialSteps, isFinal, publishBuildQueue, publishDeploymentChange, setStep } from "./store";
 
-/** A build that has not finished after this long failed. */
+/** A build that has not finished this long after its start failed. */
 export const buildTimeoutMs = 90 * 60_000;
+/**
+ * A build still queued this long after its dispatch failed, however its
+ * node's queue moves: the node lost it (its agent restarted twice while it
+ * waited, or the runner could not hand it over again) and goes on with the
+ * builds behind it. Far above a real wait: each build ahead holds its slot
+ * for at most the agent's 45-minute build timeout.
+ */
+export const queuedBuildTimeoutMs = 4 * buildTimeoutMs;
 /** Extra time on top of the health timeout for pulling and switching. */
 const rolloutGraceMs = 5 * 60_000;
 
@@ -83,8 +91,6 @@ interface EngineState {
   streams: Map<string, { cancel(): void }>;
   /** Builds this process already tried to re-attach to after a restart. */
   reattached: Set<string>;
-  /** When this process handed a queued build to its node, by build id: the clone step leaves out the wait for a slot. */
-  handedOver: Map<string, number>;
   pending: Set<Promise<void>>;
 }
 
@@ -93,7 +99,7 @@ const engines = new WeakMap<object, EngineState>();
 export function engineFor(deps: Deps): Engine {
   let state = engines.get(deps.db);
   if (!state) {
-    state = { deps, chains: new Map(), streams: new Map(), reattached: new Set(), handedOver: new Map(), pending: new Set() };
+    state = { deps, chains: new Map(), streams: new Map(), reattached: new Set(), pending: new Set() };
     engines.set(deps.db, state);
   }
   // The latest deps win: tests swap deps.agents for a fake before any op runs.
@@ -321,10 +327,17 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
 
   let stream: AgentStream<"build">;
   try {
-    s.handedOver.set(buildRow.id, Date.now());
+    // Its place in the node's queue (builds/slots.ts queueOrder), set before any progress can arrive.
+    db.update(builds).set({ handedOverAt: new Date() }).where(eq(builds.id, buildRow.id)).run();
+    // It went ahead of the builds sent to the node before it that are not there yet: they are one more behind now.
+    const behind = db
+      .select({ id: builds.id })
+      .from(builds)
+      .where(and(eq(builds.nodeId, buildNode.id), eq(builds.status, "queued"), isNull(builds.handedOverAt)))
+      .get();
+    if (behind) publishBuildQueue(s.deps, buildNode.id);
     stream = s.deps.agents.open(buildNode.id, "build", resolved.request);
   } catch (error) {
-    s.handedOver.delete(buildRow.id);
     db.update(builds)
       .set({ status: "failed", finishedAt: new Date(), error: messageOf(error) })
       .where(eq(builds.id, buildRow.id))
@@ -421,7 +434,6 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
   if (finished) return d.id;
 
   const now = new Date();
-  const handedOver = engines.get(db)?.handedOver;
   let steps = d.steps;
   const patch: Partial<typeof deployments.$inferInsert> = {};
   // The agent's duration runs from its Build call, so it holds the wait for a slot too.
@@ -434,9 +446,7 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
   if (start && build.status === "queued") {
     db.update(builds).set({ status: "running", startedAt: now }).where(eq(builds.id, build.id)).run();
     // The clone step's time leaves out the wait between the hand-over and the slot.
-    const handed = handedOver?.get(build.id);
-    if (handed !== undefined) steps = delayStart(steps, "clone", now.getTime() - handed, now.getTime());
-    handedOver?.delete(build.id);
+    if (build.handedOverAt) steps = delayStart(steps, "clone", now.getTime() - build.handedOverAt.getTime(), now.getTime());
     queueMoved = true;
   }
   switch (progress.stage) {
@@ -488,7 +498,6 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
     default:
       break;
   }
-  if (progress.stage >= BuildStage.SUCCEEDED) handedOver?.delete(build.id);
   db.update(deployments)
     .set({ ...patch, steps })
     .where(eq(deployments.id, d.id))
@@ -584,7 +593,9 @@ async function checkBuild(s: EngineState, d: DeploymentRow): Promise<void> {
  * buildTimeoutMs from its real start. A queued one waits as long as the
  * builds ahead of it on its node run, each with its own timeout; it fails
  * once nothing started or ended on that node for buildTimeoutMs, which
- * means the node lost it (its agent restarted, say).
+ * means the node lost it (its agent restarted, say), and in any case
+ * queuedBuildTimeoutMs after its dispatch, for a node that lost it but
+ * keeps building others.
  */
 function buildTimeout(s: EngineState, build: typeof builds.$inferSelect): string | null {
   const now = Date.now();
@@ -592,6 +603,10 @@ function buildTimeout(s: EngineState, build: typeof builds.$inferSelect): string
   if (build.status === "running") {
     const started = (build.startedAt ?? build.createdAt).getTime();
     return now - started > buildTimeoutMs ? `The build did not finish within ${minutes} minutes.` : null;
+  }
+  const node = build.nodeId ? nodeName(s, build.nodeId) : "its node";
+  if (now - build.createdAt.getTime() > queuedBuildTimeoutMs) {
+    return `The build never started: it waited ${queuedBuildTimeoutMs / 3_600_000} hours for a build slot on ${node}.`;
   }
   let moved = build.createdAt.getTime();
   if (build.nodeId) {
@@ -603,7 +618,6 @@ function buildTimeout(s: EngineState, build: typeof builds.$inferSelect): string
     moved = Math.max(moved, last?.started?.getTime() ?? 0, last?.finished?.getTime() ?? 0);
   }
   if (now - moved <= buildTimeoutMs) return null;
-  const node = build.nodeId ? nodeName(s, build.nodeId) : "its node";
   return `The build never started: no build started or finished on ${node} for ${minutes} minutes while it waited for a build slot.`;
 }
 
@@ -619,6 +633,13 @@ async function reattachBuild(s: EngineState, d: DeploymentRow, buildId: string, 
       commitSha: d.commitSha,
       uploadId: d.uploadId,
     });
+    // One the runner never handed over (the panel stopped while it fetched the source) joins the node's queue now.
+    // One it did keeps its place: the agent re-attaches to the build it still has.
+    s.deps.db
+      .update(builds)
+      .set({ handedOverAt: new Date() })
+      .where(and(eq(builds.id, buildId), isNull(builds.handedOverAt)))
+      .run();
     const stream = s.deps.agents.open(nodeId, "build", resolved.request);
     s.streams.set(buildId, stream);
     log(s, d, "build", "Following the build again after a panel restart.");
@@ -926,7 +947,6 @@ export function finish(
     .where(eq(builds.deploymentId, d.id))
     .orderBy(desc(builds.createdAt))
     .get();
-  if (lastBuild) engines.get(db)?.handedOver.delete(lastBuild.id);
   db.transaction((tx) => {
     tx.update(deployments)
       .set({

@@ -5,15 +5,20 @@
 // say so on their deployment (buildWait, the clone step), their service
 // (buildWaiting), builds.queue and the build node list, with their place in
 // line, and move up when a build ahead starts, ends or is cancelled.
+// Places follow the order builds reach their node's agent (the hand-over),
+// which serves them first come, first served.
 
 import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import { builds as buildOps, deployments as deploymentOps, nodes as nodeOps, projects, services as serviceOps } from "@seylo/ops";
 import { BuildProgressSchema, BuildStage } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { builds, nodes, services } from "../src/db/schema";
-import { buildTimeoutMs, engineFor, unfinishedDeployments } from "../src/modules/deployments/engine";
+import { builds, nodes, services, sourceUploads } from "../src/db/schema";
+import { buildTimeoutMs, engineFor, queuedBuildTimeoutMs, unfinishedDeployments } from "../src/modules/deployments/engine";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
@@ -24,10 +29,16 @@ let projectId: string;
 let target: string;
 let ra: string;
 let tlv: string;
+let dir: string;
+let masterKey: Uint8Array;
 
 beforeEach(async () => {
   setSystemTime();
-  panel = testPanel();
+  dir = mkdtempSync(join(tmpdir(), "seylo-build-queue-"));
+  mkdirSync(join(dir, "uploads"), { recursive: true });
+  masterKey = crypto.getRandomValues(new Uint8Array(32));
+  // On a file, so a test can restart the panel on the same database.
+  panel = testPanel({ panelPath: join(dir, "panel.db"), masterKey, dataDir: dir });
   fleet = new FakeFleet(panel);
   target = fleet.addNode("app-node");
   // Builds at once is 1 on both builders (the default).
@@ -39,13 +50,29 @@ beforeEach(async () => {
   fleet.buildScript = () => ({ queued: true, result: "held", digest: `sha256:${"b".repeat(64)}` });
 });
 afterEach(async () => {
-  // Held streams end as if the nodes went away, before the database closes.
+  await stopPanel();
+  setSystemTime();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+/** Held streams end as if the nodes went away, then the database closes. */
+async function stopPanel() {
   fleet.online.clear();
+  fleet.releaseUploads();
   for (const drop of fleet.drops.splice(0)) drop();
   await fleet.settle();
-  setSystemTime();
   panel.close();
-});
+}
+
+/** The panel stops and starts again on the same database: its deploy runner starts from nothing, the nodes keep their builds. */
+async function restartPanel() {
+  const script = fleet.buildScript;
+  await stopPanel();
+  panel = testPanel({ panelPath: join(dir, "panel.db"), masterKey, dataDir: dir });
+  fleet = new FakeFleet(panel);
+  fleet.buildScript = script;
+  for (const id of [target, ra, tlv]) fleet.online.add(id);
+}
 
 /** An app with an inline Dockerfile that builds on the given node. */
 async function app(name: string, buildNodeId: string): Promise<string> {
@@ -110,6 +137,22 @@ async function end(buildId: string, result: "succeeded" | "failed" = "succeeded"
   fleet.endBuild(buildId, result);
   await fleet.settle();
 }
+
+async function tick() {
+  const engine = engineFor(panel.deps);
+  for (const id of unfinishedDeployments(panel.deps)) engine.kick(id);
+  await fleet.settle();
+}
+
+/** Waits for cond without fleet.settle (which waits for every deploy runner, also one held on purpose). */
+async function until(cond: () => boolean) {
+  for (let i = 0; i < 500 && !cond(); i++) await Bun.sleep(1);
+  expect(cond()).toBe(true);
+}
+
+const buildOf = (deploymentId: string) => panel.deps.db.select().from(builds).where(eq(builds.deploymentId, deploymentId)).get();
+const handedOver = (deploymentId: string) =>
+  fleet.calls.some((c) => c.method === "build" && (c.request as { buildId: string }).buildId === buildOf(deploymentId)?.id);
 
 test("a build is queued until its node starts it: QUEUED alone keeps it queued, the first stage after the slot runs it", async () => {
   const web = await app("web", ra);
@@ -298,11 +341,15 @@ test("a final result with no start seen (the progress was lost) still ends the b
 test("a re-attached stream of a queued build keeps it queued until the start comes again", async () => {
   const web = await app("web", ra);
   const { deploymentId, buildId } = await deploy(web);
+  const handed = buildRow(buildId)?.handedOverAt?.getTime();
+  expect(handed).toBeNumber();
   // The stream drops (as after a panel restart): the runner opens the build again and the agent replays QUEUED.
   for (const drop of fleet.drops.splice(0)) drop();
   await fleet.settle();
   expect(fleet.calls.filter((c) => c.method === "build")).toHaveLength(2);
+  // The agent re-attaches to the build it has, so its place in the queue stays.
   expect(buildRow(buildId)).toMatchObject({ status: "queued", startedAt: null });
+  expect(buildRow(buildId)?.handedOverAt?.getTime()).toBe(handed as number);
   await start(buildId);
   expect(buildRow(buildId)?.status).toBe("running");
   expect((await deployment(web, deploymentId)).status).toBe("building");
@@ -317,11 +364,6 @@ test("a queued build waits past the build timeout while its node's queue moves, 
   const first = await deploy(a);
   await start(first.buildId);
   const second = await deploy(b);
-  const tick = async () => {
-    const engine = engineFor(panel.deps);
-    for (const id of unfinishedDeployments(panel.deps)) engine.kick(id);
-    await fleet.settle();
-  };
 
   // The running one times out from its start; the queued one behind it does not, its queue just moved.
   setSystemTime(new Date(t0 + buildTimeoutMs + 60_000));
@@ -350,4 +392,172 @@ test("a node without Can build runs one build at a time, like its agent", async 
   // The panel sends max_parallel_builds 0 without Can build, which the agent runs as 1.
   panel.deps.db.update(nodes).set({ canBuild: false }).where(eq(nodes.id, ra)).run();
   expect((await deployment(b, second.deploymentId)).buildWait).toEqual({ node: { id: ra, name: "il-ra" }, position: 1 });
+});
+
+/** An app built from an uploaded archive whose upload to the build node waits until fleet.releaseUpload. */
+async function slowUploadApp(name: string, buildNodeId: string): Promise<{ serviceId: string; uploadId: string }> {
+  const serviceId = await app(name, buildNodeId);
+  const upload = panel.deps.db
+    .insert(sourceUploads)
+    .values({ serviceId, fileName: `${name}.tar.gz`, sizeBytes: 4, sha256: "0".repeat(64) })
+    .returning()
+    .get();
+  writeFileSync(join(dir, "uploads", `${upload.id}.tar.gz`), "data");
+  const row = panel.deps.db.select().from(services).where(eq(services.id, serviceId)).get();
+  panel.deps.db
+    .update(services)
+    .set({ spec: { ...(row?.spec as object), source: { type: "upload", fileName: `${name}.tar.gz` } } })
+    .where(eq(services.id, serviceId))
+    .run();
+  fleet.holdUpload(upload.id);
+  return { serviceId, uploadId: upload.id };
+}
+
+const uploading = (uploadId: string) =>
+  fleet.calls.some((call) => call.method === "uploadBuildContext" && (call.request as { uploadId: string }).uploadId === uploadId);
+
+test("queue places follow the order builds reach their node, not the order they were dispatched", async () => {
+  const [a, b, c] = [await app("a", ra), await app("b", ra), await app("c", ra)];
+  // u builds an uploaded archive, which takes a while to send to il-ra.
+  const { serviceId: u, uploadId } = await slowUploadApp("u", ra);
+  const first = await deploy(a);
+  await start(first.buildId);
+
+  // u is dispatched first and b second, but b reaches il-ra while u's archive is still on its way.
+  const uDeploy = (await callOp(panel, deploymentOps.deploy, { serviceId: u }, { cookie })).body.id as string;
+  await until(() => uploading(uploadId));
+  const bDeploy = (await callOp(panel, deploymentOps.deploy, { serviceId: b }, { cookie })).body.id as string;
+  await until(() => handedOver(bDeploy));
+  const [uBuild, bBuild] = [buildOf(uDeploy), buildOf(bDeploy)];
+  expect(uBuild?.createdAt.getTime()).toBeLessThanOrEqual(bBuild?.createdAt.getTime() as number);
+  expect(uBuild?.handedOverAt).toBeNull();
+  const [uId, bId] = [uBuild?.id as string, bBuild?.id as string];
+
+  // Not on the node yet, u joins its queue behind every build il-ra has: b is next in line.
+  expect((await queue()).map((q) => [q.id, q.status, q.position, q.waiting])).toEqual([
+    [first.buildId, "running", null, false],
+    [bId, "queued", 1, true],
+    [uId, "queued", 2, true],
+  ]);
+  expect(cloneDetail(await deployment(b, bDeploy))).toBe("Waiting for a build slot on il-ra - next in line");
+  expect(cloneDetail(await deployment(u, uDeploy))).toBe("Waiting for a build slot on il-ra - 1 ahead");
+
+  // The archive arrives and u is handed over: still behind b, and ahead of a build sent after it.
+  fleet.releaseUpload(uploadId);
+  await fleet.settle();
+  expect(buildOf(uDeploy)?.handedOverAt?.getTime()).toBeGreaterThanOrEqual(buildOf(bDeploy)?.handedOverAt?.getTime() as number);
+  const third = await deploy(c);
+  expect((await queue(ra)).map((q) => [q.id, q.position])).toEqual([
+    [first.buildId, null],
+    [bId, 1],
+    [uId, 2],
+    [third.buildId, 3],
+  ]);
+
+  // a ends and the agent starts b, the one that reached it first: u is next in line.
+  await end(first.buildId);
+  await start(bId);
+  expect((await deployment(u, uDeploy)).buildWait).toEqual({ node: { id: ra, name: "il-ra" }, position: 1 });
+  expect((await deployment(c, third.deploymentId)).buildWait).toEqual({ node: { id: ra, name: "il-ra" }, position: 2 });
+});
+
+test("a build that reaches its node ahead of one sent there before it tells that one it moved back", async () => {
+  const first = await deploy(await app("a", ra));
+  await start(first.buildId);
+  const [u, v] = [await slowUploadApp("u", ra), await slowUploadApp("v", ra)];
+  const uDeploy = (await callOp(panel, deploymentOps.deploy, { serviceId: u.serviceId }, { cookie })).body.id as string;
+  await until(() => uploading(u.uploadId));
+  const vDeploy = (await callOp(panel, deploymentOps.deploy, { serviceId: v.serviceId }, { cookie })).body.id as string;
+  await until(() => uploading(v.uploadId));
+  // Neither is on il-ra yet: in the order they were sent.
+  expect((await deployment(u.serviceId, uDeploy)).buildWait?.position).toBe(1);
+  expect((await deployment(v.serviceId, vDeploy)).buildWait?.position).toBe(2);
+
+  const events: { type: string; deployment?: { buildWait: { position: number } | null } }[] = [];
+  panel.deps.live.subscribe(
+    { id: "tab", send: (m) => events.push((m as { event: (typeof events)[number] }).event) },
+    `deployment:${uDeploy}`,
+  );
+  // v's archive arrives first: v is next in line, and u's page hears that it is behind v now.
+  fleet.releaseUpload(v.uploadId);
+  await until(() => handedOver(vDeploy));
+  expect((await deployment(u.serviceId, uDeploy)).buildWait?.position).toBe(2);
+  expect(events.filter((e) => e.type === "deployment").at(-1)?.deployment?.buildWait?.position).toBe(2);
+});
+
+test("a queued build the runner never handed over takes its place when it is handed over after a restart", async () => {
+  const [a, b, c, d] = [await app("a", ra), await app("b", ra), await app("c", ra), await app("d", ra)];
+  const first = await deploy(a);
+  await start(first.buildId);
+  const second = await deploy(b);
+  const third = await deploy(c);
+  // As if the panel stopped while it fetched b's source, before its Build call.
+  panel.deps.db.update(builds).set({ handedOverAt: null }).where(eq(builds.id, second.buildId)).run();
+  expect((await queue(ra)).map((q) => [q.id, q.position])).toEqual([
+    [first.buildId, null],
+    [third.buildId, 1],
+    [second.buildId, 2],
+  ]);
+
+  // The runner opens every build again: b reaches il-ra now, behind c and ahead of a build sent later.
+  for (const drop of fleet.drops.splice(0)) drop();
+  await fleet.settle();
+  expect(buildRow(second.buildId)?.handedOverAt).not.toBeNull();
+  const fourth = await deploy(d);
+  expect((await queue(ra)).map((q) => [q.id, q.position])).toEqual([
+    [first.buildId, null],
+    [third.buildId, 1],
+    [second.buildId, 2],
+    [fourth.buildId, 3],
+  ]);
+});
+
+test("a queued build its node lost fails after hours of waiting, also while the node keeps building others", async () => {
+  const t0 = Date.now();
+  setSystemTime(new Date(t0));
+  const web = await app("lost", ra);
+  const lost = await deploy(web);
+  const hour = 60 * 60_000;
+  const hours = queuedBuildTimeoutMs / hour;
+  expect(hours).toBe(6);
+
+  // il-ra no longer has it (its agent restarted while it waited), and goes on building what comes after it, every hour.
+  for (let h = 1; h <= hours; h++) {
+    setSystemTime(new Date(t0 + h * hour));
+    const other = await deploy(await app(`other-${h}`, ra));
+    await start(other.buildId);
+    await end(other.buildId);
+    await tick();
+    expect(buildRow(lost.buildId)?.status).toBe("queued");
+  }
+
+  setSystemTime(new Date(t0 + hours * hour + 60_000));
+  await tick();
+  expect(buildRow(lost.buildId)?.status).toBe("failed");
+  const d = await deployment(web, lost.deploymentId);
+  expect(d.status).toBe("failed");
+  expect(d.error).toBe("The build never started: it waited 6 hours for a build slot on il-ra.");
+  expect(fleet.calls.some((c) => c.method === "cancelBuild" && (c.request as { buildId: string }).buildId === lost.buildId)).toBe(true);
+});
+
+test("after a panel restart the clone step still leaves out the wait for a slot", async () => {
+  const t0 = Date.now();
+  setSystemTime(new Date(t0));
+  const web = await app("web", ra);
+  const { deploymentId, buildId } = await deploy(web);
+
+  // The panel restarts while the build waits on il-ra; the new runner follows it again.
+  setSystemTime(new Date(t0 + 60_000));
+  await restartPanel();
+  await tick();
+  expect(fleet.calls.filter((c) => c.method === "build")).toHaveLength(1);
+  expect(buildRow(buildId)).toMatchObject({ status: "queued", startedAt: null });
+
+  setSystemTime(new Date(t0 + 10 * 60_000));
+  await start(buildId);
+  setSystemTime(new Date(t0 + 10 * 60_000 + 30_000));
+  await end(buildId);
+  const d = await deployment(web, deploymentId);
+  expect(d.steps.find((s: { key: string }) => s.key === "clone").durationMs).toBeLessThan(60_000);
+  expect(d.steps.find((s: { key: string }) => s.key === "build").detail).toBe("Dockerfile on il-ra in 30s");
 });

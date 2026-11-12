@@ -168,6 +168,13 @@ export const builds = sqliteTable(
     error: text("error"),
     startedAt: timestamp("started_at"),
     finishedAt: timestamp("finished_at"),
+    /**
+     * When the runner first opened the build's Build stream on its node: the
+     * agent queues builds in the order they arrive (builds/slots.ts), which
+     * is not the order of created_at when fetching the source or sending an
+     * archive takes longer for one build than for another. Null until then.
+     */
+    handedOverAt: timestamp("handed_over_at"),
     createdAt: createdAt(),
   },
   (t) => [
