@@ -2183,6 +2183,15 @@ never type the ids by hand.
   free slot on its node (`builds/slots.ts` `waitingBuilds`, since 0.2.14;
   before, running from the dispatch), running ("Building and deploying")
   once the build has its slot, success, failed, cancelled,
+  never back from running to pending: a commit shown running stays so
+  when its build goes back into the line because another build reached
+  the node's agent first (kept in memory, like what was posted). GitLab
+  keeps one pending or running status per name and answers 400 "Cannot
+  transition status" to pending after pending (the waiting description
+  after "Deploy queued"), running after running (a post repeated after a
+  panel restart) and pending after running: `gitlab.ts` takes that answer
+  as done, so the job neither fails nor holds the next state behind its
+  retries,
   with fixed descriptions (never the deploy's error: repository
   collaborators need not be panel members; the link leads to the
   deployments page); a commit shown as queued whose deploy a newer push
@@ -4597,10 +4606,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `POST /api/hooks/deploy/<token>` (deploy trigger URLs),
   `POST /api/uploads/services/<serviceId>` (a `.tar.gz` source, then a deploy).
 - Live: deployment log lines on `deployment:<id>` (`{ type: "log", lines }`),
-  invalidations on `service:<id>`, `project:<id>` (`services.list`,
-  `projects.get`, and since 0.2.14 `previews.list`: a preview is a service
-  of the project, and the Previews tab shows its latest deploy) and `panel`
-  (`deployments.recent`, `builds.queue`).
+  invalidations on `service:<id>` (for a preview's deploy, since 0.2.14,
+  also `previews.list` on `service:<id>` of the service it previews,
+  whose Previews tab shows its latest deploy and whose page follows that
+  topic; not on `project:<id>`, which only the sidebar follows, while the
+  project is open there), `project:<id>` (`services.list`,
+  `projects.get`) and `panel` (`deployments.recent`, `builds.queue`).
 - Templates run only in `apps/panel/src/template-runner` (QuickJS-wasm,
   32 MiB, 1 s); the catalog format is `templates/README.md`.
 - Docker Hub (`modules/dockerHub/`): `dockerHub.search`, `dockerHub.tags`

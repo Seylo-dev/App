@@ -20,10 +20,12 @@ import {
 import { DeployStage } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
 import { freshSignInMs } from "../src/auth/fresh";
-import { builds, deploymentLogs, deployments, gitProviderWebhooks, services, sessions, webhookDeliveries } from "../src/db/schema";
+import { builds, deploymentLogs, deployments, gitProviderWebhooks, jobs, services, sessions, webhookDeliveries } from "../src/db/schema";
 import { resolveBuild } from "../src/modules/deployments/source";
+import { publishBuildQueue } from "../src/modules/deployments/store";
 import { gitlabNeedsHttps, repairHooks } from "../src/modules/gitProviders/hooks";
 import { pollProviderBranches } from "../src/modules/gitProviders/poll";
+import { commitStatusJobType } from "../src/modules/gitProviders/status";
 import { loadService } from "../src/modules/services/rows";
 import { readSpec } from "../src/modules/services/spec";
 import { setTargetResolver } from "../src/modules/uptime/targets";
@@ -98,6 +100,40 @@ async function connectedService(kind: "gitlab" | "gitea" | "bitbucket", name = "
   if (!hook) throw new Error("no webhook row");
   const secret = panel.deps.secrets.open(hook.secretSealed, "git.webhook") as string;
   return { id, providerId, repo, hook, secret };
+}
+
+/** The id of a deployment's build. */
+const buildOf = (deploymentId: string) =>
+  panel.deps.db.select().from(builds).where(eq(builds.deploymentId, deploymentId)).get()?.id as string;
+
+/**
+ * GitLab's commit statuses as its API keeps them: one pending or running
+ * status per commit and name, moved through a state machine that refuses
+ * pending twice, running twice and pending after running with a 400. A
+ * finished one is left as it is, and the next post starts a new one.
+ * Returns the posts it refused ("<name> <state> <description>").
+ */
+function gitlabStatusMachine(): { refused: string[] } {
+  const active = new Map<string, string>();
+  const refused: string[] = [];
+  fake.override((r) => {
+    if (r.method !== "POST" || r.host !== "gitlab.com" || !r.path.includes("/statuses/")) return undefined;
+    const key = `${r.path} ${r.body.name}`;
+    const now = active.get(key);
+    const state = r.body.state as string;
+    if (now && (state === "pending" || (state === "running" && now === "running"))) {
+      refused.push(`${r.body.name} ${state} ${r.body.description}`);
+      const event = state === "pending" ? "enqueue" : "run";
+      return {
+        status: 400,
+        body: { message: `Cannot transition status via :${event} from :${now} (Reason(s): Status cannot transition via "${event}")` },
+      };
+    }
+    if (state === "pending" || state === "running") active.set(key, state);
+    else active.delete(key);
+    return { status: 201, body: { id: 501, sha: r.path.split("/").pop(), status: state, name: r.body.name } };
+  });
+  return { refused };
 }
 
 const sign = (secret: string, body: string) => createHmac("sha256", secret).update(body).digest("hex");
@@ -1085,6 +1121,124 @@ describe("commit statuses", () => {
     expect(await lastOf("seylo/api", "running")).toMatchObject({ description: "Building and deploying" });
     fleet.endBuild(second, "failed");
     await fleet.settle();
+  });
+
+  test("GitLab: a queued deploy whose build then waits stays pending, and goes running once its build starts", async () => {
+    fleet.buildScript = () => ({ queued: true, result: "held", digest: `sha256:${"b".repeat(64)}` });
+    const gitlab = gitlabStatusMachine();
+    const web = await connectedService("gitlab", "web");
+    const api = await connectedService("gitlab", "api", web.providerId);
+    let head = gitlabHead;
+    fake.override((r) =>
+      r.path.endsWith("/repository/branches/main")
+        ? { body: { name: "main", commit: { id: head, message: "x\n", author_name: "jdev" } } }
+        : undefined,
+    );
+    const push = (svc: { hook: { id: string }; secret: string }, sha: string) =>
+      deliver("gitlab", svc.hook, svc.secret, "Push Hook", { ...payloadFixture("gitlab-push"), after: sha, checkout_sha: sha });
+    const second = "6".repeat(40);
+    const postsOf = (sha: string, name: string) =>
+      fake.sent
+        .filter((r) => r.method === "POST" && r.path === `/api/v4/projects/acme%2Fplatform%2Fshop/statuses/${sha}` && r.body.name === name)
+        .map((r) => `${r.body.state} ${r.body.description}`);
+    const until = async (sha: string, name: string, post: string) => {
+      for (let i = 0; i < 50 && postsOf(sha, name).at(-1) !== post; i++) {
+        await panel.runner.runDue(panel.deps);
+        await Bun.sleep(5);
+      }
+      return postsOf(sha, name);
+    };
+
+    // web's first deploy has node-a's one build slot; a second push to web queues a deploy behind it.
+    await push(web, gitlabHead);
+    const firstBuild = buildOf(deploymentsOf(web.id)[0]?.id as string);
+    fleet.grantSlot(firstBuild);
+    await fleet.settle();
+    head = second;
+    await push(web, second);
+    expect(deploymentsOf(web.id).find((d) => d.commitSha === second)?.status).toBe("queued");
+    expect(await until(second, "seylo/web", "pending Deploy queued")).toEqual(["pending Deploy queued"]);
+    // api's deploy builds the same head, its build waiting behind web's.
+    await push(api, second);
+    expect(await until(second, "seylo/api", "pending Waiting for a build slot")).toContain("pending Waiting for a build slot");
+
+    // web's first build ends: its queued deploy starts, its build behind api's in node-a's line.
+    fleet.endBuild(firstBuild, "failed");
+    await fleet.settle();
+    const queuedDeploy = deploymentsOf(web.id).find((d) => d.commitSha === second);
+    expect(queuedDeploy?.status).toBe("building");
+    // GitLab refuses pending after pending: the post is done, the job does not fail.
+    expect(await until(second, "seylo/web", "pending Waiting for a build slot")).toEqual([
+      "pending Deploy queued",
+      "pending Waiting for a build slot",
+    ]);
+    expect(gitlab.refused).toContain("seylo/web pending Waiting for a build slot");
+
+    const apiBuild = buildOf(deploymentsOf(api.id)[0]?.id as string);
+    fleet.grantSlot(apiBuild);
+    await fleet.settle();
+    fleet.endBuild(apiBuild, "failed");
+    await fleet.settle();
+    const webBuild = buildOf(queuedDeploy?.id as string);
+    fleet.grantSlot(webBuild);
+    await fleet.settle();
+    expect((await until(second, "seylo/web", "running Building and deploying")).at(-1)).toBe("running Building and deploying");
+    expect(
+      panel.deps.db
+        .select()
+        .from(jobs)
+        .where(eq(jobs.type, commitStatusJobType))
+        .all()
+        .filter((j) => j.lastError),
+    ).toEqual([]);
+    fleet.endBuild(webBuild, "failed");
+    await fleet.settle();
+  });
+
+  test("a commit shown running stays running when its build goes back into the line", async () => {
+    // node-a builds one at a time: web's build reached its agent first and was next to start, so web posted running.
+    fleet.buildScript = () => ({ queued: true, result: "held", digest: `sha256:${"b".repeat(64)}` });
+    const gitlab = gitlabStatusMachine();
+    const web = await connectedService("gitlab", "web");
+    const api = await connectedService("gitlab", "api", web.providerId);
+    await deliver("gitlab", web.hook, web.secret, "Push Hook", payloadFixture("gitlab-push"));
+    await deliver("gitlab", api.hook, api.secret, "Push Hook", payloadFixture("gitlab-push"));
+    const postsOf = (name: string) =>
+      fake.sent
+        .filter(
+          (r) => r.method === "POST" && r.path === `/api/v4/projects/acme%2Fplatform%2Fshop/statuses/${gitlabHead}` && r.body.name === name,
+        )
+        .map((r) => r.body.state as string);
+    const until = async (name: string, state: string) => {
+      for (let i = 0; i < 50 && postsOf(name).at(-1) !== state; i++) {
+        await panel.runner.runDue(panel.deps);
+        await Bun.sleep(5);
+      }
+      return postsOf(name);
+    };
+    expect((await until("seylo/web", "running")).at(-1)).toBe("running");
+    expect((await until("seylo/api", "pending")).at(-1)).toBe("pending");
+
+    // api's build turns out to have reached the agent first: it is next to start, web's waits behind it.
+    const [webBuild, apiBuild] = [buildOf(deploymentsOf(web.id)[0]?.id as string), buildOf(deploymentsOf(api.id)[0]?.id as string)];
+    const at = panel.deps.db.select().from(builds).where(eq(builds.id, webBuild)).get()?.handedOverAt as Date;
+    panel.deps.db
+      .update(builds)
+      .set({ handedOverAt: new Date(at.getTime() - 1000) })
+      .where(eq(builds.id, apiBuild))
+      .run();
+    publishBuildQueue(panel.deps, nodeA);
+    expect((await until("seylo/api", "running")).at(-1)).toBe("running");
+    await panel.runner.runDue(panel.deps);
+    // web never goes back to pending: no running, pending, running on its commit.
+    expect(postsOf("seylo/web").slice(postsOf("seylo/web").indexOf("running"))).toEqual(["running"]);
+    expect(gitlab.refused).toEqual([]);
+    for (const id of [apiBuild, webBuild]) {
+      fleet.grantSlot(id);
+      await fleet.settle();
+      fleet.endBuild(id, "failed");
+      await fleet.settle();
+    }
   });
 
   test("a connection with statuses off posts none", async () => {

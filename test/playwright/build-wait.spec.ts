@@ -2,7 +2,8 @@
 // (0.2.14), on the demo data: the panel marks the deployment (buildWait) and
 // the service (buildWaiting), and its clone step says where it stands. The
 // header, the deploy row, the log modal, the Overview's Deploys card, the
-// Previews tab and the dashboard say "Waiting for a build slot" where they
+// Previews tab (which follows its previews' deploys on its service's topic)
+// and the dashboard say "Waiting for a build slot" where they
 // said "Building", every step strip starts with a pending Queued step (a
 // clock, its place in line as the title) with Clone pending behind it, and
 // the build node picker says how many builds run and how many wait. The
@@ -148,6 +149,31 @@ test("a preview whose build waits says so on the Previews tab", async ({ page })
   await expect(row.getByText("Waiting for a build slot", { exact: true })).toBeVisible();
   await expect(row.getByText("Building", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: `${shots}/previews.png` });
+});
+
+test("the Previews tab follows its previews' deploys on the service's own topic, without the sidebar's", async ({ page }) => {
+  const demo = (serviceHandlers["previews.list"] as () => Input)();
+  let waiting = true;
+  const senders = new Map<string, (event: object) => void>();
+  await installDemo(page, {
+    overrides: {
+      "previews.list": () => ({
+        previews: demo.previews.map((p: Input, i: number) => (i === 0 ? { ...p, status: "building", buildWaiting: waiting } : p)),
+      }),
+    },
+    onLiveSubscribe: (topic, send) => senders.set(topic, send),
+  });
+  await page.goto(`/p/${ids.acme}/s/${svc.web}/previews`);
+  const row = page.getByText("#42", { exact: true }).locator("..");
+  await expect(row.getByText("Waiting for a build slot", { exact: true })).toBeVisible();
+
+  // The preview's build gets its slot: the panel tells the previewed service's page (service:<id>), and
+  // nothing on project:<id>, which only the sidebar follows, and only while the project is open there.
+  waiting = false;
+  await expect.poll(() => senders.has(`service:${svc.web}`)).toBe(true);
+  senders.get(`service:${svc.web}`)?.({ type: "invalidate", ops: ["previews.list"] });
+  await expect(row.getByText("Building", { exact: true })).toBeVisible();
+  await expect(row.getByText("Waiting for a build slot", { exact: true })).toHaveCount(0);
 });
 
 test("the build node picker says how many builds run and how many wait", async ({ page }) => {

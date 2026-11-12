@@ -159,15 +159,24 @@ export function gitlabClient({ deps, row, token }: ClientConfig): ProviderClient
       }
     },
     async setStatus(repo, sha, status) {
-      await apiRequest(deps, target, `/projects/${project(repo)}/statuses/${encodeSegment(sha)}`, {
-        method: "POST",
-        body: {
-          state: stateMap[status.state],
-          name: status.context,
-          description: status.description.slice(0, 255),
-          ...(status.targetUrl ? { target_url: status.targetUrl } : {}),
-        },
-      });
+      try {
+        await apiRequest(deps, target, `/projects/${project(repo)}/statuses/${encodeSegment(sha)}`, {
+          method: "POST",
+          body: {
+            state: stateMap[status.state],
+            name: status.context,
+            description: status.description.slice(0, 255),
+            ...(status.targetUrl ? { target_url: status.targetUrl } : {}),
+          },
+        });
+      } catch (error) {
+        // GitLab keeps one pending or running status per name and moves it through its state machine: pending
+        // twice (a new description), running twice (a post repeated after a panel restart) or pending after
+        // running answer 400 "Cannot transition status via :enqueue from :pending". The commit already shows
+        // that state, or a later one it does not go back from, so the post is done.
+        if (error instanceof ProviderApiError && error.status === 400 && /cannot transition status/i.test(error.message)) return;
+        throw error;
+      }
     },
     cloneUrl(repo) {
       return `${row.url}/${repo}.git`;

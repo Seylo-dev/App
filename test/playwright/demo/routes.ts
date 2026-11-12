@@ -8,8 +8,9 @@
 // without demo data go to the real panel the run started (signed in).
 // Sockets: the live socket accepts every subscription and streams a few
 // deployment log lines and the assistant's replies (assistant.ts, whose
-// handlers a test passes as overrides); log follow and the terminals answer
-// like an agent.
+// handlers a test passes as overrides), and a test can send events on the
+// topics the page follows (onLiveSubscribe); log follow and the terminals
+// answer like an agent.
 
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { followAssistantTopic, resetAssistantDemo } from "./assistant";
@@ -333,6 +334,12 @@ export interface DemoOptions {
   nodeLive?: "stream" | "silent" | "refuse";
   /** Milliseconds between live samples (default 2000, as the panel asks agents). */
   nodeLiveIntervalMs?: number;
+  /**
+   * Called for each topic the page subscribes to on the live socket (not
+   * node-live:<id>), with a function that sends an event on it, as the
+   * panel would: a test publishes an invalidation on one topic only.
+   */
+  onLiveSubscribe?: (topic: string, send: (event: object) => void) => void;
 }
 
 export async function installDemo(page: Page, options: DemoOptions = {}): Promise<void> {
@@ -426,6 +433,7 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
       }
       if (message.type !== "subscribe") return;
       ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+      options.onLiveSubscribe?.(message.topic, (event) => ws.send(JSON.stringify({ type: "event", topic: message.topic, event })));
       if (message.topic.startsWith("ai:") && !assistantTopics.has(message.topic)) {
         assistantTopics.set(
           message.topic,

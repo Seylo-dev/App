@@ -62,9 +62,20 @@ const statusPosts: Record<StatusPhase, { state: CommitStatusState; description: 
   cancelled: { state: "cancelled", description: "Deploy cancelled" },
 };
 
-/** The deployment's phase now: a building one asks the build queue whether its build waits. */
+/**
+ * The deployment's phase now: a building one asks the build queue whether
+ * its build waits. A commit that already shows running for this deployment
+ * stays running while its build goes back into the line (another build
+ * reached the node's agent first, so it is second now): never running,
+ * pending, running again, which GitLab refuses besides ("Cannot transition
+ * status via :enqueue from :running"). Kept in memory like what was
+ * posted: after a panel restart such a build posts pending once, which
+ * gitlab.ts takes as done.
+ */
 function phaseOf(deps: Pick<Deps, "db">, row: DeploymentRow): StatusPhase | null {
-  return statusFor(row, row.status === "building" && waitingBuilds(deps.db, [row.id]).has(row.id));
+  const phase = statusFor(row, row.status === "building" && waitingBuilds(deps.db, [row.id]).has(row.id));
+  const shown = shownOf(deps, row.id);
+  return phase === "waiting" && shown?.state === "running" && shown.sha === row.commitSha ? "running" : phase;
 }
 
 const supersededDescription = "Superseded by a newer push";

@@ -18,6 +18,7 @@ import {
   type DeployStepKey,
   type DeployStepStatus,
   deployments,
+  previews,
   services,
   sourceUploads,
 } from "../../db/schema";
@@ -305,9 +306,10 @@ export function publishDeploymentChange(deps: Pick<Deps, "db" | "live">, service
     type: "invalidate",
     ops: [deploymentOps.list.id, deploymentOps.get.id, deploymentOps.log.id, serviceOps.get.id, buildOps.queue.id],
   });
-  if (svc) {
-    // previews.list: a preview is a service of the project, and the Previews tab shows its latest deploy.
-    deps.live.publish(`project:${svc.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, projectOps.get.id, previewOps.list.id] });
+  if (svc) deps.live.publish(`project:${svc.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, projectOps.get.id] });
+  // A preview's deploy: the Previews tab of the service it previews shows its latest deploy, and that page follows service:<id>.
+  for (const p of deps.db.select({ serviceId: previews.serviceId }).from(previews).where(eq(previews.previewServiceId, serviceId)).all()) {
+    deps.live.publish(`service:${p.serviceId}`, { type: "invalidate", ops: [previewOps.list.id] });
   }
   deps.live.publish("panel", { type: "invalidate", ops: [buildOps.queue.id, deploymentOps.recent.id] });
 }

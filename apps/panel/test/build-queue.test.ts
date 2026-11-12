@@ -17,6 +17,7 @@ import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import {
   builds as buildOps,
   deployments as deploymentOps,
+  type LiveTopic,
   nodes as nodeOps,
   previews as previewOps,
   projects,
@@ -636,15 +637,24 @@ test("a preview whose deploy waits for a build slot says so in previews.list, an
   const listed = async () => (await callOp(panel, previewOps.list, { serviceId: parent }, { cookie })).body.previews[0];
   expect(await listed()).toMatchObject({ prNumber: 7, status: "building", buildWaiting: true });
 
-  // The project's screens hear that the preview's deploy moved, so the Previews tab refetches.
-  const events: { type: string; ops?: string[] }[] = [];
-  panel.deps.live.subscribe(
-    { id: "tab", send: (m) => events.push((m as { event: (typeof events)[number] }).event) },
-    `project:${projectId}`,
-  );
+  // The parent service's page (service:<parent>, the topic the Previews tab's page follows) hears that the
+  // preview's deploy moved, so the tab refetches without the sidebar's project:<id>, which is not followed
+  // while the project is collapsed there.
+  type Heard = { type: string; ops?: string[] };
+  const heard = (topic: LiveTopic) => {
+    const events: Heard[] = [];
+    panel.deps.live.subscribe({ id: topic, send: (m) => events.push((m as { event: Heard }).event) }, topic);
+    return events;
+  };
+  const onParent = heard(`service:${parent}`);
+  const onProject = heard(`project:${projectId}`);
+  const refetches = (events: Heard[]) => events.filter((e) => e.type === "invalidate" && e.ops?.includes(previewOps.list.id)).length;
   await end(first.buildId);
+  const before = refetches(onParent);
   await start(preview.buildId);
   expect(await listed()).toMatchObject({ status: "building", buildWaiting: false });
-  expect(events.some((e) => e.type === "invalidate" && e.ops?.includes(previewOps.list.id))).toBe(true);
+  expect(refetches(onParent)).toBeGreaterThan(before);
+  // Not on the project's topic: there it refetched every open Previews tab for any deploy of the project.
+  expect(refetches(onProject)).toBe(0);
   await end(preview.buildId);
 });
