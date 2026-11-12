@@ -3,6 +3,7 @@
 // project already chosen. The protected Panel project gets none. The logo and
 // panel name at the top go to the dashboard. Demo data.
 
+import { ids, projects } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { expect, stateFile, test, dashboardHeading } from "./helpers";
 
@@ -64,19 +65,35 @@ test.describe("sidebar new service", () => {
     await expect(sidebar.getByRole("link", { name: /^Approvals/ })).toBeVisible();
   });
 
-  test("an open project's services end with a gap before the next project", async ({ page }) => {
+  test("every project has the same room after it, open with services, empty or collapsed", async ({ page }) => {
     await installDemo(page);
     await page.goto("/");
     const sidebar = page.getByRole("navigation", { name: "Main" });
-    const lastService = sidebar.getByRole("link", { name: /^worker/ });
-    const nextProject = sidebar.getByRole("link", { name: /^personal/ });
-    await expect(lastService).toBeVisible();
-    const a = await lastService.boundingBox();
-    const b = await nextProject.boundingBox();
-    expect(a && b).toBeTruthy();
-    // 8 px of room after the services (the rows themselves sit 1 px apart).
-    expect(Math.round((b?.y ?? 0) - ((a?.y ?? 0) + (a?.height ?? 0)))).toBeGreaterThanOrEqual(8);
+    const box = async (name: RegExp) => {
+      const b = await sidebar.getByRole("link", { name }).first().boundingBox();
+      if (!b) throw new Error(`no box for ${name}`);
+      return b;
+    };
+    const gap = async (above: RegExp, below: RegExp) => {
+      const a = await box(above);
+      const b = await box(below);
+      return Math.round(b.y - (a.y + a.height));
+    };
+    await expect(sidebar.getByRole("link", { name: /^worker/ })).toBeVisible();
+    // After an open project's last service (acme-shop's worker) and before the next project.
+    const afterServices = await gap(/^worker/, /^personal/);
+    expect(afterServices).toBeGreaterThanOrEqual(8);
     await page.screenshot({ path: `${process.env.SHOTS_DIR ?? "test/playwright/shots"}/sidebar-project-spacing.png`, clip: { x: 0, y: 0, width: 300, height: 700 } });
+
+    // Collapsed: acme-shop's row right above personal's gets the same room.
+    const collapsed = projects.map((p) => (p.id === ids.acme ? { ...p, collapsed: true } : p));
+    await installDemo(page, { overrides: { "projects.list": () => ({ projects: collapsed }) } });
+    await page.goto("/");
+    await expect(sidebar.getByRole("link", { name: /^personal/ })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /^worker/ })).toHaveCount(0);
+    const afterRow = await gap(/^acme-shop/, /^personal/);
+    expect(Math.abs(afterRow - afterServices)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `${process.env.SHOTS_DIR ?? "test/playwright/shots"}/sidebar-project-spacing-collapsed.png`, clip: { x: 0, y: 0, width: 300, height: 700 } });
   });
 
   test("the protected Panel project has no +", async ({ page }) => {
