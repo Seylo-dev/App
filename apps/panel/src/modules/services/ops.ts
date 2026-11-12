@@ -1,7 +1,7 @@
 // Service ops: list, read, create, settings, notes, placements and run state.
 // Delete is delete.ts, move is move.ts.
 
-import { normalizeWatchPaths, OpError, services as serviceOps, watchPatternProblem } from "@seylo/ops";
+import { normalizeWatchPaths, normalizeWatchPattern, OpError, services as serviceOps, watchPatternError } from "@seylo/ops";
 import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains, projectPrefs, projects, servicePlacements, services, volumes } from "../../db/schema";
@@ -218,14 +218,19 @@ const setSource = implement(serviceOps.setSource, async (input, ctx) => {
   return toDetail(ctx.db, ctx.agents, next);
 });
 
-/** Watch paths as stored: normalised, BAD_REQUEST on a pattern that cannot match. */
+/**
+ * Watch paths as stored: normalised, BAD_REQUEST on a pattern that is not
+ * usable or can never match ("apps/docs/.."), with the field of that entry
+ * as it was sent.
+ */
 export function checkWatchPaths(patterns: readonly string[]): string[] {
-  const watchPaths = normalizeWatchPaths([...patterns]);
-  for (const [index, pattern] of watchPaths.entries()) {
-    const problem = watchPatternProblem(pattern);
-    if (problem) throw new OpError("BAD_REQUEST", `${pattern}: ${problem}`, { field: `watchPaths.${index}` });
+  for (const [index, raw] of patterns.entries()) {
+    const pattern = normalizeWatchPattern(raw);
+    if (pattern === "" || pattern === "!") continue;
+    const error = watchPatternError(pattern);
+    if (error) throw new OpError("BAD_REQUEST", error, { field: `watchPaths.${index}` });
   }
-  return watchPaths;
+  return normalizeWatchPaths(patterns);
 }
 
 const setWatchPaths = implement(serviceOps.setWatchPaths, (input, ctx) => {

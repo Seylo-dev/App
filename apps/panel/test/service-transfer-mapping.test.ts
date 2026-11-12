@@ -814,3 +814,33 @@ describe("backups", () => {
     expect([policy?.destinationId, policy?.volumeId, policy?.enabled]).toEqual([onB, newVolume?.id, true]);
   });
 });
+
+describe("watch paths", () => {
+  test("watch paths that can never match are left out of the import, with the panel's reason", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const id = await app(a, "web", { type: "image", image: "nginx:1.27", registryId: null });
+    const file = await exportZip(a, id, { secrets: "omitted", passphrase: undefined });
+    const e = await entriesOf(file.bytes);
+    const entry = e.services[0] as { path: string; json: string };
+    const doc = JSON.parse(entry.json);
+    // A file from a panel that saved such a pattern before it was refused.
+    doc.spec.watchPaths = ["apps/web/**", "apps/docs/.."];
+    const json = JSON.stringify(doc);
+    const manifest = JSON.parse(e.manifestText);
+    Object.assign(
+      manifest.entries.find((x: { path: string }) => x.path === entry.path),
+      { size: Buffer.byteLength(json), sha256: sha(json) },
+    );
+    const begun = await callOp(
+      b.panel,
+      transferOps.importBegin,
+      { projectId: b.projectId, manifest: JSON.stringify(manifest), services: [{ path: entry.path, json }] },
+      { cookie: b.cookie },
+    );
+    expect(begun.status).toBe(200);
+    expect(begun.body.warnings.find((w: { reason: string }) => w.reason === "watchPaths")?.message).toBe(
+      "Watch paths left out: apps/docs/.. never matches a file: paths start at the repository root. To watch a folder, write apps/docs/**",
+    );
+  });
+});

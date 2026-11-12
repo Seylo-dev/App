@@ -2,15 +2,18 @@
 // matches) with a live tester: paste changed files and see, per file and
 // for the push, what the panel would do. The tester runs the same matcher
 // as the panel (@seylo/ops watch-paths), so the answer is the real one.
+// Patterns are checked the same way: one the panel would refuse (such as
+// "apps/docs/..", which never matches) shows the panel's message under
+// the box as you type, and Save stays off until it is fixed.
 
-import { decideWatchFile, describeWatchPaths, matchWatchPaths, normalizeWatchPaths, services, watchPatternProblem } from "@seylo/ops";
+import { decideWatchFile, describeWatchPaths, matchWatchPaths, normalizeWatchPaths, services, watchPatternError } from "@seylo/ops";
 import { useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
@@ -23,6 +26,22 @@ const lines = (text: string) =>
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
+
+/**
+ * What the Patterns box holds: the list as it would be saved, the panel's
+ * own refusal for each pattern it would refuse (watchPatternError, what
+ * services.setWatchPaths answers with), and whether Save may be pressed:
+ * only for a changed list with nothing in it refused.
+ */
+export function watchPathsDraft(text: string, saved: readonly string[]) {
+  const patterns = normalizeWatchPaths(text.split("\n"));
+  const refused = patterns.flatMap((pattern) => {
+    const error = watchPatternError(pattern);
+    return error ? [{ pattern, error }] : [];
+  });
+  const changed = patterns.join("\n") !== saved.join("\n");
+  return { patterns, refused, changed, canSave: changed && refused.length === 0 };
+}
 
 export function WatchPathsCard({ service }: { service: ServiceDetail }) {
   const saved = service.watchPaths ?? [];
@@ -37,11 +56,9 @@ export function WatchPathsCard({ service }: { service: ServiceDetail }) {
     },
   });
 
-  const patterns = useMemo(() => normalizeWatchPaths(text.split("\n")), [text]);
-  const problems = patterns.map((p) => ({ pattern: p, problem: watchPatternProblem(p) })).filter((p) => p.problem);
+  const { patterns, refused, canSave } = watchPathsDraft(text, saved);
   const files = lines(sample);
   const result = files.length > 0 ? matchWatchPaths(patterns, files) : null;
-  const changed = patterns.join("\n") !== saved.join("\n");
 
   return (
     <SectionCard title={t("serviceSource.watch.title")} description={t("serviceSource.watch.description")}>
@@ -55,9 +72,9 @@ export function WatchPathsCard({ service }: { service: ServiceDetail }) {
             placeholder={t("serviceSource.watch.placeholder")}
             onChange={(e) => setText(e.target.value)}
           />
-          {problems.map((p) => (
+          {refused.map((p) => (
             <span key={p.pattern} role="alert" className="text-xs text-chip-red-fg">
-              {p.pattern}: {p.problem}
+              {p.error}
             </span>
           ))}
         </Field>
@@ -110,7 +127,7 @@ export function WatchPathsCard({ service }: { service: ServiceDetail }) {
         <Button
           size="sm"
           variant="primary"
-          disabled={!changed || problems.length > 0 || save.isPending}
+          disabled={!canSave || save.isPending}
           onClick={() => save.mutate({ serviceId: service.id, watchPaths: patterns })}
         >
           {t("serviceSource.watch.save")}

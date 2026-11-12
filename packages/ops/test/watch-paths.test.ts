@@ -12,6 +12,7 @@ import {
   normalizeWatchPaths,
   normalizeWatchPattern,
   skipMarkerOf,
+  watchPatternError,
   watchPatternProblem,
 } from "../src";
 
@@ -414,6 +415,69 @@ describe("normalizing patterns", () => {
     expect(watchPatternProblem("a\nb")).toBe("Patterns are one line each.");
     expect(watchPatternProblem("x".repeat(301))).toContain("300");
     expect(watchPatternProblem("apps/**")).toBeNull();
+    expect(watchPatternError("a\nb")).toBe("a\nb: Patterns are one line each.");
+    expect(watchPatternError("apps/**")).toBeNull();
+  });
+
+  test('any run of leading "./" and "/" is dropped, so it is never refused', () => {
+    expect(normalizeWatchPattern("/./src/**")).toBe("src/**");
+    expect(normalizeWatchPattern(".//./src/")).toBe("src/**");
+    expect(normalizeWatchPattern("!/./docs/**")).toBe("!docs/**");
+    // Not a leading "./": kept, and refused below.
+    expect(normalizeWatchPattern("../x/**")).toBe("../x/**");
+    expect(normalizeWatchPattern(".github/workflows/*.yml")).toBe(".github/workflows/*.yml");
+  });
+});
+
+describe('patterns with a "." or ".." segment never match and are refused', () => {
+  const hint = "paths start at the repository root. To watch a folder, write";
+  test("the message names the pattern and the folder pattern to write instead", () => {
+    expect(watchPatternError("apps/docs/..")).toBe(`apps/docs/.. never matches a file: ${hint} apps/docs/**`);
+    expect(watchPatternError("apps/docs/.")).toBe(`apps/docs/. never matches a file: ${hint} apps/docs/**`);
+    expect(watchPatternError(normalizeWatchPattern("apps/docs/../"))).toBe(`apps/docs/../** never matches a file: ${hint} apps/docs/**`);
+    expect(watchPatternError("apps/*/../**")).toBe(`apps/*/../** never matches a file: ${hint} apps/*/**`);
+    expect(watchPatternProblem("apps/docs/..")).toBe(`It never matches a file: ${hint} apps/docs/**`);
+  });
+
+  test('without a folder before the dots, or with more after them, the hint is "folder/**"', () => {
+    expect(watchPatternError("../x/**")).toBe(`../x/** never matches a file: ${hint} folder/**`);
+    expect(watchPatternError("a/./b")).toBe(`a/./b never matches a file: ${hint} folder/**`);
+    expect(watchPatternError("apps/docs/../web")).toBe(`apps/docs/../web never matches a file: ${hint} folder/**`);
+    expect(watchPatternError("**/..")).toBe(`**/.. never matches a file: ${hint} folder/**`);
+    expect(watchPatternError("..")).toBe(`.. never matches a file: ${hint} folder/**`);
+    expect(watchPatternError(".")).toBe(`. never matches a file: ${hint} folder/**`);
+  });
+
+  test("an exclusion keeps its !", () => {
+    expect(watchPatternError("!apps/docs/..")).toBe(
+      "!apps/docs/.. never matches a file: paths start at the repository root. To exclude a folder, write !apps/docs/**",
+    );
+  });
+
+  test("no file git names matches them, which is why they are refused", () => {
+    for (const glob of ["apps/docs/..", "apps/docs/.", "../x/**", "a/./b"]) {
+      for (const path of ["apps/docs/intro.md", "apps/docs", "apps", "x/a.ts", "a/b", "a/b/c.ts", "./x/a.ts"]) {
+        expect(matchWatchPaths([glob], [path])).toEqual({ deploy: false, reason: "noMatch", checked: 1 });
+      }
+    }
+  });
+
+  test("ordinary patterns, dots inside names and a leading ./ pass", () => {
+    const ok = [
+      "**/*.md",
+      "!docs/**",
+      ".github/workflows/*.yml",
+      "apps/web/**",
+      "*.config.ts",
+      "src/.env.example",
+      "apps/docs/...",
+      "a..b/**",
+      "**/.well-known/**",
+      "?",
+    ];
+    for (const pattern of ok) expect(watchPatternError(pattern)).toBeNull();
+    expect(normalizeWatchPaths(["./src/**", "!./docs/"])).toEqual(["src/**", "!docs/**"]);
+    for (const pattern of normalizeWatchPaths(["./src/**", "!./docs/"])) expect(watchPatternError(pattern)).toBeNull();
   });
 });
 

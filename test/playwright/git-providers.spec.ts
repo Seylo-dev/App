@@ -226,6 +226,33 @@ test.describe("git providers", () => {
     await expect(page.getByText("Watch paths saved.")).toBeVisible();
     expect(calls.find((c) => c.op === "services.setWatchPaths")?.input).toEqual({ serviceId: svc.api, watchPaths: ["apps/web/**", "!**/*.md"] });
   });
+
+  test("watch paths: a pattern that never matches is refused as you type, with what to write", async ({ page }) => {
+    const calls = watchApi(page);
+    await installDemo(page, {
+      overrides: { "services.setWatchPaths": (input) => ({ watchPaths: input.watchPaths }) },
+    });
+    await page.goto(`/p/${ids.acme}/s/${svc.api}/source`);
+    const patterns = page.getByLabel("Patterns");
+    const save = page.getByRole("button", { name: "Save watch paths" });
+    await patterns.fill("apps/web/**\napps/docs/..");
+    const refusal = page.getByRole("alert").filter({ hasText: "never matches a file" });
+    await expect(refusal).toHaveText(
+      "apps/docs/.. never matches a file: paths start at the repository root. To watch a folder, write apps/docs/**",
+    );
+    await expect(save).toBeDisabled();
+    await page.screenshot({ path: `${shots}/watch-paths-refused.png`, fullPage: true });
+
+    await patterns.fill("apps/web/**\napps/docs/**");
+    await expect(refusal).toHaveCount(0);
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(page.getByText("Watch paths saved.")).toBeVisible();
+    expect(calls.find((c) => c.op === "services.setWatchPaths")?.input).toEqual({
+      serviceId: svc.api,
+      watchPaths: ["apps/web/**", "apps/docs/**"],
+    });
+  });
 });
 
 /** The demo's own answer for services.get, so overrides can build on it. */

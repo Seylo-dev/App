@@ -10,7 +10,11 @@
 //   **   any characters including "/"; "**/" also matches no folder at all
 //   ?    one character except "/"
 //   dir/ the same as dir/**
-// So "*.md" is a file in the root only; "**/*.md" is one anywhere.
+// So "*.md" is a file in the root only; "**/*.md" is one anywhere. A
+// pattern with a "." or ".." path segment ("apps/docs/..", "../x/**")
+// never matches, since git names changed files without them, so saving
+// refuses it with what to write instead (watchPatternError). A leading
+// "./" is dropped, as is a leading "/".
 //
 // The panel runs this on every push and the web app runs it in the watch
 // paths tester, so both always agree. Matching never backtracks: a glob is
@@ -60,12 +64,12 @@ const workPerLiteralCheck = 2 * workPerCall;
  */
 const maxMiddleLength = 32;
 
-/** Trims a pattern and drops a leading "./" or "/"; a trailing "/" means everything below. */
+/** Trims a pattern and drops a leading "./" or "/" (any run of them); a trailing "/" means everything below. */
 export function normalizeWatchPattern(raw: string): string {
   let pattern = raw.trim();
   const negated = pattern.startsWith("!");
   if (negated) pattern = pattern.slice(1).trim();
-  pattern = pattern.replace(/^(\.\/)+/, "").replace(/^\/+/, "");
+  pattern = pattern.replace(/^(?:\.?\/)+/, "");
   if (pattern.endsWith("/")) pattern = `${pattern}**`;
   return negated ? `!${pattern}` : pattern;
 }
@@ -81,13 +85,60 @@ export function normalizeWatchPaths(raw: readonly string[]): string[] {
   return out;
 }
 
-/** Why a pattern is not usable, or null when it is. */
+/**
+ * What is wrong with a pattern: not usable as text, or it never matches
+ * because a path segment is "." or ".." ("apps/docs/..", "../x/**",
+ * "a/./b"; git names changed files from the repository root without such
+ * segments). `instead` is what to write: "apps/docs/**" for
+ * "apps/docs/..", "folder/**" when the pattern names no folder before its
+ * dots.
+ */
+type PatternProblem = { kind: "invalid"; text: string } | { kind: "neverMatches"; instead: string };
+
+function patternProblem(pattern: string): PatternProblem | null {
+  const negated = pattern.startsWith("!");
+  const body = negated ? pattern.slice(1) : pattern;
+  if (body === "") return { kind: "invalid", text: "The pattern is empty." };
+  if (pattern.length > maxWatchPathLength) return { kind: "invalid", text: `Patterns are at most ${maxWatchPathLength} characters.` };
+  if (/[\n\r\t\0]/.test(pattern)) return { kind: "invalid", text: "Patterns are one line each." };
+  const segments = body.split("/");
+  const dots = segments.findIndex(isDotSegment);
+  if (dots < 0) return null;
+  // A folder only when nothing but dots and "**" follows it ("apps/docs/..",
+  // "apps/docs/../**"): "apps/docs/../web" names no folder to suggest.
+  const before = segments.slice(0, dots).filter((s) => s !== "");
+  const onlyDotsAfter = segments.slice(dots).every((s) => isDotSegment(s) || s === "**" || s === "");
+  const folder = onlyDotsAfter && before.some((s) => s !== "**") ? before.join("/") : "folder";
+  return { kind: "neverMatches", instead: `${negated ? "!" : ""}${folder}/**` };
+}
+
+const isDotSegment = (segment: string) => segment === "." || segment === "..";
+
+/** The hint after "never matches a file: ". */
+function neverMatchesHint(instead: string): string {
+  const what = instead.startsWith("!") ? "To exclude a folder" : "To watch a folder";
+  return `paths start at the repository root. ${what}, write ${instead}`;
+}
+
+/** Why a (normalized) pattern is not usable, or null when it is. */
 export function watchPatternProblem(pattern: string): string | null {
-  const body = pattern.startsWith("!") ? pattern.slice(1) : pattern;
-  if (body === "") return "The pattern is empty.";
-  if (pattern.length > maxWatchPathLength) return `Patterns are at most ${maxWatchPathLength} characters.`;
-  if (/[\n\r\t\0]/.test(pattern)) return "Patterns are one line each.";
-  return null;
+  const problem = patternProblem(pattern);
+  if (!problem) return null;
+  return problem.kind === "invalid" ? problem.text : `It never matches a file: ${neverMatchesHint(problem.instead)}`;
+}
+
+/**
+ * The message that refuses a (normalized) pattern when watch paths are
+ * saved, naming the pattern, or null when it is usable. The panel's
+ * services.setWatchPaths and the import plan refuse with it, and the web
+ * app's watch paths card shows it as you type, so both say the same.
+ */
+export function watchPatternError(pattern: string): string | null {
+  const problem = patternProblem(pattern);
+  if (!problem) return null;
+  return problem.kind === "invalid"
+    ? `${pattern}: ${problem.text}`
+    : `${pattern} never matches a file: ${neverMatchesHint(problem.instead)}`;
 }
 
 /** One step of a compiled glob. */

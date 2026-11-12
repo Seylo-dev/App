@@ -494,7 +494,7 @@ export const setWatchPaths = defineOp({
   kind: "mutation",
   summary: "Set a service's watch paths",
   description:
-    'Sets the glob patterns a push must touch to deploy the service (for monorepos), in order: * (not across "/"), ** (across folders), ?, and ! to exclude; the last pattern that matches a file decides. A push deploys when at least one changed file counts; when the changed files cannot be known it deploys. An empty list deploys on every push. Applies to GitHub, GitLab, Gitea/Forgejo and Bitbucket pushes, branch polling and the deploy trigger URL.',
+    'Sets the glob patterns a push must touch to deploy the service (for monorepos), in order: * (not across "/"), ** (across folders), ?, and ! to exclude; the last pattern that matches a file decides. Patterns start at the repository root: one with a "." or ".." segment (such as apps/docs/..) never matches and is refused; to watch a folder, write apps/docs/**. A push deploys when at least one changed file counts; when the changed files cannot be known it deploys. An empty list deploys on every push. Applies to GitHub, GitLab, Gitea/Forgejo and Bitbucket pushes, branch polling and the deploy trigger URL.',
   input: Type.Object({ serviceId: Id, watchPaths: WatchPaths }),
   output: Type.Object({ watchPaths: WatchPaths }),
   permission: permission.service("services.update", serviceScope),

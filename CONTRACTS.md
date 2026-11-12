@@ -2036,7 +2036,21 @@ never type the ids by hand.
 - Watch paths (`@seylo/ops` `watch-paths.ts`, `services.setWatchPaths`,
   `spec.watchPaths`): ordered globs (`*` not across `/`, `**` across
   folders and `**/` also none, `?`, `!` excludes; anchored at the root; a
-  trailing `/` means everything below); for each changed file the last
+  trailing `/` means everything below; any leading run of `./` and `/` is
+  dropped). No other syntax: a pattern with a `.` or `..` path segment
+  (`apps/docs/..`, `../x/**`, `a/./b`) never matches, since git names
+  changed files from the root without them, so saving refuses it
+  (`watchPatternError`, BAD_REQUEST with `field: watchPaths.<index of the
+  entry as sent>`): "`<pattern>` never matches a file: paths start at the
+  repository root. To watch a folder, write `<folder>/**`", the folder
+  being what comes before the dots when only dots and `**` follow
+  (`apps/docs/**` for `apps/docs/..`), else `folder/**`; an exclusion
+  reads "To exclude a folder, write `!<folder>/**`". `checkWatchPaths`
+  (services ops) runs it for `services.setWatchPaths` and the import
+  plan (which leaves such a file's watch paths out with a `watchPaths`
+  warning); the web Watch paths card shows the same message under the
+  patterns as you type and keeps Save off while one is refused.
+  Patterns stored before stay as they are. For each changed file the last
   matching pattern decides, with only `!` patterns everything else
   counts; a push deploys when one file counts. Matching never backtracks
   and costs the same per character whatever the pattern (`globMatches`

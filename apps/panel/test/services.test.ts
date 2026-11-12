@@ -242,6 +242,33 @@ describe("service settings", () => {
     expect(panel.deps.db.select().from(services).where(eq(services.id, id)).get()).toBeUndefined();
     expect((await callOp(panel, projects.remove, { projectId, confirmName: "shop" }, { cookie })).status).toBe(200);
   });
+
+  test('watch paths: a pattern with a ".." or "." segment is refused with its field and what to write; nothing is saved', async () => {
+    const id = (await callOp(panel, serviceOps.create, { projectId, name: "docs", kind: "app", nodeId: nodeA }, { cookie })).body.id;
+    const set = (watchPaths: string[]) => callOp(panel, serviceOps.setWatchPaths, { serviceId: id, watchPaths }, { cookie });
+    expect((await set(["apps/web/**"])).status).toBe(200);
+
+    // The field is the entry as sent, blank lines included.
+    const refused = await set(["apps/web/**", "  ", "apps/docs/.."]);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "apps/docs/.. never matches a file: paths start at the repository root. To watch a folder, write apps/docs/**",
+      details: { field: "watchPaths.2" },
+    });
+    const outside = await set(["../shared/**"]);
+    expect(outside.body.error).toMatchObject({
+      message: "../shared/** never matches a file: paths start at the repository root. To watch a folder, write folder/**",
+      details: { field: "watchPaths.0" },
+    });
+    expect((await set(["src/./lib/**"])).body.error.details).toEqual({ field: "watchPaths.0" });
+    expect((await callOp(panel, serviceOps.get, { serviceId: id }, { cookie })).body.watchPaths).toEqual(["apps/web/**"]);
+
+    // Ordinary patterns and a leading ./ save as before.
+    const ok = await set(["./src/**", "**/*.md", "!docs/**", ".github/workflows/*.yml"]);
+    expect(ok.status).toBe(200);
+    expect(ok.body.watchPaths).toEqual(["src/**", "**/*.md", "!docs/**", ".github/workflows/*.yml"]);
+  });
 });
 
 describe("moving services", () => {
