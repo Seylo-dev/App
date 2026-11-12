@@ -2509,9 +2509,12 @@ never type the ids by hand.
   after the deployment left `building`: a late or replayed report does not
   change what a rolled-out deployment runs. The service's own or shared
   `GIT_SHA` in the sealed env wins. A rollback seals the service's env now
-  plus the `builtCommit` GIT_SHA of the deployment it runs again (through
-  a chain of rollbacks when one's own GIT_SHA won); a move keeps the live
-  env; a restart changes nothing. Deployments sealed before 0.2.14 have
+  plus the `builtCommit` GIT_SHA of the deployment it runs again, and so
+  does a move to another project, whose env is sealed afresh in the new
+  project, with the live deployment it switches
+  (`deployments.project_move.fromDeploymentId`, `reusedImageOf`); through
+  a chain of rollbacks and moves when one's own GIT_SHA won. A move
+  between nodes keeps the live env; a restart changes nothing. Deployments sealed before 0.2.14 have
   none, so running apps are not recreated when the panel updates: GIT_SHA
   comes with each service's next deploy (and a rollback to such a
   deployment runs without it, as before). The References panel of the

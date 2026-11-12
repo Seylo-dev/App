@@ -4,13 +4,15 @@
 // side puts it in the env the deployment's containers get. It is sealed
 // into the deployment's env (deployments.envSealed) while the deployment
 // builds, once the commit is known, so it follows the deployment: a restart
-// keeps it, a rollback runs with the commit of the deployment it runs
-// again, and a deployment from before keeps the env it had, so no running
-// app is recreated for it when the panel updates.
+// keeps it, a rollback or a move to another project runs with the commit
+// of the deployment whose image it runs again, and a deployment from
+// before keeps the env it had, so no running app is recreated for it when
+// the panel updates.
 
 import { eq } from "drizzle-orm";
 import { deployments } from "../../db/schema";
 import type { Deps } from "../../deps";
+import type { DeploymentRow } from "../deployments/store";
 
 export const gitShaVar = "GIT_SHA";
 
@@ -87,23 +89,34 @@ export function recordBuiltCommit(deps: Pick<Deps, "db" | "secrets">, deployment
 }
 
 /**
- * The env a rollback starts with: the service's env now, plus GIT_SHA of
- * the deployment whose image it runs again (a GIT_SHA of the service's
- * own still wins). That one may be a rollback too, whose own GIT_SHA won:
- * then the deployment it ran again says. Other deployments get theirs from
- * their build.
+ * The deployment whose image `d` runs again, without a build of its own: a
+ * rollback's target, or the live deployment a move to another project
+ * switches (its env is sealed afresh in the new project). Null for the
+ * rest, which build or copy the live env (a move between nodes).
  */
-export function withRolledBackCommit(deps: Pick<Deps, "db" | "secrets">, rollbackOf: string | null, envSealed: string): string {
-  let next = rollbackOf;
+export function reusedImageOf(d: Pick<DeploymentRow, "rollbackOf" | "projectMove">): string | null {
+  return d.rollbackOf ?? d.projectMove?.fromDeploymentId ?? null;
+}
+
+/**
+ * The env a deployment that runs an older image again starts with (a
+ * rollback, a move to another project): the service's env now, plus
+ * GIT_SHA of the deployment whose image it runs (a GIT_SHA of the
+ * service's own still wins). That one may have run an image again too,
+ * with its own GIT_SHA winning: then the one it ran again says. Other
+ * deployments get theirs from their build.
+ */
+export function withReusedCommit(deps: Pick<Deps, "db" | "secrets">, from: string | null, envSealed: string): string {
+  let next = from;
   for (let hops = 0; next && hops < 50; hops++) {
     const target = deps.db
-      .select({ envSealed: deployments.envSealed, rollbackOf: deployments.rollbackOf })
+      .select({ envSealed: deployments.envSealed, rollbackOf: deployments.rollbackOf, projectMove: deployments.projectMove })
       .from(deployments)
       .where(eq(deployments.id, next))
       .get();
     const commit = builtCommit(deps, target?.envSealed ?? null);
     if (commit) return sealGitSha(deps, envSealed, commit);
-    next = target?.rollbackOf ?? null;
+    next = target ? reusedImageOf(target) : null;
   }
   return envSealed;
 }

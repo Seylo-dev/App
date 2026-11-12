@@ -4,7 +4,8 @@
 // GIT_SHA"). The node passes it to the build (go/internal/build); these
 // tests cover the containers' env: it follows the deployment, a GIT_SHA of
 // the service's own or the project's shared one wins, rollbacks run the
-// old commit, and running services are not recreated for it.
+// old commit, so do moves to another project, and running services are not
+// recreated for it.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { deployments as deploymentOps, projects, services as serviceOps } from "@seylo/ops";
@@ -186,6 +187,41 @@ describe("GIT_SHA for deployments built from a repository", () => {
     await deployLive(id);
     const back = await callOp(panel, deploymentOps.rollback, { serviceId: id, deploymentId: again.body.id }, { cookie });
     expect(back.status).toBe(200);
+    await fleet.settle();
+    expect(containerEnv(id).GIT_SHA).toBe(shaA);
+  });
+
+  test("a move to another project runs with the commit its image was built from", async () => {
+    // Before: the switch sealed its env afresh in the new project and lost GIT_SHA until the next deploy.
+    const id = await createApp("api", gitSource);
+    nodeChecksOut(shaA);
+    await deployLive(id);
+    const other = (await callOp(panel, projects.create, { name: "respo-next" }, { cookie })).body.id as string;
+
+    const move = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: other, confirm: true }, { cookie });
+    expect(move.status).toBe(200);
+    expect(move.body.deploymentId).toBeString();
+    await fleet.settle();
+    // The same image again, no build.
+    expect(fleet.builds).toHaveLength(1);
+    expect(containerEnv(id).GIT_SHA).toBe(shaA);
+    await goLive(id, move.body.deploymentId);
+    expect(containerEnv(id).GIT_SHA).toBe(shaA);
+
+    // A GIT_SHA of its own at the time of a move wins; rolling back to that move once it is gone
+    // runs the commit of the image the move ran again.
+    writeServiceEnv(panel.deps.db, panel.deps.secrets, id, "GIT_SHA=pinned\n", null);
+    const back = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId, confirm: true }, { cookie });
+    expect(back.status).toBe(200);
+    await fleet.settle();
+    expect(containerEnv(id).GIT_SHA).toBe("pinned");
+    await goLive(id, back.body.deploymentId);
+    writeServiceEnv(panel.deps.db, panel.deps.secrets, id, "", null);
+    nodeChecksOut(shaB);
+    await deployLive(id);
+    expect(containerEnv(id).GIT_SHA).toBe(shaB);
+    const rb = await callOp(panel, deploymentOps.rollback, { serviceId: id, deploymentId: back.body.deploymentId }, { cookie });
+    expect(rb.status).toBe(200);
     await fleet.settle();
     expect(containerEnv(id).GIT_SHA).toBe(shaA);
   });

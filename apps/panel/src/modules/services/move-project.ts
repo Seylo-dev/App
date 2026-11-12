@@ -153,6 +153,8 @@ export const moveProject = implement(serviceOps.moveProject, async (input, ctx) 
           toProjectId: input.projectId,
           removedGrants: removedGrants.map((g) => ({ userId: g.userId, actions: g.actions, createdBy: g.createdBy })),
           removedInviteGrants,
+          // Its env is sealed afresh, so GIT_SHA comes from the deployment whose image it runs.
+          fromDeploymentId: live.id,
         },
       })
       .returning()

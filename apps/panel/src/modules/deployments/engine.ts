@@ -38,7 +38,7 @@ import type { Deps } from "../../deps";
 import type { RefusedSpec } from "../../desired";
 import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
-import { recordBuiltCommit, withRolledBackCommit } from "../env/git-sha";
+import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-sha";
 import { dataVolumes } from "../services/insert";
 import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService } from "../services/rows";
@@ -189,8 +189,9 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
     phaseStartedAt: now,
     targetNodeIds: targets,
     runSettings: (d.runSettings ?? runSettingsOf(spec)) as unknown as Record<string, unknown>,
-    // A rollback also gets the GIT_SHA its image was built with; builds get theirs once the commit is known.
-    envSealed: d.envSealed ?? withRolledBackCommit(s.deps, d.rollbackOf, sealDeploymentEnv(s.deps, svc.id)),
+    // A rollback or a move to another project also gets the GIT_SHA its image was built with; builds get
+    // theirs once the commit is known.
+    envSealed: d.envSealed ?? withReusedCommit(s.deps, reusedImageOf(d), sealDeploymentEnv(s.deps, svc.id)),
     steps: d.steps.length > 0 ? d.steps : initialSteps(build),
   });
 
