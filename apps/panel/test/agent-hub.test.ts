@@ -140,6 +140,60 @@ describe("decideHello: re-join, panel node, NAT address", () => {
     decideHello(panel.deps.db, panel.deps.panelId, nonce, resumeHello(nonce, nodeId, key.privateKey), { remoteIp: "2a01:4f8::9" });
     expect(getSetting(panel.deps.db, "nodeConnectAddresses")).toEqual({ [nodeId]: "2a01:4f8::9" });
   });
+
+  test("a resume without facts (seylo set-panel's check) keeps the node's facts and public addresses", () => {
+    // compile.ts reads privateIpv4 from the row for other nodes' LB peers; a wiped row moves them.
+    const key = agentKey();
+    addJoinToken("facts");
+    const hello = joinHello(nonce, "facts", key);
+    hello.facts = create(NodeFactsSchema, {
+      hostname: "host-a",
+      publicIpv4: "140.82.121.4",
+      publicIpv6: "2a01:4f8::1",
+      privateIpv4: "10.0.0.7",
+      interfaceAddresses: ["10.0.0.7", "140.82.121.4"],
+    });
+    const nodeId = (decideHello(panel.deps.db, panel.deps.panelId, nonce, hello, { remoteIp: "140.82.121.4" }) as { nodeId: string })
+      .nodeId;
+    const row = () => panel.deps.db.select().from(nodes).where(eq(nodes.id, nodeId)).get();
+    const before = row();
+    expect(before?.facts).toMatchObject({ privateIpv4: "10.0.0.7" });
+
+    // Over the panel's IP from another address of the node.
+    const check = decideHello(panel.deps.db, panel.deps.panelId, nonce, resumeHello(nonce, nodeId, key.privateKey), {
+      remoteIp: "93.184.216.20",
+    });
+    expect(check).toMatchObject({ ok: true, joined: false });
+    const after = row();
+    expect(after?.facts).toEqual(before?.facts as Record<string, unknown>);
+    expect(after?.publicIpv4).toBe("140.82.121.4");
+    expect(after?.publicIpv6).toBe("2a01:4f8::1");
+    expect(after?.agentVersion).toBe("1.0.1");
+    // The address it connected from is the panel's own observation, kept as on every handshake.
+    expect(getSetting(panel.deps.db, "nodeConnectAddresses")).toEqual({ [nodeId]: "93.184.216.20" });
+
+    // The agent's own connect (facts again) replaces them.
+    const resumed = resumeHello(nonce, nodeId, key.privateKey);
+    resumed.facts = create(NodeFactsSchema, { hostname: "host-a", privateIpv4: "10.0.0.8" });
+    decideHello(panel.deps.db, panel.deps.panelId, nonce, resumed, { remoteIp: "93.184.216.20" });
+    expect(row()?.facts).toMatchObject({ privateIpv4: "10.0.0.8" });
+    expect(row()?.publicIpv4).toBe("93.184.216.20");
+    expect(row()?.publicIpv6).toBeNull();
+  });
+
+  test("a join without facts still records the public address it connected from", () => {
+    addJoinToken("bare");
+    const hello = joinHello(nonce, "bare", agentKey());
+    hello.facts = undefined;
+    const joined = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello, { remoteIp: "93.184.216.20" });
+    const row = panel.deps.db
+      .select()
+      .from(nodes)
+      .where(eq(nodes.id, (joined as { nodeId: string }).nodeId))
+      .get();
+    expect(row?.facts).toBeNull();
+    expect(row?.publicIpv4).toBe("93.184.216.20");
+  });
 });
 
 describe("decideHello", () => {

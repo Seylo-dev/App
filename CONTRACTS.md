@@ -521,7 +521,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   without `--insecure` (join's rule; `--pin` needs `https://`); the same
   address and pin as `panel_url` changes nothing. Before writing anything it dials the address (the pin, else the
   system roots), resumes as the node with `agent.key` (a ClientHello
-  without facts, so the panel keeps the facts it has) and checks the
+  without facts: the CLI has only their machine part, and the panel's
+  `decideHello` leaves the stored facts and public addresses alone for a
+  hello without them) and checks the
   recorded identity like every connect (`checkPanelID`,
   `verifyPanelIdentity`, and HelloAccepted.node_id); an accepted session is
   closed at once (the panel sees the node online for a moment). A
@@ -2238,7 +2240,11 @@ never type the ids by hand.
   describe`) leave it out and install the latest stable release.
   `publicIpv4`/`publicIpv6` hold the facts' own public addresses first and
   the public address the agent connected from only when the facts have
-  none; that connect address is also kept on its own, per node, in the
+  none. A resume or re-join without facts (`seylo set-panel`'s check;
+  every agent connect sends them) leaves `facts`, `publicIpv4` and
+  `publicIpv6` as they are, since 0.2.12 (before, it wiped the facts and
+  replaced the addresses until the agent connected again); a new node
+  without facts gets the connect address. That connect address is also kept on its own, per node, in the
   `nodeConnectAddresses` setting (`agent-hub/handshake.ts`, every
   handshake; dropped when the node connects from a private address or is
   removed), since an agent cannot make it up (git addresses count it as a

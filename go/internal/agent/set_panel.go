@@ -201,8 +201,12 @@ func checkSamePanel(ctx context.Context, cfg FileConfig, key ed25519.PrivateKey,
 			return nil, err
 		}
 		res.PanelID, res.PanelVersion = server.GetPanelId(), server.GetPanelVersion()
-		// No facts: the panel keeps the ones it has until the agent itself
-		// connects after the restart.
+		// No facts: this process has only the machine part of them (the
+		// runtime, network and build components fill the rest, capabilities
+		// included), and partial facts would replace the node's. A panel
+		// since 0.2.12 leaves the stored facts and public addresses alone
+		// for a hello without facts (decideHello in agent-hub/handshake.ts)
+		// until the agent itself connects after the restart.
 		return &agentv1.ClientHello{AgentVersion: version.Version, Credential: &agentv1.ClientHello_Resume{Resume: &agentv1.ResumeCredential{
 			NodeId:    cfg.NodeID,
 			Signature: rpc.SignHello(key, server, cfg.NodeID),

@@ -72,15 +72,19 @@ export function decideHello(
   options: HelloOptions = {},
 ): HelloDecision {
   const now = options.now ?? new Date();
-  const facts = hello.facts ? (toJson(NodeFactsSchema, hello.facts) as Record<string, unknown>) : null;
   const seen = publicRemote(options.remoteIp);
-  const report = {
-    facts,
-    agentVersion: hello.agentVersion,
-    lastSeenAt: now,
+  // What the hello says about the machine. Every agent connect sends its
+  // facts; a hello without them (`seylo set-panel` resuming only to check
+  // the panel's identity, agent/set_panel.go) says nothing about the
+  // machine, so a known node's row keeps the facts and public addresses it
+  // has (compile.ts, domains and uptime read them from the row) until the
+  // agent itself connects. A new node gets the address it connected from.
+  const machine = {
+    facts: hello.facts ? (toJson(NodeFactsSchema, hello.facts) as Record<string, unknown>) : null,
     publicIpv4: hello.facts?.publicIpv4 || seen.v4,
     publicIpv6: hello.facts?.publicIpv6 || seen.v6,
   };
+  const report = { agentVersion: hello.agentVersion, lastSeenAt: now, ...(hello.facts ? machine : {}) };
 
   switch (hello.credential.case) {
     case "resume": {
@@ -148,7 +152,7 @@ export function decideHello(
         const canBuild = row.canBuild;
         const node = tx
           .insert(nodes)
-          .values({ name, publicKey: Buffer.from(publicKey), canBuild, isPanelNode, ...report })
+          .values({ name, publicKey: Buffer.from(publicKey), canBuild, isPanelNode, ...report, ...machine })
           .returning({ id: nodes.id })
           .get();
         tx.update(joinTokens).set({ nodeId: node.id }).where(eq(joinTokens.id, row.id)).run();
