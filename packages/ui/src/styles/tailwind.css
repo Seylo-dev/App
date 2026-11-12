@@ -206,6 +206,34 @@
   }
 }
 
+/*
+ * A list that scrolls up and down inside a card (the Environment tab's
+ * References): no scrollbar, and the top or bottom edge that hides items
+ * fades out. scrollFadeColumnRef (lib/scroll-fade.ts) sets the data-fade-*
+ * attributes. Focus moving by Tab stops clear of the faded edges.
+ */
+@utility scroll-column {
+  overflow-y: auto;
+  scrollbar-width: none;
+  scroll-padding-block: 24px;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  &[data-fade-end] {
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  }
+
+  &[data-fade-start] {
+    mask-image: linear-gradient(to top, #000 calc(100% - 24px), transparent);
+  }
+
+  &[data-fade-start][data-fade-end] {
+    mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  }
+}
+
 /* Loading placeholders: a soft light sweep over the muted block. */
 @utility skeleton-shimmer {
   overflow: hidden;

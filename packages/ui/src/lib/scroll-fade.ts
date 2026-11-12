@@ -6,6 +6,9 @@
 // data-fade-end) and the utility fades them out. It also keeps the current
 // item (the active tab, the selected option) in the visible part of the
 // row, so a row opened on a later tab never hides which one is selected.
+// Lists that scroll up and down inside a card (the Environment tab's
+// References) do the same with `scroll-column` and `scrollFadeColumnRef`:
+// the top and bottom edges fade while they hide items.
 
 import { type Ref, useCallback } from "react";
 
@@ -103,6 +106,57 @@ export function scrollFadeRef(el: HTMLElement | null): (() => void) | undefined 
   const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => revealCurrent(el)) : 0;
   return () => {
     if (frame) cancelAnimationFrame(frame);
+    el.removeEventListener("scroll", update);
+    resize?.disconnect();
+    items?.disconnect();
+  };
+}
+
+export interface ScrollColumnBox {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+}
+
+/** Which edges of a list that scrolls up and down hide items: start is the top, end the bottom. */
+export function scrollColumnFadeEdges(box: ScrollColumnBox): { start: boolean; end: boolean } {
+  return scrollFadeEdges({ scrollLeft: box.scrollTop, clientWidth: box.clientHeight, scrollWidth: box.scrollHeight });
+}
+
+/**
+ * A ref callback for a `scroll-column` element: keeps data-fade-start (the
+ * top) and data-fade-end (the bottom) in step while the list scrolls,
+ * resizes or its items grow and shrink (a group that folds). Pass it as
+ * `ref={scrollFadeColumnRef}`; React runs the cleanup it returns.
+ */
+export function scrollFadeColumnRef(el: HTMLElement | null): (() => void) | undefined {
+  if (!el) return undefined;
+  const update = () => {
+    const { start, end } = scrollColumnFadeEdges(el);
+    el.toggleAttribute("data-fade-start", start);
+    el.toggleAttribute("data-fade-end", end);
+  };
+  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+  const watchItems = () => {
+    if (!resize) return;
+    resize.disconnect();
+    resize.observe(el);
+    // An item that grows (a group that opens) makes the list longer without resizing it.
+    for (const child of el.children) resize.observe(child);
+  };
+  // Items added or removed (the list's own children): watch the new ones too.
+  const items =
+    typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver(() => {
+          watchItems();
+          update();
+        });
+  watchItems();
+  items?.observe(el, { childList: true });
+  el.addEventListener("scroll", update, { passive: true });
+  update();
+  return () => {
     el.removeEventListener("scroll", update);
     resize?.disconnect();
     items?.disconnect();

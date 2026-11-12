@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { revealDelta, scrollFadeEdges } from "./scroll-fade";
+import { revealDelta, scrollColumnFadeEdges, scrollFadeEdges } from "./scroll-fade";
 
 test("a row that fits fades nothing", () => {
   expect(scrollFadeEdges({ scrollLeft: 0, clientWidth: 400, scrollWidth: 400 })).toEqual({ start: false, end: false });
@@ -26,4 +26,14 @@ test("the current item is scrolled clear of the faded edges", () => {
   expect(revealDelta(row, { left: -60, right: 10 })).toBe(-60 - 16 - 32);
   // Under the end fade counts as hidden.
   expect(revealDelta(row, { left: 300, right: 360 })).toBe(360 - 374 + 32);
+});
+
+test("a list that scrolls up and down fades the top and bottom edges that hide items", () => {
+  // The References list: 1240px of groups in a 520px card.
+  const list = { clientHeight: 520, scrollHeight: 1240 };
+  expect(scrollColumnFadeEdges({ ...list, scrollTop: 0 })).toEqual({ start: false, end: true });
+  expect(scrollColumnFadeEdges({ ...list, scrollTop: 300 })).toEqual({ start: true, end: true });
+  expect(scrollColumnFadeEdges({ ...list, scrollTop: 720 })).toEqual({ start: true, end: false });
+  // Everything fits (the groups folded): no fade.
+  expect(scrollColumnFadeEdges({ scrollTop: 0, clientHeight: 520, scrollHeight: 520.5 })).toEqual({ start: false, end: false });
 });
