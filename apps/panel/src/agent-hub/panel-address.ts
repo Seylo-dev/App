@@ -80,6 +80,15 @@ export const inspectedKeyMark = "inspected:";
  */
 const inspectedText = /TLS inspection|certificate signed by unknown authority|did not present the panel's pinned key/;
 
+/**
+ * Text of a move alert whose address answered with Traefik's own default
+ * certificate (the agent's dial error says so, and quotes the issuer of
+ * what came in place of a pin): the panel's proxy had no certificate for
+ * the name for a while, no firewall re-signed it, so the text above does
+ * not count.
+ */
+const traefikDefaultText = /answers with Traefik's own certificate|issued by "TRAEFIK DEFAULT CERT"/i;
+
 /** When the node's open move alert about an inspected certificate was raised; null when it has none. */
 export function inspectedMoveAlertAt(db: PanelDb, nodeId: string): Date | null {
   const prefix = moveFailedAlertPrefix(nodeId);
@@ -88,7 +97,9 @@ export function inspectedMoveAlertAt(db: PanelDb, nodeId: string): Date | null {
     .from(alerts)
     .where(and(keyStartsWith(prefix), isNull(alerts.resolvedAt)))
     .all();
-  const hit = open.find((row) => row.key.startsWith(prefix + inspectedKeyMark) || inspectedText.test(row.message));
+  const hit = open.find(
+    (row) => row.key.startsWith(prefix + inspectedKeyMark) || (inspectedText.test(row.message) && !traefikDefaultText.test(row.message)),
+  );
   return hit?.createdAt ?? null;
 }
 

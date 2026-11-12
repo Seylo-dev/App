@@ -170,16 +170,40 @@ test("an agent before 0.2.14 says so in the message only", async () => {
   expect(panelAddressChoice(panel.deps.db, agent.nodeId).choice).toBe("follow");
 });
 
+test("Traefik's own certificate at the domain is no inspected certificate, from any agent", async () => {
+  liveDomain();
+  const agent = await twoNodes();
+  // A 0.2.13 agent moving from a pinned address: Go's error, conn's hint and its own sentence about TLS inspection.
+  await reportMoveAlert(agent, 1n, {
+    message:
+      "Could not move to the panel address https://panel.example.com: dial panel: tls: failed to verify certificate: x509: certificate signed by unknown authority. " +
+      "panel.example.com answers with Traefik's own certificate: the panel's server has no certificate for that name yet (see the panel domain's status)\n" +
+      "The node keeps connecting through https://203.0.113.4:3443 and tries again in 24 hours or when the agent restarts. " +
+      "If the node's network decrypts HTTPS (TLS inspection), it cannot use that address and stays on its pinned one.",
+  });
+  expect(panelAddressChoice(panel.deps.db, agent.nodeId)).toMatchObject({ choice: "follow", by: "default" });
+  await reportMoveAlert(agent, 2n, { message: "moved", resolved: true });
+  // The same in place of a pin.
+  await reportMoveAlert(agent, 3n, {
+    message:
+      "Could not move to the panel address https://panel.example.com: dial panel: conn: panel certificate does not match the pinned key " +
+      '(the certificate presented says it was issued by "TRAEFIK DEFAULT CERT"). panel.example.com did not present the panel\'s pinned key: ' +
+      "a firewall or proxy on this server's network may decrypt HTTPS (TLS inspection), or the address leads to another server",
+  });
+  expect(panelAddressChoice(panel.deps.db, agent.nodeId).choice).toBe("follow");
+  expect(agentMoveTarget(panel.deps.db, agent.nodeId)).not.toBeNull();
+});
+
 test("HelloAccepted and the desired state carry the panel's name for the node", async () => {
   const { cookie } = await createUser(panel, "owner");
   let agent = await twoNodes();
   const name = row(agent.nodeId).name;
   expect(agent.accepted?.nodeName).toBe(name);
-  await callOp(panel, nodeOps.rename, { nodeId: agent.nodeId, name: "il-tlv" }, { cookie });
+  await callOp(panel, nodeOps.rename, { nodeId: agent.nodeId, name: "edge-east" }, { cookie });
   const settings = compileNodeSettings(panel.deps.db, row(agent.nodeId), { revision: 1n, secrets: panel.deps.secrets });
-  expect(settings.nodeName).toBe("il-tlv");
+  expect(settings.nodeName).toBe("edge-east");
   agent = await reconnect(agent);
-  expect(agent.accepted?.nodeName).toBe("il-tlv");
+  expect(agent.accepted?.nodeName).toBe("edge-east");
 });
 
 test("an offline node's row says why the panel refused it, and only with the node's own signature", async () => {

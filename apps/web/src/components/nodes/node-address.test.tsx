@@ -18,7 +18,7 @@ import { NodeTable } from "./node-table";
 const node = (values: Partial<NodeDetail>) =>
   ({
     id: "node-1",
-    name: "il-tlv",
+    name: "edge-east",
     location: null,
     tags: [],
     status: "online",
