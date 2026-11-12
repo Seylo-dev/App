@@ -5,7 +5,7 @@
 // with its password) does not copy it, Enter does, and the field shows a
 // focus ring while the keyboard is on it. Demo data.
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { databaseOf, ids as svc } from "./demo/service";
@@ -16,6 +16,15 @@ test.use({ storageState: stateFile, permissions: ["clipboard-read", "clipboard-w
 const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
 const setClipboard = (page: Page, text: string) => page.evaluate((value) => navigator.clipboard.writeText(value), text);
 
+/** Focuses what comes right before target in tab order, so one Tab lands on it the way a keyboard user crosses the page. */
+const focusBefore = (target: Locator) =>
+  target.evaluate((el) => {
+    const focusable = [
+      ...document.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'),
+    ].filter((e) => e === el || e.getClientRects().length > 0);
+    focusable[focusable.indexOf(el as HTMLElement) - 1]?.focus();
+  });
+
 test.describe("copy", () => {
   test("focusing a copy field does not copy it; Enter and a click do", async ({ page }) => {
     await installDemo(page);
@@ -25,8 +34,8 @@ test.describe("copy", () => {
     await expect(url).toBeVisible();
     await setClipboard(page, "what was there before");
 
-    // Tab from the button before it, the way a keyboard user crosses the page.
-    await internal.getByRole("button", { name: "Reset password" }).focus();
+    // Tab from what comes before it, the way a keyboard user crosses the page.
+    await focusBefore(url);
     await page.keyboard.press("Tab");
     await expect(url).toBeFocused();
     await page.keyboard.press("Tab");
@@ -86,7 +95,7 @@ test.describe("copy", () => {
     });
 
     expect(await outline(field)).toMatchObject({ style: "none" });
-    await internal.getByRole("button", { name: "Reset password" }).focus();
+    await focusBefore(url);
     await page.keyboard.press("Tab");
     await expect(url).toBeFocused();
     // Before: the value button had outline-none and the field showed nothing.
