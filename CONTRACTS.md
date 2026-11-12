@@ -4676,7 +4676,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   severity `warning` like `empty-reference`: counted as problems
   in the editor, never blocking a save (only syntax errors do), returned by
   env.set, env.setVariable and env.analyze with their fixes. Lines with
-  syntax problems are skipped.
+  syntax problems are skipped, and neither runs when the context says
+  `references: false` (the web Shared variables sheet: shared values
+  cannot hold references, env.setShared refuses one, so a hint to write
+  one would only lead to a refused save; env.references never sets it).
   `single-quoted-reference`: a well-formed `${{target.VARIABLE}}` inside a
   single-quoted value (single quotes keep their text as is, so the app gets
   the characters), one warning per reference on its text, `params`
@@ -4696,7 +4699,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   is left alone, so is one after `@`); right after it the end, a blank, a
   quote, `,` `;` `/` `:` `|` `?` `#` `&` `)` `>` `]` (never `.`, so
   `api.DOMAIN.com` is no token, nor `@`, `-` or `=`). Text inside `${{ }}`
-  and a double-quoted value's escapes never count. VARIABLE must be in
+  never counts. In double quotes the escapes the parser reads stand for
+  what they become (`\n` `\r` `\t` blanks, `\"` a quote, `\\` and `\$` no
+  delimiter), and any other backslash is a backslash, no delimiter either
+  (`"C:\dir\api.URL"` has no token, the same as unquoted). VARIABLE must be in
   capitals (letters, digits, `_`, starting with a letter or `_`), so
   `example.com`, `file.txt`, `api.domain` and `1.2` never match. It warns
   when name is a target (a service, the service itself with

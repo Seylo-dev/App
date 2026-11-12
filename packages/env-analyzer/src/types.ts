@@ -198,6 +198,13 @@ export interface AnalyzeContext {
   self: { serviceId: string | null; name: string; nodes: NodeRef[]; builtins?: ReferenceVariable[] };
   /** Other services of the same project and the project's shared variables. */
   targets: ReferenceTarget[];
+  /**
+   * false: the text cannot hold references (the project's shared variables,
+   * which env.setShared refuses with one), so the hints that suggest
+   * writing one (single-quoted-reference, bare-reference) are left out.
+   * Left out, references are allowed. env.references never sets it.
+   */
+  references?: boolean;
 }
 
 export interface AnalyzeResult {

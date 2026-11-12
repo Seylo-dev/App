@@ -179,10 +179,14 @@ function bareReference(
 /**
  * The value with what can never be a token blanked out, same length so
  * offsets stay: text inside ${{ }} (and a broken ${{ up to the end of its
- * line) becomes a character that is no delimiter, and in double quotes an
- * escape such as \n becomes two blanks.
+ * line) becomes a character that is no delimiter. In double quotes the
+ * escapes the parser reads (\n \r \t \" \\ \$) stand in for what they
+ * become: \n, \r and \t two blanks, \" two quotes, \\ and \$ (a backslash
+ * or a dollar, neither a delimiter) masked. Any other backslash stays a
+ * backslash, so C:\dir\api.URL is no token, the same as unquoted.
  */
 function scannable(raw: string, quoted: boolean): string {
   const out = raw.replace(/\$\{\{.*?(?:\}\}|$)/gm, (text) => masked.repeat(text.length));
-  return quoted ? out.replace(/\\[^]/g, "  ") : out;
+  if (!quoted) return out;
+  return out.replace(/\\[nrt"\\$]/g, (escape) => (escape === '\\"' ? '""' : /\\[nrt]/.test(escape) ? "  " : masked.repeat(2)));
 }

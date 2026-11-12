@@ -1,8 +1,10 @@
 // The project's shared variables (${{project.NAME}}), edited in a sheet from
 // the Environment tab. Shared variables cannot reference services, so the
-// editor runs the analyzer with an empty context: syntax only.
+// editor runs the analyzer with an empty context and references: false:
+// syntax only, without the hints that suggest writing a reference (the
+// save would refuse it).
 
-import { analyzeEnv } from "@seylo/env-analyzer";
+import { type AnalyzeContext, analyzeEnv } from "@seylo/env-analyzer";
 import { env, OpError } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
@@ -15,7 +17,7 @@ import { EnvEditor } from "../editor/env-editor";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpView, retryOp } from "../op-state";
 
-const sharedContext = { self: { serviceId: null, name: "project", nodes: [] }, targets: [] };
+export const sharedContext: AnalyzeContext = { self: { serviceId: null, name: "project", nodes: [] }, targets: [], references: false };
 
 export function SharedVariablesSheet({
   projectId,

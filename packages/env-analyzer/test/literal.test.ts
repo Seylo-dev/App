@@ -124,6 +124,24 @@ describe("single-quoted-reference", () => {
   });
 });
 
+describe("where references are not allowed", () => {
+  // The project's shared variables sheet: plain values, env.setShared refuses a reference.
+  const shared: AnalyzeContext = { self: { serviceId: null, name: "project", nodes: [] }, targets: [], references: false };
+  const text = ["TPL='Hello ${{user.NAME}}'", "X=api.URL", "Y=project.URL", ""].join("\n");
+
+  test("neither hint suggests writing a reference", () => {
+    expect(analyzeEnv(text, shared).diagnostics).toEqual([]);
+    // The same text where references are allowed gets all three.
+    const allowed = analyzeEnv(text, { self: shared.self, targets: [] }).diagnostics.map((d) => d.code);
+    expect(allowed).toEqual(["single-quoted-reference", "bare-reference", "bare-reference"]);
+    expect(analyzeEnv(text, { ...context, references: false }).diagnostics).toEqual([]);
+  });
+
+  test("syntax problems still show", () => {
+    expect(analyzeEnv("TPL='Hello\n", shared).diagnostics.map((d) => d.code)).toEqual(["unterminated-quote"]);
+  });
+});
+
 describe("bare-reference", () => {
   /** [token, reference, fix texts] per warning. */
   const found = (text: string, ctx: AnalyzeContext = context) =>
@@ -239,6 +257,21 @@ describe("bare-reference", () => {
       "",
     ].join("\n");
     expect(found(text)).toEqual([]);
+  });
+
+  test("a backslash in double quotes is a backslash unless the parser reads an escape", () => {
+    // The app gets C:\dir\api.URL: a backslash is no delimiter, the same as unquoted.
+    const text = ['A="C:\\dir\\api.URL"', "B=C:\\dir\\api.URL", 'C="\\xdb.PASSWORD"', 'D="\\\\api.URL"', 'E="\\$api.URL"', ""].join("\n");
+    expect(parseEnv(text).entries.map((e) => e.value)).toEqual(["C:\\dir\\api.URL", "C:\\dir\\api.URL", "\\xdb.PASSWORD", "\\api.URL", "$api.URL"]);
+    expect(found(text)).toEqual([]);
+    // Escapes the parser reads stand in for what they become: line breaks and tabs are blanks, \" a quote.
+    const escapes = ['A="x\\tapi.URL"', 'B="\\"api.URL\\""', 'C="\\r\\napi.URL\\n"', ""].join("\n");
+    expect(found(escapes)).toEqual([
+      ["api.URL", "${{api.URL}}", ["${{api.URL}}"]],
+      ["api.URL", "${{api.URL}}", ["${{api.URL}}"]],
+      ["api.URL", "${{api.URL}}", ["${{api.URL}}"]],
+    ]);
+    expect(resolveEnv(parseEnv(fixed("bare-reference", escapes)), context).values.B).toBe('"https://api.example.com"');
   });
 
   test("long values take linear time", () => {

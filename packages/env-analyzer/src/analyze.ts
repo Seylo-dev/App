@@ -63,7 +63,10 @@ export function analyzeParsed(parsed: ParsedEnv, context: AnalyzeContext): Diagn
     if (entry.quote !== "single") diagnostics.push(...checkLiteralAddresses(index, entry, context));
     if (!parsed.problems.some((p) => p.range.start < entry.range.end && p.range.end > entry.range.start)) {
       diagnostics.push(...checkHardcoded(index, entry, context));
-      diagnostics.push(...checkSingleQuoted(index, entry), ...checkBareReferences(index, entry, context));
+      // Where references are not allowed, a hint to write one would only lead to a refused save.
+      if (context.references !== false) {
+        diagnostics.push(...checkSingleQuoted(index, entry), ...checkBareReferences(index, entry, context));
+      }
     }
   }
 
