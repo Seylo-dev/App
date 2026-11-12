@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,9 +31,12 @@ import (
 // TLS. A fallback an older agent kept (a leaf without keyCertSign, which
 // Bun's BoringSSL and OpenSSL 1.1 refuse as "unable to verify the first
 // certificate"; the VM's OpenSSL 3 already calls it self-signed) is made
-// again and installed: the database then serves the new one, which
-// -verify_return_error reports as "self-signed certificate" and which
-// verifies with its own file as the CA (libpq verify-ca, mysql --ssl-ca).
+// again and installed: the database then serves the new one (CA:FALSE,
+// keyCertSign, name-constrained), which -verify_return_error reports as
+// "self-signed certificate" and which verifies with its own file as the
+// CA (libpq verify-ca, mysql --ssl-ca). Once the exposure gets a TLS host
+// name without an ACME certificate, the fallback is made again for that
+// name and verifies with the name checked too (libpq verify-full).
 func TestExposedTLSFallbackIsSelfSignedForOpenSSL(t *testing.T) {
 	openssl, err := exec.LookPath("openssl")
 	if err != nil {
@@ -134,7 +138,8 @@ func TestExposedTLSFallbackIsSelfSignedForOpenSSL(t *testing.T) {
 					t.Fatal("the old fallback is still kept")
 				}
 				got := served()
-				if !bytes.Equal(got.Raw, keptBlock.Bytes) || !got.IsCA || got.KeyUsage&x509.KeyUsageCertSign == 0 {
+				if !bytes.Equal(got.Raw, keptBlock.Bytes) || got.IsCA || got.KeyUsage&x509.KeyUsageCertSign == 0 ||
+					!got.PermittedDNSDomainsCritical || len(got.PermittedDNSDomains) == 0 {
 					t.Fatal("the database does not serve the new fallback")
 				}
 				if out := sClient("-verify_return_error"); !regexp.MustCompile(`verify error:num=18:self[- ]signed certificate`).MatchString(out) {
@@ -142,6 +147,23 @@ func TestExposedTLSFallbackIsSelfSignedForOpenSSL(t *testing.T) {
 				}
 				if out := sClient("-verify_return_error", "-CAfile", ca); !regexp.MustCompile(`Verify return code: 0 \(ok\)`).MatchString(out) {
 					t.Fatalf("the new fallback with itself as the CA: %s", out)
+				}
+
+				// A TLS host name with no ACME certificate for it: made again
+				// for that name, which a client that checks it accepts.
+				const host = "db.seylo.test"
+				if err := x.Apply(e.Ctx(time.Minute), withHostname(s, host)); err != nil {
+					t.Fatalf("installing the fallback for %s: %v", host, err)
+				}
+				named, _ := os.ReadFile(ca)
+				if bytes.Equal(named, kept) {
+					t.Fatal("the fallback without a host name is kept")
+				}
+				if got := served(); !slices.Equal(got.DNSNames, []string{host}) {
+					t.Fatalf("the database serves %v", got.DNSNames)
+				}
+				if out := sClient("-verify_return_error", "-CAfile", ca, "-verify_hostname", host); !regexp.MustCompile(`Verify return code: 0 \(ok\)`).MatchString(out) {
+					t.Fatalf("the fallback for %s with itself as the CA and the name checked: %s", host, out)
 				}
 			})
 		}
