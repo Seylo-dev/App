@@ -189,20 +189,15 @@ export function materializeService(caller: HostCaller & { secrets: SecretBox }, 
 
 /**
  * What a copy of a service keeps of its spec: everything but its place in a
- * stack, a preview's identity, the entry node and previews (off). A clone
- * also never deploys itself on the next push and starts without an
- * uploaded archive's name (it copies the archive separately); an export
- * keeps both and drops the previews' domain pattern, which names the old
- * panel's wildcard domain.
+ * stack, a preview's identity, the entry node and previews (off). The
+ * source stays as it is, Deploy on push included (an import decides that
+ * itself), except that a clone starts without an uploaded archive's name
+ * (it copies the archive separately); an export drops the previews' domain
+ * pattern, which names the old panel's wildcard domain.
  */
 export function portableSpecOf(spec: ServiceSpecJson, mode: "clone" | "export"): ServiceSpecJson {
-  const repo = spec.source.type === "github" || spec.source.type === "git" || spec.source.type === "provider";
   const source: ServiceSpecJson["source"] =
-    mode === "clone" && repo
-      ? { ...(spec.source as Extract<ServiceSpecJson["source"], { deployOnPush: boolean }>), deployOnPush: false }
-      : mode === "clone" && spec.source.type === "upload"
-        ? { type: "upload", fileName: null }
-        : spec.source;
+    mode === "clone" && spec.source.type === "upload" ? { type: "upload", fileName: null } : spec.source;
   return {
     ...spec,
     source,

@@ -381,28 +381,42 @@ describe("services.clone", () => {
     expect(panel.deps.db.select().from(services).where(eq(services.nameKey, "web-copy")).get()).toBeUndefined();
   });
 
-  test("push deploys and previews stay off on the clone", async () => {
+  test("a clone keeps the source's Deploy on push, on or off, and deployOnPush overrides it; previews stay off", async () => {
     const id = await app(shop, "web");
     const spec = row(id)?.spec as Record<string, unknown>;
-    panel.deps.db
-      .update(services)
-      .set({
-        spec: {
-          ...spec,
-          source: { type: "git", url: "https://git.example.com/a/b.git", branch: "main", credentialId: null, deployOnPush: true },
-          previews: { enabled: true, domainPattern: "", maxPreviews: 5 },
-        },
-      })
-      .where(eq(services.id, id))
-      .run();
-    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA }, { cookie });
-    expect(res.body.service.sourceConfig).toMatchObject({ type: "git", deployOnPush: false });
-    const cloneSpec = row(res.body.service.id)?.spec as { previews: { enabled: boolean } } | undefined;
-    expect(cloneSpec?.previews.enabled).toBe(false);
+    const source = (deployOnPush: boolean) => ({
+      type: "git",
+      url: "https://git.example.com/a/b.git",
+      branch: "main",
+      credentialId: null,
+      deployOnPush,
+    });
+    const setPush = (deployOnPush: boolean) =>
+      panel.deps.db
+        .update(services)
+        .set({ spec: { ...spec, source: source(deployOnPush), previews: { enabled: true, domainPattern: "", maxPreviews: 5 } } })
+        .where(eq(services.id, id))
+        .run();
+    const cloned = async (input: { deployOnPush?: boolean } = {}) => {
+      const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA, ...input }, { cookie });
+      expect(res.status).toBe(200);
+      return res.body.service as { id: string; sourceConfig: unknown };
+    };
+
+    setPush(true);
+    const kept = await cloned();
+    expect(kept.sourceConfig).toEqual(source(true));
+    expect(row(kept.id)?.spec).toMatchObject({ previews: { enabled: false } });
+    expect((await cloned({ deployOnPush: false })).sourceConfig).toEqual(source(false));
+
+    setPush(false);
+    expect((await cloned()).sourceConfig).toEqual(source(false));
+    expect((await cloned({ deployOnPush: true })).sourceConfig).toEqual(source(true));
+    // The source keeps its own.
+    expect(row(id)?.spec).toMatchObject({ source: { deployOnPush: false } });
   });
 
-  test("a clone of a GitLab, Gitea or Bitbucket app does not deploy on push either", async () => {
-    // The provider poller deploys every service with deployOnPush, webhook or not.
+  test("a GitLab, Gitea or Bitbucket app's clone keeps deploying on push unless told not to", async () => {
     const id = await app(shop, "api");
     const spec = row(id)?.spec as Record<string, unknown>;
     const source = {
@@ -419,7 +433,36 @@ describe("services.clone", () => {
       .where(eq(services.id, id))
       .run();
     const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA }, { cookie });
-    expect(res.body.service.sourceConfig).toMatchObject({ type: "provider", repo: "acme/api", deployOnPush: false });
+    expect(res.body.service.sourceConfig).toEqual(source);
+    const off = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA, deployOnPush: false }, { cookie });
+    expect(off.body.service.sourceConfig).toEqual({ ...source, deployOnPush: false });
+  });
+
+  test("Deploy on push belongs to repository sources: an image or upload app's clone ignores it", async () => {
+    const id = await app(shop, "web");
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA, deployOnPush: true }, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.service.sourceConfig).toEqual({ type: "image", image: "nginx:1.27", registryId: null });
+    expect((row(res.body.service.id)?.spec as { source?: object } | undefined)?.source).toEqual({
+      type: "image",
+      image: "nginx:1.27",
+      registryId: null,
+    });
+
+    const spec = row(id)?.spec as Record<string, unknown>;
+    panel.deps.db
+      .update(services)
+      .set({ spec: { ...spec, source: { type: "upload", fileName: "site.tar.gz" } } })
+      .where(eq(services.id, id))
+      .run();
+    const upload = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: id, projectId: blog, nodeId: nodeA, deployOnPush: false },
+      { cookie },
+    );
+    expect(upload.status).toBe(200);
+    expect(upload.body.service.sourceConfig).toEqual({ type: "upload", fileName: null });
   });
 
   test("an upload app's clone gets a copy of the newest archive, for people who can read its files", async () => {

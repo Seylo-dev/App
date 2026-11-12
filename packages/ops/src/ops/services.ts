@@ -757,7 +757,7 @@ export const clone = defineOp({
   kind: "mutation",
   summary: "Clone a service",
   description:
-    "Copies a service (app, cron, database, Box, or a compose member as a standalone app) into the same or another project and node: source, build settings, environment (only when you can read it and may edit env, and files for file mounts, in the target project; its references to the source itself name the clone), health check, resources, crash policy, notes, and the main domain's access rules onto a new automatic domain. Domains, deploy history, cron jobs, backups, alerts and exposed ports are not copied. Volumes start empty or get a copy of the source's data (the source stops during the copy when stopSource is set, always for databases). The clone is created stopped and named <name>-copy unless named. Needs services.view on the source and services.create in the target project.",
+    "Copies a service (app, cron, database, Box, or a compose member as a standalone app) into the same or another project and node: source, build settings, environment (only when you can read it and may edit env, and files for file mounts, in the target project; its references to the source itself name the clone), health check, resources, crash policy, notes, and the main domain's access rules onto a new automatic domain. Domains, deploy history, cron jobs, backups, alerts and exposed ports are not copied. Volumes start empty or get a copy of the source's data (the source stops during the copy when stopSource is set, always for databases). A repository source (GitHub, a git URL, GitLab, Gitea or Bitbucket) keeps its Deploy on push setting unless deployOnPush says otherwise; while it is on, pushes to the branch deploy the clone too (through a repository webhook of its own when the connected GitHub account or a provider connection reads the repository). The clone is created stopped and named <name>-copy unless named. Needs services.view on the source and services.create in the target project.",
   input: Type.Object({
     serviceId: Id,
     projectId: Id,
@@ -768,6 +768,11 @@ export const clone = defineOp({
     stopSource: Type.Optional(Type.Boolean()),
     /** Add an automatic domain from the target node's wildcard record (needs domains.edit there). */
     autoDomain: Type.Optional(Type.Boolean()),
+    /**
+     * Deploy the clone on each push to its branch: repository sources only (github, git, provider), the
+     * others have no such setting and ignore it. Left out, the clone keeps the source's setting.
+     */
+    deployOnPush: Type.Optional(Type.Boolean()),
   }),
   output: Type.Object({
     service: ServiceDetail,

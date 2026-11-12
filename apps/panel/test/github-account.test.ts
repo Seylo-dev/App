@@ -454,6 +454,77 @@ describe("the account as a source", () => {
     expect(fleet.builds[0]?.request).toMatchObject({ source: { source: { case: "git", value: { token: tokens.classic } } } });
   });
 
+  test("a clone that deploys on push gets its own repository webhook, whose deliveries deploy the clone", async () => {
+    setSetting(panel.deps.db, "panelDomain", "panel.example.com");
+    const { body: account } = await connect();
+    const id = await app();
+    await connectRepo(id, account.id);
+    const source = panel.deps.db.select().from(githubRepoWebhooks).where(eq(githubRepoWebhooks.serviceId, id)).get();
+    calls = [];
+    const cloned = await callOp(panel, serviceOps.clone, { serviceId: id, projectId, nodeId: nodeA, name: "web-staging" }, { cookie });
+    expect(cloned.status).toBe(200);
+    const cloneId = cloned.body.service.id as string;
+    expect(cloned.body.service.sourceConfig).toMatchObject({
+      type: "github",
+      accountId: account.id,
+      repo: "acme/shop",
+      deployOnPush: true,
+    });
+    const create = calls.filter((c) => c.method === "POST" && c.path === "/repos/acme/shop/hooks");
+    expect(create).toHaveLength(1);
+    expect(create[0]?.auth).toBe(tokens.classic);
+    const hook = panel.deps.db.select().from(githubRepoWebhooks).where(eq(githubRepoWebhooks.serviceId, cloneId)).get();
+    expect(hook).toMatchObject({ remoteId: "991", error: null, url: `https://panel.example.com/api/hooks/github-repo/${hook?.id}` });
+    expect(hook?.id).not.toBe(source?.id);
+    expect((await callOp(panel, github.repoWebhook, { serviceId: cloneId }, { cookie })).body).toMatchObject({
+      created: true,
+      error: null,
+    });
+
+    const sha = "3333333333333333333333333333333333333333";
+    const payload = JSON.stringify({
+      ref: "refs/heads/main",
+      after: sha,
+      repository: { full_name: "acme/shop" },
+      head_commit: { id: sha, message: "Fix", author: { username: "dev" } },
+      sender: { login: "dev" },
+    });
+    const res = await panel.app.handle(
+      new Request(`http://panel.test/api/hooks/github-repo/${hook?.id}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "push",
+          "x-github-delivery": crypto.randomUUID(),
+          "x-hub-signature-256": `sha256=${createHmac("sha256", hookSecret ?? "")
+            .update(payload)
+            .digest("hex")}`,
+        },
+        body: payload,
+      }),
+    );
+    expect(await res.json()).toMatchObject({ ok: true, deployed: 1 });
+    await fleet.settle();
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, cloneId)).get()).toMatchObject({
+      commitSha: sha,
+      trigger: "push",
+    });
+
+    // Cloned with it off: no webhook on the repository for it.
+    calls = [];
+    const quiet = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: id, projectId, nodeId: nodeA, name: "web-quiet", deployOnPush: false },
+      { cookie },
+    );
+    expect(quiet.status).toBe(200);
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/hooks"))).toBe(false);
+    expect(
+      panel.deps.db.select().from(githubRepoWebhooks).where(eq(githubRepoWebhooks.serviceId, quiet.body.service.id)).get(),
+    ).toBeUndefined();
+  });
+
   test("without a panel domain, or when GitHub refuses the webhook, the branch is polled every minute", async () => {
     const { body: account } = await connect();
     const id = await app();

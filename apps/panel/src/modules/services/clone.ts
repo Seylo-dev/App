@@ -9,11 +9,14 @@
 // volume data needs files.read. Writing them into the clone needs what
 // writing them there always needs: env.edit in the target project (and
 // files.write for file mounts). The copied .env names the clone where it
-// named the source itself (impact.ts renameSelf). Domains (unique per
-// host), deploy history, cron jobs, backups, alerts and exposed ports are
-// never copied. The clone starts stopped and never deployed; a stopped,
-// never-deployed service is still sent to its node (services/desired.ts)
-// so copied data is kept.
+// named the source itself (impact.ts renameSelf). A repository source keeps
+// the source's Deploy on push unless the caller says otherwise; while it is
+// on, a source read through the connected GitHub account or a provider
+// connection gets the clone its own repository webhook (connectCloneHook).
+// Domains (unique per host), deploy history, deploy triggers, cron jobs,
+// backups, alerts and exposed ports are never copied. The clone starts
+// stopped and never deployed; a stopped, never-deployed service is still
+// sent to its node (services/desired.ts) so copied data is kept.
 //
 // Data copies run as a job: stop the source when asked (always for
 // databases), pipe each volume ExportVolume -> ImportVolume through the
@@ -24,13 +27,14 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "@seylo/env-analyzer";
-import { OpError, services as serviceOps } from "@seylo/ops";
+import { github as githubOps, gitProviders as gitProviderOps, OpError, services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import {
   type DomainMiddlewares,
   domains,
+  gitProviders,
   nodes,
   projects,
   serviceBoxes,
@@ -55,6 +59,9 @@ import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
+import { accountForSource } from "../github/account";
+import { ensureRepoHook } from "../github/repo-hooks";
+import { ensureHook } from "../gitProviders/hooks";
 import { activeMove, assertNoTransfer, copyRunning, toDataCopy } from "./copies";
 import { withoutCredentials } from "./git-url";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
@@ -263,9 +270,46 @@ const autoDomainErrors: Record<AutoDomainBlock, [code: "CONFLICT" | "FORBIDDEN" 
   taken: ["CONFLICT", "That automatic domain is already in use. Name the clone differently."],
 };
 
-/** What the clone's spec keeps: everything but its place in a stack, previews, a preview's identity and push deploys. */
-export function cloneSpecOf(spec: ServiceSpecJson): ServiceSpecJson {
-  return portableSpecOf(spec, "clone");
+type RepoSource = Extract<ServiceSpecJson["source"], { deployOnPush: boolean }>;
+
+/** A source with a Deploy on push switch: GitHub, a git URL, GitLab, Gitea or Bitbucket. */
+function isRepoSource(source: ServiceSpecJson["source"]): source is RepoSource {
+  return source.type === "github" || source.type === "git" || source.type === "provider";
+}
+
+/**
+ * What the clone's spec keeps: everything but its place in a stack, previews and a preview's identity.
+ * A repository source keeps the source's Deploy on push unless `deployOnPush` says otherwise.
+ */
+export function cloneSpecOf(spec: ServiceSpecJson, deployOnPush?: boolean): ServiceSpecJson {
+  const portable = portableSpecOf(spec, "clone");
+  if (deployOnPush === undefined || !isRepoSource(portable.source)) return portable;
+  return { ...portable, source: { ...portable.source, deployOnPush } };
+}
+
+/**
+ * The clone's own repository webhook, as github.connectRepo and gitProviders.connectRepo make it, while
+ * it deploys on push: deliveries to a webhook name one service, so the source's never reach the clone.
+ * Pushes through the GitHub App reach every service of the repository. A refused webhook keeps its
+ * reason on the row and the branch is polled; a failure here never fails the clone.
+ */
+async function connectCloneHook(ctx: OpContext, serviceId: string, source: ServiceSpecJson["source"]): Promise<void> {
+  if (!isRepoSource(source) || !source.deployOnPush) return;
+  try {
+    if (source.type === "github" && source.installationId === null) {
+      await ensureRepoHook(ctx, { serviceId, account: accountForSource(ctx.db, source.accountId), repo: source.repo });
+      ctx.live.publish(`service:${serviceId}`, { type: "invalidate", ops: [githubOps.repoWebhook.id] });
+    } else if (source.type === "provider") {
+      const provider = ctx.db.select().from(gitProviders).where(eq(gitProviders.id, source.providerId)).get();
+      if (!provider) return;
+      // The address the caller reached the panel at only for people who manage connections (gitProviders hookOrigin).
+      const origin = ctx.access.can("gitProviders.manage") ? (ctx.origin ?? null) : null;
+      await ensureHook(ctx, { serviceId, provider, repo: source.repo, origin });
+      ctx.live.publish(`service:${serviceId}`, { type: "invalidate", ops: [gitProviderOps.webhook.id] });
+    }
+  } catch (error) {
+    ctx.logger.warn({ err: error, serviceId }, "creating the clone's repository webhook failed");
+  }
 }
 
 /** The source's newest upload, so an upload app's clone can deploy the same archive. */
@@ -343,7 +387,7 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
     // An export may hold it stopped and start it again at its end; an import has not filled it yet.
     assertNoTransfer(ctx.db, svc.id);
   }
-  const spec = cloneSpecOf(plan.spec);
+  const spec = cloneSpecOf(plan.spec, input.deployOnPush);
   assertSourceAllowed(ctx, plan.projectId, spec.source);
   await assertGitSourceTarget(ctx.db, plan.projectId, spec.source, gitCaller(ctx));
   if (spec.stack) await assertGitSourceTarget(ctx.db, plan.projectId, spec.stack.source, gitCaller(ctx), "source");
@@ -450,13 +494,22 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   if (svc.kind === "app" && spec.ports.length > 0 && !created.domain) openFirstRun(ctx.db, created.id);
   // The target node keeps the clone (stopped) so copied data is never swept as an orphan.
   ctx.agents.desired.markDirty({ serviceId: created.id });
+  await connectCloneHook(ctx, created.id, spec.source);
   const row = loadService(ctx.db, created.id);
   publishService(ctx, row);
   ctx.live.publish(`project:${plan.projectId}`, { type: "invalidate", ops: ["env.references"] });
   if (created.copy) {
     ctx.jobs.enqueue(cloneDataJobType, { copyId: created.copy.id }, { maxAttempts: 1, dedupeKey: `clone-data:${created.copy.id}` });
   }
-  ctx.auditDetails?.({ cloneId: created.id, cloneName: plan.name, projectId: plan.projectId, nodeId: plan.nodeId, data, env: plan.env });
+  ctx.auditDetails?.({
+    cloneId: created.id,
+    cloneName: plan.name,
+    projectId: plan.projectId,
+    nodeId: plan.nodeId,
+    data,
+    env: plan.env,
+    ...(isRepoSource(spec.source) ? { deployOnPush: spec.source.deployOnPush } : {}),
+  });
   return {
     service: toDetail(ctx.db, ctx.agents, row),
     copied: {

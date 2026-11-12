@@ -217,6 +217,27 @@ describe("GitHub webhooks", () => {
     expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).all()).toHaveLength(1);
   });
 
+  test("a clone of a service that deploys on push deploys on the next push too, unless cloned with it off", async () => {
+    const id = await githubService();
+    const clone = async (input: { name: string; deployOnPush?: boolean }) => {
+      const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId, nodeId: nodeA, ...input }, { cookie });
+      expect(res.status).toBe(200);
+      return res.body.service.id as string;
+    };
+    const staging = await clone({ name: "web-staging" });
+    const quiet = await clone({ name: "web-quiet", deployOnPush: false });
+    const sha = "6666666666666666666666666666666666666666";
+    expect((await post("push", push("main", sha))).body).toMatchObject({ ok: true, deployed: 2 });
+    for (const serviceId of [id, staging]) {
+      expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, serviceId)).all()).toEqual([
+        expect.objectContaining({ trigger: "push", commitSha: sha, branch: "main" }),
+      ]);
+    }
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, quiet)).all()).toHaveLength(0);
+    const ignored = (await callOp(panel, webhooks.listDeliveries, { serviceId: quiet }, { cookie })).body.deliveries;
+    expect(ignored[0]).toMatchObject({ outcome: "ignored", detail: "Deploy on push is off." });
+  });
+
   test("pull requests open, update and close a preview service with the same env", async () => {
     const id = await githubService();
     const refused = await callOp(panel, previewOps.updateSettings, { serviceId: id, enabled: true }, { cookie });

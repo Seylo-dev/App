@@ -3443,8 +3443,23 @@ logins come only with a data copy (`databases.credentials`; an empty clone
 gets new passwords for every `service_secrets` name), other volume data
 `files.read`, the main domain's access rules `domains.view` on the source
 and `domains.edit` in the target (they go onto a new automatic domain
-`<name>.<node wildcard>`). Push deploys and previews are off on the clone,
-a compose member becomes a standalone app (`member: null`), compose stacks
+`<name>.<node wildcard>`). Previews are off on the clone. A repository
+source (`github`, `git`, `provider`) keeps the source's `deployOnPush`
+unless `services.clone` gets `deployOnPush` (add-only, optional; other
+sources ignore it, and `portableSpecOf` keeps the source as it is, so an
+export is unchanged and an import still decides for itself). While it is
+on, the clone deploys on each push to its branch like the source:
+pushes through the GitHub App reach every service of the repository
+(`github/push.ts` `servicesForRepo`), and polling follows every service
+with `deployOnPush` set, but a delivery to a repository webhook names one
+service, so a source read through the connected GitHub account or a
+provider connection gets the clone a webhook of its own after the
+transaction (`connectCloneHook`: `ensureRepoHook` or `ensureHook`, the
+connectRepo rules, a provider's origin address only for
+`gitProviders.manage`; a refusal keeps its reason on the row and polling
+covers pushes, a throw is logged and never fails the clone). A `git` URL
+deploys on push through a deploy trigger URL, which a clone never copies.
+A compose member becomes a standalone app (`member: null`), compose stacks
 and protected services are refused (CONFLICT `reason: compose|protected`).
 The clone is created `stopped` and never deployed: `serviceSpecFor` sends
 such a "parked" service as a stopped spec without an image (so its node

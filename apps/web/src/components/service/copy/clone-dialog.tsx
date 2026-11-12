@@ -1,8 +1,10 @@
 // "Clone" from the service menu: pick the project, node and name, choose
-// whether the volumes start empty or get a copy of the data, and add an
-// automatic domain. services.clonePreview says what comes along for this
-// person (their permissions decide whether the environment and the data
-// can be copied); services.clone creates the stopped copy.
+// whether the volumes start empty or get a copy of the data, add an
+// automatic domain, and for a repository source whether the clone deploys
+// on push (the source's setting to start with). services.clonePreview says
+// what comes along for this person (their permissions decide whether the
+// environment and the data can be copied); services.clone creates the
+// stopped copy.
 
 import { projects, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -12,14 +14,16 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui
 import { Input } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { IconCheck } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { deploysOnPush } from "../../../lib/service-display";
 import { NodePicker, ProjectPicker } from "../../pickers";
-import { CheckLabel, Field } from "../field";
+import { CheckLabel, Field, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
 import { OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
@@ -44,6 +48,14 @@ function blockedText(reason: Blocked): string | null {
   }
 }
 
+/** What the Deploy on push switch does for this clone, under the switch. */
+function pushNote(source: ServiceDetail["sourceConfig"], sourcePush: boolean, clonePush: boolean, name: string): string {
+  const branch = "branch" in source ? source.branch : "";
+  if (!clonePush) return t("serviceCopy.clone.pushOff", { branch });
+  if (source.type === "git") return t("serviceCopy.clone.pushGit");
+  return t(sourcePush ? "serviceCopy.clone.pushBoth" : "serviceCopy.clone.pushCloneOnly", { branch, name });
+}
+
 export function CloneDialog({
   service,
   open,
@@ -62,6 +74,9 @@ export function CloneDialog({
   const [data, setData] = useState<"empty" | "copy">("empty");
   const [stopSource, setStopSource] = useState(true);
   const [autoDomain, setAutoDomain] = useState(true);
+  // Only repository sources have the switch (null for the others); the clone starts with the source's setting.
+  const sourcePush = deploysOnPush(service.sourceConfig);
+  const [deployOnPush, setDeployOnPush] = useState(sourcePush ?? false);
   const preview = useOp(services.clonePreview, { serviceId: service.id, projectId, nodeId }, { enabled: open && !!nodeId, retry: retryOp });
   const projectList = useOp(projects.list, {}, { enabled: open });
   const projectName = projectList.data?.projects.find((p) => p.id === projectId)?.name ?? "";
@@ -103,6 +118,7 @@ export function CloneDialog({
       data: p.volumes.length > 0 ? data : undefined,
       stopSource: data === "copy" && !p.data.alwaysStops ? stopSource : undefined,
       autoDomain: p.autoDomain !== null ? autoDomain : undefined,
+      deployOnPush: sourcePush !== null ? deployOnPush : undefined,
     });
   };
 
@@ -208,6 +224,16 @@ export function CloneDialog({
                   {t("serviceCopy.clone.autoDomain", { host: p.autoDomain })}
                   {p.middlewares && <span className="text-muted-foreground"> {t("serviceCopy.clone.autoDomainRules")}</span>}
                 </CheckLabel>
+              )}
+
+              {sourcePush !== null && (
+                <ToggleRow
+                  title={t("serviceCopy.clone.deployOnPush")}
+                  description={pushNote(service.sourceConfig, sourcePush, deployOnPush, service.name)}
+                  control={
+                    <Switch checked={deployOnPush} onCheckedChange={setDeployOnPush} aria-label={t("serviceCopy.clone.deployOnPush")} />
+                  }
+                />
               )}
 
               {renamed.length > 0 && (

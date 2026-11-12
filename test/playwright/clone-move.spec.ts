@@ -85,8 +85,80 @@ test.describe("clone and move", () => {
         data: "copy",
         stopSource: true,
         autoDomain: true,
+        deployOnPush: true,
       },
     ]);
+    expect(errors).toEqual([]);
+  });
+
+  test("Clone: Deploy on push starts as the source's, for repository sources only", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const sent: Record<string, unknown>[] = [];
+    await installDemo(page, {
+      overrides: {
+        "services.clonePreview": (input) => ({
+          name: "copy",
+          kind: "app",
+          projectId: input.projectId ?? ids.acme,
+          nodeId: input.nodeId ?? ids.de,
+          env: "none",
+          volumes: [],
+          data: { available: false, blockedBy: "noVolumes", alwaysStops: false },
+          autoDomain: null,
+          middlewares: false,
+          references: [],
+        }),
+        "services.clone": (input) => {
+          sent.push(input);
+          return {
+            service: { id: "svccopy0000000aa", projectId: input.projectId, name: input.name },
+            copied: { env: false, fileMounts: false, databaseLogins: false, middlewares: false, autoDomain: null },
+            dataCopy: null,
+          };
+        },
+      },
+    });
+    const openClone = async (path: string, name: string) => {
+      await page.goto(path);
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Clone" }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("heading", { name: `Clone ${name}` })).toBeVisible();
+      await expect(dialog.getByLabel("Name")).toHaveValue("copy");
+      return dialog;
+    };
+
+    // api follows acme/shop-api on main through the GitHub App, deploying on push: the clone does too.
+    let dialog = await openClone(apiPage, "api");
+    const push = dialog.getByRole("switch", { name: "Deploy on push" });
+    await expect(push).toBeChecked();
+    await expect(dialog.getByText("Each push to main deploys both api and the clone.")).toBeVisible();
+    await push.click();
+    await expect(push).not.toBeChecked();
+    await expect(dialog.getByText("Pushes to main do not deploy the clone.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Clone", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent.at(-1)).toMatchObject({ serviceId: ids.api, name: "copy", deployOnPush: false });
+
+    // A git URL that does not deploy on push: off to start with; on, the note says the trigger URL stays behind.
+    dialog = await openClone(`/p/${ids.acme}/s/svcprivapi0000d1`, "private-api");
+    const gitPush = dialog.getByRole("switch", { name: "Deploy on push" });
+    await expect(gitPush).not.toBeChecked();
+    await expect(dialog.getByText("Pushes to main do not deploy the clone.")).toBeVisible();
+    await gitPush.click();
+    await expect(dialog.getByText("deploys on push through a deploy trigger URL, which the clone does not copy")).toBeVisible();
+    await dialog.getByRole("button", { name: "Clone", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent.at(-1)).toMatchObject({ serviceId: "svcprivapi0000d1", deployOnPush: true });
+
+    // A database runs an image: no switch, and nothing about pushes is sent.
+    dialog = await openClone(`/p/${ids.acme}/s/${ids.db}`, "db");
+    await expect(dialog.getByText("Source, build, health check")).toBeVisible();
+    await expect(dialog.getByRole("switch", { name: "Deploy on push" })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Clone", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent.at(-1)).toEqual({ serviceId: ids.db, projectId: ids.acme, nodeId: ids.de, name: "copy" });
     expect(errors).toEqual([]);
   });
 

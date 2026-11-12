@@ -606,6 +606,44 @@ describe("one repository, several services", () => {
     expect(deploymentsOf(second.id)).toHaveLength(1);
   });
 
+  test("a clone that deploys on push gets a webhook of its own; one cloned with it off gets none and is not polled", async () => {
+    const source = await connectedService("gitea", "web");
+    const cloned = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: source.id, projectId, nodeId: nodeA, name: "web-staging" },
+      { cookie },
+    );
+    expect(cloned.status).toBe(200);
+    const cloneId = cloned.body.service.id as string;
+    expect(cloned.body.service.sourceConfig).toMatchObject({ type: "provider", providerId: source.providerId, deployOnPush: true });
+    const hook = panel.deps.db.select().from(gitProviderWebhooks).where(eq(gitProviderWebhooks.serviceId, cloneId)).get();
+    if (!hook) throw new Error("the clone has no webhook row");
+    expect(hook.id).not.toBe(source.hook.id);
+    expect(hook).toMatchObject({ remoteId: "7", error: null, url: `https://panel.example.com/api/hooks/gitea/${hook.id}` });
+    const secret = panel.deps.secrets.open(hook.secretSealed, "git.webhook") as string;
+    expect(secret).not.toBe(source.secret);
+    const res = await deliver("gitea", hook, secret, "push", payloadFixture("gitea-push"));
+    expect(res.body).toMatchObject({ ok: true, deployed: 1 });
+    expect(deploymentsOf(cloneId)).toEqual([expect.objectContaining({ trigger: "push", commitSha: giteaHead })]);
+    expect(deploymentsOf(source.id)).toHaveLength(0);
+
+    const quiet = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: source.id, projectId, nodeId: nodeA, name: "web-quiet", deployOnPush: false },
+      { cookie },
+    );
+    expect(quiet.status).toBe(200);
+    expect(
+      panel.deps.db.select().from(gitProviderWebhooks).where(eq(gitProviderWebhooks.serviceId, quiet.body.service.id)).get(),
+    ).toBeUndefined();
+    // Past every webhook's safety net: the source and the clone that deploys on push are read, the quiet one is not.
+    const before = fake.sent.length;
+    await pollProviderBranches(panel.deps, Date.now() + 10 * 60_000);
+    expect(fake.sent.slice(before).filter((r) => r.path === "/api/v1/repos/acme/shop/branches/main")).toHaveLength(2);
+  });
+
   test("GitLab hooks of one push that share an event UUID (before 17.4) each deploy their service", async () => {
     const first = await connectedService("gitlab", "web");
     const second = await connectedService("gitlab", "worker", first.providerId);
