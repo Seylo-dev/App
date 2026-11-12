@@ -227,9 +227,15 @@ export const terminalSockets: {
  * 1011 "closed"), as for a node that has no container of the service.
  * `refuseNext`: reasons for the next sockets of either kind, one each and
  * before `refuse`, as for an attach that comes while the container is
- * between a restart's stop and start.
+ * between a restart's stop and start. `closeLateMs`: a refused socket
+ * closes this long after its closed message, as when the browser gets the
+ * close event late (a slow close handshake behind a proxy or tunnel).
  */
-export const terminalAgent: { refuse: string | null; refuseNext: string[] } = { refuse: null, refuseNext: [] };
+export const terminalAgent: { refuse: string | null; refuseNext: string[]; closeLateMs: number } = {
+  refuse: null,
+  refuseNext: [],
+  closeLateMs: 0,
+};
 
 /** The live sockets open now (one per page), for pushLive. */
 const liveSockets = new Set<WebSocketRoute>();
@@ -263,6 +269,7 @@ function resetDemoState() {
   terminalSockets.length = 0;
   terminalAgent.refuse = null;
   terminalAgent.refuseNext = [];
+  terminalAgent.closeLateMs = 0;
   liveSockets.clear();
   resetGitDemo();
   resetAssistantDemo();
@@ -469,7 +476,9 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
     const refusal = terminalAgent.refuseNext.shift() ?? (shell ? null : terminalAgent.refuse);
     if (refusal !== null) {
       ws.send(JSON.stringify({ type: "closed", reason: refusal }));
-      void ws.close({ code: 1011, reason: "closed" });
+      const late = terminalAgent.closeLateMs;
+      if (late > 0) setTimeout(() => ws.close({ code: 1011, reason: "closed" }).catch(() => {}), late);
+      else void ws.close({ code: 1011, reason: "closed" });
       return;
     }
     if (shell) ws.send(encode("\x1b[32mbun@api\x1b[0m:\x1b[34m/app\x1b[0m$ "));

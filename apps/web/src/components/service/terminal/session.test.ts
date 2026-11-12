@@ -45,12 +45,15 @@ class FakeSocket {
     this.readyState = 3;
     this.onclose?.call(this as never, { code, reason } as CloseEvent);
   }
-  /** The panel when the agent refuses the attach at once: ready first (startTerminal's end()), its note, then 1011. */
-  refuse(note = refused) {
+  /**
+   * The panel when the agent refuses the attach at once: ready first (startTerminal's end()), its note, then 1011.
+   * `late`: the close event does not come yet (a slow close handshake behind a proxy or tunnel, a busy tab); finish() delivers it.
+   */
+  refuse(note = refused, { late = false } = {}) {
     this.open();
     this.ready();
     this.control({ type: "closed", reason: note });
-    this.finish(1011, "closed");
+    if (!late) this.finish(1011, "closed");
   }
 }
 
@@ -269,6 +272,41 @@ test("a shell's Reconnect the agent refuses at once says why in the panel's word
   h.sockets[1]?.output("bun@api:/app$ ");
   expect(h.state().status).toBe("ready");
   expect(h.notes).toEqual(["Connected (generation 42)"]);
+});
+
+// Review of the fix above: the panel's closed note comes right after ready, but the browser may deliver the close
+// event well after confirmMs. The confirm timer then showed the refused try after all: "Connected to …", a ready
+// state with stdin on, and no refusal line, until the late close turned it into a wait or Reconnect.
+test("a refused attach whose close event comes late never shows: no Connected line and no ready state, console or shell", async () => {
+  for (const follow of [running, undefined]) {
+    const h = harness({ follow, probe: true });
+    await h.click();
+    const ws = h.sockets[0];
+    ws?.refuse(refused, { late: true });
+    await h.clock.advance(1000);
+    expect(h.notes).toEqual([]);
+    expect(h.state()).toEqual({ status: "connecting" });
+    await h.clock.advance(4000);
+    expect(h.notes).toEqual([]);
+    expect(h.state()).toEqual({ status: "connecting" });
+    // No retry before the close: one socket at a time.
+    expect(h.sockets).toHaveLength(1);
+    ws?.finish(1011, "closed");
+    expect(h.notes).toEqual([]);
+    if (!follow) {
+      expect(h.state()).toEqual({ status: "closed", reason: refused });
+      continue;
+    }
+    // The console tries again by itself, and that one attaches: one Connected line in all.
+    expect(h.state()).toEqual({ status: "waiting", reason: "Disconnected. Connecting again…" });
+    await h.clock.advance(1000);
+    const second = h.sockets[1];
+    second?.open();
+    second?.ready();
+    second?.output("Listening on :3000\r\n");
+    expect(h.state().status).toBe("ready");
+    expect(h.notes).toEqual(["Connected (generation 42)"]);
+  }
 });
 
 test("a clicked session shows once its first output arrives, or a second after ready for a quiet one", async () => {

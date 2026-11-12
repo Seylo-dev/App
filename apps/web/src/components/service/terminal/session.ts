@@ -227,7 +227,9 @@ export function createTerminalSession(host: SessionHost): TerminalSession {
     // A session shows (ready, its Connected line) once its first output arrives, its process
     // exits or it stayed up confirmMs after ready, a clicked one too: the panel sends ready
     // before it closes an attach the agent refused at once, which never opened, so that one
-    // leaves nothing in the terminal and its close shows the panel's words.
+    // leaves nothing in the terminal and its close shows the panel's words. The closed note
+    // is the panel's last message: one before the session showed stops the confirm timer,
+    // as the browser may deliver the close event after confirmMs.
     let shown = false;
     let info: ReadyInfo | null = null;
     let hold: Timer | undefined;
@@ -267,6 +269,7 @@ export function createTerminalSession(host: SessionHost): TerminalSession {
       } else if (message.type === "closed") {
         closedNote = message.reason;
         if (shown) host.term()?.note(message.reason);
+        else clock.clearTimeout(hold);
       }
     };
     ws.onclose = (event) => {

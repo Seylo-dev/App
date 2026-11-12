@@ -13,8 +13,8 @@
 // stopping at Reconnect after the tries an attach that is refused at once
 // came to, with one Connected line; one Reconnect click connecting though
 // the agent refuses its first attach, and a shell's refused Reconnect
-// saying why), and a deploy that failed at Clone: its title and the
-// private repo hint.
+// saying why, also when that socket's close event comes late), and a
+// deploy that failed at Clone: its title and the private repo hint.
 // Screenshots go to $CONSOLE_SHOTS_DIR (default $SHOTS_DIR/console).
 
 import { mkdirSync } from "node:fs";
@@ -684,54 +684,61 @@ test.describe("console and shell", () => {
 
   // Owner, 2026-11-13: "sometimes I have to click twice on the reconnect". The panel sends ready before it closes an
   // attach the agent refused at once (the container between a restart's stop and start), so that try looked like
-  // a session: "Connected to api", the refusal, Reconnect again.
-  test("one Reconnect click connects even when the agent refuses its first attach, with no Connected line for that try", async ({
-    page,
-  }) => {
-    await installDemo(page);
-    await page.goto(`${api}/console`);
-    const terminal = page.getByRole("region", { name: "Console" });
-    const output = terminal.getByRole("application", { name: "Console" });
-    await expect(output.getByText(consoleLine)).toBeVisible();
-    await terminalSockets[0]?.drop({ code: 1000, reason: "idle", note: "The session was idle for too long." });
-    const reconnect = terminal.getByRole("button", { name: "Reconnect" });
-    await expect(reconnect).toBeVisible();
-    const refused = "The service has no running container on this node.";
-    terminalAgent.refuseNext.push(refused);
-    await reconnect.click();
-    // Refused, then the console tries again by itself and attaches: no second click.
-    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(3);
-    await expect.poll(() => openSockets()).toEqual(["console"]);
-    await expect(reconnect).toHaveCount(0);
-    await expect(page.getByPlaceholder(stdinPlaceholder)).toBeEnabled();
-    // The first session's line and the one that attached; the refused try left nothing.
-    await expect(output.getByText(/Connected to api/)).toHaveCount(2);
-    await expect(output.getByText(refused)).toHaveCount(0);
-  });
+  // a session: "Connected to api", the refusal, Reconnect again. Also when the browser gets that socket's close
+  // event after confirmMs (1 s): the closed note before it must still keep the try from showing.
+  for (const closeLateMs of [0, 1500]) {
+    const late = closeLateMs ? " (its close event 1.5 s late)" : "";
+    test(`one Reconnect click connects even when the agent refuses its first attach, with no Connected line for that try${late}`, async ({
+      page,
+    }) => {
+      await installDemo(page);
+      await page.goto(`${api}/console`);
+      const terminal = page.getByRole("region", { name: "Console" });
+      const output = terminal.getByRole("application", { name: "Console" });
+      await expect(output.getByText(consoleLine)).toBeVisible();
+      await terminalSockets[0]?.drop({ code: 1000, reason: "idle", note: "The session was idle for too long." });
+      const reconnect = terminal.getByRole("button", { name: "Reconnect" });
+      await expect(reconnect).toBeVisible();
+      const refused = "The service has no running container on this node.";
+      terminalAgent.refuseNext.push(refused);
+      terminalAgent.closeLateMs = closeLateMs;
+      await reconnect.click();
+      // Refused, then the console tries again by itself and attaches: no second click.
+      await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(3);
+      await expect.poll(() => openSockets()).toEqual(["console"]);
+      await expect(reconnect).toHaveCount(0);
+      await expect(page.getByPlaceholder(stdinPlaceholder)).toBeEnabled();
+      // The first session's lines and the one that attached; the refused try left nothing.
+      await expect(output.getByText(consoleLine)).toHaveCount(2);
+      await expect(output.getByText(/Connected to api/)).toHaveCount(2);
+      await expect(output.getByText(refused)).toHaveCount(0);
+    });
 
-  test("a shell's Reconnect that the agent refuses at once says why, and the next click connects", async ({ page }) => {
-    await installDemo(page);
-    await page.goto(`${api}/console?mode=shell`);
-    const shell = page.getByRole("region", { name: "Shell" });
-    const output = shell.getByRole("application", { name: "Shell" });
-    await expect(output.getByText("Connected to api (generation 42) as bun in /app", { exact: false })).toBeVisible();
-    await terminalSockets.find((s) => s.kind === "shell")?.end(0);
-    const reconnect = shell.getByRole("button", { name: "Reconnect" });
-    await expect(reconnect).toBeVisible();
-    const refused = "The service has no running container on this node.";
-    terminalAgent.refuseNext.push(refused);
-    await reconnect.click();
-    // The panel's words on the Reconnect line, not the socket's "closed", and no Connected line for a shell that never opened.
-    await expect(reconnect.locator("xpath=..")).toContainText(refused);
-    await expect(output.getByText(/Connected to api/)).toHaveCount(1);
-    // A shell does not try again by itself (each one is a new audited process): the next click connects.
-    await page.waitForTimeout(1500);
-    expect(terminalSockets.filter((s) => s.kind === "shell")).toHaveLength(2);
-    await reconnect.click();
-    await expect(reconnect).toHaveCount(0);
-    await expect.poll(() => openSockets()).toEqual(["shell"]);
-    await expect(output.getByText(/Connected to api/)).toHaveCount(2);
-  });
+    test(`a shell's Reconnect that the agent refuses at once says why, and the next click connects${late}`, async ({ page }) => {
+      await installDemo(page);
+      await page.goto(`${api}/console?mode=shell`);
+      const shell = page.getByRole("region", { name: "Shell" });
+      const output = shell.getByRole("application", { name: "Shell" });
+      await expect(output.getByText("Connected to api (generation 42) as bun in /app", { exact: false })).toBeVisible();
+      await terminalSockets.find((s) => s.kind === "shell")?.end(0);
+      const reconnect = shell.getByRole("button", { name: "Reconnect" });
+      await expect(reconnect).toBeVisible();
+      const refused = "The service has no running container on this node.";
+      terminalAgent.refuseNext.push(refused);
+      terminalAgent.closeLateMs = closeLateMs;
+      await reconnect.click();
+      // The panel's words on the Reconnect line, not the socket's "closed", and no Connected line for a shell that never opened.
+      await expect(reconnect.locator("xpath=..")).toContainText(refused);
+      await expect(output.getByText(/Connected to api/)).toHaveCount(1);
+      // A shell does not try again by itself (each one is a new audited process): the next click connects.
+      await page.waitForTimeout(1500);
+      expect(terminalSockets.filter((s) => s.kind === "shell")).toHaveLength(2);
+      await reconnect.click();
+      await expect(reconnect).toHaveCount(0);
+      await expect.poll(() => openSockets()).toEqual(["shell"]);
+      await expect(output.getByText(/Connected to api/)).toHaveCount(2);
+    });
+  }
 
   test("a shell that exits stays closed: the person typed exit", async ({ page }) => {
     await installDemo(page);
