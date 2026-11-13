@@ -345,9 +345,11 @@ builds queued or running at the update) and `0020_build_progress_logged`
 `0021_project_dashboard_collapsed` (`project_prefs.dashboard_collapsed`,
 default false, set to `collapsed` on existing rows, so nobody's home page
 changes on the update), `0022_deployment_port_move`
-(`deployments.port_move`, nullable JSON text) and `0023_backup_contents`
+(`deployments.port_move`, nullable JSON text), `0023_backup_contents`
 (`backup_policies.selection`, `backup_runs.selection`, `contents` and
-`warnings`, all nullable JSON text, no backfill)), which the panel applies at start, also
+`warnings`, all nullable JSON text, no backfill) and
+`0024_exposure_allow_plain` (`port_exposures.allow_plain`, default false,
+so every exposure from before stays TLS only)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
