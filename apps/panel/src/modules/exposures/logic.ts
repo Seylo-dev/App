@@ -4,7 +4,7 @@
 // when they picked one themselves (listen port 0).
 
 import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
-import type { ServiceStatus } from "@seylo/proto";
+import type { OpenPort, ServiceStatus } from "@seylo/proto";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, inArray, lte, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
@@ -131,26 +131,40 @@ export function applyDomainLive(db: PanelDb, serviceId: string, now = new Date()
   return true;
 }
 
+/** A reported port's end in milliseconds, as the panel sent it; null without one. */
+function reportedEnd(port: OpenPort): number | null {
+  return port.expiresAt ? Number(port.expiresAt.seconds) * 1000 + Math.floor(port.expiresAt.nanos / 1_000_000) : null;
+}
+
 /**
  * Stores ports the agent picked (listen port 0) from its ServiceStatus, so
- * the address shows and stays stable across later syncs. Matching is by
- * container port, plus the expiry for timed exposes.
+ * the address shows and stays stable across later syncs. A timed expose's
+ * port is matched by its id (OpenPort.timedExposeId, agents from 0.2.16),
+ * and from older agents, which send none, by its container port and its
+ * end to the millisecond; the other rows by their container port and
+ * having no end. A reported port goes to one row only, never to one whose
+ * port is already recorded.
  */
 export function recordReportedPorts(db: PanelDb, nodeId: string, status: ServiceStatus): string[] {
   const rows = db
     .select()
     .from(portExposures)
-    .where(and(eq(portExposures.serviceId, status.serviceId), eq(portExposures.nodeId, nodeId), eq(portExposures.listenPort, 0)))
+    .where(and(eq(portExposures.serviceId, status.serviceId), eq(portExposures.nodeId, nodeId)))
     .all();
+  const recorded = new Set(rows.filter((row) => row.listenPort > 0).map((row) => row.listenPort));
+  const free = status.openPorts.filter((p) => p.hostPort > 0 && !recorded.has(p.hostPort));
+  const taken = new Set<OpenPort>();
   const changed: string[] = [];
   for (const row of rows) {
-    const match = status.openPorts.find((p) => {
-      if (p.containerPort !== row.targetPort) return false;
-      const expires = p.expiresAt ? Number(p.expiresAt.seconds) * 1000 : null;
-      if (row.kind === "timed") return expires !== null && row.expiresAt !== null && Math.abs(expires - row.expiresAt.getTime()) < 1000;
-      return expires === null;
+    if (row.listenPort !== 0) continue;
+    const match = free.find((p) => {
+      if (taken.has(p) || p.containerPort !== row.targetPort) return false;
+      if (row.kind !== "timed") return !p.expiresAt && !p.timedExposeId;
+      if (p.timedExposeId) return p.timedExposeId === row.id;
+      return row.expiresAt !== null && reportedEnd(p) === row.expiresAt.getTime();
     });
-    if (match && match.hostPort > 0) {
+    if (match) {
+      taken.add(match);
       db.update(portExposures).set({ listenPort: match.hostPort }).where(eq(portExposures.id, row.id)).run();
       changed.push(row.id);
     }

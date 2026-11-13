@@ -8,7 +8,9 @@
 // (exposureWaitsFor), as the desired state keeps it.
 
 import { OpError } from "@seylo/ops";
+import type { OpenPort } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
+import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { portExposures, serviceDatabases, serviceSecrets } from "../../db/schema";
 import type { Deps } from "../../deps";
@@ -150,6 +152,19 @@ export function exposedAddress(info: DatabaseInfo): { host: string; port: number
   const host = info.row.tlsHostname ?? (info.node ? nodeAddress(info.node) : null);
   if (!host) return null;
   return { host, port: info.exposure.listenPort > 0 ? info.exposure.listenPort : null };
+}
+
+/**
+ * The exposed port as the database's node reports it (its certificate and,
+ * from 0.2.16 agents, whether TLS is on inside the database); undefined
+ * while exposure is off, its port is not known yet or the node does not
+ * report it open.
+ */
+export function reportedExposedPort(agents: Pick<AgentHub, "state"> | undefined, info: DatabaseInfo): OpenPort | undefined {
+  const port = info.exposure?.listenPort ?? 0;
+  if (port === 0) return undefined;
+  const status = agents?.state.serviceStatuses(info.service.id).find((s) => !info.node || s.nodeId === info.node.id)?.status;
+  return status?.openPorts.find((p) => p.hostPort === port && !p.expiresAt);
 }
 
 /** creds: another user than the main one (databases.createUser's URLs). */

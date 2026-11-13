@@ -10,7 +10,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { portExposures } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { type DatabaseInfo, exposedAddress, findDatabase, loadDatabase } from "../databases/info";
-import { timedAccess, timedPorts } from "../databases/timed";
+import { timedAccess, timedDatabase, timedPorts } from "../databases/timed";
 import { normalizeCidr, normalizeCidrs } from "../domains/checks";
 import { getService, invalidateService, mainPort, nodeHost, openedByOf, serviceNodes } from "../domains/lookup";
 import { closeFirstRun, type ExposureRow, firewallHint, firstRunAccess, openFirstRun, saveAccessSettings } from "./logic";
@@ -30,7 +30,9 @@ function databaseOf(ctx: OpContext, serviceId: string): DatabaseInfo | null {
   return findDatabase(ctx.db, serviceId) ? loadDatabase(ctx, serviceId) : null;
 }
 
-function toTimed(ctx: OpContext, row: ExposureRow, db: DatabaseInfo | null): TimedExpose {
+/** A database's timed exposes say TLS where its node reports it on (timedDatabase). */
+function toTimed(ctx: OpContext, row: ExposureRow, info: DatabaseInfo | null): TimedExpose {
+  const db = info ? timedDatabase(info, ctx.agents) : null;
   const node = serviceNodes(ctx.db, row.serviceId).find((n) => n.id === row.nodeId);
   const host = node ? nodeHost(node) : "";
   const port = row.listenPort > 0 ? row.listenPort : null;

@@ -51,10 +51,11 @@ import {
   exposureState,
   internalConnection,
   loadDatabase,
+  reportedExposedPort,
   writeSecret,
 } from "./info";
 import { createdPgdata } from "./pgdata";
-import { timedUrl } from "./timed";
+import { timedDatabase, timedUrl } from "./timed";
 import { afterChange, changeMainPassword } from "./users";
 
 type Database = Static<typeof dbOps.Database>;
@@ -64,8 +65,7 @@ const hostnamePattern = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{
 /** What the node reports about a database: its web UI and the exposed port's certificate. */
 function reported(agents: AgentHub | undefined, info: DatabaseInfo) {
   const status = agents?.state.serviceStatuses(info.service.id).find((s) => !info.node || s.nodeId === info.node.id)?.status;
-  const port =
-    info.exposure && info.exposure.listenPort > 0 ? status?.openPorts.find((p) => p.hostPort === info.exposure?.listenPort) : undefined;
+  const port = reportedExposedPort(agents, info);
   const webUi = status?.webUi;
   return {
     webUiRunning: webUi?.running ?? false,
@@ -231,7 +231,8 @@ export const connection = implement(dbOps.connection, (input, ctx) => {
 });
 
 /** The open timed exposes whose port the node reported, as URLs with the password. */
-function timedConnections(ctx: Pick<OpContext, "db">, info: DatabaseInfo) {
+function timedConnections(ctx: Pick<OpContext, "db" | "agents">, info: DatabaseInfo) {
+  const db = timedDatabase(info, ctx.agents);
   const rows = ctx.db
     .select()
     .from(portExposures)
@@ -244,7 +245,7 @@ function timedConnections(ctx: Pick<OpContext, "db">, info: DatabaseInfo) {
     if (!node) return [];
     const host = nodeHost(node);
     return [
-      { exposureId: row.id, host, port: row.listenPort, url: timedUrl(info, host, row.listenPort, row.targetPort, info.admin.password) },
+      { exposureId: row.id, host, port: row.listenPort, url: timedUrl(db, host, row.listenPort, row.targetPort, info.admin.password) },
     ];
   });
 }

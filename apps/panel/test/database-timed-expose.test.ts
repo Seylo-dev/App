@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { databases as dbOps, exposures as exposureOps, type LiveServerMessage } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
-import { auditLog, nodes } from "../src/db/schema";
+import { auditLog, nodes, portExposures } from "../src/db/schema";
 import { compileDesiredState } from "../src/desired/compile";
 import { enginesCapability, exposureCapability } from "../src/modules/databases/engines";
 import { sweepAndMark } from "../src/modules/exposures/logic";
@@ -46,12 +46,16 @@ async function createDb(
   return { node: placed, serviceId: res.body.serviceId as string };
 }
 
-/** What the node reports for a timed expose: the port it picked, with the expose's end. */
+/**
+ * What the node reports for a timed expose: the port it picked, with the
+ * expose's end (and its id, from agents since 0.2.16), and for the exposed
+ * port whether TLS is on inside the database (0.2.16).
+ */
 function reportTimed(
   agent: ReturnType<typeof fakeAgent>,
   serviceId: string,
   epoch: bigint,
-  ports: { hostPort: number; containerPort: number; expiresAt?: string }[],
+  ports: { hostPort: number; containerPort: number; expiresAt?: string; timedExposeId?: string; databaseTls?: boolean }[],
 ) {
   agent.snapshot({
     epoch,
@@ -61,6 +65,8 @@ function reportTimed(
         openPorts: ports.map((p) => ({
           hostPort: p.hostPort,
           containerPort: p.containerPort,
+          timedExposeId: p.timedExposeId ?? "",
+          ...(p.databaseTls === undefined ? {} : { databaseTls: p.databaseTls }),
           ...(p.expiresAt
             ? {
                 expiresAt: {
@@ -181,6 +187,9 @@ describe("timed expose of a database", () => {
     const opened = await open(serviceId, { port: 41000 });
     expect(opened.status).toBe(200);
     expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, port: 41000 }, { cookie })).status).toBe(409);
+    // Exposure is on, but the node has not opened it yet: no TLS in the Postgres so far.
+    expect(opened.body.database).toMatchObject({ tls: "none", url: "postgresql://postgres@203.0.113.10:41000/shop_db" });
+    // An agent before 0.2.16 does not say whether TLS is on: the exposed port it reports open is the sign.
     reportTimed(agent, serviceId, 1n, [
       { hostPort: 45432, containerPort: 5432 },
       { hostPort: 41000, containerPort: 5432, expiresAt: opened.body.expiresAt },
@@ -206,6 +215,103 @@ describe("timed expose of a database", () => {
     const spec = state.services.find((s) => s.id === serviceId);
     expect(spec?.kindSpec.case === "database" && spec.kindSpec.value.exposure).toMatchObject({ enabled: true, hostPort: 45432 });
     expect(spec?.devAccess?.timedExposes.map((t) => t.hostPort)).toEqual([41000]);
+    agent.disconnect();
+  });
+
+  test("Postgres' TLS is asked for once the node reports it on inside the database, not when exposure is switched on", async () => {
+    const { node, serviceId } = await createDb("postgres");
+    const agent = fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
+    const opened = await open(serviceId);
+    const timed = { hostPort: 41000, containerPort: 5432, expiresAt: opened.body.expiresAt, timedExposeId: opened.body.id };
+    reportTimed(agent, serviceId, 1n, [timed]);
+    const plain = {
+      tls: "none",
+      url: "postgresql://postgres@203.0.113.10:41000/shop_db",
+      command: "psql postgresql://postgres@203.0.113.10:41000/shop_db",
+    };
+    const timedAccess = async () => (await callOp(panel, exposureOps.get, { serviceId }, { cookie })).body.timed[0].database;
+    expect(await timedAccess()).toMatchObject(plain);
+
+    // Exposure on: the node opens the port at once and turns TLS on inside Postgres a few seconds later.
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, port: 45432 }, { cookie })).status).toBe(200);
+    expect(await timedAccess()).toMatchObject(plain);
+    const got: LiveServerMessage[] = [];
+    panel.deps.live.subscribe({ id: crypto.randomUUID(), send: (m) => got.push(m) }, `service:${serviceId}`);
+    const invalidated = () => got.flatMap((m) => (m.type === "event" && m.event.type === "invalidate" ? m.event.ops : []));
+    reportTimed(agent, serviceId, 2n, [{ hostPort: 45432, containerPort: 5432, databaseTls: false }, timed]);
+    expect(await timedAccess()).toMatchObject(plain);
+    let conn = await callOp(panel, dbOps.connection, { serviceId }, { cookie });
+    expect(conn.body.timed[0].url).toBe(`postgresql://postgres:${conn.body.internal.password}@203.0.113.10:41000/shop_db`);
+
+    got.length = 0;
+    reportTimed(agent, serviceId, 3n, [{ hostPort: 45432, containerPort: 5432, databaseTls: true }, timed]);
+    // Open screens read the timed URLs again.
+    expect(invalidated()).toEqual(expect.arrayContaining([exposureOps.get.id, dbOps.connection.id]));
+    expect(await timedAccess()).toMatchObject({
+      tls: "database",
+      url: "postgresql://postgres@203.0.113.10:41000/shop_db?sslmode=require",
+      command: "psql 'postgresql://postgres@203.0.113.10:41000/shop_db?sslmode=require'",
+    });
+    conn = await callOp(panel, dbOps.connection, { serviceId }, { cookie });
+    expect(conn.body.timed[0].url).toBe(`postgresql://postgres:${conn.body.internal.password}@203.0.113.10:41000/shop_db?sslmode=require`);
+
+    // The same report again changes nothing on screen.
+    got.length = 0;
+    reportTimed(agent, serviceId, 4n, [{ hostPort: 45432, containerPort: 5432, databaseTls: true }, timed]);
+    expect(invalidated()).not.toContain(exposureOps.get.id);
+    agent.disconnect();
+  });
+
+  test("two timed exposes of one port opened in the same second each get their own reported port", async () => {
+    const { node, serviceId } = await createDb("postgres");
+    const agent = fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
+    const first = await open(serviceId);
+    const second = await open(serviceId);
+    expect(first.body.id).not.toBe(second.body.id);
+    // Opened in the same second, to the millisecond even: their ends cannot tell them apart.
+    const end = new Date(first.body.expiresAt);
+    panel.deps.db.update(portExposures).set({ expiresAt: end }).where(eq(portExposures.serviceId, serviceId)).run();
+    // The node lists them by port, the second expose's first; each says whose it is.
+    reportTimed(agent, serviceId, 1n, [
+      { hostPort: 41000, containerPort: 5432, expiresAt: end.toISOString(), timedExposeId: second.body.id },
+      { hostPort: 41001, containerPort: 5432, expiresAt: end.toISOString(), timedExposeId: first.body.id },
+    ]);
+    const listed = (await callOp(panel, exposureOps.get, { serviceId }, { cookie })).body.timed as { id: string; port: number | null }[];
+    expect(Object.fromEntries(listed.map((t) => [t.id, t.port]))).toEqual({ [first.body.id]: 41001, [second.body.id]: 41000 });
+    const conn = (await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body.timed as { exposureId: string; port: number }[];
+    expect(Object.fromEntries(conn.map((t) => [t.exposureId, t.port]))).toEqual({ [first.body.id]: 41001, [second.body.id]: 41000 });
+    agent.disconnect();
+  });
+
+  test("from an agent before 0.2.16, without expose ids: ends in one second are told apart by the millisecond, and a port goes to one expose", async () => {
+    const { node, serviceId } = await createDb("valkey");
+    const agent = fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
+    const first = await open(serviceId);
+    const second = await open(serviceId);
+    const third = await open(serviceId);
+    // One second: 100 ms and 700 ms past it, and the third ends with the second.
+    const base = Math.floor(Date.now() / 1000) * 1000 + 3600_000;
+    const ends: [string, number][] = [
+      [first.body.id, base + 100],
+      [second.body.id, base + 700],
+      [third.body.id, base + 700],
+    ];
+    for (const [id, at] of ends)
+      panel.deps.db
+        .update(portExposures)
+        .set({ expiresAt: new Date(at) })
+        .where(eq(portExposures.id, id))
+        .run();
+    reportTimed(agent, serviceId, 1n, [
+      { hostPort: 41000, containerPort: 6379, expiresAt: new Date(base + 700).toISOString() },
+      { hostPort: 41001, containerPort: 6379, expiresAt: new Date(base + 100).toISOString() },
+      { hostPort: 41002, containerPort: 6379, expiresAt: new Date(base + 700).toISOString() },
+    ]);
+    const listed = (await callOp(panel, exposureOps.get, { serviceId }, { cookie })).body.timed as { id: string; port: number | null }[];
+    const got = Object.fromEntries(listed.map((t) => [t.id, t.port]));
+    expect(got[first.body.id]).toBe(41001);
+    // The two that end together got the other two ports, one each.
+    expect([got[second.body.id], got[third.body.id]].sort()).toEqual([41000, 41002]);
     agent.disconnect();
   });
 
