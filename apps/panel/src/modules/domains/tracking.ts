@@ -8,7 +8,11 @@
 // service's route file says why (ServiceStatus.route_write_error): open
 // Domains tabs show it on the domains it has no route for (no-route.ts),
 // and once it writes the file the service's waiting domains are checked
-// at once.
+// at once. A certificate that comes makes an "elsewhere" from before out of
+// date: it is cleared and the origin is checked again a few seconds later.
+// Before 0.2.16 it was only cleared, and a domain with its certificate was
+// never checked again, so it kept no origin for good (and behind
+// Cloudflare's proxy the Domains tab counted it as needing setup).
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { domains as domainOps, exposures as exposureOps } from "@seylo/ops";
@@ -20,12 +24,18 @@ import { applyDomainLive } from "../exposures/logic";
 import { acmeHeld } from "./acme-hold";
 import { invalidateService } from "./lookup";
 import { checkWaitingDomains } from "./no-route";
+import { enqueueOriginCheck } from "./origin";
 
 /** Applies one service's route reports; returns true when a row changed. */
-export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "alerts">, status: ServiceStatus, now = new Date()): boolean {
+export function applyRouteStatus(
+  deps: Pick<Deps, "db" | "agents" | "live" | "alerts" | "jobs">,
+  status: ServiceStatus,
+  now = new Date(),
+): boolean {
   let changed = false;
   let primaryWentLive = false;
   let holdChanged = false;
+  const recheck: string[] = [];
   for (const route of status.routes) {
     const row = deps.db
       .select()
@@ -42,10 +52,13 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
         if (held && !route.certificateExpiresAt) break;
         if (row.https === "acme" && row.certStatus !== "valid") {
           set.certStatus = "valid";
-          // Let's Encrypt reached a node of the service: an "elsewhere" from before is out of date (origin.ts).
+          // Let's Encrypt reached a node of the service: an "elsewhere" from before is out of date (origin.ts),
+          // and the check a few seconds from now says what requests reach now.
           if (row.originStatus === "elsewhere") {
             set.originStatus = null;
             set.originCheckedAt = null;
+            set.originUnknownSince = null;
+            recheck.push(row.id);
           }
         }
         if (row.certError) set.certError = null;
@@ -98,6 +111,7 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
   if ((primaryWentLive && applyDomainLive(deps.db, status.serviceId, now)) || holdChanged) {
     deps.agents.desired.markDirty({ serviceId: status.serviceId });
   }
+  for (const domainId of recheck) enqueueOriginCheck(deps, domainId, now.getTime());
   if (changed) invalidateService(deps, status.serviceId, [domainOps.list.id, exposureOps.get.id]);
   return changed;
 }

@@ -197,11 +197,20 @@ export const Domain = Type.Object({
    * The last origin check of a custom domain (not automatic, not
    * redirect-only) while its DNS is ok or proxied; absent before the first
    * check and while DNS is in another state. domains.checkDns runs it, and
-   * so does the panel a few seconds after domains.add.
+   * so does the panel a few seconds after domains.add. While it is absent
+   * or unknown the panel checks again on its own (every 2 minutes in the
+   * first hour of unknown answers, every 15 minutes in the first day, then
+   * every 6 hours), also once the domain is live with a valid certificate.
    */
   origin: Type.Optional(OriginStatus),
   /** When origin was checked. */
   originCheckedAt: Type.Optional(Timestamp),
+  /**
+   * With origin unknown: when the first check of this run of unknown
+   * answers was. The Domains tab counts a domain behind Cloudflare's proxy
+   * as needing setup once its origin has been unknown for 30 minutes.
+   */
+  originUnknownSince: Type.Optional(Timestamp),
   /**
    * Why that check did not reach the node, when Cloudflare said (see
    * OriginReason); only with origin unknown or elsewhere. The panel keeps

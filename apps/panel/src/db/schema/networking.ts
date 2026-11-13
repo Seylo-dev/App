@@ -73,6 +73,12 @@ export const domains = sqliteTable(
     originStatus: text("origin_status").$type<OriginStatus>(),
     originCheckedAt: timestamp("origin_checked_at"),
     /**
+     * While the origin is unknown: the first check of the run that has not
+     * learned where requests go (the re-check's pacing and the Domains
+     * tab's 30 minutes start there). Null with any other origin.
+     */
+    originUnknownSince: timestamp("origin_unknown_since"),
+    /**
      * When the domain's route was first allowed to ask Let's Encrypt
      * (modules/domains/acme-hold.ts): a check proved the domain reaches a
      * node of the service, or nothing could prove it. Set once, never

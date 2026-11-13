@@ -1,0 +1,1 @@
+ALTER TABLE `domains` ADD `origin_unknown_since` integer;

@@ -48,7 +48,11 @@
 // It runs for custom domains (not automatic, not redirect-only) whose DNS
 // is ok or proxied: in domains.checkDns, a few seconds after domains.add as
 // the domains.checkOrigin job once the nodes have the route, and before
-// domains.retryCertificate. Not while the service's nodes cannot have a
+// domains.retryCertificate; again a few seconds after a certificate made an
+// "elsewhere" out of date (tracking.ts), and on recheck.ts's schedule for
+// as long as the origin is not known (none yet, or unknown). An answer from
+// a check that began before the stored one was taken is not stored
+// (saveOrigin). Not while the service's nodes cannot have a
 // route for the domain (a service that has not deployed yet, a compose
 // stack, a cron service: no-route.ts), where it could only fail; the
 // service's deployment going live runs the job (checkWaitingDomains).
@@ -295,26 +299,66 @@ export function lastOriginReason(domainId: string): OriginReason | undefined {
 /**
  * Stores an origin (null clears it) and the check's reason; tells open
  * screens when either changed. Returns whether the origin did.
+ *
+ * `startedAt` is when the check began. Checks of one domain overlap (the
+ * check a few seconds after domains.add, the Domains tab's, the re-check,
+ * Regenerate certificate), and one that began before the stored answer was
+ * taken is older news: it stores nothing. Before, the last to finish won,
+ * so a slow answer from before the node served the route ("elsewhere":
+ * Traefik's 404 through Cloudflare) could replace the proof that had
+ * released the certificate.
+ *
+ * An unknown origin keeps originUnknownSince from the run's first unknown
+ * answer; any other answer, or none, clears it.
  */
 export function saveOrigin(
   deps: Pick<Deps, "db" | "live">,
-  row: Pick<DomainRow, "id" | "serviceId" | "originStatus">,
+  row: Pick<DomainRow, "id" | "serviceId">,
   origin: OriginStatus | null,
   at = new Date(),
   reason?: OriginReason,
+  startedAt?: Date,
 ): boolean {
+  const current = deps.db
+    .select({
+      originStatus: domains.originStatus,
+      originCheckedAt: domains.originCheckedAt,
+      originUnknownSince: domains.originUnknownSince,
+    })
+    .from(domains)
+    .where(eq(domains.id, row.id))
+    .get();
+  if (!current) return false;
+  if (startedAt && current.originCheckedAt && current.originCheckedAt.getTime() > startedAt.getTime()) return false;
+  const unknownSince = origin === "unknown" ? (current.originUnknownSince ?? at) : null;
   deps.db
     .update(domains)
-    .set({ originStatus: origin, originCheckedAt: origin ? at : null })
+    .set({ originStatus: origin, originCheckedAt: origin ? at : null, originUnknownSince: unknownSince })
     .where(eq(domains.id, row.id))
     .run();
   const before = lastReasons.get(row.id);
   const kept = origin && origin !== "node" ? reason : undefined;
   if (kept) lastReasons.set(row.id, kept);
   else lastReasons.delete(row.id);
-  const changed = (row.originStatus ?? null) !== origin;
-  if (changed || before !== kept) invalidateService(deps, row.serviceId, [domainOps.list.id]);
+  const changed = (current.originStatus ?? null) !== origin;
+  if (changed || before !== kept || (current.originUnknownSince?.getTime() ?? null) !== (unknownSince?.getTime() ?? null)) {
+    invalidateService(deps, row.serviceId, [domainOps.list.id]);
+  }
   return changed;
+}
+
+/**
+ * Runs the origin check of a domain now and stores its answer (unless a
+ * check that began later stored one meanwhile), then settles the hold:
+ * a proof releases a domain whose certificate waits for it. The DNS answer
+ * on the row stands; checkDomain (recheck.ts) looks DNS up as well.
+ */
+export async function checkOriginNow(deps: Pick<Deps, "db" | "agents" | "live">, row: DomainRow): Promise<OriginCheck> {
+  const startedAt = new Date();
+  const check = await checkOrigin(deps, row);
+  saveOrigin(deps, row, check.origin, new Date(), check.reason, startedAt);
+  settleHold(deps, row, { dnsStatus: row.dnsStatus, origin: check.origin, provable: check.provable });
+  return check;
 }
 
 export const originCheckJobType = "domains.checkOrigin";
@@ -348,13 +392,14 @@ export const originCheckJob = defineJob<{ domainId: string; tries?: number }>({
     if (!row || !originApplies(row, row.dnsStatus)) return;
     // Nothing of the service runs on its nodes (not deployed yet): no route answers, so nothing to learn.
     if (unroutableDomain(ctx.db, row)) return;
+    const startedAt = new Date();
     const check = await checkOrigin(ctx, row);
     const tries = payload.tries ?? 1;
     if (check.waiting && tries < originCheckTries) {
       enqueueNext(ctx, originCheckJobType, new Date(Date.now() + 10_000), { domainId: row.id, tries: tries + 1 });
       return;
     }
-    saveOrigin(ctx, row, check.origin, new Date(), check.reason);
+    saveOrigin(ctx, row, check.origin, new Date(), check.reason, startedAt);
     settleHold(ctx, row, { dnsStatus: row.dnsStatus, origin: check.origin, provable: check.provable });
   },
 });

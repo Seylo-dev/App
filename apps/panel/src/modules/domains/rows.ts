@@ -60,7 +60,12 @@ export function toDomain(row: DomainRow): Domain {
     dnsCheckedAt: row.dnsCheckedAt?.toISOString() ?? null,
     // Said only while it can be true: a record that moved since (missing, wrong target) makes it stale.
     ...(row.originStatus && row.originCheckedAt && originApplies(row, row.dnsStatus)
-      ? { origin: row.originStatus, originCheckedAt: row.originCheckedAt.toISOString(), ...originReasonOf(row.id) }
+      ? {
+          origin: row.originStatus,
+          originCheckedAt: row.originCheckedAt.toISOString(),
+          ...originReasonOf(row.id),
+          ...(row.originStatus === "unknown" && row.originUnknownSince ? { originUnknownSince: row.originUnknownSince.toISOString() } : {}),
+        }
       : {}),
     certificate: {
       status: row.https === "off" ? "none" : row.certStatus,

@@ -32139,6 +32139,10 @@
                           "format": "date-time",
                           "type": "string"
                         },
+                        "originUnknownSince": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
                         "originReason": {
                           "anyOf": [
                             {
@@ -32873,6 +32877,10 @@
                       ]
                     },
                     "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "originUnknownSince": {
                       "format": "date-time",
                       "type": "string"
                     },
@@ -33656,6 +33664,10 @@
                             "format": "date-time",
                             "type": "string"
                           },
+                          "originUnknownSince": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "originReason": {
                             "anyOf": [
                               {
@@ -34253,6 +34265,10 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "originUnknownSince": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "originReason": {
                       "anyOf": [
                         {
@@ -34779,6 +34795,10 @@
                       ]
                     },
                     "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "originUnknownSince": {
                       "format": "date-time",
                       "type": "string"
                     },
@@ -35407,6 +35427,10 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "originUnknownSince": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "originReason": {
                       "anyOf": [
                         {
@@ -35920,6 +35944,10 @@
                       ]
                     },
                     "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "originUnknownSince": {
                       "format": "date-time",
                       "type": "string"
                     },
@@ -36500,6 +36528,10 @@
                       ]
                     },
                     "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "originUnknownSince": {
                       "format": "date-time",
                       "type": "string"
                     },

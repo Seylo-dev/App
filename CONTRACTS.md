@@ -349,7 +349,10 @@ changes on the update), `0022_deployment_port_move`
 (`backup_policies.selection`, `backup_runs.selection`, `contents` and
 `warnings`, all nullable JSON text, no backfill) and
 `0024_exposure_allow_plain` (`port_exposures.allow_plain`, default false,
-so every exposure from before stays TLS only)), which the panel applies at start, also
+so every exposure from before stays TLS only) and
+`0025_domain_origin_unknown_since` (`domains.origin_unknown_since`,
+nullable, no backfill: an origin unknown from before starts its run at the
+first re-check)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -6067,17 +6070,48 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `domains.origin_status`/`origin_checked_at` (migration
   `0007_domain_origin`), cleared when DNS leaves ok/proxied, and an
   `elsewhere` is cleared when an ACME route turns ACTIVE (Let's Encrypt
-  reached a node). `Domain.origin`/`originCheckedAt` are set only while
+  reached a node), which enqueues the `domains.checkOrigin` job for it
+  (0.2.16; before, nothing checked such a domain again). A check stores
+  its answer only when no answer taken after it began is stored
+  (`saveOrigin`'s `startedAt`, 0.2.16; before, the last to finish won, so a
+  slow "elsewhere" from before the node served the route could replace the
+  proof that had released the certificate). While the answer is
+  `unknown`, `domains.origin_unknown_since` (migration
+  `0025_domain_origin_unknown_since`) keeps the time of the run's first
+  unknown answer, and `Domain.originUnknownSince` carries it (only with
+  `origin` unknown); any other answer, or none, clears it.
+  `Domain.origin`/`originCheckedAt` are set only while
   DNS is ok or proxied; `DnsCheck.origin` only from `domains.checkDns`.
   Runs in `domains.checkDns`, and 5 s after `domains.add` as the
   `domains.checkOrigin` job (one attempt; while an online node with the
   capability has not reported the route it enqueues itself again 10 s
-  later, 4 tries, storing nothing meanwhile). `setOriginFetch` swaps the
+  later, 4 tries, storing nothing meanwhile). Until the origin is known
+  (none stored, or `unknown`) the `domains.recheckWaiting` schedule checks
+  it again (0.2.16, `recheck.ts` `originRecheckDue`, origin only, no DNS
+  lookup, also once the domain is live with a valid certificate; a domain
+  whose certificate waits is left to its DNS re-check): due when its last
+  origin check (else its last DNS check) is older than 2 min in the first
+  hour of the run, 15 min in its first day, 6 h after, counted from
+  `origin_unknown_since` (a run not started yet counts as the first hour);
+  it shares the 20 checks per run with the waiting domains, oldest check
+  first, and skips domains without a route as they do. `setOriginFetch` swaps the
   fetch in tests. The web's Domains row asks `domains.checkDns` while a
   certificate is generating and the origin is not `node`, and below a row
   whose origin is `elsewhere`; every minute while the certificate waits
   for DNS, and Check again (on every pending-certificate note) runs it at
-  once and refreshes the row. A held domain whose DNS is `proxied` reads
+  once and refreshes the row. The Domains tab's red count
+  (`domains/needs-setup.ts`, 0.2.16) counts a proxied domain only once its
+  origin has been `unknown` for 30 minutes (`originUnknownSince`), never
+  while it is not checked yet or still being checked (before, every
+  proxied domain without `node` counted); a missing or wrong record,
+  `elsewhere`, a failed certificate and a domain the panel knows has no
+  route (not `notDeployed`) count as before. Its tooltip names the
+  domains it counts. While a proxied domain is still being checked its
+  DNS chip's title starts "Checking that requests reach <node IP>...";
+  once it counts, the chip is amber and a note below the row
+  (`OriginUnknownNote`, unless a certificate note already shows) says why,
+  with Cloudflare's `originReason` when there is one, and Check again,
+  which runs `domains.checkDns`. A held domain whose DNS is `proxied` reads
   "Certificate waits for Cloudflare" (not "... for DNS": its record there
   is set, the check through Cloudflare is what holds it, since 0.2.13),
   and its note, like the one below an `elsewhere` row, says the
@@ -6117,7 +6151,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `domains.checkOrigin` job, the `domains.recheckWaiting` schedule
   (`modules/domains/recheck.ts`, every 60 s: at most 20 waiting domains
   whose last check is older than 2 min in their first hour, 15 min in
-  their first day, 6 h after, oldest check first) and
+  their first day, 6 h after, oldest check first, together with the
+  origins that are not known, see the origin check above) and
   `domains.retryCertificate`, which refuses
   a still-held domain (CONFLICT `reason: waitingForDns`) and, when its
   check releases one, returns it pending without calling the agents (the
