@@ -6927,7 +6927,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the panel refuses disabled with why; what happens, on the card and in
   the dialog, with the internal and `EXPOSED_*` users listed; a blocker
   keeping Move off and the panel's refusal in the dialog; the move sent to
-  the node picked; Move to another node in the database's menu), and since 0.2.1
+  the node picked; Move to another node in the database's menu; Save and
+  restart saving the limits, then deploying, after a confirm), and since 0.2.1
   `nodes-build-default.spec.ts` (Add node's Build images on this node:
   ticked by default, the request carries the choice, Change),
   `panel-access.spec.ts` (the Panel domain card's switches in every state,
