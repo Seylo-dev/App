@@ -9,7 +9,13 @@
 // selected in it, and Shift+right-click anywhere), nothing opens on a drag
 // grip (data-no-context-menu) or while `blocked()` says so (a drag is on),
 // and right-clicks that reach the trigger through a React portal (a dialog
-// or a menu rendered inside the row) are not the row's.
+// or a menu rendered inside the row) are not the row's. A touch or pen
+// long-press follows the same rules: Radix opens the menu from a timer of
+// its own (iOS sends no contextmenu event at all), so a press where a
+// right-click would not open it holds the trigger disabled until the
+// finger or pen lifts, which clears that timer. The fields and native
+// areas also keep text selection and the link callout on a touch screen
+// (styles/tailwind.css), where the row itself has neither.
 
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { ContextMenu as Menu } from "radix-ui";
@@ -110,8 +116,28 @@ interface SelectionNote {
   had: boolean;
 }
 
+/**
+ * What a touch or pen long-press here would do: the same as a right-click
+ * on the same spot, without the selection rule (on a touch screen a
+ * selection has its own handles and callout, and a row takes none).
+ */
+export function longPressDecision(target: MenuTarget, blocked: boolean): "ours" | "native" | "none" {
+  return contextMenuDecision({ button: 2, shiftKey: false, target, hasSelection: false, blocked });
+}
+
+/**
+ * A touch or pen press in progress on the trigger, and whether it holds the
+ * trigger disabled. It ends when any pointer lifts or is cancelled, so a
+ * press that ends elsewhere (or whose element went) never keeps the menu off.
+ */
+interface Press {
+  held: boolean;
+  end: () => void;
+}
+
 export function ContextMenuTrigger({
   blocked,
+  disabled = false,
   onContextMenuCapture,
   onPointerDownCapture,
   onPointerDown,
@@ -123,9 +149,37 @@ export function ContextMenuTrigger({
   blocked?: () => boolean;
 }) {
   const note = React.useRef<SelectionNote | null>(null);
+  const press = React.useRef<Press | null>(null);
+  // Disabled while a touch or pen press must not open the menu: Radix clears its long-press timer when the trigger turns disabled.
+  const [held, setHeld] = React.useState(false);
+  React.useEffect(() => () => press.current?.end(), []);
+  const startPress = () => {
+    press.current?.end();
+    const current: Press = {
+      held: false,
+      end: () => {
+        window.removeEventListener("pointerup", current.end, true);
+        window.removeEventListener("pointercancel", current.end, true);
+        if (press.current === current) press.current = null;
+        if (current.held) setHeld(false);
+      },
+    };
+    window.addEventListener("pointerup", current.end, true);
+    window.addEventListener("pointercancel", current.end, true);
+    press.current = current;
+  };
+  const hold = () => {
+    const current = press.current;
+    if (!current || current.held) return;
+    current.held = true;
+    setHeld(true);
+  };
   return (
     <Menu.Trigger
       data-context-menu-trigger=""
+      disabled={disabled || held}
+      // Radix marks the trigger data-disabled while it is; a held press is not the row being disabled.
+      data-disabled={disabled ? "" : undefined}
       className={cn("pointer-coarse:select-none", className)}
       onPointerDownCapture={(event) => {
         onPointerDownCapture?.(event);
@@ -133,11 +187,14 @@ export function ContextMenuTrigger({
         if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
           note.current = { at: performance.now(), had: selectionIn(event.currentTarget) };
         }
+        if (event.pointerType !== "mouse") startPress();
       }}
       onPointerDown={(event) => {
         onPointerDown?.(event);
-        // A long-press on an open "..." menu inside the row is that menu's, not a request for this one.
-        if (event.pointerType !== "mouse" && classify(event.target, event.currentTarget) === "menu") event.preventDefault();
+        // A long-press where a right-click would open no menu of ours (a field, a native area, a grip, an open
+        // "..." menu or a dialog inside the row, or while a drag is on) leaves the browser's long-press alone.
+        if (event.pointerType === "mouse") return;
+        if (longPressDecision(classify(event.target, event.currentTarget), blocked?.() ?? false) !== "ours") hold();
       }}
       onContextMenuCapture={(event) => {
         onContextMenuCapture?.(event);
@@ -154,6 +211,8 @@ export function ContextMenuTrigger({
           hasSelection: hadSelection,
           blocked: blocked?.() ?? false,
         });
+        // The contextmenu of a long-press (Android) that is not ours: Radix's long-press timer must not open the menu after it.
+        if (decision !== "ours") hold();
         if (decision === "native") {
           // Radix's handler (bubble phase) never runs, and the browser shows its own menu.
           event.stopPropagation();
@@ -188,7 +247,19 @@ export function ContextMenuTrigger({
   );
 }
 
-export function ContextMenuContent({ className, onContextMenu, ...props }: React.ComponentProps<typeof Menu.Content>) {
+/**
+ * Whether the menu, once closed, should leave focus where it is instead of
+ * moving it back to what had it when the menu opened: yes when something
+ * outside the menu took focus meanwhile (an item started an inline rename,
+ * opened a dialog). When the menu just closed (Escape, a click outside, an
+ * item that moved nothing), focus fell to the page with the menu's items
+ * and goes back, so the keyboard stays on the row.
+ */
+export function keepsFocusOnClose(active: Element | null, body: Element | null): boolean {
+  return active !== null && active !== body;
+}
+
+export function ContextMenuContent({ className, onContextMenu, onCloseAutoFocus, ...props }: React.ComponentProps<typeof Menu.Content>) {
   return (
     <Menu.Portal>
       <Menu.Content
@@ -198,6 +269,12 @@ export function ContextMenuContent({ className, onContextMenu, ...props }: React
         onContextMenu={(event) => {
           onContextMenu?.(event);
           event.preventDefault();
+        }}
+        // What had focus when the menu opened is not the row in every browser (Safari and Firefox on macOS do not
+        // focus a button on click): moving focus back there would blur a rename field an item just opened.
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (!event.defaultPrevented && keepsFocusOnClose(document.activeElement, document.body)) event.preventDefault();
         }}
         {...props}
       />

@@ -122,8 +122,17 @@ rendered into the row through a portal (a dialog), and Shift+right-click
 anywhere. Nothing opens on `[data-no-context-menu]` (a drag grip), inside
 an open menu, or while `blocked()` says so. The context menu key and
 Shift+F10 open the menu at the focused element in every browser (macOS
-has no such key). After a touch long-press opened it, the tap the lifted
-finger leaves on the row is swallowed. `contextMenuDecision` and
+has no such key). A touch or pen long-press follows the same rules
+(`longPressDecision`): Radix opens the menu from a timer of its own (iOS
+sends no contextmenu event), so a press where a right-click would open
+none of ours keeps the trigger disabled until it lifts, which clears that
+timer. On a touch screen the row takes no text selection or link callout
+(`pointer-coarse:select-none`), and the browser's-menu places above get
+both back (`styles/tailwind.css`). After a touch long-press opened it, the
+tap the lifted finger leaves on the row is swallowed. When the menu
+closes, focus goes back to what had it when the menu opened, unless an
+item moved it somewhere since (an inline rename's field, a dialog:
+`keepsFocusOnClose`). `contextMenuDecision`, `longPressDecision` and
 `isMenuKey` are the pure rules (tested without a DOM).
 
 ## LogViewer

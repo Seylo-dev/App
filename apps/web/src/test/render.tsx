@@ -2,9 +2,9 @@
 // screen reads (any op left out stays pending, the way it looks while the
 // panel has not answered), an op client that never answers, the kit's
 // words, and a router around the screen so its links render. `path` opens
-// the screen on another page; a project page (/p/<id>) gives it the
-// project's id the way the app's project routes do (useParams). `errors`
-// are queries that failed (a permission the viewer lacks).
+// the screen on another page; a project page (/p/<id>) or a service page
+// (/p/<id>/s/<id>) gives it the ids the way the app's routes do (useParams).
+// `errors` are queries that failed (a permission the viewer lacks).
 
 import type { OpClient } from "@seylo/ops/client";
 import { OpClientProvider, opQueryKey } from "@seylo/ops/react";
@@ -40,7 +40,10 @@ export async function renderStatic(
   const client = { call: () => new Promise(() => {}) } as unknown as OpClient;
   const root = createRootRoute({ component: screen });
   const router = createRouter({
-    routeTree: root.addChildren([createRoute({ getParentRoute: () => root, path: "/p/$projectId", component: () => null })]),
+    routeTree: root.addChildren([
+      createRoute({ getParentRoute: () => root, path: "/p/$projectId", component: () => null }),
+      createRoute({ getParentRoute: () => root, path: "/p/$projectId/s/$serviceId", component: () => null }),
+    ]),
     history: createMemoryHistory({ initialEntries: [options.path ?? "/"] }),
   });
   await router.load();

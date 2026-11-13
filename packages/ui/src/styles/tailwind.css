@@ -327,3 +327,22 @@
     outline-offset: 2px;
   }
 }
+
+/*
+ * A row with a right-click menu (context-menu.tsx) takes no text selection
+ * and no link callout on a touch screen: a long-press there is its menu.
+ * Where the browser's own menu stays (nativeMenuTargets: fields, editors,
+ * terminals, [data-native-context-menu]) both come back, so a command, a
+ * DNS record or a link in a row's notes can be selected and copied. In the
+ * base layer, so a utility on an element inside still wins.
+ */
+@layer base {
+  @media (pointer: coarse) {
+    [data-context-menu-trigger]
+      :is(input, textarea, select, [contenteditable]:not([contenteditable="false"]), .monaco-editor, .xterm, [data-native-context-menu]) {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
+  }
+}

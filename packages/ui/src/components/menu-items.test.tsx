@@ -3,7 +3,16 @@ import { isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LogBuffer } from "../lib/log-buffer";
 import { CodeBlock, CopyCode } from "./code-block";
-import { contextMenuDecision, isMenuKey, type MenuRequest, nativeMenuTargets, wantsNativeMenu } from "./context-menu";
+import {
+  contextMenuDecision,
+  isMenuKey,
+  keepsFocusOnClose,
+  longPressDecision,
+  type MenuRequest,
+  type MenuTarget,
+  nativeMenuTargets,
+  wantsNativeMenu,
+} from "./context-menu";
 import { CopyField } from "./copy-field";
 import { DataTable, rowActionEntries } from "./data-table";
 import { LogViewer } from "./log-viewer";
@@ -74,6 +83,44 @@ describe("the browser's menu or ours", () => {
     expect(contextMenuDecision(request)).toBe(expected);
     expect(wantsNativeMenu(request)).toBe(expected === "native");
   });
+});
+
+describe("a touch or pen long-press: the right-click's rules", () => {
+  test.each<[string, MenuTarget, boolean, ReturnType<typeof longPressDecision>]>([
+    ["on the row", "row", false, "ours"],
+    ["on a text field, a code block, the logs or a row's notes", "field", false, "native"],
+    ["on a dialog rendered inside the row", "portal", false, "native"],
+    ["on the drag grip", "grip", false, "none"],
+    ["on an open '...' menu inside the row", "menu", false, "none"],
+    ["on the row while a drag is on", "row", true, "none"],
+  ])("%s", (_name, target, blocked, expected) => {
+    expect(longPressDecision(target, blocked)).toBe(expected);
+  });
+});
+
+test("a touch screen keeps text selection and the link callout where the browser's menu stays (tailwind.css)", async () => {
+  const css = (await Bun.file(new URL("../styles/tailwind.css", import.meta.url)).text()).replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = /@media \(pointer: coarse\) \{\s*\[data-context-menu-trigger\]\s*:is\(([^{]*)\)\s*\{([^}]*)\}/.exec(css);
+  expect(rule).not.toBeNull();
+  const list = (value: string) =>
+    value
+      .replaceAll("'", '"')
+      .split(/,\s*/)
+      .map((part) => part.trim());
+  // The same places as the contextmenu rules, so the two never drift apart.
+  expect(list(rule?.[1] ?? "")).toEqual(list(nativeMenuTargets));
+  expect(rule?.[2]).toContain("user-select: text");
+  expect(rule?.[2]).toContain("-webkit-touch-callout: default");
+});
+
+test("a closing context menu leaves focus where an item put it, and gives it back otherwise", () => {
+  const body = { tag: "body" } as unknown as Element;
+  const field = { tag: "input" } as unknown as Element;
+  // An item opened an inline rename (or a dialog): its field keeps focus.
+  expect(keepsFocusOnClose(field, body)).toBe(true);
+  // Escape, a click outside, an item that moved nothing: focus fell to the page with the items, and goes back.
+  expect(keepsFocusOnClose(body, body)).toBe(false);
+  expect(keepsFocusOnClose(null, body)).toBe(false);
 });
 
 test("the context menu key and Shift+F10 ask for the menu, nothing else does", () => {
@@ -151,8 +198,15 @@ test("a row with entries becomes the trigger without a wrapper element", () => {
   expect(out).toContain('data-context-menu-trigger=""');
   expect(out).toContain('data-state="closed"');
   expect(out).toContain("pointer-coarse:select-none");
-  // The row keeps its own classes.
+  // The row keeps its own classes, and is not marked disabled (a held touch press is not either).
   expect(out).toContain("row");
+  expect(out).not.toContain("data-disabled");
+  const disabled = renderToStaticMarkup(
+    <RowContextMenu entries={[item("open")]} disabled>
+      <a href="/p/x">api</a>
+    </RowContextMenu>,
+  );
+  expect(disabled).toContain('data-disabled=""');
 });
 
 test("an empty actions menu renders nothing", () => {

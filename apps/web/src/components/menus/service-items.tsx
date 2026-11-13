@@ -73,7 +73,11 @@ export interface ServiceMenuContext {
   here: boolean;
   /** A deploy of it is queued or running. */
   busy: boolean;
-  /** Its desired run state when known (services.get); without it, status "stopped" says so. */
+  /**
+   * Its desired run state from a live services.get (its own page is open);
+   * without it, status "stopped" says so (the panel reports "stopped" for a
+   * stopped service that is deployed and not deploying).
+   */
   stopped?: boolean;
   /** The terminal modes the viewer may open on it (terminal/access.ts); null while not known. */
   terminalModes: readonly TerminalMode[] | null;

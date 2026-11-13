@@ -6506,7 +6506,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   touch long-press, the context menu key and Shift+F10; the browser's own
   menu on text fields, Monaco, xterm, `[data-native-context-menu]`,
   selected text, portals and Shift+right-click; nothing on
-  `[data-no-context-menu]` grips) and `menu-items.tsx` (`MenuEntry`,
+  `[data-no-context-menu]` grips; a touch or pen long-press follows the
+  same rules, `longPressDecision`, by holding the trigger disabled for
+  the press so Radix's long-press timer never fires there, and those
+  places keep text selection and the link callout on a touch screen,
+  `styles/tailwind.css`; on close, focus stays where an item moved it,
+  `keepsFocusOnClose`, so an inline rename keeps its field in Safari and
+  Firefox) and `menu-items.tsx` (`MenuEntry`,
   `MenuItems`, `RowContextMenu` on the row's own element with
   `data-state="open"` for its selected look, `ActionsMenu` for the "...").
   Every object has one entry list for its "..." and its right-click menu,
@@ -6525,8 +6531,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and the panel's refusal is toasted. Service menus build their entries
   when they open (`menus/service-menu.tsx` `ServiceMenuItems`), and the
   run actions are one hook (`menus/service-actions.ts`) the header's
-  buttons use too. Dialogs a menu opens live shell-wide in
-  `menus/object-actions.tsx` (Clone, Move to project, Stop, Delete
+  buttons use too. A list row's run items (Restart, Stop, Start) follow
+  the row's status; the cached `services.get` decides only on the
+  service's own page, where it is live. Dialogs a menu opens live
+  shell-wide in `menus/object-actions.tsx` (Clone, Move to project, Stop, Delete
   service; Rename and Delete project, `project/project-dialogs.tsx`), never
   in the row, so they stay when the row goes. Right-click menus are on the
   sidebar's project and service rows, the dashboard's Cards (title row,
@@ -6598,7 +6606,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   domain; the browser's menu on Monaco, the logs, selected text and
   Shift+right-click; a drag after a menu and a right-click that lifts
   nothing; a touch long-press opening a card's menu without opening the
-  card, and a swipe opening nothing; screenshots light and dark),
+  card, and a swipe opening nothing; a long-press on a cron row's command
+  opening none and leaving it selectable, the job's name opening it; Stop
+  then Start from a sidebar row away from the service's page offering
+  Start, then Restart and Stop; Rename from a chat's menu keeping its
+  field when a right-click focused nothing; screenshots light and dark),
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
   text unsaved), `env-references.spec.ts` (the References panel on the demo

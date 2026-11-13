@@ -25,13 +25,17 @@ export function useServiceMenu(service: ServiceMenuSubject): MenuEntry[] {
   const deploys = (service.kind === "app" || service.kind === "cron") && !isPanelService(service);
   // The same query the header's Deploy waits on: the deploy in progress, if any.
   const active = useActiveDeploy(service.id, deploys);
-  // A row has only the summary; the page's services.get, when cached, knows whether it is stopped.
+  // A row has only the summary. On the service's own page its services.get
+  // is live (the page reads it and follows service:<id>), so it says whether
+  // the service is stopped; anywhere else a cached copy is whatever the page
+  // last read, and a stop or start since (from this menu or anyone's) only
+  // marked it stale, so the row's status is the newer word.
   const detail = useOp(services.get, { serviceId: service.id }, { enabled: false });
   const terminalModes = useTerminalModes(service);
   return serviceMenuEntries(service, {
     here,
     busy: active !== null || service.status === "building" || service.status === "deploying",
-    stopped: detail.data?.stopped,
+    stopped: here ? detail.data?.stopped : undefined,
     terminalModes,
     act: (action) => objects.serviceAction(service, action, active?.id),
   });

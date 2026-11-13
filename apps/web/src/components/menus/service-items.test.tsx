@@ -70,7 +70,7 @@ test("stopped: Start instead of Restart and Stop", () => {
 
 test("a list row has no desired state: status stopped stands in for it", () => {
   expect(ids({ status: "stopped" })).toContain("start");
-  // services.get's stopped (from the cache) wins over the status.
+  // On its own page the live services.get's stopped wins over the status (service-menu.test.tsx: never a cached one).
   expect(ids({ status: "crashed" }, { stopped: true })).toContain("start");
   expect(ids({ status: "crashed" })).toEqual(expect.arrayContaining(["restart", "stop"]));
 });

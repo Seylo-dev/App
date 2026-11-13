@@ -6,13 +6,18 @@
 // "..." menu lists exactly what the right-click menu lists. The browser's
 // own menu stays on the editors, the logs, text selected in a row and
 // Shift+right-click; dragging still works around the menus; on a touch
-// screen a long-press opens the menu and a swipe does not. Screenshots,
-// light and dark, go to $SHOTS_DIR/context-menus/.
+// screen a long-press opens the menu and a swipe does not, and a
+// long-press on a row's command keeps the browser's. A list row's Stop or
+// Start is followed by the right run items, and Rename from a chat's menu
+// keeps its field in browsers where a right-click focuses nothing.
+// Screenshots, light and dark, go to $SHOTS_DIR/context-menus/.
 
 import { mkdirSync } from "node:fs";
 import type { CDPSession, Locator, Page } from "@playwright/test";
-import { ids } from "./demo/fixtures";
+import { assistantHandlers } from "./demo/assistant";
+import { services as demoServices, ids } from "./demo/fixtures";
 import { type Handler, installDemo } from "./demo/routes";
+import { handlers as serviceHandlers } from "./demo/service";
 import { dashboardHeading, expect, stateFile, test, withDashboardView } from "./helpers";
 
 test.use({ storageState: stateFile });
@@ -183,6 +188,8 @@ test("the keyboard: Shift+F10 and the context menu key open the focused row's me
   expect((await itemsOf(contextMenu(page)))[0]).toBe("openNewTab");
   await page.keyboard.press("Escape");
   await expect(contextMenu(page)).toBeHidden();
+  // Closed with nothing chosen, the menu gives focus back to the row.
+  await expect(api).toBeFocused();
 
   // A sortable row's grip (Tab reaches it first) opens nothing.
   const grip = sidebar(page).locator('button[aria-label^="Move web."]');
@@ -278,6 +285,87 @@ test("a service menu's items do what the header's buttons do, with the same conf
   await choose("Move to another node");
   await expect(page).toHaveURL(new RegExp(`/p/${ids.acme}/s/${ids.api}/advanced#move$`));
   await expect(page.locator("section#move, #move").first()).toBeVisible();
+});
+
+test("a row's Stop and Start from its menu: the next menu offers Start, then Restart and Stop (not an old copy of the service's page)", async ({
+  page,
+}) => {
+  let apiStopped = false;
+  const run = (id: string) => id === "restart" || id === "stop" || id === "start";
+  await open(page, `/p/${ids.acme}/s/${ids.api}`, {
+    "services.stop": (input) => {
+      if (input.serviceId === ids.api) apiStopped = true;
+      return { id: input.serviceId };
+    },
+    "services.start": (input) => {
+      if (input.serviceId === ids.api) apiStopped = false;
+      return { id: input.serviceId };
+    },
+    "services.list": (input) => ({
+      services: (demoServices[String(input.projectId ?? "")] ?? []).map((service) =>
+        (service as { id: string }).id === ids.api && apiStopped ? { ...(service as object), status: "stopped" } : service,
+      ),
+    }),
+    "services.get": (input) => {
+      const detail = serviceHandlers["services.get"]?.(input) as Record<string, unknown>;
+      return input.serviceId === ids.api && apiStopped ? { ...detail, stopped: true, status: "stopped" } : detail;
+    },
+  });
+  // api's page read services.get (running); then away from it, so that copy stays in the cache, unread.
+  await expect(page.locator("main header").first().getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  await sidebarService(page, "web").click();
+  await expect(page).toHaveURL(new RegExp(`/s/${ids.web}$`));
+  const api = sidebarService(page, "api");
+
+  await api.click({ button: "right" });
+  expect((await itemsOf(contextMenu(page))).filter(run)).toEqual(["restart", "stop"]);
+  await contextMenu(page).getByRole("menuitem", { name: "Stop", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(api.locator(".bg-status-off")).toHaveCount(1);
+  await api.click({ button: "right" });
+  expect((await itemsOf(contextMenu(page))).filter(run)).toEqual(["start"]);
+
+  await contextMenu(page).getByRole("menuitem", { name: "Start", exact: true }).click();
+  await expect(api.locator(".bg-status-off")).toHaveCount(0);
+  await api.click({ button: "right" });
+  expect((await itemsOf(contextMenu(page))).filter(run)).toEqual(["restart", "stop"]);
+  await page.keyboard.press("Escape");
+});
+
+test("Rename from a chat's right-click menu keeps its field where a right-click focuses nothing (Safari, Firefox on macOS)", async ({
+  page,
+}) => {
+  await open(page, "/assistant", assistantHandlers);
+  const composer = page.getByRole("textbox", { name: "Message the assistant" });
+  await composer.focus();
+  // As in Safari and Firefox on macOS: a right-click leaves focus where it was (the composer), so that is what the menu
+  // would give focus back to when it closes.
+  await page.evaluate(() => {
+    window.addEventListener(
+      "mousedown",
+      (event) => {
+        if (event.button === 2) event.preventDefault();
+      },
+      true,
+    );
+    window.addEventListener("contextmenu", () => {
+      (window as unknown as { __focusedAtMenu: string }).__focusedAtMenu = document.activeElement?.getAttribute("aria-label") ?? "";
+    }, true);
+  });
+  const row = page.locator('nav[aria-label="Your chats"] [data-context-menu-trigger]').filter({ hasText: "Why is the worker restarting?" });
+  await row.click({ button: "right" });
+  await expect(contextMenu(page)).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __focusedAtMenu: string }).__focusedAtMenu)).toBe("Message the assistant");
+  await contextMenu(page).getByRole("menuitem", { name: "Rename", exact: true }).click();
+  const field = page.getByRole("textbox", { name: "Chat title" });
+  await expect(field).toBeFocused();
+  // The menu has faded out and its focus scope let go: the field is still there, with focus.
+  await expect(contextMenu(page)).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await expect(field).toBeFocused();
+  await page.keyboard.type("Worker memory");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('nav[aria-label="Your chats"]').getByText("Worker memory", { exact: true })).toBeVisible();
 });
 
 test("a node row: its menu, and Shell opens the node's shell view", async ({ page }) => {
@@ -499,5 +587,43 @@ test.describe("on a touch screen", () => {
     await expect(page.getByRole("dialog")).toBeHidden();
     await page.locator(`[data-slot="service-card"][href$="/s/${ids.web}"]`).tap();
     await expect(page).toHaveURL(new RegExp(`/s/${ids.web}$`));
+  });
+
+  test("a long-press on a row's command keeps the browser's (selectable, no menu of ours); on the rest of the row it opens the menu", async ({
+    page,
+  }) => {
+    await open(page, `/p/${ids.acme}/s/${ids.api}/cron`);
+    const row = page.locator("[data-context-menu-trigger]").filter({ hasText: "Nightly cleanup" });
+    const command = row.locator('[data-slot="copy-code"]');
+    await command.scrollIntoViewIfNeeded();
+    await expect(command).toContainText("bun run cleanup");
+    // The row takes no text selection on a touch screen (a long-press is its menu); the command keeps it.
+    const userSelect = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return style.userSelect || style.webkitUserSelect;
+      });
+    expect(await userSelect(row)).toBe("none");
+    expect(await userSelect(command)).toBe("text");
+
+    const cdp = await page.context().newCDPSession(page);
+    const box = await command.locator("code").boundingBox();
+    if (!box) throw new Error("no command");
+    await touch(cdp, "touchStart", box.x + 8, box.y + box.height / 2);
+    await page.waitForTimeout(1000);
+    await expect(contextMenu(page)).toHaveCount(0);
+    await expect(row).toHaveAttribute("data-state", "closed");
+    await touch(cdp, "touchEnd", box.x + 8, box.y + box.height / 2);
+    await page.waitForTimeout(300);
+    await expect(contextMenu(page)).toHaveCount(0);
+
+    // The job's name, on the same row: its menu.
+    const name = await row.getByText("Nightly cleanup", { exact: true }).boundingBox();
+    if (!name) throw new Error("no name");
+    await touch(cdp, "touchStart", name.x + 8, name.y + name.height / 2);
+    await page.waitForTimeout(1000);
+    await expect(contextMenu(page)).toBeVisible();
+    await expect(row).toHaveAttribute("data-state", "open");
+    await touch(cdp, "touchEnd", name.x + 8, name.y + name.height / 2);
   });
 });
