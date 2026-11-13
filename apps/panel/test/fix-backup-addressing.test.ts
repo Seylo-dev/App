@@ -708,6 +708,43 @@ describe("backups from before 0.2.15 on a bucket host", () => {
     expect(other.checked).toEqual([]);
   });
 
+  test("Download links it where it is, as a restore downloads it", async () => {
+    const { cookie } = await createUser(panel, "owner");
+    /** The link Download gives for a backup, its object put where `where` says (or nowhere). */
+    async function downloadUrl(c: Case, where: "now" | "before" | "nowhere") {
+      const { service, run, objects } = seed(c);
+      const source = run();
+      if (where === "now") objects.set(source.key, "the archive");
+      if (where === "before") objects.set(`${c.bucket}/${source.key}`, "the old archive");
+      requests.length = 0;
+      const response = await viaProvider(() =>
+        callOp(panel, backupOps.downloadUrl, { serviceId: service.id, runId: source.id }, { cookie }),
+      );
+      expect(response.status).toBe(200);
+      const url = new URL(response.body.url);
+      expect(url.searchParams.get("response-content-disposition")).toBe(`attachment; filename="${response.body.fileName}"`);
+      return { key: source.key, at: `${url.host}${url.pathname}`, url, checked: lines() };
+    }
+
+    const now = await downloadUrl(spaces, "now");
+    expect(now.at).toBe(`${spaces.host}/${now.key}`);
+    expect(now.checked).toEqual([`HEAD ${spaces.host}/${now.key}`]);
+
+    // Before, the link was for the reported key only, and the bucket answered NoSuchKey.
+    const before = await downloadUrl(spaces, "before");
+    expect(before.at).toBe(`${spaces.host}/backups/${before.key}`);
+    expect(before.checked).toEqual([`HEAD ${spaces.host}/${before.key}`, `HEAD ${spaces.host}/backups/${before.key}`]);
+    expect(await viaProvider(async () => (await fetch(before.url)).text())).toBe("the old archive");
+
+    const nowhere = await downloadUrl(spaces, "nowhere");
+    expect(nowhere.at).toBe(`${spaces.host}/${nowhere.key}`);
+
+    // Destinations whose addressing did not change: no lookup.
+    const other = await downloadUrl(r2, "now");
+    expect(other.at).toBe(`${r2.host}${r2.base}${other.key}`);
+    expect(other.checked).toEqual([]);
+  });
+
   test("a bucket that does not answer the lookup leaves the key as reported", async () => {
     // Takes the connection and never answers.
     const silent = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });

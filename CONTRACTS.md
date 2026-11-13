@@ -4925,9 +4925,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   again in the path of the nodes' URLs (except Aliyun and AWS
   FIPS/PrivateLink, which got it twice in the host and wrote nothing), so
   the objects of those runs are `<bucket>/<key>` inside the bucket
-  (`legacyKey`): a restore's GET is presigned for that key when only it
-  exists (the panel checks both with HEAD, 15 s at most, else the key as
-  reported), `deleteRun` deletes both keys,
+  (`legacyKey`): a restore's GET, and the link of `backups.downloadUrl`,
+  is presigned for that key when only it exists (`storedKey`: the panel
+  checks both with HEAD, 15 s at most for a restore and 5 s for a
+  download, else the key as reported), `deleteRun` deletes both keys,
   and retention lists both folders and counts them together towards
   keepLast. The signing region is the
   destination's (`auto` for R2). A failed connection test names the

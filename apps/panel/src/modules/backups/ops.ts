@@ -29,7 +29,7 @@ import {
   toRun,
   toRuns,
 } from "./runs";
-import { type DestinationRow, deleteRunObject, type StorageConfig, storageConfig, testStorage } from "./storage";
+import { type DestinationRow, deleteRunObject, type StorageConfig, storageConfig, storedKey, testStorage } from "./storage";
 
 type Destination = Static<typeof backupOps.Destination>;
 type Policy = Static<typeof backupOps.Policy>;
@@ -517,15 +517,21 @@ export function downloadAllowed(db: PanelDb, access: Access, serviceId: string):
   }
 }
 
+/** How long Download waits for the bucket to say which of a run's two keys exists (storedKey) before it links the reported one. */
+const downloadLookupMs = 5_000;
+
 /**
  * A short link to download one backup straight from its bucket: a GET
  * presigned for that run's own object (ownObjectKey), so it reaches
  * nothing else in the bucket, and saved under a readable name. The browser
- * navigates to it; the bytes never pass through the panel.
+ * navigates to it; the bytes never pass through the panel. On a bucket
+ * host a backup from before 0.2.15 may be at its old address (address.ts
+ * legacyKey): like a restore's download (signing.ts), the link is for the
+ * key that exists.
  */
 export const downloadUrl = implement(
   backupOps.downloadUrl,
-  (input, ctx) => {
+  async (input, ctx) => {
     const service = getService(ctx.db, input.serviceId);
     const run = requireRun(ctx, input.serviceId, input.runId);
     if (run.kind !== "backup" || run.status !== "succeeded" || !run.objectKey) {
@@ -549,10 +555,14 @@ export const downloadUrl = implement(
       ? ctx.db.select({ name: volumes.name }).from(volumes).where(eq(volumes.id, run.volumeId)).get()?.name
       : undefined;
     const fileName = backupFileName(service.name, run.target === "database" ? "database" : (volumeName ?? "volume"), run.startedAt, ext);
+    const config = storageConfig(ctx.secrets, destination);
+    // HEAD on the reported key, then the old one, only on a bucket host;
+    // when the bucket does not answer in time, the reported key.
+    const key = await storedKey(config, run.objectKey, downloadLookupMs);
     const now = new Date();
-    const url = presign(storageConfig(ctx.secrets, destination), {
+    const url = presign(config, {
       method: "GET",
-      key: run.objectKey,
+      key,
       query: { "response-content-disposition": `attachment; filename="${fileName}"` },
       expiresIn: backupOps.downloadUrlSeconds,
       now,
