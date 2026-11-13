@@ -6,7 +6,7 @@
 // change), and saves check the index like any reference.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { analyzeEnv } from "@seylo/env-analyzer";
+import { analyzeEnv, type ReferenceVariable } from "@seylo/env-analyzer";
 import { domains as domainOps, env as envOps } from "@seylo/ops";
 import { domains } from "../src/db/schema";
 import { setDnsLookups } from "../src/modules/domains/dns";
@@ -59,7 +59,7 @@ async function apiDomains(serviceId: string) {
 const builtinsOf = async (serviceId: string, target: string) => {
   const ctx = await callOp(panel, envOps.references, { serviceId }, { cookie });
   expect(ctx.status).toBe(200);
-  const variables: { name: string; value: string | null; list?: boolean }[] =
+  const variables: ReferenceVariable[] =
     target === "self" ? ctx.body.self.builtins : ctx.body.targets.find((t: { name: string }) => t.name === target).variables;
   return { ctx: ctx.body, variables, value: (name: string) => variables.find((v) => v.name === name)?.value };
 };
