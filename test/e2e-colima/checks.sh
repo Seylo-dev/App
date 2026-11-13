@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # The e2e checklist against the three VMs. One function per check
-# (check_01 .. check_43); each prints its sub-results with evidence and ends
+# (check_01 .. check_44); each prints its sub-results with evidence and ends
 # PASS, FAIL, BLOCKED (a precondition is missing, with the reason) or SKIP.
 # Results are kept per check in dist/e2e/state/results and RESULTS.md (next
 # to this file) is rewritten from them after every run, so a single check
 # can be rerun alone.
 #
-# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..40, then 31)
+# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..44, then 31)
 #        test/e2e-colima/checks.sh report      rewrite RESULTS.md only
 #
 # Panel calls go through the REST op routes (/api/v1/<op id>) with the API
@@ -69,12 +69,13 @@ TITLES=(
   "Move the panel A -> B in the browser: data, keys, registry and sign-ins come along, every node follows; a failed move rolls back; back to A"
   "Export whoami with its volume and a Postgres with its data from e2e-exports on B, import both into e2e-imports on C: env, cron job, the volume's file, the rows, basic auth; refusals"
   "Database version: patch update and a MongoDB major upgrade keep the data"
+  "Move a Postgres with rows B -> C: rows, stored password, TLS exposure on C with the same allowed IPs, an app on C reconnects, backup on C, B drops its copy"
 )
 # The highest check number. Check 31 gives the panel a domain and puts
 # everything back afterwards; it runs last (after 32..41) so a failed
 # cleanup cannot spoil the others. Checks 39, 40 and 41 put back what they
 # change too.
-LAST=43
+LAST=44
 DOMAIN_CHECK=31
 
 CUR=
@@ -4652,6 +4653,119 @@ check_43() {
     bad "no 7.0 deployment is kept"
   fi
   api services.delete "{\"serviceId\":\"$db\",\"confirmName\":\"mongo-ver\"}" >/dev/null || true
+}
+
+# Check 44 (0.2.16): services.move of a database. A PostgreSQL 17 on B with
+# 25 rows, exposed over TLS on port 25444 to the Mac and the VM network,
+# moves to C: services.moveImpact offers C and lists the data volume and
+# the exposed port; the move stops it, copies the volume through the panel
+# and starts it on C; the rows are there; the panel's stored password still
+# signs in, from an app and through the exposed port, which listens on C's
+# address with TLS and the same allowed IPs (and not on B); an app on C in
+# the project, deployed before the move with ${{pgmove.INTERNAL_URL}} (no
+# private network between nodes, so it waits), connects by itself once the
+# database is there, without a deploy; a backup runs on C (with check 11's
+# MinIO destination); and B drops its copy.
+P44_PORT=25444
+# Every 3 s: the row count when it signs in, PG-WAITING when it cannot.
+p44_probe='["sh","-c","while true; do if n=$(psql \"$DATABASE_URL\" -tAc \"select count(*) from marker\" 2>/dev/null); then echo PG-ROWS-$n; else echo PG-WAITING; fi; sleep 3; done"]'
+check_44() {
+  need_key || return 3
+  local nb nc pid db pass app out dep st before after url host dest run node
+  nb=$(node_id b)
+  nc=$(node_id c)
+  [ -n "$nb" ] && [ -n "$nc" ] || { blocked "nodes B and C must be joined"; return 3; }
+  op_is_query services.moveImpact || { blocked "this build has no services.moveImpact"; return 3; }
+  pid=$(project_id e2e-dbmove)
+  delete_service e2e-dbmove pgmove-app
+  delete_service e2e-dbmove pgmove
+  pass=e2e-pgmove-pass-44
+  db=$(api databases.create "{\"projectId\":\"$pid\",\"name\":\"pgmove\",\"engine\":\"postgres\",\"version\":\"17\",\"nodeId\":\"$nb\",\"database\":\"app\",\"user\":\"app\",\"password\":\"$pass\"}" | jq -r .serviceId) ||
+    { bad "databases.create failed"; return 1; }
+  wait_for 300 "pgmove running on B" svc_running "$db" || { bad "pgmove did not reach running on B ($(svc_status "$db"))"; return 1; }
+  wait_for 90 "pgmove accepting on B" pg_exec b "$db" "select 1" || true
+  pg_exec b "$db" "create table marker (n int primary key, note text); insert into marker select g, 'row-' || g from generate_series(1, 25) g" >/dev/null ||
+    { bad "could not write the rows on B"; return 1; }
+  expect "25 rows on B" test "$(pg_exec b "$db" "select count(*) from marker" | tr -d '[:space:]')" = 25
+  api databases.setExposure "{\"serviceId\":\"$db\",\"enabled\":true,\"port\":$P44_PORT,\"allowedCidrs\":[\"$(host_ip)/32\",\"192.168.64.0/24\"]}" >/dev/null ||
+    bad "databases.setExposure failed"
+  # p44_tls <ip>: psql from the Mac over TLS through the exposed port, with the panel's stored password.
+  p44_tls() { psql "postgresql://app:$pass@$1:$P44_PORT/app?sslmode=require" -tAc "select count(*) from marker" 2>/dev/null | grep -qx 25; }
+  wait_for 90 "TLS through B's exposed port" p44_tls "$(node_ip b)" && good "before the move: psql over TLS through B:$P44_PORT reads the 25 rows" ||
+    bad "psql over TLS through B:$P44_PORT failed: $(psql "postgresql://app:$pass@$(node_ip b):$P44_PORT/app?sslmode=require" -tAc 'select 1' 2>&1 | head -2 | tr '\n' ' ')"
+  before=$(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '.exposure | {enabled, port, allowedCidrs, allowPlain}')
+
+  # An app on C reads the internal URL: no private network between nodes, so it waits.
+  app=$(image_service e2e-dbmove pgmove-app c postgres:17.6-alpine "" "{\"container\":{\"command\":$p44_probe},\"deployNow\":false}") ||
+    { bad "services.create pgmove-app failed"; return 1; }
+  # shellcheck disable=SC2016 # ${{...}} is the panel's reference syntax, not the shell's
+  api env.set "$(jq -nc --arg s "$app" '{serviceId:$s, text:"DATABASE_URL=${{pgmove.INTERNAL_URL}}"}')" >/dev/null || bad "env.set on pgmove-app failed"
+  api deployments.deploy "{\"serviceId\":\"$app\"}" >/dev/null || bad "deploying pgmove-app failed"
+  [ "$(wait_deploy "$app" 300)" = live ] || bad "pgmove-app did not deploy on C"
+  # p44_app_says <text>: the app's container on C logged it.
+  p44_app_says() { on "$E2E_C" "docker logs \$(docker ps -q --filter label=$SLUG.service=$app | head -1) 2>&1 | tail -5" | grep -q "$1"; }
+  wait_for 60 "pgmove-app waiting on C" p44_app_says PG-WAITING || true
+  ev "before the move pgmove-app on C says: $(on "$E2E_C" "docker logs \$(docker ps -q --filter label=$SLUG.service=$app | head -1) 2>&1 | tail -1")"
+
+  out=$(api services.moveImpact "{\"serviceId\":\"$db\"}") || { bad "services.moveImpact failed"; return 1; }
+  ev "moveImpact: $(printf '%s' "$out" | jq -c '{blocker, targets: [.targets[] | {name, online, refusal: .refusal.reason}], volumes: [.volumes[].name], exposure, internalReferrers: [.internalReferrers[].name]}')"
+  expect "moveImpact offers C and lists the data volume and the exposed port" jq_ok "$out" \
+    --arg c "$nc" --argjson p "$P44_PORT" '.blocker == null and ([.targets[] | select(.id == $c and .refusal == null)] | length == 1) and ([.volumes[].name] == ["data"]) and .exposure.database.port == $p and ([.internalReferrers[].name] == ["pgmove-app"])'
+
+  dep=$(api services.move "{\"serviceId\":\"$db\",\"toNodeId\":\"$nc\"}" | jq -r .deploymentId) || { bad "services.move failed"; return 1; }
+  st=$(wait_deploy "$db" 900 "$dep")
+  ev "move deployment: $st $(deploy_info "$db" "$dep" | jq -c '.deployment | {trigger, shippedTo: [.shippedTo[]?.name], error}')"
+  ev "move log: $(deploy_log_tail "$db" "$dep" 8 | tr '\n' '|')"
+  expect "the move went live (status $st)" test "$st" = live
+  node=$(api services.get "{\"serviceId\":\"$db\"}" | jq -r '[.placements[].nodeId] | join(",")')
+  expect "the database runs on C only ($node)" test "$node" = "$nc"
+  wait_for 120 "pgmove accepting on C" pg_exec c "$db" "select 1" || true
+  expect "the 25 rows are on C" test "$(pg_exec c "$db" "select count(*) from marker" | tr -d '[:space:]')" = 25
+  expect "the panel still has the same password" test "$(api databases.connection "{\"serviceId\":\"$db\"}" | jq -r .internal.password)" = "$pass"
+
+  # The app on C reconnects by itself: same internal address, no deploy.
+  if wait_for 120 "pgmove-app reading the rows" p44_app_says PG-ROWS-25; then
+    good "pgmove-app on C signs in with the stored password and reads the 25 rows, without a deploy"
+  else
+    bad "pgmove-app on C did not reach the database: $(on "$E2E_C" "docker logs \$(docker ps -q --filter label=$SLUG.service=$app | head -1) 2>&1 | tail -2" | tr '\n' ' ')"
+  fi
+
+  # The exposed port follows to C, with TLS and the same allowed IPs.
+  after=$(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '.exposure | {enabled, port, allowedCidrs, allowPlain}')
+  ev "exposure before: $before after: $after"
+  expect "the exposure keeps its port, allowed IPs and TLS-only setting" test "$after" = "$before"
+  host=$(addr_of "$(api databases.connection "{\"serviceId\":\"$db\"}" | jq -r '.exposed | "\(.host):\(.port)"')")
+  expect "the exposed address is C's ($host)" test "${host%:*}" = "$(node_ip c)"
+  wait_for 90 "TLS through C's exposed port" p44_tls "$(node_ip c)" && good "after the move: psql over TLS through C:$P44_PORT reads the 25 rows" ||
+    bad "psql over TLS through C:$P44_PORT failed: $(psql "postgresql://app:$pass@$(node_ip c):$P44_PORT/app?sslmode=require" -tAc 'select 1' 2>&1 | head -2 | tr '\n' ' ')"
+  out=$(psql "postgresql://app:$pass@$(node_ip c):$P44_PORT/app?sslmode=disable" -tAc 'select 1' 2>&1) && bad "psql sslmode=disable logged in through C: $out"
+  expect "C's exposed port refuses a login without TLS" grep -q 'this port only accepts TLS connections' <<<"$out"
+  url="postgresql://app:$pass@$(node_ip b):$P44_PORT/app?sslmode=require"
+  wait_for 60 "B's exposed port closed" fails env PGCONNECT_TIMEOUT=5 psql "$url" -tAc 'select 1' || bad "B still answers on $P44_PORT after the move"
+
+  # Backups run on C.
+  dest=$(api backups.listDestinations | jq -r '.destinations[]? | select(.name=="e2e-minio") | .id' | head -1)
+  if [ -n "$dest" ]; then
+    run=$(api backups.runNow "{\"serviceId\":\"$db\",\"target\":\"database\",\"destinationId\":\"$dest\"}" | jq -r .id) || bad "backups.runNow failed"
+    if [ -n "$run" ]; then
+      wait_for 300 "the backup on C" run_done "$db" "$run" || true
+      out=$(run_info "$db" "$run")
+      ev "backup run: $out"
+      expect "the backup succeeded ($(printf '%s' "$out" | jq -r .status))" test "$(printf '%s' "$out" | jq -r .status)" = succeeded
+      expect "it ran on C" test "$(panel_sql "select node_id from backup_runs where id = '$run'" | jq -r '.[0].node_id')" = "$nc"
+    fi
+  else
+    ev "no e2e-minio destination (check 11): backup on C not checked"
+  fi
+
+  # B drops its copy once C is live.
+  wait_for 120 "B dropping pgmove's container" sh -c "[ -z \"\$(colima ssh -p $E2E_B -- sudo docker ps -aq --filter label=$SLUG.service=$db)\" ]" ||
+    bad "B still has a container of pgmove"
+  wait_for 120 "B dropping pgmove's folder" on_node b "test ! -e $BRAND_DATA_DIR/services/$db" ||
+    bad "B kept $BRAND_DATA_DIR/services/$db after the move"
+
+  delete_service e2e-dbmove pgmove-app
+  delete_service e2e-dbmove pgmove
 }
 
 main() {
