@@ -120,6 +120,12 @@ export const portExposures = sqliteTable(
     /** Source CIDRs allowed to connect; timed exposes are locked to the IP that opened them. Empty = anyone. */
     allowedCidrs: json<string[]>("allowed_cidrs").notNull().default(sql`'[]'`),
     tls: integer("tls", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Database exposure (0.2.16): the owner allowed clients without TLS too
+     * (databases.setExposure allowPlain). Off by default; turning exposure
+     * off deletes the row, so it starts off again.
+     */
+    allowPlain: integer("allow_plain", { mode: "boolean" }).notNull().default(false),
     /** Timed exposes end at expiresAt; redirecting first-run ports close at closeAt. The agent enforces both. */
     expiresAt: timestamp("expires_at"),
     closeAt: timestamp("close_at"),

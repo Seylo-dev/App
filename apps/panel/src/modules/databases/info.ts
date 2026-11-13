@@ -2,8 +2,9 @@
 // exposure row and the internal and exposed connection details. Env
 // references (${{db.INTERNAL_URL}}), the connection op and the desired
 // state all use this, so they always agree. The exposed connection uses
-// the database's own user and password, over TLS only, and reads as closed
-// while the node's agent is too old to keep the port TLS only
+// the database's own user and password, over TLS (and also without when
+// the owner allowed it and the node's agent can, plainAccepted), and reads
+// as closed while the node's agent is too old to keep the port TLS only
 // (exposureWaitsFor), as the desired state keeps it.
 
 import { OpError } from "@seylo/ops";
@@ -13,8 +14,8 @@ import { portExposures, serviceDatabases, serviceSecrets } from "../../db/schema
 import type { Deps } from "../../deps";
 import type { SecretBox } from "../../security/secret-box";
 import { getService, nodeAddress, type PlacedNode, type ServiceRow, serviceNodes } from "../domains/lookup";
-import { missingExposureCapability } from "./capability";
-import { type Credentials, connectionUrl, type Engine, engines, exposureRefusal, httpUrl } from "./engines";
+import { missingExposureCapability, nodeHasCapability } from "./capability";
+import { type Credentials, connectionUrl, type Engine, engines, exposureRefusal, httpUrl, plainExposureCapability } from "./engines";
 
 type Tx = Parameters<Parameters<PanelDb["transaction"]>[0]>[0];
 
@@ -45,6 +46,13 @@ export interface DatabaseInfo {
    * reader says so: exposedAddress and exposedConnection are null.
    */
   exposureWaitsFor: string | null;
+  /**
+   * The node's agent cannot take clients without TLS (no
+   * database.exposure.plain.v1 in its stored facts, or no node): the port
+   * stays TLS only whatever exposure.allowPlain says (databaseRuntime
+   * sends allowPlain only when this is false).
+   */
+  plainNeedsNodeUpdate: boolean;
 }
 
 export function readSecret(deps: Pick<Deps, "db" | "secrets">, serviceId: string, name: string): string | null {
@@ -92,7 +100,13 @@ export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: stri
     admin: { user: row.adminUser, password: adminPassword, database: row.databaseName },
     exposure,
     exposureWaitsFor: exposure && node ? missingExposureCapability(deps.db, null, engine, node.id) : null,
+    plainNeedsNodeUpdate: !node || !nodeHasCapability(deps.db, null, node.id, plainExposureCapability),
   };
+}
+
+/** Clients without TLS get through the open port: the owner allowed them and the node's agent can. */
+export function plainAccepted(info: DatabaseInfo): boolean {
+  return exposureState(info) === "open" && !!info.exposure?.allowPlain && !info.plainNeedsNodeUpdate;
 }
 
 /** databases.get exposure.state: "waitingForNodeUpdate" while exposure is on and the node's agent is too old for it. */
@@ -139,14 +153,18 @@ export function exposedAddress(info: DatabaseInfo): { host: string; port: number
 }
 
 /** creds: another user than the main one (databases.createUser's URLs). */
-export function exposedConnection(info: DatabaseInfo, creds: Credentials = info.admin): (Connection & { tlsParams: string }) | null {
+export function exposedConnection(
+  info: DatabaseInfo,
+  creds: Credentials = info.admin,
+): (Connection & { tlsParams: string; allowPlain: boolean }) | null {
   const address = exposedAddress(info);
   if (!address || address.port === null) return null;
   // Mongo and ClickHouse speak TLS from the first byte through the agent; with no host name the
   // certificate is self-signed, so clients must be told to accept it (Postgres and MySQL "require"
   // never verifies).
   const accept = info.row.tlsHostname ? "" : (selfSignedParam[info.row.engine] ?? "");
-  // The same user and password as inside: exposing only opens the port, with TLS.
+  // The same user and password as inside: exposing only opens the port, with TLS. The URL asks for TLS
+  // also where plain clients are accepted too: it keeps working, and it is the safe default to hand out.
   const url = connectionUrl(info.row.engine, creds, address.host, address.port, true);
   return {
     url: accept ? `${url}&${accept}` : url,
@@ -154,6 +172,7 @@ export function exposedConnection(info: DatabaseInfo, creds: Credentials = info.
     port: address.port,
     ...creds,
     tlsParams: accept ? `${info.engine.tlsParams}&${accept}` : info.engine.tlsParams,
+    allowPlain: plainAccepted(info),
   };
 }
 

@@ -3,7 +3,7 @@ import { databases } from "@seylo/ops";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
 import type { ServiceDetail } from "../use-service";
-import { ConnectionPage } from "./connection-page";
+import { ConnectionPage, PlainWarning } from "./connection-page";
 
 const db = {
   serviceId: "svc-db",
@@ -22,6 +22,8 @@ const db = {
     port: 15432,
     user: "postgres",
     allowedCidrs: [],
+    allowPlain: false,
+    plainNeedsNodeUpdate: false,
     needsAllowedCidrs: false,
     tlsHostname: null,
     certificate: "selfSigned",
@@ -46,6 +48,7 @@ const connection = {
     user: "postgres",
     password,
     tlsParams: "sslmode=require",
+    allowPlain: false,
   },
 };
 const service = { id: "svc-db", projectId: "prj-1", name: "db", kind: "postgres", placements: [] } as unknown as ServiceDetail;
@@ -232,4 +235,78 @@ test("a self-signed exposure says why, how to get a trusted certificate and what
   });
   expect(valid).not.toContain(t("serviceDatabase.selfSigned.title"));
   expect(valid).toContain(t("serviceDatabase.certIssuer", { issuer: "Let's Encrypt (R11)" }));
+});
+
+/** The connection tab's exposed card for a database, as text. */
+async function exposedCard(database: object, exposed: object | null = connection.exposed) {
+  return text(
+    section(
+      await renderStatic(
+        () => <ConnectionPage service={service} />,
+        [
+          [databases.get, { serviceId: "svc-db" }, database],
+          [databases.connection, { serviceId: "svc-db" }, { ...connection, exposed }],
+        ],
+      ),
+      t("serviceDatabase.exposed"),
+    ),
+  );
+}
+
+const plainSwitch = (card: string) => card.match(/<button[^>]*id="db-plain"[^>]*>/)?.[0] ?? "";
+
+test("connections without TLS: a switch, off by default, with what it means now", async () => {
+  const off = await exposedCard(db);
+  expect(off).toContain(t("serviceDatabase.plain.label"));
+  expect(plainSwitch(off)).toContain('aria-checked="false"');
+  expect(plainSwitch(off)).not.toContain('disabled=""');
+  expect(off).toContain(t("serviceDatabase.plain.off"));
+  expect(off).toContain(t("serviceDatabase.sslRequired"));
+  expect(off).not.toContain(t("serviceDatabase.plain.chip"));
+
+  // On: the TLS-only chip goes, and one line says plain clients connect too while the URL keeps asking for TLS.
+  const onDb = { ...db, exposure: { ...db.exposure, allowPlain: true } };
+  const on = await exposedCard(onDb, { ...connection.exposed, allowPlain: true });
+  expect(plainSwitch(on)).toContain('aria-checked="true"');
+  expect(on).toContain(t("serviceDatabase.plain.on"));
+  expect(on).toContain(t("serviceDatabase.plain.chip"));
+  expect(on).not.toContain(t("serviceDatabase.sslRequired"));
+  expect(on).toContain("sslmode=require");
+  expect(on).toContain(t("serviceDatabase.sameUserAfterPlain"));
+  expect(on).not.toContain(t("serviceDatabase.sameUserAfter"));
+  expect(off).toContain(t("serviceDatabase.sameUserAfter"));
+  expect(on).not.toContain(t("serviceDatabase.plain.mysqlKey"));
+  // MySQL's clients need the server's key for the password without TLS.
+  expect(await exposedCard({ ...onDb, engine: "mysql" })).toContain(t("serviceDatabase.plain.mysqlKey"));
+});
+
+test("an agent older than 0.2.16: the switch waits for the node's update", async () => {
+  const needs = t("serviceDatabase.plain.needsAgent", { version: "0.2.16", node: "de-fsn-1" });
+  expect(needs).toContain("Needs the node's agent 0.2.16");
+  const old = await exposedCard({ ...db, exposure: { ...db.exposure, plainNeedsNodeUpdate: true } });
+  expect(old).toContain(needs);
+  expect(plainSwitch(old)).toContain('disabled=""');
+  // On already (the node went back to an older agent): TLS only meanwhile, and it can still be turned off.
+  const waiting = await exposedCard({ ...db, exposure: { ...db.exposure, plainNeedsNodeUpdate: true, allowPlain: true } });
+  expect(waiting).toContain(t("serviceDatabase.plain.waitingForAgent", { version: "0.2.16", node: "de-fsn-1" }));
+  expect(plainSwitch(waiting)).toContain('aria-checked="true"');
+  expect(plainSwitch(waiting)).not.toContain('disabled=""');
+  expect(waiting).toContain(t("serviceDatabase.sslRequired"));
+  expect(waiting).not.toContain(t("serviceDatabase.plain.chip"));
+});
+
+test("the confirmation says it more strongly when the port is open to every IP", async () => {
+  const warning = async (database: object) => text(await renderStatic(() => <PlainWarning db={database as never} />, []));
+  const open = await warning(db);
+  expect(open).toContain(t("serviceDatabase.plain.confirm.openToEveryone"));
+  expect(open).toContain(t("serviceDatabase.plain.confirm.prefer"));
+  expect(open).not.toContain("The allowed IPs still apply");
+  const limited = await warning({ ...db, exposure: { ...db.exposure, allowedCidrs: ["198.51.100.24/32", "203.0.113.0/24"] } });
+  expect(limited).toContain(t("serviceDatabase.plain.confirm.limited", { cidrs: "198.51.100.24/32, 203.0.113.0/24" }));
+  expect(limited).not.toContain(t("serviceDatabase.plain.confirm.openToEveryone"));
+  // Postgres does not send the password itself; the Redis-like engines and ClickHouse do.
+  expect(open).not.toContain(t("serviceDatabase.plain.confirm.passwordInClear"));
+  for (const engine of ["valkey", "clickhouse"]) {
+    expect(await warning({ ...db, engine })).toContain(t("serviceDatabase.plain.confirm.passwordInClear"));
+  }
 });

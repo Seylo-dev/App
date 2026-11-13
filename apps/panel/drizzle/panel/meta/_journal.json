@@ -169,6 +169,13 @@
       "when": 1794545810626,
       "tag": "0023_backup_contents",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1794548931631,
+      "tag": "0024_exposure_allow_plain",
+      "breakpoints": true
     }
   ]
 }

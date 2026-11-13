@@ -105,6 +105,7 @@ const columns: Record<string, Record<string, Decision>> = {
     target_port: "out: derived from the engine",
     allowed_cidrs: "exported",
     tls: "exported",
+    allow_plain: "out: an imported database listener starts TLS only; clients without TLS are allowed again on its Connection tab",
     expires_at: "out: timed exposures are not exported",
     close_at: runtime,
     created_by: local,

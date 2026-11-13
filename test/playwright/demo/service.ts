@@ -910,6 +910,9 @@ export function databaseOf(serviceId: string) {
     // The database's own user: exposing only opens the port, with TLS.
     user: "postgres",
     allowedCidrs: [],
+    // TLS only (the default); database-plain.spec.ts turns connections without TLS on.
+    allowPlain: false,
+    plainNeedsNodeUpdate: false,
     needsAllowedCidrs: false,
     tlsHostname: null,
     certificate: "selfSigned",
@@ -987,6 +990,7 @@ export function connectionOf(serviceId: string) {
         user: "default",
         password: "Rk2mV7wTq9Lx4Pb8",
         tlsParams: "",
+        allowPlain: false,
       },
       timed: [],
     };
@@ -1021,6 +1025,7 @@ export function connectionOf(serviceId: string) {
       user: "postgres",
       password: "Zq8vN3pXr7Lm2Kd9",
       tlsParams: "sslmode=require",
+      allowPlain: false,
     },
     // The timed expose exposuresOf lists, with the password.
     timed: [

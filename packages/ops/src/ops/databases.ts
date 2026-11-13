@@ -73,10 +73,27 @@ export const DatabaseExposure = Type.Object({
   /** Node public address (or tlsHostname) and the agent-owned port. Null while closed (state is not "open"). */
   host: Type.Union([Type.String(), Type.Null()]),
   port: Type.Union([PublicPort, Type.Null()]),
-  /** The user for exposed access: the database's own (internal.user), over TLS only. */
+  /** The user for exposed access: the database's own (internal.user), over TLS (also without, with allowPlain). */
   user: Type.String(),
   /** Empty means anyone may connect; the UI warns about it. */
   allowedCidrs: Type.Array(Cidr),
+  /**
+   * The owner allowed clients without TLS too (0.2.16, databases.setExposure
+   * allowPlain): the node relays a client that does not ask for TLS to the
+   * database instead of refusing it, and TLS clients connect as before.
+   * Their queries, data and, for some sign-in methods, the password travel
+   * unencrypted; allowedCidrs still applies. Off by default, and off again
+   * after exposure is turned off. While plainNeedsNodeUpdate is true the
+   * port stays TLS only whatever this says.
+   */
+  allowPlain: Type.Boolean(),
+  /**
+   * The node's agent is older than 0.2.16 and cannot take clients without
+   * TLS: the port stays TLS only, also with allowPlain on (it applies by
+   * itself once the node is updated), and setExposure refuses allowPlain
+   * true (CONFLICT agentTooOld).
+   */
+  plainNeedsNodeUpdate: Type.Boolean(),
   /**
    * The engine may be exposed only to listed source addresses (KeyDB, which
    * gets no security fixes): setExposure refuses an empty allowedCidrs.
@@ -180,6 +197,13 @@ export const DatabaseConnection = Type.Object({
       password: Type.String(),
       /** Driver hint, for example "sslmode=require" for Postgres. */
       tlsParams: Type.String(),
+      /**
+       * Clients without TLS are accepted too: exposure.allowPlain is on and
+       * the node applies it (0.2.16). url still asks for TLS, which keeps
+       * working; a client that leaves TLS off signs in with the same user
+       * and password.
+       */
+      allowPlain: Type.Boolean(),
     }),
     Type.Null(),
   ]),
@@ -449,7 +473,7 @@ export const connection = defineOp({
   kind: "query",
   summary: "Get connection details",
   description:
-    "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords, and the URL of each open timed expose (exposures.openTimed). All use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
+    "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords, and the URL of each open timed expose (exposures.openTimed). All use the database's own user and password. The exposed URL asks for TLS; exposed.allowPlain says whether clients without TLS are accepted too. Internal URLs only work for services of the project on the same node.",
   input: Type.Object({ serviceId: Id }),
   output: DatabaseConnection,
   sensitive: { output: ["internal.url", "internal.password", "internal.httpUrl", "exposed.url", "exposed.password", "timed.*.url"] },
@@ -773,7 +797,7 @@ export const setExposure = defineOp({
   kind: "mutation",
   summary: "Expose a database",
   description:
-    "Turns TLS exposure on or off. On: the agent opens a node port to the database, TLS only, for the database's own user and password (nothing changes inside the database), optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). Postgres, MySQL and MariaDB need a node agent from 0.2.9 or later (CONFLICT agentTooOld otherwise). MariaDB 10.11 has no TLS and cannot be exposed (CONFLICT noTls; 11.4 and later can). The internal URL does not change. Fields left out keep their value.",
+    "Turns TLS exposure on or off. On: the agent opens a node port to the database, TLS only, for the database's own user and password (nothing changes inside the database), optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). Postgres, MySQL and MariaDB need a node agent from 0.2.9 or later (CONFLICT agentTooOld otherwise). MariaDB 10.11 has no TLS and cannot be exposed (CONFLICT noTls; 11.4 and later can). allowPlain true also accepts clients that do not ask for TLS (off by default): their queries, data and, for some sign-in methods, the password travel unencrypted, so ask the person first, say so more strongly when allowedCidrs is empty (open to every IP), and prefer TLS or a timed expose; TLS clients keep working and allowedCidrs still applies. It needs a node agent from 0.2.16 (CONFLICT agentTooOld) and exposure on (BAD_REQUEST otherwise); turning it off closes the plain sessions, not the TLS ones, and turning exposure off resets it. The internal URL does not change. Fields left out keep their value.",
   input: Type.Object({
     serviceId: Id,
     enabled: Type.Boolean(),
@@ -782,6 +806,8 @@ export const setExposure = defineOp({
     allowedCidrs: Type.Optional(Type.Array(Cidr, { maxItems: 200 })),
     /** Host name pointing at the node for an ACME certificate; null for self-signed. */
     tlsHostname: Type.Optional(Type.Union([Type.String({ maxLength: 253 }), Type.Null()])),
+    /** Accept clients without TLS too (0.2.16); off by default. See exposure.allowPlain. */
+    allowPlain: Type.Optional(Type.Boolean()),
   }),
   output: Database,
   permission: serviceScope("databases.expose"),

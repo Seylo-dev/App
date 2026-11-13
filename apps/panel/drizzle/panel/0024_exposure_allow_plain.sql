@@ -1,0 +1,1 @@
+ALTER TABLE `port_exposures` ADD `allow_plain` integer DEFAULT false NOT NULL;

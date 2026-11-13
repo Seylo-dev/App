@@ -4,7 +4,8 @@
 // (users.ts changeMainPassword: inside the running database through the
 // agent's Exec, or by the restart a new environment causes), the web UI
 // and shell links, and TLS exposure through the agent's portgate, which
-// uses the database's own user.
+// uses the database's own user (and takes clients without TLS too when the
+// owner allows them, allowPlain).
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { databases as dbOps, domains as domainOps, env as envOps, OpError, terminals } from "@seylo/ops";
@@ -38,6 +39,8 @@ import {
   exposureRefusal,
   generatePassword,
   generateUserName,
+  plainExposureCapability,
+  plainExposureVersion,
 } from "./engines";
 import { imageVersion } from "./images";
 import {
@@ -109,6 +112,8 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
       port: address?.port ?? null,
       user: info.admin.user,
       allowedCidrs: info.exposure?.allowedCidrs ?? [],
+      allowPlain: info.exposure?.allowPlain ?? false,
+      plainNeedsNodeUpdate: info.plainNeedsNodeUpdate,
       needsAllowedCidrs: info.engine.exposureNeedsAllowlist,
       tlsHostname: info.row.tlsHostname,
       certificate: served.certificate,
@@ -300,6 +305,28 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
       { field: "allowedCidrs", reason: "allowlistRequired" },
     );
   }
+  // Clients without TLS: the owner's opt-in (the web app warns and asks first, more strongly with no allow
+  // list), never a block. It lives on the exposure row, so turning exposure off resets it.
+  if (input.allowPlain && !input.enabled) {
+    throw new OpError("BAD_REQUEST", "Connections without TLS need exposure on.", { field: "allowPlain" });
+  }
+  const wasPlain = info.exposure?.allowPlain ?? false;
+  const allowPlain = input.enabled ? (input.allowPlain ?? wasPlain) : false;
+  // An older agent ignores the field and stays TLS only: refuse turning it on there instead of a switch that does nothing.
+  if (allowPlain && !wasPlain && !nodeHasCapability(ctx.db, ctx.agents, node.id, plainExposureCapability)) {
+    throw new OpError(
+      "CONFLICT",
+      `The agent on ${node.name} cannot accept connections without TLS yet: it needs ${plainExposureVersion}. Update the node first.`,
+      { field: "allowPlain", reason: "agentTooOld" },
+    );
+  }
+  if (allowPlain !== wasPlain) {
+    // The input says what was asked; this says what changed (turning exposure off ends it too).
+    ctx.auditDetails?.({
+      plainConnections: allowPlain ? "allowed" : "tlsOnly",
+      ...(allowPlain ? { openToEveryone: cidrs.length === 0 } : {}),
+    });
+  }
   ctx.db.transaction((tx) => {
     tx.update(serviceDatabases).set({ tlsHostname }).where(eq(serviceDatabases.serviceId, info.service.id)).run();
     if (!input.enabled) {
@@ -320,7 +347,7 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
     }
     if (info.exposure) {
       tx.update(portExposures)
-        .set({ listenPort: port, allowedCidrs: cidrs, tls: true })
+        .set({ listenPort: port, allowedCidrs: cidrs, tls: true, allowPlain })
         .where(eq(portExposures.id, info.exposure.id))
         .run();
     } else {
@@ -333,6 +360,7 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
           targetPort: info.engine.port,
           allowedCidrs: cidrs,
           tls: true,
+          allowPlain,
           createdBy: userOf(ctx.principal)?.id ?? null,
         })
         .run();

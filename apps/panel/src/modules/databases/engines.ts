@@ -104,6 +104,17 @@ export const enginesCapability = "database.engines.v2";
  */
 export const exposureCapability = "database.exposure.v2";
 
+/**
+ * The agent capability for exposure that also takes clients without TLS
+ * (0.2.16, DatabaseExposure.allow_plain, go/internal/dbengine
+ * PlainExposureCapability). An older agent ignores the field and keeps the
+ * port TLS only.
+ */
+export const plainExposureCapability = "database.exposure.plain.v1";
+
+/** The agent version that first takes clients without TLS on an exposed database (plainExposureCapability). */
+export const plainExposureVersion = "0.2.16";
+
 const pg = (version: string, image: string): EngineVersion => ({
   version,
   image,

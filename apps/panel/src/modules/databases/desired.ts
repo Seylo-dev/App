@@ -32,8 +32,10 @@ const protoEngines = {
  * node), exposure is never sent to an agent that cannot keep the port TLS
  * only (missingExposureCapability): an engine added in 0.2 needs
  * database.engines.v2, Postgres, MySQL and MariaDB need
- * database.exposure.v2. memo is the compile's (retire.ts scans the
- * running deployments once per compile).
+ * database.exposure.v2. allowPlain goes only to an agent that advertises
+ * database.exposure.plain.v1 (info.plainNeedsNodeUpdate; an older one
+ * would ignore it and stay TLS only anyway). memo is the compile's
+ * (retire.ts scans the running deployments once per compile).
  */
 export function databaseRuntime(
   deps: Pick<Deps, "db" | "secrets">,
@@ -57,6 +59,7 @@ export function databaseRuntime(
               hostPort: info.exposure.listenPort,
               allowedSourceCidrs: info.exposure.allowedCidrs,
               tlsHostname: info.row.tlsHostname ?? "",
+              allowPlain: info.exposure.allowPlain && !info.plainNeedsNodeUpdate,
             }
           : { enabled: false },
       // The separate exposed user of a database from before 0.2.9, once no running service has its URL.

@@ -1,7 +1,8 @@
 // The Connection tab of a database (Database.dc.html): the internal URL
 // for services on the same node, the exposed URL with TLS for everything
 // else (toggle, allowed IPs, certificate; the same user and password as
-// inside), the timed expose for one IP (timed-expose-card.tsx), the
+// inside; connections without TLS as an opt-in that asks first), the
+// timed expose for one IP (timed-expose-card.tsx), the
 // on-demand web UI, a pre-logged-in shell, the backup
 // summary, and Change links next to the user and the password, which open
 // the Users tab (users-page.tsx) with the main user's dialog.
@@ -11,6 +12,7 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
+import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
@@ -21,7 +23,7 @@ import { Switch } from "@seylo/ui/components/switch";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconLock, IconTable, IconTerminal2 } from "@tabler/icons-react";
+import { IconLock, IconLockOpen, IconTable, IconTerminal2 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
@@ -277,12 +279,18 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
       title={t("serviceDatabase.exposed")}
       badge={
         e.enabled &&
-        !waiting && (
+        !waiting &&
+        (plainAccepted(db) ? (
+          <Chip tone="amber">
+            <IconLockOpen size={11} stroke={2.6} />
+            {t("serviceDatabase.plain.chip")}
+          </Chip>
+        ) : (
           <Chip tone="green">
             <IconLock size={11} stroke={2.6} />
             {t("serviceDatabase.sslRequired")}
           </Chip>
-        )
+        ))
       }
       actions={
         <span className="flex items-center gap-2.5 text-[13px]">
@@ -333,7 +341,7 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             <span>
               {t("serviceDatabase.sameUserBefore")}{" "}
               <b className="rounded-[5px] bg-field px-[5px] py-px font-mono text-xs font-medium text-foreground">{e.user}</b>{" "}
-              {t("serviceDatabase.sameUserAfter")}
+              {t(plainAccepted(db) ? "serviceDatabase.sameUserAfterPlain" : "serviceDatabase.sameUserAfter")}
             </span>
             <span>
               {t("serviceDatabase.allowedFrom")}{" "}
@@ -357,6 +365,7 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             </span>
           </div>
           <SelfSignedNote db={db} serviceName={service.name} />
+          <PlainRow service={service} db={db} />
           {/* Muted, as buttons inside a card are; the user and password change on the Users tab. */}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="bg-muted shadow-none" onClick={() => setEditing(true)}>
@@ -367,6 +376,101 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
       )}
       {editing && <ExposureDialog service={service} db={db} onClose={() => setEditing(false)} />}
     </Section>
+  );
+}
+
+/** Clients without TLS get through the open port: allowed, and the node's agent can (0.2.16). */
+function plainAccepted(db: Db): boolean {
+  return db.exposure.allowPlain && !db.exposure.plainNeedsNodeUpdate;
+}
+
+/** The agent version that takes clients without TLS (the panel's plainExposureVersion). */
+const plainAgentVersion = "0.2.16";
+
+/** Engines whose clients send the password as it is: the Redis protocol's AUTH, ClickHouse's native Hello. */
+const passwordInClear = new Set(["redis", "valkey", "keydb", "dragonfly", "clickhouse"]);
+
+/**
+ * Connections without TLS: a switch with what it means now. Turning it on
+ * asks first (PlainWarning); turning it off does not. Disabled while the
+ * node's agent is older than 0.2.16 and it is off.
+ */
+function PlainRow({ service, db }: { service: ServiceDetail; db: Db }) {
+  const invalidate = useInvalidate();
+  const [asking, setAsking] = useState(false);
+  const set = useOpMutation(databases.setExposure, {
+    onSuccess: () => invalidate(databases.get, databases.connection),
+    onError: fail,
+  });
+  const e = db.exposure;
+  const hint = e.plainNeedsNodeUpdate
+    ? t(e.allowPlain ? "serviceDatabase.plain.waitingForAgent" : "serviceDatabase.plain.needsAgent", {
+        version: plainAgentVersion,
+        node: db.nodeName,
+      })
+    : e.allowPlain
+      ? t("serviceDatabase.plain.on")
+      : t("serviceDatabase.plain.off");
+  return (
+    <div className="flex items-start gap-3 rounded-control bg-field px-3 py-2.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <label htmlFor="db-plain" className="cursor-pointer text-[13px] font-medium text-foreground">
+          {t("serviceDatabase.plain.label")}
+        </label>
+        <span id="db-plain-hint" className="text-[12.5px] leading-normal text-ink-strong">
+          {hint}
+        </span>
+        {plainAccepted(db) && db.engine === "mysql" && (
+          <span className="text-[12.5px] leading-normal text-ink-strong">{t("serviceDatabase.plain.mysqlKey")}</span>
+        )}
+      </span>
+      <Switch
+        id="db-plain"
+        aria-describedby="db-plain-hint"
+        className="mt-0.5 shrink-0"
+        checked={e.allowPlain}
+        // Off on an older agent: nothing to turn on yet. On there, it can still be turned off.
+        disabled={set.isPending || (e.plainNeedsNodeUpdate && !e.allowPlain)}
+        onCheckedChange={(on) => (on ? setAsking(true) : set.mutate({ serviceId: service.id, enabled: true, allowPlain: false }))}
+      />
+      <ConfirmDialog
+        open={asking}
+        onOpenChange={setAsking}
+        destructive={e.allowedCidrs.length === 0}
+        title={t("serviceDatabase.plain.confirm.title")}
+        description={t("serviceDatabase.plain.confirm.body", { name: service.name })}
+        confirmLabel={t("serviceDatabase.plain.confirm.button")}
+        onConfirm={async () => {
+          await set.mutateAsync({ serviceId: service.id, enabled: true, allowPlain: true });
+        }}
+      >
+        <PlainWarning db={db} />
+      </ConfirmDialog>
+    </div>
+  );
+}
+
+/**
+ * What the confirmation adds to its description: the password itself for
+ * engines that send it as it is, who can connect (in strong words when the
+ * port is open to every IP), and what to prefer.
+ */
+export function PlainWarning({ db }: { db: Db }) {
+  const open = db.exposure.allowedCidrs.length === 0;
+  return (
+    <div className="flex flex-col gap-2 text-[12.5px] leading-normal">
+      {passwordInClear.has(db.engine) && <p className="m-0 text-ink-strong">{t("serviceDatabase.plain.confirm.passwordInClear")}</p>}
+      {open ? (
+        <p role="note" className="m-0 rounded-control bg-chip-red-bg px-3 py-2.5 font-medium text-chip-red-fg">
+          {t("serviceDatabase.plain.confirm.openToEveryone")}
+        </p>
+      ) : (
+        <p role="note" className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-chip-amber-fg">
+          {t("serviceDatabase.plain.confirm.limited", { cidrs: db.exposure.allowedCidrs.join(", ") })}
+        </p>
+      )}
+      <p className="m-0 text-ink-strong">{t("serviceDatabase.plain.confirm.prefer")}</p>
+    </div>
   );
 }
 

@@ -25,8 +25,30 @@ export default {
     "Closed until {node} updates to 0.2.9: its agent cannot keep this port TLS-only yet. Exposure stays on, and the port opens by itself after the update.",
   sameUserBefore: "The same user",
   sameUserAfter: "and password as inside, here only over TLS. The internal URL is unchanged.",
+  sameUserAfterPlain: "and password as inside, here with or without TLS. The internal URL is unchanged.",
   allowedFrom: "Allowed from:",
   anywhere: "anywhere",
+  /** Connections without TLS on the exposed port (databases.setExposure allowPlain). */
+  plain: {
+    label: "Allow connections without TLS",
+    chip: "TLS optional",
+    off: "Off: clients that do not ask for TLS are refused.",
+    on: "Clients without TLS are accepted too. The URL above still asks for TLS, which keeps working.",
+    mysqlKey:
+      "MySQL clients without TLS need the server's public key to send the password: --get-server-public-key, or allowPublicKeyRetrieval=true in JDBC.",
+    needsAgent: "Needs the node's agent {version}: update {node} to turn it on.",
+    waitingForAgent: "On, but this needs the node's agent {version}: the port stays TLS only until {node} is updated.",
+    confirm: {
+      title: "Allow connections without TLS?",
+      body: "Clients that do not ask for TLS can then sign in to {name}. Their queries, the data they get back and, with some sign-in methods, the password travel unencrypted: anyone on the network path can read them.",
+      passwordInClear: "This engine's clients send the password itself unencrypted.",
+      openToEveryone:
+        "This port is open to every IP address: anyone who has or guesses the password can sign in without TLS from anywhere, and everything sent can be read on the way. Limit it to your IPs first if you can.",
+      limited: "The allowed IPs still apply: only {cidrs} can connect.",
+      prefer: "TLS clients keep working as before. Prefer TLS, or a timed expose for a one-off connection.",
+      button: "Allow without TLS",
+    },
+  },
   limit: "Limit to IPs",
   certificate: "Certificate",
   certIssuer: "via {issuer}",

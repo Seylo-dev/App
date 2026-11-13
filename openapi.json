@@ -21399,7 +21399,7 @@
       "get": {
         "operationId": "databases.connection",
         "summary": "Get connection details",
-        "description": "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords, and the URL of each open timed expose (exposures.openTimed). All use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
+        "description": "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords, and the URL of each open timed expose (exposures.openTimed). All use the database's own user and password. The exposed URL asks for TLS; exposed.allowPlain says whether clients without TLS are accepted too. Internal URLs only work for services of the project on the same node.",
         "tags": [
           "databases"
         ],
@@ -21482,7 +21482,8 @@
                             "database",
                             "user",
                             "password",
-                            "tlsParams"
+                            "tlsParams",
+                            "allowPlain"
                           ],
                           "properties": {
                             "url": {
@@ -21505,6 +21506,9 @@
                             },
                             "tlsParams": {
                               "type": "string"
+                            },
+                            "allowPlain": {
+                              "type": "boolean"
                             }
                           }
                         },
@@ -21833,6 +21837,8 @@
                         "port",
                         "user",
                         "allowedCidrs",
+                        "allowPlain",
+                        "plainNeedsNodeUpdate",
                         "needsAllowedCidrs",
                         "tlsHostname",
                         "certificate",
@@ -21895,6 +21901,12 @@
                             "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
                             "type": "string"
                           }
+                        },
+                        "allowPlain": {
+                          "type": "boolean"
+                        },
+                        "plainNeedsNodeUpdate": {
+                          "type": "boolean"
                         },
                         "needsAllowedCidrs": {
                           "type": "boolean"
@@ -22790,6 +22802,8 @@
                         "port",
                         "user",
                         "allowedCidrs",
+                        "allowPlain",
+                        "plainNeedsNodeUpdate",
                         "needsAllowedCidrs",
                         "tlsHostname",
                         "certificate",
@@ -22852,6 +22866,12 @@
                             "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
                             "type": "string"
                           }
+                        },
+                        "allowPlain": {
+                          "type": "boolean"
+                        },
+                        "plainNeedsNodeUpdate": {
+                          "type": "boolean"
                         },
                         "needsAllowedCidrs": {
                           "type": "boolean"
@@ -23453,7 +23473,7 @@
       "post": {
         "operationId": "databases.setExposure",
         "summary": "Expose a database",
-        "description": "Turns TLS exposure on or off. On: the agent opens a node port to the database, TLS only, for the database's own user and password (nothing changes inside the database), optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). Postgres, MySQL and MariaDB need a node agent from 0.2.9 or later (CONFLICT agentTooOld otherwise). MariaDB 10.11 has no TLS and cannot be exposed (CONFLICT noTls; 11.4 and later can). The internal URL does not change. Fields left out keep their value.",
+        "description": "Turns TLS exposure on or off. On: the agent opens a node port to the database, TLS only, for the database's own user and password (nothing changes inside the database), optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). Postgres, MySQL and MariaDB need a node agent from 0.2.9 or later (CONFLICT agentTooOld otherwise). MariaDB 10.11 has no TLS and cannot be exposed (CONFLICT noTls; 11.4 and later can). allowPlain true also accepts clients that do not ask for TLS (off by default): their queries, data and, for some sign-in methods, the password travel unencrypted, so ask the person first, say so more strongly when allowedCidrs is empty (open to every IP), and prefer TLS or a timed expose; TLS clients keep working and allowedCidrs still applies. It needs a node agent from 0.2.16 (CONFLICT agentTooOld) and exposure on (BAD_REQUEST otherwise); turning it off closes the plain sessions, not the TLS ones, and turning exposure off resets it. The internal URL does not change. Fields left out keep their value.",
         "tags": [
           "databases"
         ],
@@ -23510,6 +23530,9 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "allowPlain": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -23666,6 +23689,8 @@
                         "port",
                         "user",
                         "allowedCidrs",
+                        "allowPlain",
+                        "plainNeedsNodeUpdate",
                         "needsAllowedCidrs",
                         "tlsHostname",
                         "certificate",
@@ -23728,6 +23753,12 @@
                             "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
                             "type": "string"
                           }
+                        },
+                        "allowPlain": {
+                          "type": "boolean"
+                        },
+                        "plainNeedsNodeUpdate": {
+                          "type": "boolean"
                         },
                         "needsAllowedCidrs": {
                           "type": "boolean"
@@ -24226,6 +24257,8 @@
                             "port",
                             "user",
                             "allowedCidrs",
+                            "allowPlain",
+                            "plainNeedsNodeUpdate",
                             "needsAllowedCidrs",
                             "tlsHostname",
                             "certificate",
@@ -24288,6 +24321,12 @@
                                 "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
                                 "type": "string"
                               }
+                            },
+                            "allowPlain": {
+                              "type": "boolean"
+                            },
+                            "plainNeedsNodeUpdate": {
+                              "type": "boolean"
                             },
                             "needsAllowedCidrs": {
                               "type": "boolean"
