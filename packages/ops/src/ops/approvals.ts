@@ -44,12 +44,32 @@ export const ApprovalSource = Type.Union([
 ]);
 export type ApprovalSource = Static<typeof ApprovalSource>;
 
+/**
+ * Why approving a pending call needs more care than an ordinary change,
+ * read from its input and the resource as they are when the approval is
+ * read, so it says what approving does now. "plainConnections": a
+ * databases.setExposure that lets the database's clients in without TLS
+ * ("allow"), or, while they are let in, from more addresses ("widen").
+ * added in 0.2.17
+ */
+export const ApprovalWarning = Type.Object({
+  kind: Type.Literal("plainConnections"),
+  change: Type.Union([Type.Literal("allow"), Type.Literal("widen")]),
+  /** The allow list approving it leaves; empty sets no limit. */
+  allowedCidrs: Type.Array(Type.String()),
+  /** Every IP address gets in: the list is empty, holds a /0, or its ranges add up to every IPv4 or IPv6 address. */
+  openToEveryone: Type.Boolean(),
+});
+export type ApprovalWarning = Static<typeof ApprovalWarning>;
+
 export const Approval = Type.Object({
   id: Id,
   opId: Type.String(),
   /** The op's summary, for the list ("Delete a project"). */
   opSummary: Type.String(),
   opKind: Type.Union([Type.Literal("mutation"), Type.Literal("destructive")]),
+  /** Pending approvals only, when approving it weakens something (ApprovalWarning); absent otherwise. added in 0.2.17 */
+  warning: Type.Optional(ApprovalWarning),
   /** The input with sensitive fields replaced by "[redacted]". */
   inputPreview: Type.Unknown(),
   /** Which kind of model asked. */

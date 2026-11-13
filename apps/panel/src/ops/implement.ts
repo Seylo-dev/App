@@ -2,7 +2,7 @@
 // @seylo/ops. Handlers get validated input and an OpContext; they throw
 // OpError for expected failures and let anything else become INTERNAL.
 
-import { type AnyOpContract, OpError, type OpInput, type OpOutput } from "@seylo/ops";
+import { type AnyOpContract, type approvals, OpError, type OpInput, type OpOutput } from "@seylo/ops";
 import type { Access } from "../auth/access";
 import type { Principal, PrincipalUser } from "../auth/principal";
 import type { PanelDb } from "../db/client";
@@ -86,18 +86,38 @@ export interface OpHandler<C extends AnyOpContract = AnyOpContract> {
    * person's own call never runs it. Set with implement()'s options.
    */
   modelApproval?(input: OpInput<C>, check: { db: PanelDb; access: Access }): boolean;
+  /**
+   * The refusals the handler would make anyway that need no change made
+   * (the resource's state, the node's agent, input it cannot take), run
+   * before a model's call is held for a person: by the pipeline before it
+   * answers APPROVAL_REQUIRED, and by the AI assistant before it queues a
+   * change (OpRunner.precheck). Throws the handler's OpError, so the model
+   * hears it at once instead of an approval that fails once approved.
+   * Read only: the handler still makes every check itself. Set with
+   * implement()'s options. added in 0.2.17
+   */
+  precheck?(input: OpInput<C>, check: { db: PanelDb; agents: Deps["agents"] }): void;
+  /**
+   * What approving a pending call of this op weakens, for the Approvals
+   * page and the assistant's card (Approval.warning), from its input and
+   * the resource as it is now; null for an ordinary change. Set with
+   * implement()'s options. added in 0.2.17
+   */
+  approvalWarning?(input: OpInput<C>, check: { db: PanelDb }): approvals.ApprovalWarning | null;
 }
 
 export function implement<C extends AnyOpContract>(
   contract: C,
   run: OpHandler<C>["run"],
-  options: { guard?: OpHandler<C>["guard"]; modelApproval?: OpHandler<C>["modelApproval"] } = {},
+  options: Pick<OpHandler<C>, "guard" | "modelApproval" | "precheck" | "approvalWarning"> = {},
 ): OpHandler<C> {
   return {
     contract,
     run,
     ...(options.guard ? { guard: options.guard } : {}),
     ...(options.modelApproval ? { modelApproval: options.modelApproval } : {}),
+    ...(options.precheck ? { precheck: options.precheck } : {}),
+    ...(options.approvalWarning ? { approvalWarning: options.approvalWarning } : {}),
   };
 }
 

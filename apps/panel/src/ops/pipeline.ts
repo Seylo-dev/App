@@ -16,7 +16,7 @@
 // callers are refused before validation, so they learn nothing about
 // schemas.
 
-import { type AnyOpContract, OpError } from "@seylo/ops";
+import { type AnyOpContract, type approvals, OpError } from "@seylo/ops";
 import { type Access, createAccess, type Target, targetOf } from "../auth/access";
 import { authenticate, type Credentials, signedOutError } from "../auth/authenticate";
 import { describePrincipal, type Principal, type PrincipalUser } from "../auth/principal";
@@ -138,6 +138,8 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
         needsPerson(op, handler, input, { db: deps.db, access }) &&
         !approvalWaived(deps, principal)
       ) {
+        // A call the handler would refuse anyway is refused now, not once a person approved it.
+        handler.precheck?.(input as never, { db: deps.db, agents: deps.agents });
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
       }
 
@@ -171,6 +173,12 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
 /** Whether a principal may run an op on an input; throws OpError, returns the permission's target. */
 export type AuthorizeOp = (op: AnyOpContract, principal: Principal, input: unknown) => Target | undefined;
 
+/** The handler's refusals for a validated input before it is held (OpHandler.precheck); throws OpError. */
+export type PrecheckOp = (op: AnyOpContract, input: unknown) => void;
+
+/** What approving a pending call weakens (OpHandler.approvalWarning); input is read only for an op that has the check. */
+export type ApprovalWarningOf = (op: AnyOpContract, input: () => unknown) => approvals.ApprovalWarning | null;
+
 /**
  * The check the approvals module repeats for the requester when it queues
  * a model's call and when a person approves it, the same the pipeline
@@ -178,6 +186,28 @@ export type AuthorizeOp = (op: AnyOpContract, principal: Principal, input: unkno
  */
 export function createAuthorizer(db: PanelDb, handlers: ReadonlyMap<string, OpHandler>): AuthorizeOp {
   return (op, principal, input) => authorize(db, handlers, op, createAccess(db, principal), input);
+}
+
+export function createPrechecker(deps: Pick<Deps, "db" | "agents">, handlers: ReadonlyMap<string, OpHandler>): PrecheckOp {
+  return (op, input) => handlers.get(op.id)?.precheck?.(input as never, { db: deps.db, agents: deps.agents });
+}
+
+/**
+ * Approval.warning for the approvals module. A check that throws (an input
+ * from an older panel version, a resource gone) reads as no warning: the
+ * Approvals page must still load, and approving it runs every check again.
+ */
+export function createApprovalWarnings(deps: Pick<Deps, "db" | "logger">, handlers: ReadonlyMap<string, OpHandler>): ApprovalWarningOf {
+  return (op, input) => {
+    const check = handlers.get(op.id)?.approvalWarning;
+    if (!check) return null;
+    try {
+      return check(input() as never, { db: deps.db });
+    } catch (error) {
+      deps.logger.warn({ err: error, opId: op.id }, "reading an approval's warning failed");
+      return null;
+    }
+  };
 }
 
 function authorize(

@@ -42,7 +42,7 @@ import { agentsRefused, beginWrite, joinsRefused, pauseMessage, writePause } fro
 import { appContentSecurityPolicy, injectBoot, readBoot } from "./modules/settings/boot";
 import { tailnetIdentity } from "./modules/tailscale/facts";
 import { collectHandlers } from "./ops/handlers";
-import { createAuthorizer, createOpExecutor, type ExecuteOp } from "./ops/pipeline";
+import { createApprovalWarnings, createAuthorizer, createOpExecutor, createPrechecker, type ExecuteOp } from "./ops/pipeline";
 import { createRateLimiter, type RateLimiter } from "./ops/rate-limit";
 import { type EdgeTicketKey, ensureEdgeTicketKey } from "./security/edge-ticket-key";
 import { createSecretBox } from "./security/secret-box";
@@ -87,6 +87,12 @@ export function createPanel(options: PanelOptions): Panel {
     authorize: () => {
       throw new Error("ops are not ready yet: the panel is still being built");
     },
+    precheck: () => {
+      throw new Error("ops are not ready yet: the panel is still being built");
+    },
+    approvalWarning: () => {
+      throw new Error("ops are not ready yet: the panel is still being built");
+    },
   };
 
   const deps: Deps = {
@@ -119,6 +125,8 @@ export function createPanel(options: PanelOptions): Panel {
   const execute = createOpExecutor(deps, handlers, options.rateLimiter ?? createRateLimiter());
   ops.execute = execute;
   ops.authorize = createAuthorizer(db, handlers);
+  ops.precheck = createPrechecker(deps, handlers);
+  ops.approvalWarning = createApprovalWarnings(deps, handlers);
   const edgeKey = ensureEdgeTicketKey(db, secrets);
   for (const module of panelModules) module.start?.(deps);
 

@@ -5,19 +5,23 @@
 // turned off. The exposed URL keeps asking for TLS. A model (MCP, AI) that
 // turns it on, or empties or widens the allow list while it is on (0.0.0.0/0
 // in place of a list, say), waits for a person's approval (modelApproval
-// "conditional").
+// "conditional"), unless the handler would refuse it anyway (precheck:
+// refused at once), and the waiting approval says what approving lets in
+// (Approval.warning).
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { allOps, approvals as approvalOps, databases as dbOps } from "@seylo/ops";
+import { ai, allOps, approvals as approvalOps, databases as dbOps } from "@seylo/ops";
 import { buildAiTools } from "@seylo/ops/generators";
 import { and, eq } from "drizzle-orm";
 import { authenticate } from "../src/auth/authenticate";
 import { approvals, auditLog, nodes, portExposures } from "../src/db/schema";
+import { setModelProvider } from "../src/modules/ai/client";
 import { runOpAs } from "../src/modules/approvals/run-as";
 import { databaseRuntime } from "../src/modules/databases/desired";
 import { enginesCapability, exposureCapability, plainExposureCapability } from "../src/modules/databases/engines";
 import { callTool } from "../src/modules/mcp/tools";
 import { setSetting } from "../src/settings";
+import { scriptedModel, settled } from "./ai-fake";
 import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, settleDeploys } from "./seed-helpers";
 
@@ -397,4 +401,180 @@ test("the assistant's call waits for a person unless the person's auto mode is o
   setSetting(panel.deps.db, "mcpAskBeforeDestructive", false);
   expect(await asAssistant({ allowedCidrs: [] })).toMatchObject(needsApproval);
   expect(await exposureOf(serviceId)).toMatchObject({ allowPlain: true, allowedCidrs: ["198.51.100.0/24"] });
+});
+
+/** The pending setExposure approvals. */
+const pendingExposures = () =>
+  panel.deps.db
+    .select()
+    .from(approvals)
+    .where(and(eq(approvals.opId, dbOps.setExposure.id), eq(approvals.status, "pending")))
+    .all();
+
+/** An MCP token's tool call to databases_setExposure, as an MCP host makes it. */
+function mcpTool(serviceId: string) {
+  const mcp = createApiKey(panel, ownerId, { kind: "mcp" });
+  return (args: Record<string, unknown>) => {
+    const principal = authenticate(panel.deps.db, { bearerToken: mcp });
+    if (principal.type !== "apiKey") throw new Error("not a key");
+    const call = { name: "databases_setExposure", args: { serviceId, enabled: true, ...args }, bearerToken: mcp, principal };
+    return callTool(panel.deps, { ...call, ip: null, userAgent: null });
+  };
+}
+
+test("a held call the handler would refuse is refused at once, with no approval to fail later", async () => {
+  // An agent from 0.2.9 to 0.2.15: turning plain clients on is refused there.
+  const old = await exposedDb("postgres", [enginesCapability, exposureCapability]);
+  const mcp = createApiKey(panel, ownerId, { kind: "mcp" });
+  const asModel = (serviceId: string, input: Record<string, unknown>) =>
+    callOp(panel, dbOps.setExposure, { serviceId, enabled: true, ...input }, { bearer: mcp });
+  const tooOld = await asModel(old.serviceId, { allowPlain: true });
+  expect(tooOld.status).toBe(409);
+  expect(tooOld.body.error.details).toMatchObject({ reason: "agentTooOld", field: "allowPlain" });
+  const tool = await mcpTool(old.serviceId)({ allowPlain: true });
+  expect(tool?.isError).toBe(true);
+  expect(tool?.content[0]?.text).toStartWith("CONFLICT: The agent on");
+  expect(tool?.content[0]?.text).toContain("0.2.16");
+
+  // On a current agent: a TLS host name that is none, a port another database has open on the node.
+  const { serviceId, node, project } = await exposedDb();
+  const notAHost = await asModel(serviceId, { allowPlain: true, tlsHostname: "not a host" });
+  expect(notAHost.status).toBe(400);
+  expect(notAHost.body.error.details).toMatchObject({ field: "tlsHostname" });
+  const other = await callOp(
+    panel,
+    dbOps.create,
+    { projectId: project.id, name: "other-db", engine: "postgres", nodeId: node.id },
+    { cookie },
+  );
+  const otherId: string = other.body.serviceId;
+  expect((await callOp(panel, dbOps.setExposure, { serviceId: otherId, enabled: true, port: 41001 }, { cookie })).status).toBe(200);
+  const taken = await asModel(serviceId, { allowPlain: true, port: 41001 });
+  expect(taken.status).toBe(409);
+  expect(taken.body.error.details).toMatchObject({ field: "port" });
+
+  // MariaDB 10.11 has no TLS, so it is never exposed, with or without plain clients.
+  const mariadb = await callOp(
+    panel,
+    dbOps.create,
+    { projectId: project.id, name: "legacy-db", engine: "mariadb", version: "10.11", nodeId: node.id },
+    { cookie },
+  );
+  const noTls = await asModel(mariadb.body.serviceId, { allowPlain: true });
+  expect(noTls.status).toBe(409);
+  expect(noTls.body.error.details).toMatchObject({ reason: "noTls" });
+
+  // Nothing waits, nothing changed, and a call it takes still waits.
+  expect(pendingExposures()).toHaveLength(0);
+  expect(await exposureOf(serviceId)).toMatchObject({ allowPlain: false, port: 41000 });
+  const waits = await asModel(serviceId, { allowPlain: true });
+  expect(waits.status).toBe(403);
+  expect(waits.body.error.code).toBe("APPROVAL_REQUIRED");
+  // A person's own call gets the same refusals as before.
+  const person = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, allowPlain: true, port: 41001 }, { cookie });
+  expect(person.status).toBe(409);
+});
+
+test("the assistant's change the handler would refuse fails at once instead of queuing an approval", async () => {
+  const model = scriptedModel();
+  setModelProvider(model.provider);
+  try {
+    const old = await exposedDb("postgres", [enginesCapability, exposureCapability]);
+    const enabled = await callOp(
+      panel,
+      ai.updateSettings,
+      { enabled: true, anthropicApiKey: "placeholder-model-key-for-tests" },
+      { cookie },
+    );
+    expect(enabled.status).toBe(200);
+    const tool = (id: string, input: Record<string, unknown>) => ({
+      type: "tool_use" as const,
+      id,
+      name: "databases_setExposure",
+      input: { serviceId: old.serviceId, ...input },
+    });
+    model.script = [
+      [
+        { type: "text", text: "I will let clients without TLS in." },
+        // The node's agent is too old; plain clients with exposure off.
+        tool("tu_old", { enabled: true, allowPlain: true }),
+        tool("tu_off", { enabled: false, allowPlain: true }),
+      ],
+      // Told why at once, it narrows the list instead.
+      [tool("tu_narrow", { enabled: true, allowedCidrs: ["198.51.100.0/24"] })],
+      [{ type: "text", text: "Done." }],
+    ];
+    const sent = await callOp(panel, ai.send, { message: "Let my laptop connect without TLS" }, { cookie });
+    await settled(panel, sent.body.conversationId);
+    const reply = (await callOp(panel, ai.conversation, { conversationId: sent.body.conversationId }, { cookie })).body.messages[1];
+    const calls = reply.parts.filter((p: { type: string }) => p.type === "tool_call");
+    expect(calls[0]).toMatchObject({ toolCallId: "tu_old", status: "error", approvalId: null });
+    expect(calls[0].resultPreview).toStartWith("CONFLICT: The agent on");
+    expect(calls[1]).toMatchObject({
+      toolCallId: "tu_off",
+      status: "error",
+      approvalId: null,
+      resultPreview: "BAD_REQUEST: Connections without TLS need exposure on.",
+    });
+    // The model got both refusals as tool results in its next call, with nothing waiting for a person.
+    const results = JSON.stringify(model.calls[1]?.messages.at(-1));
+    expect(results).toContain("CONFLICT: The agent on");
+    expect(results).toContain("BAD_REQUEST: Connections without TLS need exposure on.");
+    // The assistant queues every change: this one waits, as an ordinary change with no warning.
+    expect(calls[2]).toMatchObject({ toolCallId: "tu_narrow", status: "needs_approval" });
+    expect(pendingExposures().map((row) => row.id)).toEqual([calls[2].approvalId]);
+    const narrow = await callOp(panel, approvalOps.get, { approvalId: calls[2].approvalId }, { cookie });
+    expect(narrow.body.status).toBe("pending");
+    expect(narrow.body).not.toHaveProperty("warning");
+  } finally {
+    setModelProvider(null);
+  }
+});
+
+test("a waiting approval that lets clients in without TLS says so, with the allow list it leaves, while approving would", async () => {
+  const { serviceId } = await exposedDb();
+  const set = async (input: Record<string, unknown>) =>
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, ...input }, { cookie })).status).toBe(200);
+  await set({ allowedCidrs: ["203.0.113.7/32"] });
+  const tool = mcpTool(serviceId);
+  const get = async (approvalId: string) => (await callOp(panel, approvalOps.get, { approvalId }, { cookie })).body;
+
+  // Turning them on, the stored list kept: who gets in is that list.
+  expect((await tool({ allowPlain: true }))?.content[0]?.text).toContain("needs a person's approval");
+  const allowId = pendingExposures()[0]?.id as string;
+  expect((await get(allowId)).warning).toEqual({
+    kind: "plainConnections",
+    change: "allow",
+    allowedCidrs: ["203.0.113.7/32"],
+    openToEveryone: false,
+  });
+  // The list says so too, for every viewer that may see it.
+  const listed = (await callOp(panel, approvalOps.list, {}, { cookie })).body.approvals;
+  expect(listed.find((a: { id: string }) => a.id === allowId)?.warning).toMatchObject({ change: "allow" });
+
+  // Read as approving it would run now: the person turned them on and emptied the list meanwhile.
+  await set({ allowPlain: true, allowedCidrs: [] });
+  expect(await get(allowId)).not.toHaveProperty("warning");
+  await set({ allowPlain: false, allowedCidrs: ["203.0.113.7/32"] });
+  expect((await get(allowId)).warning).toMatchObject({ change: "allow", allowedCidrs: ["203.0.113.7/32"] });
+
+  // While they are let in, a catch-all in place of the list: from more addresses, every IP.
+  await set({ allowPlain: true });
+  expect(await get(allowId)).not.toHaveProperty("warning");
+  await tool({ allowedCidrs: ["0.0.0.0/1", "128.0.0.0/1"] });
+  const widenId = pendingExposures().find((row) => row.id !== allowId)?.id as string;
+  expect((await get(widenId)).warning).toEqual({
+    kind: "plainConnections",
+    change: "widen",
+    allowedCidrs: ["0.0.0.0/1", "128.0.0.0/1"],
+    openToEveryone: true,
+  });
+
+  // Decided: nothing more to warn about.
+  const approved = await callOp(panel, approvalOps.approve, { approvalId: widenId }, { cookie });
+  expect(approved.body.status).toBe("executed");
+  expect(approved.body).not.toHaveProperty("warning");
+  expect(await get(widenId)).not.toHaveProperty("warning");
+  const denied = await callOp(panel, approvalOps.deny, { approvalId: allowId }, { cookie });
+  expect(denied.body).not.toHaveProperty("warning");
 });

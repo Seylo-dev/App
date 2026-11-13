@@ -90,14 +90,20 @@ export function exposureOf(db: PanelDb, row: DatabaseRow): ExposureRow | null {
   );
 }
 
-export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: string): DatabaseInfo {
-  const service = getService(deps.db, serviceId);
-  const row = findDatabase(deps.db, serviceId);
+/** The rows a check before a change reads: loadDatabase without the secrets and the node's agent state. */
+export type DatabaseTarget = Pick<DatabaseInfo, "service" | "row" | "engine" | "node" | "exposure">;
+
+/** A database service's rows (NOT_FOUND when the service is none or no database), nothing opened. */
+export function findDatabaseTarget(db: PanelDb, serviceId: string): DatabaseTarget {
+  const service = getService(db, serviceId);
+  const row = findDatabase(db, serviceId);
   if (!row) throw new OpError("NOT_FOUND", `${service.name} is not a database.`, { serviceId });
-  const engine = engines[row.engine];
+  return { service, row, engine: engines[row.engine], node: serviceNodes(db, serviceId)[0] ?? null, exposure: exposureOf(db, row) };
+}
+
+export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: string): DatabaseInfo {
+  const { service, row, engine, node, exposure } = findDatabaseTarget(deps.db, serviceId);
   const adminPassword = readSecret(deps, serviceId, adminPasswordSecret) ?? "";
-  const exposure = exposureOf(deps.db, row);
-  const node = serviceNodes(deps.db, serviceId)[0] ?? null;
   return {
     service,
     row,

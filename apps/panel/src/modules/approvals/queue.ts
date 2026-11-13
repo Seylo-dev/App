@@ -312,10 +312,15 @@ export function deny(deps: Deps, approvalId: string, decider: Principal, note: s
 
 /**
  * The approval as the API returns it, for `viewerId`: a chat's title goes
- * to the person whose chat it is only (chats are private).
+ * to the person whose chat it is only (chats are private). A pending one
+ * gets its warning from the op's handler (OpHandler.approvalWarning), from
+ * the sealed input it would run and the resource as it is now.
  */
-export function toApproval(db: PanelDb, row: ApprovalRow, viewerId: string | null) {
+export function toApproval(deps: Pick<Deps, "db" | "secrets" | "ops">, row: ApprovalRow, viewerId: string | null) {
+  const { db } = deps;
   const op = opById(row.opId);
+  const warning =
+    op && row.status === "pending" ? deps.ops.approvalWarning(op, () => parseInput(op.input, openInput(deps, row), false)) : null;
   const requester = row.requestedById
     ? db
         .select({ id: users.id, name: users.name, email: users.email, avatar: users.avatar })
@@ -360,6 +365,7 @@ export function toApproval(db: PanelDb, row: ApprovalRow, viewerId: string | nul
     opId: row.opId,
     opSummary: op?.summary ?? row.opId,
     opKind: op?.kind === "destructive" ? ("destructive" as const) : ("mutation" as const),
+    ...(warning ? { warning } : {}),
     inputPreview: row.inputPreview,
     via: row.requestedByType === "ai" ? ("ai" as const) : ("mcp" as const),
     source,

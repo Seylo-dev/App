@@ -2,10 +2,12 @@
 // entry the old list does not hold lets clients in from new addresses, and
 // a /0 (or ranges adding up to one) lets in every address of a family. Read
 // the way the node's portgate reads them (netip.ParsePrefix): an entry's
-// family is the one it is written in.
+// family is the one it is written in. The panel's audit and approval and
+// the web app's Connection tab read lists with these.
 
 import { expect, test } from "bun:test";
-import { allowListOpensAFamily, heldByAllowList } from "../src/http/ip-ranges";
+import { isIP } from "node:net";
+import { allowListOpensAFamily, allowListOpensToEveryone, heldByAllowList, widensAllowList } from "../src/allow-lists";
 
 test("an entry is held when one entry of the list covers its whole range", () => {
   expect(heldByAllowList("203.0.113.7/32", ["203.0.113.0/24"])).toBe(true);
@@ -54,4 +56,81 @@ test("a list with a gap anywhere, or halves of two families, opens none", () => 
   expect(allowListOpensAFamily(["0.0.0.0/1", "8000::/1"])).toBe(false);
   expect(allowListOpensAFamily(["::ffff:0.0.0.0/96"])).toBe(false);
   expect(allowListOpensAFamily(["not an address"])).toBe(false);
+});
+
+test("an empty list or a catch-all lets every IP in; a limited list does not", () => {
+  expect(allowListOpensToEveryone([])).toBe(true);
+  expect(allowListOpensToEveryone(["0.0.0.0/0"])).toBe(true);
+  expect(allowListOpensToEveryone(["::/0"])).toBe(true);
+  expect(allowListOpensToEveryone(["0.0.0.0/1", "128.0.0.0/1"])).toBe(true);
+  // As typed in the web app, before the panel normalizes it: case and spaces around it.
+  expect(allowListOpensToEveryone([" ::/0 "])).toBe(true);
+  expect(allowListOpensToEveryone(["0.0.0.0/0", "203.0.113.7"])).toBe(true);
+  expect(allowListOpensToEveryone(["203.0.113.7/32"])).toBe(false);
+  expect(allowListOpensToEveryone(["0.0.0.0/1"])).toBe(false);
+  expect(allowListOpensToEveryone(["not an address"])).toBe(false);
+});
+
+test("a list widens another when it is empty or holds an entry the other does not", () => {
+  expect(widensAllowList(["203.0.113.7/32"], [])).toBe(true);
+  expect(widensAllowList(["203.0.113.7/32"], ["0.0.0.0/0"])).toBe(true);
+  expect(widensAllowList(["203.0.113.7/32"], ["203.0.113.7/32", "198.51.100.9"])).toBe(true);
+  expect(widensAllowList(["0.0.0.0/0"], [])).toBe(true);
+  // A range split across two entries counts as new.
+  expect(widensAllowList(["0.0.0.0/1", "128.0.0.0/1"], ["0.0.0.0/0"])).toBe(true);
+  // The same, narrower, or from an empty list (no limit) any list.
+  expect(widensAllowList(["203.0.113.0/24"], ["203.0.113.7", "203.0.113.128/25"])).toBe(false);
+  expect(widensAllowList(["0.0.0.0/0"], ["0.0.0.0/1", "128.0.0.0/1"])).toBe(false);
+  expect(widensAllowList([], [])).toBe(false);
+  expect(widensAllowList([], ["0.0.0.0/0"])).toBe(false);
+});
+
+test("an entry is an address exactly when node:net (the panel's normalizeCidr) takes it, zones aside", () => {
+  const candidates = [
+    "1.2.3.4",
+    "0.0.0.0",
+    "255.255.255.255",
+    "256.1.1.1",
+    "01.2.3.4",
+    "1.2.3",
+    "1.2.3.4.5",
+    "1.2.3.",
+    "::",
+    "::1",
+    "1::",
+    "1:2:3:4:5:6:7::",
+    "1:2:3:4:5:6:7:8::",
+    "::1:2:3:4:5:6:7",
+    "::1:2:3:4:5:6:7:8",
+    "1:2:3:4:5:6:7:8",
+    "1:2:3:4:5:6:7:8:9",
+    "1::2::3",
+    ":1::",
+    "1:",
+    "12345::",
+    "g::",
+    "::ffff:1.2.3.4",
+    "::FFFF:1.2.3.4",
+    "64:ff9b::1.2.3.4",
+    "::1.2.3.4",
+    "1:2:3:4:5:6:1.2.3.4",
+    "1:2:3:4:5:6:7:1.2.3.4",
+    "::1.2.3",
+    "::01.2.3.4",
+    "2001:db8::",
+    "2001:DB8:0:0:0:0:0:1",
+    "",
+    "localhost",
+    "1.2.3.4:5432",
+  ];
+  for (const text of candidates) {
+    expect([text, heldByAllowList(text, [text])]).toEqual([text, isIP(text) !== 0]);
+  }
+  // Zones are never allow list entries (netip.ParsePrefix refuses them).
+  expect(heldByAllowList("fe80::1%eth0", ["fe80::1%eth0"])).toBe(false);
+  // The bits as normalizeCidr reads them.
+  expect(heldByAllowList("1.2.3.4/024", ["1.2.3.4/24"])).toBe(true);
+  expect(allowListOpensToEveryone(["1.2.3.4/"])).toBe(false);
+  expect(heldByAllowList("1.2.3.4/33", ["0.0.0.0/0"])).toBe(false);
+  expect(heldByAllowList("::/129", ["::/0"])).toBe(false);
 });

@@ -12,7 +12,7 @@ import type { LiveHub } from "./live/hub";
 import type { Logger } from "./logger";
 import type { AlertSink } from "./modules/alerts/sink";
 import type { Notifier } from "./modules/notifications/email";
-import type { AuthorizeOp, ExecuteOp } from "./ops/pipeline";
+import type { ApprovalWarningOf, AuthorizeOp, ExecuteOp, PrecheckOp } from "./ops/pipeline";
 import type { SecretBox } from "./security/secret-box";
 
 /** The op pipeline, for code that runs ops on someone's behalf (MCP, AI assistant, approvals). */
@@ -24,6 +24,15 @@ export interface OpRunner {
    * requester of an approval. Throws OpError; returns the target.
    */
   authorize: AuthorizeOp;
+  /**
+   * The handler's refusals before a call is held for a person
+   * (OpHandler.precheck), for the AI assistant, which queues its changes
+   * itself: throws the handler's OpError; nothing for ops without one.
+   * added in 0.2.17
+   */
+  precheck: PrecheckOp;
+  /** What approving a pending call weakens (OpHandler.approvalWarning); null when nothing, or the op has no check. added in 0.2.17 */
+  approvalWarning: ApprovalWarningOf;
 }
 
 export interface Deps {

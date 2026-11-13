@@ -9,6 +9,7 @@ import { collectOps } from "./registry";
 
 export * from "./accent";
 export * from "./actions";
+export * from "./allow-lists";
 export * from "./avatars";
 export * from "./define";
 export * from "./errors";
