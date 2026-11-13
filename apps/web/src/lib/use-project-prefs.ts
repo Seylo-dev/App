@@ -2,12 +2,15 @@
 // projects and of each project's services), shared by the sidebar, the
 // dashboard and the project page. Changes show at once (the cached
 // projects.list and services.list are patched) and are saved through
-// projects.setCollapsed, projects.reorder and services.reorder; a failed save
-// refetches the list so the screen matches the panel again.
+// projects.setCollapsed, projects.reorder and services.reorder. A read of the
+// list still on its way when a change is patched in is stopped (its answer is
+// from before the save), and the list is read again once the save answered,
+// so the screen matches the panel again (after a failure too).
 
 import { projects, services } from "@seylo/ops";
 import { opQueryKey, useOpMutation } from "@seylo/ops/react";
 import { toast } from "@seylo/ui/components/toast";
+import type { Mutation, QueryKey } from "@tanstack/react-query";
 import { t } from "../i18n/t";
 import { errorMessage, queryClient } from "./api";
 import type { Project, ServiceSummary } from "./types";
@@ -27,24 +30,58 @@ export function orderServices(list: readonly ServiceSummary[], ids: readonly str
   return sorted.flatMap((s) => [s, ...list.filter((m) => m.parentId === s.id)]);
 }
 
+const servicesKey = (projectId: string) => opQueryKey(services.list, { projectId });
+
+/**
+ * Writes a change into a cached list. A read of the list still on its way
+ * (a live event refetches it while a service deploys) is stopped first: it
+ * was asked before the save, so its answer would put the old order back.
+ */
+function patchList<T>(key: QueryKey, update: (old: T) => T): void {
+  if (queryClient.getQueryData<T>(key) === undefined) return;
+  void queryClient.cancelQueries({ queryKey: key, exact: true });
+  queryClient.setQueryData<T>(key, (old) => (old === undefined ? old : update(old)));
+}
+
 function patch(update: (list: Project[]) => Project[]): void {
-  queryClient.setQueryData<ProjectList>(listKey, (old) => (old ? { projects: update(old.projects) } : old));
+  patchList<ProjectList>(listKey, (old) => ({ projects: update(old.projects) }));
+}
+
+/** The op a save runs (useOpMutation keys them ["op", <op id>]). */
+const opOf = (mutation: Mutation<unknown, unknown, unknown>) => mutation.options.mutationKey?.[1];
+const projectSaves = new Set<unknown>([projects.setCollapsed.id, projects.reorder.id]);
+
+/**
+ * Reads the list again once a save of it answered, for what a stopped read
+ * would have brought. Not while another save of the same list is still on
+ * its way: a read now could miss that one's change and show the order from
+ * before it for a moment. After a failure at once, which puts the panel's
+ * order back.
+ */
+function resync(key: QueryKey, error: unknown, sameList: (mutation: Mutation<unknown, unknown, unknown>) => boolean): void {
+  // The save that just answered still counts: its onSettled runs before it leaves "pending".
+  if (error || queryClient.isMutating({ predicate: sameList }) <= 1) void queryClient.invalidateQueries({ queryKey: key });
 }
 
 function failed(error: unknown): void {
   toast.error(t("sidebar.saveFailed"), { description: errorMessage(error, t("common.unknownError")) });
-  void queryClient.invalidateQueries({ queryKey: listKey });
+}
+
+function projectsSaved(_data: unknown, error: unknown): void {
+  resync(listKey, error, (mutation) => projectSaves.has(opOf(mutation)));
+}
+
+function servicesSaved(_data: unknown, error: unknown, input: { projectId: string }): void {
+  resync(servicesKey(input.projectId), error, (mutation) => {
+    const variables = mutation.state.variables as { projectId?: string } | undefined;
+    return opOf(mutation) === services.reorder.id && variables?.projectId === input.projectId;
+  });
 }
 
 export function useProjectPrefs() {
-  const collapse = useOpMutation(projects.setCollapsed, { onError: failed });
-  const reorder = useOpMutation(projects.reorder, { onError: failed });
-  const reorderServices = useOpMutation(services.reorder, {
-    onError: (error, input) => {
-      toast.error(t("sidebar.saveFailed"), { description: errorMessage(error, t("common.unknownError")) });
-      void queryClient.invalidateQueries({ queryKey: opQueryKey(services.list, { projectId: input.projectId }) });
-    },
-  });
+  const collapse = useOpMutation(projects.setCollapsed, { onError: failed, onSettled: projectsSaved });
+  const reorder = useOpMutation(projects.reorder, { onError: failed, onSettled: projectsSaved });
+  const reorderServices = useOpMutation(services.reorder, { onError: failed, onSettled: servicesSaved });
 
   return {
     setCollapsed(projectId: string, collapsed: boolean) {
@@ -77,8 +114,7 @@ export function useProjectPrefs() {
     },
     /** Saves a new order of a project's services (top-level ids, top to bottom). */
     setServiceOrder(projectId: string, ids: readonly string[]) {
-      const key = opQueryKey(services.list, { projectId });
-      queryClient.setQueryData<ServiceList>(key, (old) => (old ? { services: orderServices(old.services, ids) } : old));
+      patchList<ServiceList>(servicesKey(projectId), (old) => ({ services: orderServices(old.services, ids) }));
       reorderServices.mutate({ projectId, serviceIds: [...ids] });
     },
     /** Moves `projectId` to just before `beforeId` and saves the whole order. */

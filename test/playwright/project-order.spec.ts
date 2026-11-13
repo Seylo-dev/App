@@ -6,7 +6,7 @@
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
-import { ids } from "./demo/fixtures";
+import { ids, projects, services } from "./demo/fixtures";
 import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
 import { dashboardHeading, expect, stateFile, test, withDashboardView } from "./helpers";
@@ -14,30 +14,59 @@ import { dashboardHeading, expect, stateFile, test, withDashboardView } from "./
 test.use({ storageState: stateFile });
 
 type Calls = { op: string; input: Record<string, unknown> }[];
+type Listed = { id: string; parentId?: string | null };
+
+/** `list` in the saved order `ids` (the rest after, as they were), each service's compose members after it, as the panel lists them. */
+function inOrder<T extends Listed>(list: readonly T[], ids: readonly string[]): T[] {
+  const rank = (item: T, at: number) => (ids.includes(item.id) ? ids.indexOf(item.id) : ids.length + at);
+  const top = list
+    .map((item, at) => ({ item, at }))
+    .filter(({ item }) => !item.parentId)
+    .sort((a, b) => rank(a.item, a.at) - rank(b.item, b.at))
+    .map(({ item }) => item);
+  return top.flatMap((item) => [item, ...list.filter((member) => member.parentId === item.id)]);
+}
 
 /**
- * The demo, with the reorder ops recorded. `saveMs` holds their answers back
- * (so one lands while a drop's frames are watched); `refuse` makes them fail.
+ * The demo, with the reorder ops recorded and saved: projects.list and
+ * services.list answer in the saved order, as the panel does (the page reads
+ * them again once a save answered). `saveMs` holds the saves' answers back (so
+ * one lands while a drop's frames are watched); `refuse` makes them fail.
+ * `setup` runs after the demo's routes, before the page opens, so its routes win.
  */
-async function open(page: Page, path = "/", { saveMs = 0, refuse = false } = {}): Promise<Calls> {
+async function open(
+  page: Page,
+  path = "/",
+  { saveMs = 0, refuse = false, setup }: { saveMs?: number; refuse?: boolean; setup?: () => Promise<void> } = {},
+): Promise<Calls> {
   const calls: Calls = [];
+  let projectOrder: string[] = [];
+  const serviceOrder = new Map<string, string[]>();
   const refusal = () => new DemoRefusal(500, "INTERNAL", "The database is locked.");
   await installDemo(page, {
     nodeLive: "silent",
     delay: (op) => (op.endsWith(".reorder") ? saveMs : 0),
     overrides: {
+      "projects.list": () => ({ projects: inOrder(projects, projectOrder) }),
+      "services.list": (input) => {
+        const projectId = String(input.projectId ?? "");
+        return { services: inOrder((services[projectId] ?? []) as Listed[], serviceOrder.get(projectId) ?? []) };
+      },
       "projects.reorder": (input) => {
         calls.push({ op: "projects.reorder", input });
         if (refuse) throw refusal();
+        projectOrder = input.projectIds;
         return { projectIds: input.projectIds };
       },
       "services.reorder": (input) => {
         calls.push({ op: "services.reorder", input });
         if (refuse) throw refusal();
+        serviceOrder.set(input.projectId, input.serviceIds);
         return { projectId: input.projectId, serviceIds: input.serviceIds };
       },
     },
   });
+  await setup?.();
   await page.goto(path);
   return calls;
 }
@@ -296,6 +325,135 @@ test("a project dropped on the dashboard goes straight to its new place", async 
   await page.mouse.up();
   expectStraightDrop(await frames(), place);
   await expect(sections.first()).toContainText("personal");
+});
+
+// A drop while the list is being read again (reviewer, 2026-11-13): while a
+// service of the project deploys or restarts, the panel says "services.list
+// is stale" on project:<id> and the page reads the list again, up to once a
+// second. That read was asked before the save, so its answer has the old
+// order; it used to land over the dropped order and put the item back where
+// it came from, until the next read. The drop now stops that read, and the
+// list is read again once the save answered.
+
+/** The live socket in place of the demo's: `stale` says ops on a topic changed, as the panel does when a container changes. */
+async function liveSocket(page: Page) {
+  let socket: { send(text: string): void } | null = null;
+  await page.routeWebSocket(/\/api\/live/, (ws) => {
+    socket = ws;
+    ws.onMessage((raw) => {
+      const message = JSON.parse(String(raw)) as { type: string; topic: string };
+      if (message.type === "subscribe") ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+    });
+  });
+  return {
+    async stale(topic: string, ops: string[]) {
+      await expect.poll(() => socket !== null).toBe(true);
+      socket?.send(JSON.stringify({ type: "event", topic, event: { type: "invalidate", ops } }));
+    },
+  };
+}
+
+/**
+ * Holds the next read of `op` (once `arm`ed) until `release`, then answers it
+ * with `before`: what the panel had when it was asked, before the drop's save.
+ * Reads of the same project after it go on to the demo; `later` counts them.
+ */
+async function holdNextRead(page: Page, op: "projects.list" | "services.list", before: unknown) {
+  let armed = false;
+  let asked = false;
+  let later = 0;
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(new RegExp(`/api/v1/${op.replace(".", "\\.")}`), async (route) => {
+    const request = route.request();
+    const ours = op === "projects.list" || `${request.url()} ${request.postData() ?? ""}`.includes(ids.acme);
+    if (!armed || !ours) {
+      if (asked && ours) later++;
+      return route.fallback();
+    }
+    armed = false;
+    asked = true;
+    await released;
+    // The page may have stopped this read: then nothing is waiting for the answer.
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(before) }).catch(() => {});
+  });
+  return {
+    arm: () => {
+      armed = true;
+    },
+    asked: () => asked,
+    later: () => later,
+    release: () => release(),
+  };
+}
+
+test("a service dropped while its list is being read again stays in its new place, and the list is read after the save", async ({
+  page,
+}) => {
+  let live: Awaited<ReturnType<typeof liveSocket>> | undefined;
+  let read: Awaited<ReturnType<typeof holdNextRead>> | undefined;
+  const calls = await open(page, "/", {
+    saveMs: 400,
+    setup: async () => {
+      live = await liveSocket(page);
+      read = await holdNextRead(page, "services.list", { services: services[ids.acme] });
+    },
+  });
+  if (!live || !read) throw new Error("setup did not run");
+  const held = read;
+  await expect(dashboardHeading(page)).toBeVisible();
+  const rows = sidebarProjects(page).first().locator("ul > li");
+  await expect(rows.nth(1)).toContainText("api");
+  const api = rows.nth(1);
+  const place = await topLeft(rows.first());
+  const frames = await watchDrop(api);
+  await dragOver(page, api, rows.first());
+  held.arm();
+  await live.stale(`project:${ids.acme}`, ["services.list"]);
+  await expect.poll(() => held.asked()).toBe(true);
+  await page.mouse.up();
+  // The read from before the save answers right after the drop, the save 400 ms in.
+  held.release();
+  expectStraightDrop(await frames(), place);
+  await expect(rows.first()).toContainText("api");
+  expect(calls.filter((c) => c.op === "services.reorder")).toHaveLength(1);
+  await expect.poll(() => held.later()).toBeGreaterThan(0);
+  await expect(rows.first()).toContainText("api");
+});
+
+test("a project dropped while projects.list is being read again stays in its new place, and the list is read after the save", async ({
+  page,
+}) => {
+  let live: Awaited<ReturnType<typeof liveSocket>> | undefined;
+  let read: Awaited<ReturnType<typeof holdNextRead>> | undefined;
+  const calls = await open(page, "/", {
+    saveMs: 400,
+    setup: async () => {
+      live = await liveSocket(page);
+      read = await holdNextRead(page, "projects.list", { projects });
+    },
+  });
+  if (!live || !read) throw new Error("setup did not run");
+  const held = read;
+  await expect(dashboardHeading(page)).toBeVisible();
+  const list = sidebarProjects(page);
+  await expect(list.nth(1)).toContainText("personal");
+  const personal = list.nth(1);
+  const place = await topLeft(list.first());
+  const frames = await watchDrop(personal);
+  await dragOver(page, personal.locator("> div").first(), list.first().locator("> div").first());
+  held.arm();
+  await live.stale(`project:${ids.acme}`, ["projects.list"]);
+  await expect.poll(() => held.asked()).toBe(true);
+  await page.mouse.up();
+  held.release();
+  expectStraightDrop(await frames(), place);
+  await expect(list.first()).toContainText("personal");
+  expect(calls.filter((c) => c.op === "projects.reorder")).toHaveLength(1);
+  await expect.poll(() => held.later()).toBeGreaterThan(0);
+  await expect(list.first()).toContainText("personal");
 });
 
 test("a save that fails puts the order back, with an error toast", async ({ page }) => {
