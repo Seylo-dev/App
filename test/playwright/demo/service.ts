@@ -574,32 +574,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   }),
   "domains.list": () => ({ domains, autoDomainSuggestion: null }),
   "domains.checkDns": checkDns,
-  "exposures.get": () => ({
-    firstRun: {
-      status: "closed",
-      address: "203.0.113.10:41203",
-      redirectTo: "https://shop.example.com",
-      closeAt: null,
-      domainLiveAt: ago(2 * day),
-      closeWhenDomainLive: true,
-      redirectToPrimary: true,
-    },
-    timed: [
-      {
-        id: "e000000000000001",
-        serviceId: ids.web,
-        nodeId: de.id,
-        host: "203.0.113.10",
-        port: 47011,
-        targetPort: 3000,
-        allowedCidrs: ["198.51.100.24/32"],
-        expiresAt: new Date(now + 102 * min).toISOString(),
-        openedBy: { kind: "mcp", name: "Claude" },
-        createdAt: ago(18 * min),
-      },
-    ],
-    database: null,
-  }),
+  "exposures.get": (input: Input) => exposuresOf(String(input.serviceId)),
   "tunnels.get": () => ({
     serviceId: ids.web,
     enabled: false,
@@ -869,6 +844,7 @@ export function connectionOf(serviceId: string) {
         password: "Rk2mV7wTq9Lx4Pb8",
         tlsParams: "",
       },
+      timed: [],
     };
   if (serviceId === ids.clickhouse)
     return {
@@ -882,6 +858,7 @@ export function connectionOf(serviceId: string) {
         password: "Wd4nB8sKq1Pz7Hv2",
       },
       exposed: null,
+      timed: [],
     };
   return {
     internal: {
@@ -901,6 +878,83 @@ export function connectionOf(serviceId: string) {
       password: "Zq8vN3pXr7Lm2Kd9",
       tlsParams: "sslmode=require",
     },
+    // The timed expose exposuresOf lists, with the password.
+    timed: [
+      {
+        exposureId: demoDbExpose.id,
+        host: "203.0.113.10",
+        port: 47432,
+        url: "postgresql://postgres:Zq8vN3pXr7Lm2Kd9@203.0.113.10:47432/shop?sslmode=require",
+      },
+    ],
+  };
+}
+
+/** The Postgres demo database's open timed expose (its Connection tab). */
+export const demoDbExpose = {
+  id: "e000000000000101",
+  serviceId: ids.db,
+  nodeId: de.id,
+  host: "203.0.113.10",
+  port: 47432,
+  targetPort: 5432,
+  allowedCidrs: ["198.51.100.24/32"],
+  expiresAt: new Date(now + 47 * min).toISOString(),
+  firewallHint: null,
+  openedBy: { kind: "user", name: "Maya Levi" },
+  // Exposed, so TLS is on in it: the URL asks for it.
+  database: {
+    engine: "postgres",
+    user: "postgres",
+    database: "shop",
+    tls: "database",
+    url: "postgresql://postgres@203.0.113.10:47432/shop?sslmode=require",
+    command: "psql 'postgresql://postgres@203.0.113.10:47432/shop?sslmode=require'",
+  },
+  createdAt: ago(13 * min),
+};
+
+/** exposures.get: the web app's first-run access and MCP's timed expose; one timed expose on the Postgres database, none on the others. */
+export function exposuresOf(serviceId: string) {
+  const none = {
+    status: "none",
+    address: null,
+    redirectTo: null,
+    closeAt: null,
+    domainLiveAt: null,
+    closeWhenDomainLive: true,
+    redirectToPrimary: true,
+    firewallHint: null,
+  };
+  if (serviceId === ids.db) return { firstRun: none, timed: [demoDbExpose], database: { host: "203.0.113.10", port: 15432, allowedCidrs: [] } };
+  if (serviceId === ids.redis) return { firstRun: none, timed: [], database: { host: "203.0.113.10", port: 16379, allowedCidrs: [] } };
+  if (serviceId === ids.clickhouse) return { firstRun: none, timed: [], database: null };
+  return {
+    firstRun: {
+      status: "closed",
+      address: "203.0.113.10:41203",
+      redirectTo: "https://shop.example.com",
+      closeAt: null,
+      domainLiveAt: ago(2 * day),
+      closeWhenDomainLive: true,
+      redirectToPrimary: true,
+    },
+    timed: [
+      {
+        id: "e000000000000001",
+        serviceId: ids.web,
+        nodeId: de.id,
+        host: "203.0.113.10",
+        port: 47011,
+        targetPort: 3000,
+        allowedCidrs: ["198.51.100.24/32"],
+        expiresAt: new Date(now + 102 * min).toISOString(),
+        openedBy: { kind: "mcp", name: "Claude" },
+        database: null,
+        createdAt: ago(18 * min),
+      },
+    ],
+    database: null,
   };
 }
 

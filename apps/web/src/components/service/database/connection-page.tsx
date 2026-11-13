@@ -1,7 +1,8 @@
 // The Connection tab of a database (Database.dc.html): the internal URL
 // for services on the same node, the exposed URL with TLS for everything
 // else (toggle, allowed IPs, certificate; the same user and password as
-// inside), the on-demand web UI, a pre-logged-in shell, the backup
+// inside), the timed expose for one IP (timed-expose-card.tsx), the
+// on-demand web UI, a pre-logged-in shell, the backup
 // summary, and Change links next to the user and the password, which open
 // the Users tab (users-page.tsx) with the main user's dialog.
 
@@ -36,6 +37,7 @@ import { DatabaseShell } from "../terminal/console-pages";
 import type { ServiceDetail } from "../use-service";
 import { maskUrlPassword } from "./mask-url";
 import { SelfSignedNote } from "./self-signed-note";
+import { TimedExposeCard } from "./timed-expose-card";
 
 type Db = OpOutput<typeof databases.get>;
 type Connection = OpOutput<typeof databases.connection>;
@@ -82,6 +84,8 @@ export function ConnectionPage({ service }: { service: ServiceDetail }) {
       <div className="flex min-w-0 flex-[999_1_520px] flex-col gap-4">
         <InternalCard service={service} db={db.data} conn={conn.data ?? null} connError={conn.error} />
         <ExposedCard service={service} db={db.data} conn={conn.data ?? null} />
+        {/* The port for one IP for a while, for a client on a laptop: exposures.openTimed. */}
+        <TimedExposeCard service={service} db={db.data} conn={conn.data ?? null} />
         {/* The database's own output, watched like an app's Overview console (a shell is under Tools). */}
         <ConsoleCard service={service} height={consoleCardHeight} fullLink={false} />
       </div>

@@ -22,6 +22,7 @@ import { formatClock, formatDate } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
 import { servicePort } from "../service-port";
+import { oneHourMore } from "../timed-extend";
 import { useNow } from "../use-now";
 import type { ServiceDetail } from "../use-service";
 
@@ -335,7 +336,7 @@ function TimedRow({ service, x }: { service: ServiceDetail; x: Timed }) {
           <Button
             size="sm"
             className="h-[30px] bg-card"
-            onClick={() => extend.mutate({ serviceId: service.id, exposureId: x.id, durationMinutes: 60 })}
+            onClick={() => extend.mutate({ serviceId: service.id, exposureId: x.id, durationMinutes: oneHourMore(left) })}
           >
             {t("serviceDomains.dev.extend")}
           </Button>
