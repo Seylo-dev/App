@@ -338,7 +338,10 @@ service export and import) and `0017_transfer_volumes`
 and `source_stopped`, so a download that stopped its service starts it
 again after a panel restart); for 0.2.14 `0018_parallel_builds_auto`
 (`nodes.parallel_builds_auto`, default true for new nodes, set false on
-existing ones so they keep their fixed builds at once)), which the panel applies at start, also
+existing ones so they keep their fixed builds at once); for 0.2.15
+`0019_build_handed_over` (`builds.handed_over_at`, set to `created_at` on
+builds queued or running at the update) and `0020_build_progress_logged`
+(`builds.progress_logged`, default '[]')), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -4553,8 +4556,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   panel stopped before its Build call). `position` is the
   1-based place among the node's queued builds and `waiting` is true when
   its running builds and the queued ones ahead fill its Builds at once
-  (`max_parallel_builds`, at least 1; 0 without Can build, which the agent
-  runs as 1). `builds.queue` (queued = waiting for a free slot, or about to
+  (the `max_parallel_builds` the panel sends: the fixed number, or on Auto
+  what the stored facts give, at least 1; 0 without Can build, which the
+  agent runs as 1). `builds.queue` (queued = waiting for a free slot, or about to
   start in one, with its place among them; running = started on the
   agent), `builds.getSettings` nodes (`running`, `waiting`, and
   `buildsAtOnce`, the limit as the agent applies it, so the web app's
@@ -4565,14 +4569,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the preview's latest deploy) and the commit statuses all read it. The
   limit comes from one helper, `slots.ts` `buildSlotLimits(db, nodeIds)`,
   which `buildQueue` and `pickBuildNode` (free slots = limit minus running
-  and queued) both use. The web app's step strips (Overview Deploys card,
+  and queued) both use; it works the number out as the compiler does
+  (`parallelBuildsOf` with `storedFacts(nodes.facts)`), so on Auto the
+  queue counts the slots the agent was sent, not the live facts'. The web app's step strips (Overview Deploys card,
   Deployments rows, the log modal) put a pending Queued step with the
   place in line before Clone while `buildWait` is set and show Clone
   pending; that step is the web app's, not a step key of the API.
   `store.ts`
   `publishBuildQueue(deps, nodeId)` sends the node's queued deployments
   out again when a build there starts, ends or is cancelled, or its Builds
-  at once or Can build changes. "Built in Xs" counts from `started_at`
+  at once (a fixed number, Auto on or off, or Auto's number after a facts
+  write) or Can build changes. "Built in Xs" counts from `started_at`
   (the agent's duration, which holds the wait, only without one), and the
   clone step's time leaves out the wait from `handed_over_at` to the
   start, also after a panel restart. A re-attached stream replays the
@@ -4584,7 +4591,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   report), and a re-attached stream replays them, so `recordBuildProgress`
   logs a stage's message once per run of the build, the first time it
   arrives either way, and keeps the `<run id>:<stage>:<message>` keys it
-  logged in `builds.progress_logged` (migration 0019, at most 64, the run
+  logged in `builds.progress_logged` (migration 0020, at most 64, the run
   id cut to 64 characters), so a panel restart does not log them again;
   the same message from another build, another run or in another stage is
   a new line. The run id is `BuildProgress.run_id` (agent `build.Job`

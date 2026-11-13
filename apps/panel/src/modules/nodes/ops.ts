@@ -244,8 +244,8 @@ const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
   // The choice lives in settings (panel-address.ts); the row still records that the node changed.
   if (input.panelAddressChoice !== undefined) set.updatedAt = new Date();
   const row = changeNode(ctx, input.nodeId, set, { desired: agentsCare });
-  // More or fewer slots: the builds queued there have another place in line.
-  if (input.maxParallelBuilds !== undefined) publishBuildQueue(ctx, input.nodeId);
+  // More or fewer slots (a fixed number, or Auto on or off): the builds queued there have another place in line.
+  if (input.maxParallelBuilds !== undefined || input.parallelBuildsAuto !== undefined) publishBuildQueue(ctx, input.nodeId);
   // Other nodes balance load to this one at its address.
   if (input.publicAddress !== undefined) ctx.agents.desired.markDirty({ all: true });
   // A node behind 1:1 NAT may only now have an address to find its location by.

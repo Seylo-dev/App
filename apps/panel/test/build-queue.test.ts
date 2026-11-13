@@ -12,7 +12,7 @@ import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { create } from "@bufbuild/protobuf";
+import { create, toJson } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import {
   builds as buildOps,
@@ -23,7 +23,7 @@ import {
   projects,
   services as serviceOps,
 } from "@seylo/ops";
-import { BuildProgressSchema, BuildStage } from "@seylo/proto";
+import { BuildProgressSchema, BuildStage, NodeFactsSchema } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { builds, nodes, previews, services, sourceUploads } from "../src/db/schema";
 import { buildTimeoutMs, engineFor, queuedBuildTimeoutMs, unfinishedDeployments } from "../src/modules/deployments/engine";
@@ -51,7 +51,7 @@ beforeEach(async () => {
   panel = testPanel({ panelPath: join(dir, "panel.db"), masterKey, dataDir: dir });
   fleet = new FakeFleet(panel);
   target = fleet.addNode("app-node");
-  // Builds at once is 1 on both builders (the default).
+  // Builds at once is 1 on both builders: new nodes are on Auto, which gives 1 until a node reports its cores and memory.
   ra = fleet.addNode("il-ra", { canBuild: true, panelNode: true });
   tlv = fleet.addNode("il-tlv", { canBuild: true });
   ({ cookie } = await createUser(panel, "owner"));
@@ -394,7 +394,7 @@ test("a queued build waits past the build timeout while its node's queue moves, 
 
 test("a node without Can build runs one build at a time, like its agent", async () => {
   const [a, b] = [await app("a", ra), await app("b", ra)];
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
   const first = await deploy(a);
   await start(first.buildId);
   const second = await deploy(b);
@@ -575,7 +575,7 @@ test("after a panel restart the clone step still leaves out the wait for a slot"
 test("the automatic build node has the most free build slots, then the fewest builds in flight, then the first name", async () => {
   const auto = defaultSpec();
   // il-ra runs 8 builds at once and has 3, il-tlv runs 1 and has 1: il-ra has 5 free slots and il-tlv none.
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 8 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 8 }).where(eq(nodes.id, ra)).run();
   for (const name of ["a", "b", "c"]) await deploy(await app(name, ra));
   await deploy(await app("d", tlv));
   expect(pickBuildNode(panel.deps, auto, [target])).toMatchObject({ id: ra, name: "il-ra" });
@@ -585,18 +585,73 @@ test("the automatic build node has the most free build slots, then the fewest bu
   expect(listed.find((n: { id: string }) => n.id === tlv)).toMatchObject({ queued: 1, buildsAtOnce: 1 });
 
   // One free slot each (3 of 4 and 1 of 2): the node with fewer builds in flight.
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 2 }).where(eq(nodes.id, tlv)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 2 }).where(eq(nodes.id, tlv)).run();
   expect(pickBuildNode(panel.deps, auto, [target]).id).toBe(tlv);
   // Three builds on each, both full: 2 wait for il-ra's one slot and 1 for il-tlv's two, so il-tlv starts it sooner.
   await deploy(await app("f", tlv));
   await deploy(await app("g", tlv));
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 1 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 1 }).where(eq(nodes.id, ra)).run();
   expect(pickBuildNode(panel.deps, auto, [target]).id).toBe(tlv);
   // The same free slots and builds in flight: by name.
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
-  panel.deps.db.update(nodes).set({ maxParallelBuilds: 4 }).where(eq(nodes.id, tlv)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 4 }).where(eq(nodes.id, ra)).run();
+  panel.deps.db.update(nodes).set({ parallelBuildsAuto: false, maxParallelBuilds: 4 }).where(eq(nodes.id, tlv)).run();
   expect(pickBuildNode(panel.deps, auto, [target]).id).toBe(ra);
+});
+
+/** NodeFacts as the panel stores them in nodes.facts (protobuf JSON), with the cores and memory Auto reads. */
+const storedFacts = (cpuCores: number, memoryGiB: number) =>
+  toJson(
+    NodeFactsSchema,
+    create(NodeFactsSchema, { hostname: "box", cpuCores, memoryTotalBytes: BigInt(memoryGiB * 1024 ** 3) }),
+  ) as Record<string, unknown>;
+
+test("on Auto, the queue and the build node pick count the slots the node's stored facts give, as its agent gets them", async () => {
+  // 8 cores and 16 GiB: Auto runs 2 builds at once on il-ra. The fixed number left in the row (1) does not apply.
+  panel.deps.db
+    .update(nodes)
+    .set({ parallelBuildsAuto: true, maxParallelBuilds: 1, facts: storedFacts(8, 16) })
+    .where(eq(nodes.id, ra))
+    .run();
+  const [a, b, c] = [await app("a", ra), await app("b", ra), await app("c", ra)];
+  const first = await deploy(a);
+  await start(first.buildId);
+  const second = await deploy(b);
+  const third = await deploy(c);
+  // a runs, b has the second slot, c waits behind b.
+  expect((await deployment(b, second.deploymentId)).buildWait).toBeNull();
+  expect((await deployment(c, third.deploymentId)).buildWait).toEqual({ node: { id: ra, name: "il-ra" }, position: 2 });
+  const listed = (await callOp(panel, buildOps.getSettings, { serviceId: a }, { cookie })).body.nodes;
+  expect(listed.find((n: { id: string }) => n.id === ra)).toMatchObject({ queued: 3, running: 2, waiting: 1, buildsAtOnce: 2 });
+
+  // A fixed 1: b waits too, and its page hears it.
+  const events: { type: string; deployment?: { buildWait: unknown } }[] = [];
+  panel.deps.live.subscribe(
+    { id: "tab", send: (m) => events.push((m as { event: (typeof events)[number] }).event) },
+    `deployment:${second.deploymentId}`,
+  );
+  expect((await callOp(panel, nodeOps.updateSettings, { nodeId: ra, maxParallelBuilds: 1 }, { cookie })).status).toBe(200);
+  expect((await deployment(b, second.deploymentId)).buildWait).toEqual({ node: { id: ra, name: "il-ra" }, position: 1 });
+  expect(events.filter((e) => e.type === "deployment").at(-1)?.deployment?.buildWait).toEqual({
+    node: { id: ra, name: "il-ra" },
+    position: 1,
+  });
+  // Auto again: 2 slots, b no longer waits, and its page hears that too.
+  events.length = 0;
+  expect((await callOp(panel, nodeOps.updateSettings, { nodeId: ra, parallelBuildsAuto: true }, { cookie })).status).toBe(200);
+  expect((await deployment(b, second.deploymentId)).buildWait).toBeNull();
+  expect(events.filter((e) => e.type === "deployment").at(-1)?.deployment?.buildWait).toBeNull();
+
+  // 32 cores and 64 GiB: 8 slots, 5 of them free, so the automatic pick takes il-ra over il-tlv's one free slot.
+  panel.deps.db
+    .update(nodes)
+    .set({ facts: storedFacts(32, 64) })
+    .where(eq(nodes.id, ra))
+    .run();
+  expect(pickBuildNode(panel.deps, defaultSpec(), [target])).toMatchObject({ id: ra, name: "il-ra" });
+  // Without Can build its agent runs one at a time, whatever Auto would give.
+  panel.deps.db.update(nodes).set({ canBuild: false }).where(eq(nodes.id, ra)).run();
+  expect((await deployment(b, second.deploymentId)).buildWait).toEqual({ node: { id: ra, name: "il-ra" }, position: 1 });
 });
 
 test("a re-attached build replays its stages: the clone it finished before a panel restart keeps its time", async () => {

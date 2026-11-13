@@ -1,5 +1,6 @@
-// Build slots. A node runs at most its "Builds at once"
-// (nodes.max_parallel_builds) builds; its agent queues the others in arrival
+// Build slots. A node runs at most its "Builds at once" (a fixed
+// nodes.max_parallel_builds, or on Auto what its cores and memory give,
+// nodes/parallel-builds.ts) builds; its agent queues the others in arrival
 // order (go/internal/build/queue.go) and starts the next one when a build
 // ends. A build row is "queued" from the moment the panel dispatches it to
 // a node until the agent reports a stage after the slot (FETCHING_SOURCE or
@@ -9,6 +10,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { buildInFlight, builds, nodes } from "../../db/schema";
+import { parallelBuildsOf, storedFacts } from "../nodes/parallel-builds";
 
 /** Where one queued build stands on its node. */
 export interface QueuePlace {
@@ -27,7 +29,7 @@ export interface QueuePlace {
 
 /** One node's builds in flight. */
 export interface NodeSlots {
-  /** Builds at once as the agent applies it: max_parallel_builds, at least 1 (0 = not a build node, which the agent runs as 1). */
+  /** Builds at once as the agent applies it: the max_parallel_builds the panel sends, at least 1 (0 = not a build node, which the agent runs as 1). */
   limit: number;
   /** Builds started on the agent. */
   running: number;
@@ -63,8 +65,10 @@ export const queueOrder = [
 /**
  * Builds at once of these nodes as their agents apply it, by node id: the
  * number the panel sends (max_parallel_builds, desired/compile.ts), at
- * least 1. A node without Can build gets 0, which its agent runs as 1. The
- * one place the panel reads a node's slot count; the queue places and the
+ * least 1. That is the fixed number, or on Auto what the node's stored
+ * facts give (parallelBuildsOf with storedFacts, as the compiler works it
+ * out). A node without Can build gets 0, which its agent runs as 1. The one
+ * place the panel reads a node's slot count; the queue places and the
  * automatic build node pick (deployments/source.ts pickBuildNode) both go
  * through it.
  */
@@ -72,11 +76,17 @@ export function buildSlotLimits(db: PanelDb, nodeIds: readonly string[]): Map<st
   if (nodeIds.length === 0) return new Map();
   return new Map(
     db
-      .select({ id: nodes.id, canBuild: nodes.canBuild, maxParallelBuilds: nodes.maxParallelBuilds })
+      .select({
+        id: nodes.id,
+        canBuild: nodes.canBuild,
+        parallelBuildsAuto: nodes.parallelBuildsAuto,
+        maxParallelBuilds: nodes.maxParallelBuilds,
+        facts: nodes.facts,
+      })
       .from(nodes)
       .where(inArray(nodes.id, [...nodeIds]))
       .all()
-      .map((n) => [n.id, Math.max(1, n.canBuild ? n.maxParallelBuilds : 0)]),
+      .map((n) => [n.id, Math.max(1, n.canBuild ? parallelBuildsOf(n, storedFacts(n.facts)) : 0)]),
   );
 }
 

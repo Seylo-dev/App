@@ -18,6 +18,7 @@ import { type DesiredFlusher, startDesiredFlusher } from "../../desired";
 import { defineJob } from "../../jobs/queue";
 import { signBackupRequests } from "../backups/signing";
 import { edgeAccessAllowed } from "../databases/edge-ticket";
+import { publishBuildQueue } from "../deployments/store";
 import { defineModule } from "../module";
 import { writesPaused } from "../panelMove/pause";
 import { runningMinAgent } from "../updates/release-state";
@@ -158,9 +159,11 @@ function start(deps: Deps) {
       })
       .where(eq(nodes.id, nodeId))
       .run();
-    // Builds at once on Auto follows the machine: other cores or memory, the agent gets the new number.
+    // Builds at once on Auto follows the machine: other cores or memory, the agent gets the new number,
+    // and the builds queued there have another place in line (builds/slots.ts reads the stored facts).
     if (before?.canBuild && parallelBuildsOf(before, storedFacts(before.facts)) !== parallelBuildsOf(before, facts)) {
       deps.agents.desired.markDirty({ nodeId });
+      publishBuildQueue(deps, nodeId);
     }
     // The agent's own Docker version check, unless the panel holds a newer one (docker-check.ts).
     const dockerReport = reportFromAgent(facts.dockerUpdate);
