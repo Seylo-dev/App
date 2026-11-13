@@ -12,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bu
 import { domains as domainOps } from "@seylo/ops";
 import { editDistance, suggestRegistrable } from "../src/modules/domains/did-you-mean";
 import { checkHost, type DnsLookups, publicDns, relativeName, setDnsLookups } from "../src/modules/domains/dns";
-import { findZone, nsCacheMs, registrableDomain } from "../src/modules/domains/zone";
+import { registrableWarning, setWarningWait, warningWaitMs } from "../src/modules/domains/missing-registrable";
+import { findZone, isPrivateName, nsCacheMs, registrableDomain } from "../src/modules/domains/zone";
 import { setSetting } from "../src/settings";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { seedNode, seedProject, seedService } from "./seed-helpers";
@@ -204,6 +205,46 @@ describe("findZone", () => {
   });
 });
 
+describe("private names", () => {
+  const privateHosts = [
+    "app.apps.lab.internal",
+    "app.something.localhost",
+    "app.apps.home.arpa",
+    "app.n1.example.test",
+    "app.office.lan",
+    "app.nas.local",
+    "app.site.corp",
+    // RFC 6761 reserves example.com, .net and .org as well.
+    "app.n1.example.com",
+  ];
+
+  test("special-use names and private networks' top-level names; real domains are not", () => {
+    for (const host of privateHosts) expect(isPrivateName(host)).toBe(true);
+    for (const host of [
+      "app.exampel.com",
+      "www.example.co.il",
+      "shop.example.co.uk",
+      "latest.exampel.com",
+      "x.myexample.com",
+      "a.internals.co.il",
+    ]) {
+      expect(isPrivateName(host)).toBe(false);
+    }
+  });
+
+  test("public resolvers know nothing of a private name, which does not make it missing", async () => {
+    for (const host of privateHosts) {
+      const { dns } = resolver(suffixes);
+      const zone = await findZone(host, dns);
+      expect(zone.registrableMissing).toBe(false);
+      expect(zone.zone).toBeNull();
+      const checked = await checkHost(host, [node], dns);
+      expect(checked).toMatchObject({ status: "missing", zoneMissing: false });
+      expect(checked.message).toBe(`No A record for ${host} yet. Create one pointing at 203.0.113.10.`);
+    }
+  });
+});
+
 describe("checkHost", () => {
   test("a missing registrable domain: zoneMissing, no zone, and the record relative to the registrable domain", async () => {
     const { dns } = resolver(suffixes);
@@ -255,6 +296,7 @@ describe("domains ops", () => {
   });
   afterEach(() => {
     setDnsLookups(null);
+    setWarningWait(null);
     panel.close();
   });
 
@@ -365,7 +407,7 @@ describe("domains ops", () => {
   });
 
   test("domains.addAuto warns when the node's wildcard domain does not exist; a failed lookup adds it without one", async () => {
-    const { node, shop } = await setup();
+    await setup();
     // The wildcard was typed with a typo on the node.
     const typo = seedNode(panel, { ipv4: "203.0.113.20", wildcard: "n2.exampel.com" });
     const app = seedService(panel, { projectId: seedProject(panel).id, name: "app", nodeIds: [typo.id], deployed: true });
@@ -379,15 +421,106 @@ describe("domains ops", () => {
       message:
         "exampel.com does not exist: it is not registered, or has no name servers yet. Check the spelling. Did you mean example.com?",
     });
-    // A wildcard that exists: no warning.
-    const fine = seedService(panel, { projectId: seedProject(panel).id, name: "fine", nodeIds: [node.id], deployed: true });
+    // A wildcard that exists: no warning (example.co.il has name servers; example.com is special-use, see "private names").
+    const fine = onWildcard("fine", "n3.example.co.il");
     const ok = await callOp(panel, domainOps.addAuto, { serviceId: fine.id }, { cookie });
     expect(ok.status).toBe(200);
     expect(ok.body.warning).toBeUndefined();
     // The resolvers time out: no warning, and the domain is added all the same.
-    setDnsLookups(resolver(suffixes, {}, { "example.com": "ETIMEOUT" }).dns);
-    const slow = await callOp(panel, domainOps.addAuto, { serviceId: shop.id, subdomain: "shop2" }, { cookie });
+    setDnsLookups(resolver(suffixes, {}, { "example.co.il": "ETIMEOUT" }).dns);
+    const slow = await callOp(panel, domainOps.addAuto, { serviceId: fine.id, subdomain: "fine2" }, { cookie });
     expect(slow.status).toBe(200);
     expect(slow.body.warning).toBeUndefined();
+  });
+
+  /** A service named `name` on a new node whose wildcard domain is `wildcard`. */
+  function onWildcard(name: string, wildcard: string, ipv4 = "203.0.113.40") {
+    const n = seedNode(panel, { ipv4, wildcard });
+    return seedService(panel, { projectId: seedProject(panel).id, name, nodeIds: [n.id], deployed: true });
+  }
+
+  test("domains.addAuto answers within the wait when the resolvers do not, and the next one does not wait again", async () => {
+    setWarningWait(300);
+    const asked: string[] = [];
+    // A panel that cannot reach 1.1.1.1 or 8.8.8.8: the NS lookups do not come back within the wait.
+    setDnsLookups({
+      resolve4: async () => [],
+      resolve6: async () => [],
+      resolveCname: async () => [],
+      resolveNs: (name) => {
+        asked.push(name);
+        return new Promise<string[]>(() => {});
+      },
+    });
+    const app = onWildcard("app", "n4.exampel.co.il");
+    const started = Date.now();
+    const auto = await callOp(panel, domainOps.addAuto, { serviceId: app.id }, { cookie });
+    expect(auto.status).toBe(200);
+    expect(auto.body.warning).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(asked.sort()).toEqual(["app.n4.exampel.co.il", "exampel.co.il", "n4.exampel.co.il"]);
+    // The same registrable domain within a minute: answered at once, nothing asked.
+    const again = Date.now();
+    const second = await callOp(panel, domainOps.addAuto, { serviceId: app.id, subdomain: "app2" }, { cookie });
+    expect(second.status).toBe(200);
+    expect(second.body.warning).toBeUndefined();
+    expect(Date.now() - again).toBeLessThan(150);
+    expect(asked).toHaveLength(3);
+    // The wait the panel uses: a couple of seconds, not the resolvers' 20.
+    expect(warningWaitMs).toBeLessThanOrEqual(3000);
+  });
+
+  test("a lookup that fails is not asked again for a minute; a late answer is used once it comes", async () => {
+    const failing = resolver(suffixes, {}, { "exampel.co.il": "ETIMEOUT" });
+    setDnsLookups(failing.dns);
+    const app = onWildcard("app", "n5.exampel.co.il");
+    expect((await callOp(panel, domainOps.addAuto, { serviceId: app.id }, { cookie })).body.warning).toBeUndefined();
+    const asked = failing.asked.length;
+    expect((await callOp(panel, domainOps.addAuto, { serviceId: app.id, subdomain: "app2" }, { cookie })).body.warning).toBeUndefined();
+    expect(failing.asked).toHaveLength(asked);
+
+    // Answers that come after the wait: the next addAuto reads them from the NS cache and warns.
+    setWarningWait(100);
+    const held: (() => void)[] = [];
+    let hold = true;
+    setDnsLookups({
+      ...resolver(suffixes).dns,
+      resolveNs: () => (hold ? new Promise<string[]>((resolve) => held.push(() => resolve([]))) : Promise.resolve([])),
+    });
+    const web = onWildcard("web", "n6.exampel.co.uk", "203.0.113.50");
+    expect((await callOp(panel, domainOps.addAuto, { serviceId: web.id }, { cookie })).body.warning).toBeUndefined();
+    hold = false;
+    for (const answer of held) answer();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const later = await callOp(panel, domainOps.addAuto, { serviceId: web.id, subdomain: "web2" }, { cookie });
+    expect(later.body.warning).toMatchObject({ reason: "registrableMissing", registrable: "exampel.co.uk" });
+  });
+
+  test("domains.addAuto asks nothing about a private wildcard domain and never calls it missing", async () => {
+    const { dns, asked } = resolver(suffixes);
+    setDnsLookups(dns);
+    for (const [i, wildcard] of ["apps.lab.internal", "something.localhost", "apps.home.arpa", "n1.example.test", "office.lan"].entries()) {
+      const service = onWildcard(`app${i}`, wildcard, `203.0.113.${60 + i}`);
+      const auto = await callOp(panel, domainOps.addAuto, { serviceId: service.id }, { cookie });
+      expect(auto.status).toBe(200);
+      expect(auto.body.warning).toBeUndefined();
+    }
+    expect(asked).toEqual([]);
+  });
+
+  test("domains.addAuto: a host that answers exists, whatever its NS lookups said", async () => {
+    // No delegation of its own: the records are served from the suffix's zone (as www.gov.il is).
+    const { dns } = resolver(suffixes, { "app.apps.example.gov.il": ["203.0.113.70"] });
+    setDnsLookups(dns);
+    const app = onWildcard("app", "apps.example.gov.il", "203.0.113.70");
+    const auto = await callOp(panel, domainOps.addAuto, { serviceId: app.id }, { cookie });
+    expect(auto.status).toBe(200);
+    expect(auto.body.warning).toBeUndefined();
+    // Nothing answers for another name there: the warning stands.
+    const sees = { db: panel.deps.db, access: { can: () => true } };
+    expect(await registrableWarning(sees, "web.apps.example.gov.il", dns)).toMatchObject({
+      reason: "registrableMissing",
+      registrable: "example.gov.il",
+    });
   });
 });

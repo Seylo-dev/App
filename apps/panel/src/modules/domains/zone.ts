@@ -28,6 +28,27 @@ function lookupName(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, "").replace(/^\*\./, "");
 }
 
+/**
+ * Top-level names kept for private networks: internal (reserved by ICANN
+ * in 2024 for that) and the ones in common use that are not delegated.
+ */
+const privateTlds = new Set(["internal", "lan", "home", "corp", "intranet", "localdomain", "private"]);
+
+/**
+ * A name public DNS has no say about: the IANA special-use registry
+ * (tldts' list: localhost, test, local, invalid, example, onion, alt,
+ * home.arpa, ...) or a private network's top-level name (privateTlds).
+ * The public resolvers find no name servers for it, which does not make
+ * it a domain that "does not exist": it answers on its own network. The
+ * ICANN build of tldts leaves isIcann unset outside .com, .org, .net,
+ * .edu, .gov and .de, so "not an ICANN TLD" cannot be read from it.
+ */
+export function isPrivateName(host: string): boolean {
+  const name = lookupName(host);
+  if (parse(name, { extractHostname: false, detectSpecialUse: true }).isSpecialUse) return true;
+  return privateTlds.has(name.slice(name.lastIndexOf(".") + 1));
+}
+
 export interface ZoneInfo {
   /** The closest name from the host up to its registrable domain with NS records; null when none has. */
   zone: string | null;
@@ -38,7 +59,8 @@ export interface ZoneInfo {
   /**
    * No name from the host up to the registrable domain has NS records, and
    * the registrable domain's own answer said so (NXDOMAIN or no records),
-   * not a server failure such as a lame delegation.
+   * not a server failure such as a lame delegation. Never for a private
+   * name (isPrivateName), which public resolvers cannot see.
    */
   registrableMissing: boolean;
 }
@@ -90,7 +112,8 @@ export function isServerFailure(error: unknown): boolean {
  * and takes the closest that has some; never a public suffix. A lookup
  * that fails (a resolver timeout) throws, as the walk did before; a
  * server failure counts as no records there, but leaves registrableMissing
- * false when it was the registrable domain's.
+ * false when it was the registrable domain's. A private name (internal,
+ * localhost, ...) is never missing.
  */
 export async function findZone(host: string, dns: DnsLookups): Promise<ZoneInfo> {
   const name = lookupName(host);
@@ -117,7 +140,7 @@ export async function findZone(host: string, dns: DnsLookups): Promise<ZoneInfo>
       };
     }
   }
-  return { zone: null, cloudflare: false, registrable: registrable.domain, registrableMissing: !unsure };
+  return { zone: null, cloudflare: false, registrable: registrable.domain, registrableMissing: !unsure && !isPrivateName(name) };
 }
 
 /** What the panel says about a registrable domain without name servers. */

@@ -5996,10 +5996,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   answer (a lame delegation), which is not a missing domain; a timeout
   still fails the whole check (`unknown`). `DnsCheck` (additive):
   `registrable` (null for a public suffix), `zoneMissing` (no NS records
-  up to the registrable domain, its own answer NXDOMAIN or no records, and
-  no A, AAAA or CNAME answer for the host; `zone` is null and `message`
-  says "<registrable> does not exist: it is not registered, or has no name
-  servers yet. Check the spelling."), and `didYouMean`
+  up to the registrable domain, its own answer NXDOMAIN or no records, no
+  A, AAAA or CNAME answer for the host, and not a private name, see below;
+  `zone` is null and `message` says "<registrable> does not exist: it is
+  not registered, or has no name servers yet. Check the spelling."), and
+  `didYouMean`
   (`modules/domains/did-you-mean.ts`, from `domains.checkDns` and
   `domains.add` only: the closest other registrable domain under the same
   public suffix within 2 edits, 1 for names of 4 characters or fewer,
@@ -6010,14 +6011,26 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   relative to the registrable domain. `domains.add` and `domains.addAuto`
   keep such a domain and answer `Domain.warning` (`DomainWarning`, reason
   `registrableMissing`, `message`, `registrable`, `didYouMean`); addAuto
-  looks the NS records up after the insert (`missing-registrable.ts`
-  `registrableWarning`, a failed lookup gives no warning), and the panel's
-  own automatic domains (templates, Docker Hub, previews) use
-  `addAutoDomain`, the same insert without the lookup. The web's Domains
-  row says the registrable domain does not exist with "Did you mean" in
-  place of "Add this record where ...'s DNS is managed" and keeps the
-  record for once it exists; the add and the automatic add show the
-  warning as a toast (`added-toast.ts`).
+  looks the NS records up after the insert, then the host's A, AAAA and
+  CNAME records (`missing-registrable.ts` `registrableWarning`: a record
+  answering for the host means it exists, as in checkHost), and answers
+  within 2.5 s (`warningWaitMs`; the resolvers' own timeouts add up to
+  about 20 s when they cannot be reached). A lookup that fails or runs past
+  the wait gives no warning and is not asked again for that registrable
+  domain for 60 s, unless its answer comes in the meantime (the NS cache
+  has it then). The panel's own automatic domains (templates, Docker Hub,
+  previews) use `addAutoDomain`, the same insert without the lookup.
+  Private names are never missing and addAuto asks nothing about them
+  (`zone.ts` `isPrivateName`): the IANA special-use registry as tldts
+  lists it (localhost, test, local, invalid, example and example.com/.net/
+  .org, onion, alt, home.arpa, ...) and the top-level names internal, lan,
+  home, corp, intranet, localdomain and private. The ICANN build of tldts
+  sets `isIcann` only on its fast path (.com, .org, .net, .edu, .gov, .de),
+  so a top-level name outside the list is not told apart from one in it.
+  The web's Domains row says the registrable domain does not exist with
+  "Did you mean" in place of "Add this record where ...'s DNS is managed"
+  and keeps the record for once it exists; the add and the automatic add
+  show the warning as a toast (`added-toast.ts`).
 - Origin check (`modules/domains/origin.ts`): for a custom domain (not
   automatic, not redirect-only) whose DNS is ok or proxied, the panel
   fetches `http://<host>/.well-known/<slug>-origin/<challenge>` (24 random

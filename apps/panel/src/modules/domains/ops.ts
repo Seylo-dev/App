@@ -126,7 +126,7 @@ export function addAutoDomain(input: OpInput<typeof domainOps.addAuto>, ctx: OpC
 
 export const addAuto = implement(domainOps.addAuto, async (input, ctx) => {
   const domain = addAutoDomain(input, ctx);
-  // The wildcard's domain may not exist (yet): added anyway, with a warning.
+  // The wildcard's domain may not exist (yet): added anyway, with a warning. The lookup waits 2.5 s at most.
   const warning = await registrableWarning(ctx, domain.host);
   return warning ? { ...domain, warning } : domain;
 });
