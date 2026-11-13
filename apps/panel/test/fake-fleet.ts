@@ -5,19 +5,22 @@
 // stages, DeployProgress, raw byte streams), so the deploy runner is tested
 // end to end without a network.
 
-import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { durationFromMs, timestampNow } from "@bufbuild/protobuf/wkt";
+import { create, type MessageInitShape, toBinary } from "@bufbuild/protobuf";
+import { durationFromMs, timestampFromMs, timestampNow } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
 import {
   BuildProgressSchema,
   BuildSourceInfoSchema,
   BuildStage,
+  type CrashReportSchema,
   DeployProgressSchema,
   type DeployStage,
   type Event,
   EventSchema,
   HealthState,
   InstanceState,
+  PanelService,
+  ReportCrashRequestSchema,
   ServicePhase,
   ServiceStatusSchema,
   StateDeltaSchema,
@@ -106,6 +109,8 @@ export class FakeFleet {
   /** Called with every chunk an ExportVolume hands out (to look at the panel meanwhile). */
   onExportChunk: ((nodeId: string, key: string) => void) | null = null;
   private seq = new Map<string, bigint>();
+  /** The last outbox id crash() used. */
+  private outboxId = 0n;
   /** Streams of builds that wait for their slot or their end, by build id. */
   private readonly slotGates = new Map<string, Set<() => void>>();
   private readonly endGates = new Map<string, Set<(result: "succeeded" | "failed") => void>>();
@@ -437,9 +442,26 @@ export class FakeFleet {
     throw new OpError("NOT_IMPLEMENTED", `fake agent has no raw method ${method}`);
   }
 
-  /** Sends an agent event through the real hub, as the session would. */
-  emit(nodeId: string, payload: Event["payload"]): void {
-    this.panel.deps.agents.emitEvent(nodeId, create(EventSchema, { time: timestampNow(), payload }));
+  /** Sends an agent event through the real hub, as the session would; at (ms) is when it happened on the node, default now. */
+  emit(nodeId: string, payload: Event["payload"], at?: number): void {
+    this.panel.deps.agents.emitEvent(
+      nodeId,
+      create(EventSchema, { time: at === undefined ? timestampNow() : timestampFromMs(at), payload }),
+    );
+  }
+
+  /** The node reports a crash as its outbox does: PanelService.ReportCrash stores it, then fans it out. */
+  async crash(nodeId: string, report: MessageInitShape<typeof CrashReportSchema>): Promise<void> {
+    const service = this.panel.deps.agents.panelService;
+    if (!service) throw new Error("no PanelService is attached");
+    this.outboxId += 1n;
+    const request = create(ReportCrashRequestSchema, { outboxId: this.outboxId, report });
+    await service.call(
+      nodeId,
+      `/${PanelService.typeName}/ReportCrash`,
+      toBinary(ReportCrashRequestSchema, request),
+      new AbortController().signal,
+    );
   }
 
   /** The node reports a rollout step for a service generation. */

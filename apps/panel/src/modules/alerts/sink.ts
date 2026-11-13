@@ -1,7 +1,8 @@
 // deps.alerts: the one way anything in the panel records an alert. raise()
 // writes the feed row (once per incident key), checks mutes, and queues a
 // delivery job per channel the matching rule names. resolve() closes the
-// open incident and can record the good news as a feed-only alert.
+// open incident and can record the good news as a feed-only alert;
+// reopen() opens a closed one again, silently, when it turns out to go on.
 //
 //   deps.alerts.raise({ event: "backup_failed", key: `backup:${runId}`, title: "Backup of db failed", serviceId })
 //   deps.alerts.resolve(`uptime-down:${checkId}:`, { event: "uptime_up", key: `uptime-up:${checkId}:${now}`, title: ... })
@@ -11,7 +12,7 @@
 // without the start.
 
 import { type alerts as alertOps, push as pushOps } from "@seylo/ops";
-import { and, eq, gt, gte, isNull, lt, or } from "drizzle-orm";
+import { and, eq, gt, gte, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { alertMutes, alerts, notificationChannels, services } from "../../db/schema";
 import type { JobQueue } from "../../jobs/queue";
@@ -49,6 +50,12 @@ export interface AlertSink {
   resolve(keyPrefix: string, recovered?: RaiseAlert): void;
   /** Whether an unresolved alert whose key starts with `keyPrefix` exists. */
   isOpen(keyPrefix: string): boolean;
+  /**
+   * Marks the resolved alert with exactly this key open again, without
+   * notifying anyone: the incident it records turned out to go on. False
+   * when there is no such alert or it is open.
+   */
+  reopen(key: string): boolean;
 }
 
 /** Job that delivers one alert to one channel (notifications module). */
@@ -232,6 +239,22 @@ export function createAlertSink(parts: { db: PanelDb; jobs: JobQueue; live: Live
           .where(and(keyStartsWith(keyPrefix), isNull(alerts.resolvedAt)))
           .get() !== undefined
       );
+    },
+    reopen(key) {
+      try {
+        const row = db
+          .update(alerts)
+          .set({ resolvedAt: null })
+          .where(and(eq(alerts.eventKey, key), isNotNull(alerts.resolvedAt)))
+          .returning({ serviceId: alerts.serviceId, projectId: alerts.projectId })
+          .get();
+        if (!row) return false;
+        publish(row.serviceId, row.projectId);
+        return true;
+      } catch (error) {
+        logger.error({ err: error }, "reopening an alert failed");
+        return false;
+      }
     },
   };
 }

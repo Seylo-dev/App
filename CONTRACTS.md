@@ -2067,10 +2067,21 @@ never type the ids by hand.
   notification rules decide who is told; delivery is a retried job per
   channel. `deps.alerts.resolve(keyPrefix, recovered?)` closes the incident
   and can record the good news (feed only); it and `isOpen(keyPrefix)`
-  match keys as a range on the unique `event_key` index. Agent events (deploy/build
+  match keys as a range on the unique `event_key` index.
+  `deps.alerts.reopen(key)` opens the resolved alert with exactly that key
+  again without notifying anyone (since 0.2.16). Agent events (deploy/build
   results, health, backups, node alerts, updates, crashes via
   `agents.onCrash`, node offline after a 60 s grace) become alerts in
-  `modules/alerts/events.ts`.
+  `modules/alerts/events.ts`. Crashes: one `crash` alert per streak, keyed
+  `crash:<service>:<exit ms>` of the crash that raised it; streak 1 resolves
+  the open one and raises a new one. A DeployProgress SUCCEEDED or a
+  HealthChanged HEALTHY resolves it only when its `Event.time` is after the
+  service's latest crash in `crash_reports` (a SUCCEEDED also when its
+  generation is newer than that crash's), so one from before the crash that
+  arrives late leaves it open. A later crash of the same streak (streak > 1,
+  the panel holding as many of the node's crashes since its latest streak 1
+  crash as the streak counts) reopens the streak's alert instead of raising
+  another; otherwise it raises one.
 - Email: `deps.notify.sendEmail({ to, subject, text, html? })` returns
   `"sent" | "noChannel" | "failed"` through the panel's SMTP channel.
 - Running ops for someone: `deps.ops.execute(call)` is the pipeline;

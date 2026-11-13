@@ -280,6 +280,33 @@ test("alerts: raised once per key, delivered to the rule's channels, muted ones 
   expect(unresolved.body.alerts.map((a: { event: string }) => a.event)).toEqual(["health_recovered"]);
 });
 
+test("reopen opens exactly one resolved alert again and notifies nobody", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const { service } = seedService();
+  await callOp(
+    panel,
+    notifications.createChannel,
+    { name: "Hook", config: { kind: "webhook", url: `${base()}/alerts` }, isDefault: true },
+    { cookie },
+  );
+  panel.deps.alerts.raise({ event: "crash", key: "crash:x:1", title: "api crashed", serviceId: service.id });
+  panel.deps.alerts.raise({ event: "crash", key: "crash:x:10", title: "api crashed", serviceId: service.id });
+  await panel.runner.runDue(panel.deps);
+  expect(received.filter((r) => r.path === "/alerts")).toHaveLength(2);
+  // Open, or no such key: nothing to reopen.
+  expect(panel.deps.alerts.reopen("crash:x:1")).toBe(false);
+  expect(panel.deps.alerts.reopen("crash:x:2")).toBe(false);
+  panel.deps.alerts.resolve("crash:x:");
+  expect(panel.deps.alerts.reopen("crash:x:1")).toBe(true);
+  expect(panel.deps.alerts.reopen("crash:x:1")).toBe(false);
+  await panel.runner.runDue(panel.deps);
+  expect(received.filter((r) => r.path === "/alerts")).toHaveLength(2);
+  const open = await callOp(panel, alertOps.list, { serviceId: service.id, unresolvedOnly: true }, { cookie });
+  expect(open.body.alerts).toHaveLength(1);
+  expect(panel.deps.alerts.isOpen("crash:x:1")).toBe(true);
+  expect(panel.deps.alerts.isOpen("crash:x:10")).toBe(false);
+});
+
 test("the alert feed only shows what the caller can see, with keyset paging", async () => {
   const owner = await createUser(panel, "owner");
   const member = await createUser(panel, "member");

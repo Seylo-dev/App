@@ -4,16 +4,17 @@
 // alerts only when it is still offline a minute later, so agent restarts
 // and short network blips stay quiet.
 
-import { BuildStage, CrashAction, type CrashReport, DeployStage, HealthState, NodeAlertKind, UpdateTarget } from "@seylo/proto";
-import { eq } from "drizzle-orm";
+import { timestampMs } from "@bufbuild/protobuf/wkt";
+import { BuildStage, CrashAction, type CrashReport, DeployStage, type Event, HealthState, NodeAlertKind, UpdateTarget } from "@seylo/proto";
+import { and, count, desc, eq, gte, lte } from "drizzle-orm";
 import { inspectedKeyMark } from "../../agent-hub/panel-address";
-import { backupRuns, builds, deployments, nodes, services } from "../../db/schema";
+import { alerts, backupRuns, builds, crashReports, deployments, nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { getSetting } from "../../settings";
 import { splitLastOutput } from "../deployments/failure";
 import { arrivalGraceMs } from "../panelMove/keys";
-import type { RaiseAlert } from "./sink";
+import { keyStartsWith, type RaiseAlert } from "./sink";
 
 /** Grace period before a disconnected node counts as offline. */
 export const nodeOfflineGraceMs = 60_000;
@@ -58,10 +59,73 @@ export const nodeOfflineJob = defineJob<{ nodeId: string; since: string }>({
   },
 });
 
-/** Records a crash: one alert per streak (streak 1 starts a new one), and one when the agent gave up. */
+const crashPrefix = (serviceId: string) => `crash:${serviceId}:`;
+
+/** When an event happened, by its node's clock (Event.time), or now when it has none. */
+const happenedAt = (event: Event) => (event.time ? timestampMs(event.time) : Date.now());
+
+/**
+ * Good news about a service (its deploy succeeded, it is healthy again)
+ * ends its crash alert only when it came after the latest crash: a report
+ * from before that crash arriving late says nothing about it. A deploy of a
+ * newer generation than the one that crashed ends it whatever the clocks say.
+ */
+function resolveCrashes(deps: Deps, serviceId: string, at: number, generation?: number): void {
+  const latest = deps.db
+    .select({ at: crashReports.occurredAt, generation: crashReports.generation })
+    .from(crashReports)
+    .where(eq(crashReports.serviceId, serviceId))
+    .orderBy(desc(crashReports.occurredAt))
+    .get();
+  if (latest && latest.at.getTime() >= at && !(generation !== undefined && generation > latest.generation)) return;
+  deps.alerts.resolve(crashPrefix(serviceId));
+}
+
+/**
+ * The key of the crash alert of the streak a crash continues: the node's
+ * newest crash alert for the service, when it was raised since the node's
+ * latest streak 1 crash and the panel holds as many of the node's crashes
+ * since then as the streak counts. Null otherwise (reports that never
+ * arrived, a full outbox say, may hide the start of a new streak): the crash
+ * raises an alert of its own.
+ */
+function streakAlertKey(deps: Deps, serviceId: string, nodeId: string, streak: number, at: number): string | null {
+  const ofNode = and(eq(crashReports.serviceId, serviceId), eq(crashReports.nodeId, nodeId));
+  const began = deps.db
+    .select({ at: crashReports.occurredAt })
+    .from(crashReports)
+    .where(and(ofNode, lte(crashReports.streak, 1), lte(crashReports.occurredAt, new Date(at))))
+    .orderBy(desc(crashReports.occurredAt))
+    .get()?.at;
+  if (!began) return null;
+  const held = deps.db
+    .select({ n: count() })
+    .from(crashReports)
+    .where(and(ofNode, gte(crashReports.occurredAt, began), lte(crashReports.occurredAt, new Date(at))))
+    .get()?.n;
+  if (held !== streak) return null;
+  const prefix = crashPrefix(serviceId);
+  const newest = deps.db
+    .select({ key: alerts.eventKey })
+    .from(alerts)
+    .where(and(keyStartsWith(prefix), eq(alerts.nodeId, nodeId)))
+    .orderBy(desc(alerts.createdAt))
+    .get();
+  // Panels before 0.2.16 rounded the exit time in the key down; crash_reports rounds it to the nearest millisecond.
+  return newest && Number(newest.key.slice(prefix.length)) >= began.getTime() - 1 ? newest.key : null;
+}
+
+/**
+ * Records a crash: one alert per streak (streak 1 starts a new one), and one
+ * when the agent gave up. Good news between two crashes of a streak (a
+ * restarted container passed its health check before it crashed again)
+ * may have resolved the streak's alert: the next crash opens that one
+ * again instead of raising another.
+ */
 export function recordCrash(deps: Deps, nodeId: string, report: CrashReport): void {
   const serviceId = report.serviceId;
-  const at = report.exitedAt ? Number(report.exitedAt.seconds) * 1000 + Math.floor(report.exitedAt.nanos / 1e6) : Date.now();
+  // As crash_reports.occurred_at holds it.
+  const at = report.exitedAt ? timestampMs(report.exitedAt) : Date.now();
   const cause = report.oomKilled ? "out of memory" : `exit code ${report.exitCode}`;
   const after =
     report.action === CrashAction.RESTARTING
@@ -69,16 +133,22 @@ export function recordCrash(deps: Deps, nodeId: string, report: CrashReport): vo
       : report.action === CrashAction.GAVE_UP
         ? `stopped after ${report.streak} crashes in a row`
         : "left stopped";
-  if (report.streak <= 1) deps.alerts.resolve(`crash:${serviceId}:`);
-  if (report.streak <= 1 || !deps.alerts.isOpen(`crash:${serviceId}:`)) {
+  const prefix = crashPrefix(serviceId);
+  const raise = () =>
     forService(deps, serviceId, (name) => ({
       event: "crash",
-      key: `crash:${serviceId}:${at}`,
+      key: `${prefix}${at}`,
       title: `${name} crashed`,
       message: `${cause[0]?.toUpperCase()}${cause.slice(1)}, ${after}.`,
       serviceId,
       nodeId,
     }));
+  if (report.streak <= 1) {
+    deps.alerts.resolve(prefix);
+    raise();
+  } else if (!deps.alerts.isOpen(prefix)) {
+    const key = streakAlertKey(deps, serviceId, nodeId, report.streak, at);
+    if (!key || !deps.alerts.reopen(key)) raise();
   }
   if (report.action === CrashAction.GAVE_UP) {
     forService(deps, serviceId, (name) => ({
@@ -126,7 +196,7 @@ export function subscribeAgentEvents(deps: Deps): void {
     );
   });
 
-  agents.onEvent("deployProgress", (nodeId, progress) => {
+  agents.onEvent("deployProgress", (nodeId, progress, event) => {
     const { serviceId, generation } = progress;
     if (progress.stage === DeployStage.FAILED) {
       forService(deps, serviceId, (name) => ({
@@ -139,7 +209,7 @@ export function subscribeAgentEvents(deps: Deps): void {
         nodeId,
       }));
     } else if (progress.stage === DeployStage.SUCCEEDED) {
-      deps.alerts.resolve(`crash:${serviceId}:`);
+      resolveCrashes(deps, serviceId, happenedAt(event), Number(generation));
       forService(deps, serviceId, (name) => ({
         event: "deploy_succeeded",
         key: `deploy-ok:${serviceId}:${generation}:${nodeId}`,
@@ -170,7 +240,7 @@ export function subscribeAgentEvents(deps: Deps): void {
     }));
   });
 
-  agents.onEvent("healthChanged", (nodeId, change) => {
+  agents.onEvent("healthChanged", (nodeId, change, event) => {
     const { serviceId } = change;
     if (change.current === HealthState.UNHEALTHY && change.previous !== HealthState.UNHEALTHY) {
       if (deps.alerts.isOpen(`health:${serviceId}:`)) return;
@@ -189,7 +259,7 @@ export function subscribeAgentEvents(deps: Deps): void {
     } else if (change.current === HealthState.HEALTHY) {
       const name = serviceName(deps, serviceId);
       if (name === undefined) return;
-      deps.alerts.resolve(`crash:${serviceId}:`);
+      resolveCrashes(deps, serviceId, happenedAt(event));
       deps.alerts.resolve(`health:${serviceId}:`, {
         event: "health_recovered",
         key: `health-ok:${serviceId}:${Date.now()}`,
