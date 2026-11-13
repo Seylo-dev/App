@@ -319,4 +319,64 @@ describe("secret classification", () => {
     delete api.secret;
     expect(classifyEntries(parsed, context)[4]).toEqual({ secret: true, reason: "reference", detail: "api.BUILD_ID" });
   });
+
+  test("an indexed reference is classified by its item, not the whole list, and by nothing where the panel gives none", () => {
+    // A generated host reads like a token (letters and digits, 24+ characters, no slash); the
+    // whole list never does, its comma is no token character. A one-item list has nothing past
+    // [0], and BUILD_ID is no list, so the panel resolves neither of those to a value.
+    const tokenHost = "k8x2m9q4w7z1n5v3b6c0r8t2.example.net";
+    const text = [
+      "PRIMARY_HOST=${{api.DOMAINS[0]}}",
+      "MIRROR_HOST=${{api.DOMAINS[1]}}",
+      "PAST_END=${{solo.DOMAINS[1]}}",
+      "NO_LIST=${{api.BUILD_ID[1]}}",
+      "WHOLE=${{api.DOMAINS}}",
+      "",
+    ].join("\n");
+    const domains = (value: string) => ({
+      name: "DOMAINS",
+      value,
+      scope: "public" as const,
+      sensitive: false,
+      description: "",
+      list: true,
+    });
+    const context: AnalyzeContext = {
+      self: { serviceId: "s1", name: "web", nodes: [] },
+      targets: [
+        {
+          name: "api",
+          kind: "service",
+          serviceId: "s2",
+          serviceKind: "app",
+          nodes: [],
+          internalHost: "api",
+          exposed: true,
+          variables: [
+            domains(`app.example.com,${tokenHost}`),
+            { name: "BUILD_ID", value: "Zx81kLq0Pw2mNv7Bc4Rt9Ys6", scope: "plain", sensitive: true, secret: false, description: "" },
+          ],
+        },
+        {
+          name: "solo",
+          kind: "service",
+          serviceId: "s3",
+          serviceKind: "app",
+          nodes: [],
+          internalHost: "solo",
+          exposed: true,
+          variables: [domains(tokenHost)],
+        },
+      ],
+    };
+    expect(classifyEntries(parseEnv(text), context)).toEqual([
+      { secret: false, reason: "none" },
+      { secret: true, reason: "value" },
+      // "" past the end, not solo's one host.
+      { secret: false, reason: "none" },
+      // Unresolved, not BUILD_ID's token.
+      { secret: false, reason: "none" },
+      { secret: false, reason: "none" },
+    ]);
+  });
 });

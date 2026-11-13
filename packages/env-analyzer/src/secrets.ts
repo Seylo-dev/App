@@ -13,6 +13,7 @@
 // comment on the line above (or after the value) overrides all of that for
 // one variable.
 
+import { referenceValue } from "./builtins";
 import { substituteReferences } from "./references";
 import { findVariable } from "./resolve";
 import type { AnalyzeContext, EnvEntry, EnvReference, ParsedEnv } from "./types";
@@ -241,8 +242,9 @@ function carriesCredential(context: AnalyzeContext, target: string, name: string
  * a secret by its `secret` flag (the panel's own decision), else by
  * `sensitive`, a reference carries a database credential as
  * carriesCredential says, and the resolved value uses the context's
- * values. So the editor shows, for unsaved text, what builds and crash
- * reports will do.
+ * values (for ${{api.DOMAINS[1]}} that item, as referenceValue gives it).
+ * So the editor shows, for unsaved text, what builds and crash reports
+ * will do.
  */
 export function classifyEntries(parsed: ParsedEnv, context: AnalyzeContext): SecretVerdict[] {
   const variable = (target: string, name: string) => findVariable(context, target, name)?.variable ?? null;
@@ -255,7 +257,8 @@ export function classifyEntries(parsed: ParsedEnv, context: AnalyzeContext): Sec
       referenceIsCredential: (ref) => carriesCredential(context, ref.target, ref.variable, new Set()),
       resolvedValue: () => {
         if (entry.quote === "single") return entry.value;
-        const out = substituteReferences(entry.value, (target, name) => variable(target, name)?.value ?? null);
+        // With an index (${{api.DOMAINS[1]}}) the item, like resolveEnv and the panel: not the whole list.
+        const out = substituteReferences(entry.value, (target, name, index) => referenceValue(variable(target, name), index));
         return out.unresolved.length > 0 ? null : out.value;
       },
     }),
