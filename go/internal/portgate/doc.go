@@ -5,10 +5,12 @@
 // TLS only with the database's own user (the gate terminates TLS for
 // Mongo, ClickHouse and the Redis-like engines; Postgres, MySQL and
 // MariaDB speak their own TLS through the relay, and the gate refuses
-// their clients that do not ask for it, RequireTLS). A timed expose of a
-// database relays its port as it is, with no TLS of the gate and no check:
-// the database's own TLS when it has some, else plain TCP to the allowed
-// addresses until it ends. Once a domain is
+// their clients that do not ask for it, RequireTLS), unless the owner
+// allows clients without TLS too (AllowPlain): then those are relayed as
+// they are, TLS clients still get TLS, and turning it off closes only the
+// plain sessions. A timed expose of a database relays its port as it is,
+// with no TLS of the gate and no check: the database's own TLS when it has
+// some, else plain TCP to the allowed addresses until it ends. Once a domain is
 // live a public port becomes an HTTP redirector (308) to it, handing
 // cookies over through the edge, until its close_at. Expiries run on local
 // timers, so they hold while the panel is unreachable, and a listener past

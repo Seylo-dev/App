@@ -71,6 +71,7 @@ func wantPGRefusal(t *testing.T, c net.Conn) {
 type startResult struct {
 	first      []byte
 	sslRequest bool
+	plain      bool
 	err        error
 }
 
@@ -78,12 +79,18 @@ type startResult struct {
 // connection; the test plays the client on the other end.
 func startPostgres(t *testing.T, wait time.Duration) (net.Conn, net.Conn, <-chan startResult) {
 	t.Helper()
+	return startPostgresWith(t, wait, false)
+}
+
+// startPostgresWith is startPostgres on a port that may allow plain clients.
+func startPostgresWith(t *testing.T, wait time.Duration, allowPlain bool) (net.Conn, net.Conn, <-chan startResult) {
+	t.Helper()
 	gate, client := net.Pipe()
 	t.Cleanup(func() { _ = gate.Close(); _ = client.Close() })
 	done := make(chan startResult, 1)
 	go func() {
-		first, ssl, err := postgresStart(gate, wait)
-		done <- startResult{first, ssl, err}
+		first, ssl, plain, err := postgresStart(gate, wait, allowPlain)
+		done <- startResult{first, ssl, plain, err}
 	}()
 	return gate, client, done
 }
@@ -229,7 +236,10 @@ func TestPostgresAnswer(t *testing.T) {
 		db, dbGate := net.Pipe()
 		t.Cleanup(func() { _ = gate.Close(); _ = client.Close(); _ = db.Close(); _ = dbGate.Close() })
 		done := make(chan error, 1)
-		go func() { done <- postgresAnswer(gate, dbGate, time.Second) }()
+		go func() {
+			_, err := postgresAnswer(gate, dbGate, time.Second, false)
+			done <- err
+		}()
 		send(t, db, []byte{answer})
 		got := make([]byte, 1)
 		_ = client.SetReadDeadline(time.Now().Add(time.Second))
@@ -302,13 +312,19 @@ type mysqlSide struct {
 // test plays both.
 func startMySQL(t *testing.T, wait time.Duration) mysqlSide {
 	t.Helper()
+	return startMySQLWith(t, wait, false)
+}
+
+// startMySQLWith is startMySQL on a port that may allow plain clients.
+func startMySQLWith(t *testing.T, wait time.Duration, allowPlain bool) mysqlSide {
+	t.Helper()
 	gate, client := net.Pipe()
 	db, dbGate := net.Pipe()
 	t.Cleanup(func() { _ = gate.Close(); _ = client.Close(); _ = db.Close(); _ = dbGate.Close() })
 	done := make(chan startResult, 1)
 	go func() {
-		first, err := mysqlStart(gate, dbGate, wait)
-		done <- startResult{first: first, err: err}
+		first, plain, err := mysqlStart(gate, dbGate, wait, allowPlain)
+		done <- startResult{first: first, plain: plain, err: err}
 	}()
 	return mysqlSide{client, db, done}
 }
@@ -331,7 +347,7 @@ func TestMySQLStartPassesSSLRequests(t *testing.T) {
 	request := mysqlResponse(0x0000_0200|0x0000_8000|mysqlClientSSL|0x000f_0000, "")
 	go func() { _, _ = s.client.Write(request) }()
 	r := result(t, s.done)
-	if r.err != nil || !bytes.Equal(r.first, request[:6]) {
+	if r.err != nil || r.plain || !bytes.Equal(r.first, request[:6]) {
 		t.Fatalf("got %+v", r)
 	}
 }

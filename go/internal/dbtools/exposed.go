@@ -21,7 +21,10 @@ import (
 )
 
 // Connections through an exposed port use the database's own user and
-// password (DatabaseCredentials), over TLS only:
+// password (DatabaseCredentials), over TLS only unless the owner allows
+// clients without TLS too (DatabaseExposure.allow_plain, which only the
+// portgate reads: nothing in the database enforces TLS, so nothing here
+// changes for it):
 //
 //   - Postgres: the certificate (ACME for tls_hostname, else self-signed)
 //     is written to the data directory and ssl is turned on with ALTER

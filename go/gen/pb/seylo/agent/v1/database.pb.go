@@ -326,7 +326,8 @@ func (x *DatabaseTools) GetWebUiIdleTimeout() *durationpb.Duration {
 // their protocol with their own certificate, it refuses a client that
 // does not ask for TLS. Agents without "database.exposure.v2" relay
 // Postgres, MySQL and MariaDB without that check, so the panel sends their
-// exposure only to agents that advertise it.
+// exposure only to agents that advertise it. With allow_plain the port
+// also takes clients that do not ask for TLS.
 type DatabaseExposure struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Enabled  bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
@@ -340,8 +341,18 @@ type DatabaseExposure struct {
 	// before 0.2.9 created (or updated) when exposure was on. Panels from
 	// 0.2.9 leave them empty and agents from 0.2.9 ignore them; the old user
 	// is retired instead (DatabaseSpec.retired_exposed_user).
-	User          string `protobuf:"bytes,5,opt,name=user,proto3" json:"user,omitempty"`
-	Password      string `protobuf:"bytes,6,opt,name=password,proto3" json:"password,omitempty"`
+	User     string `protobuf:"bytes,5,opt,name=user,proto3" json:"user,omitempty"`
+	Password string `protobuf:"bytes,6,opt,name=password,proto3" json:"password,omitempty"`
+	// The owner's opt-in to clients without TLS: the portgate relays a
+	// client that does not ask for TLS to the database instead of refusing
+	// it, and TLS clients connect as before (Postgres, MySQL and MariaDB
+	// with the database's own TLS, the other engines with the gate's).
+	// Turned off, new plain clients are refused again and the plain
+	// sessions still open are closed; TLS sessions stay. Agents that
+	// advertise "database.exposure.plain.v1" read it; an older agent ignores
+	// it and keeps the port TLS only, and the panel sends it only to agents
+	// that advertise it.
+	AllowPlain    bool `protobuf:"varint,7,opt,name=allow_plain,json=allowPlain,proto3" json:"allow_plain,omitempty"` // added in 0.2.16 (exposure.plain)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -418,6 +429,13 @@ func (x *DatabaseExposure) GetPassword() string {
 	return ""
 }
 
+func (x *DatabaseExposure) GetAllowPlain() bool {
+	if x != nil {
+		return x.AllowPlain
+	}
+	return false
+}
+
 var File_seylo_agent_v1_database_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_database_proto_rawDesc = "" +
@@ -437,14 +455,16 @@ const file_seylo_agent_v1_database_proto_rawDesc = "" +
 	"\bdatabase\x18\x03 \x01(\tR\bdatabase\"p\n" +
 	"\rDatabaseTools\x12\x15\n" +
 	"\x06web_ui\x18\x01 \x01(\bR\x05webUi\x12H\n" +
-	"\x13web_ui_idle_timeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x10webUiIdleTimeout\"\xce\x01\n" +
+	"\x13web_ui_idle_timeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x10webUiIdleTimeout\"\xef\x01\n" +
 	"\x10DatabaseExposure\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
 	"\thost_port\x18\x02 \x01(\rR\bhostPort\x120\n" +
 	"\x14allowed_source_cidrs\x18\x03 \x03(\tR\x12allowedSourceCidrs\x12!\n" +
 	"\ftls_hostname\x18\x04 \x01(\tR\vtlsHostname\x12\x12\n" +
 	"\x04user\x18\x05 \x01(\tR\x04user\x12\x1a\n" +
-	"\bpassword\x18\x06 \x01(\tR\bpassword*\xb3\x02\n" +
+	"\bpassword\x18\x06 \x01(\tR\bpassword\x12\x1f\n" +
+	"\vallow_plain\x18\a \x01(\bR\n" +
+	"allowPlain*\xb3\x02\n" +
 	"\x0eDatabaseEngine\x12\x1f\n" +
 	"\x1bDATABASE_ENGINE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18DATABASE_ENGINE_POSTGRES\x10\x01\x12\x19\n" +

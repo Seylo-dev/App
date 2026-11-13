@@ -75,7 +75,8 @@ message DatabaseTools {
 // their protocol with their own certificate, it refuses a client that
 // does not ask for TLS. Agents without "database.exposure.v2" relay
 // Postgres, MySQL and MariaDB without that check, so the panel sends their
-// exposure only to agents that advertise it.
+// exposure only to agents that advertise it. With allow_plain the port
+// also takes clients that do not ask for TLS.
 message DatabaseExposure {
   bool enabled = 1;
   uint32 host_port = 2;
@@ -90,4 +91,14 @@ message DatabaseExposure {
   // is retired instead (DatabaseSpec.retired_exposed_user).
   string user = 5;
   string password = 6;
+  // The owner's opt-in to clients without TLS: the portgate relays a
+  // client that does not ask for TLS to the database instead of refusing
+  // it, and TLS clients connect as before (Postgres, MySQL and MariaDB
+  // with the database's own TLS, the other engines with the gate's).
+  // Turned off, new plain clients are refused again and the plain
+  // sessions still open are closed; TLS sessions stay. Agents that
+  // advertise "database.exposure.plain.v1" read it; an older agent ignores
+  // it and keeps the port TLS only, and the panel sends it only to agents
+  // that advertise it.
+  bool allow_plain = 7; // added in 0.2.16 (exposure.plain)
 }

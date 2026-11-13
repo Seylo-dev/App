@@ -183,6 +183,9 @@ func wireJobs(reg *Registry, d *Deps) error {
 	// checks Postgres, MySQL and MariaDB clients ask for TLS (network area),
 	// ExposedTLS turns it on inside them and retires the old exposed users.
 	reg.Advertise(dbengine.ExposureCapability)
+	// DatabaseExposure.allow_plain: the portgate relays clients without
+	// TLS too when the owner allows them (network area).
+	reg.Advertise(dbengine.PlainExposureCapability)
 	// Destinations without keys: the panel presigns every storage request.
 	if d.Panel != nil {
 		reg.Advertise(backup.SignedCapability)

@@ -143,6 +143,9 @@ type active struct {
 	cport              uint32
 	check              TLSCheck
 	idle               time.Duration
+	// tlsConf is set for a TerminateTLS listener: each client gets the
+	// gate's TLS, or none when it is a plain one and plain is allowed.
+	tlsConf *tls.Config
 
 	// want is replaced on sync under Manager.mu.
 	want  Listener
@@ -152,6 +155,9 @@ type active struct {
 	timer *time.Timer
 	// allowed is replaced on sync; read per connection.
 	allowed []netip.Prefix
+	// plain (Listener.AllowPlain) is replaced on sync; read per
+	// connection.
+	plain bool
 
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
@@ -160,7 +166,10 @@ type active struct {
 	clients map[net.Conn]struct{}
 	// sources counts clients per source address (MaxConnsPerSource).
 	sources map[netip.Addr]int
-	done    bool
+	// plainClients are the clients relayed without TLS, with their
+	// connection to the container; turning plain off closes both.
+	plainClients map[net.Conn]net.Conn
+	done         bool
 
 	// warnedAt is when the last "cannot reach the service" warning went
 	// out (UnixNano).
@@ -265,6 +274,7 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			AgentCertificate: dbengine.AgentCertificate(db.GetEngine()),
 			RequireTLS:       tlsCheckFor(db.GetEngine()),
 			IdleTimeout:      DatabaseIdleTimeout,
+			AllowPlain:       db.GetExposure().GetAllowPlain(),
 		})
 	}
 	return out, errs
@@ -338,6 +348,9 @@ func (m *Manager) Sync(ctx context.Context, serviceID string, wanted []Listener)
 			a.allowed = allowed
 			a.mu.Unlock()
 			a.dropDisallowed()
+			if a.setPlain(w.AllowPlain) {
+				m.log.Info("portgate listener changed", "service_id", serviceID, "listener", w.ID, "port", a.port, "allow_plain", w.AllowPlain)
+			}
 			if !a.want.ExpiresAt.Equal(w.ExpiresAt) {
 				changed = true
 			}
@@ -422,12 +435,13 @@ func (m *Manager) start(w Listener, allowed []netip.Prefix) (*active, error) {
 	if w.HostPort == 0 {
 		m.picked[key] = bound
 	}
-	if w.TerminateTLS {
-		ln = tls.NewListener(ln, m.tlsConfig(w.ServiceID, w.TLSHost))
-	}
 	a := &active{svc: w.ServiceID, lid: w.ID, redirect: w.RedirectURL, cport: w.ContainerPort, check: w.RequireTLS, idle: w.IdleTimeout,
-		want: w, port: bound, ln: ln, allowed: allowed, conns: map[net.Conn]struct{}{}, clients: map[net.Conn]struct{}{},
-		sources: map[netip.Addr]int{}}
+		want: w, port: bound, ln: ln, allowed: allowed, plain: w.AllowPlain, conns: map[net.Conn]struct{}{},
+		clients: map[net.Conn]struct{}{}, sources: map[netip.Addr]int{}, plainClients: map[net.Conn]net.Conn{}}
+	if w.TerminateTLS {
+		// Per connection (serveTLS), so a port that takes plain clients too can tell them apart.
+		a.tlsConf = m.tlsConfig(w.ServiceID, w.TLSHost)
+	}
 	if w.Mode == ModeRedirect {
 		a.srv = &http.Server{Handler: m.redirectHandler(a), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute,
 			ConnState: func(c net.Conn, st http.ConnState) {
@@ -440,8 +454,50 @@ func (m *Manager) start(w Listener, allowed []netip.Prefix) (*active, error) {
 		go m.acceptLoop(a)
 	}
 	m.schedule(a)
-	m.log.Info("portgate listener open", "service_id", w.ServiceID, "listener", w.ID, "port", bound, "mode", w.Mode)
+	m.log.Info("portgate listener open", "service_id", w.ServiceID, "listener", w.ID, "port", bound, "mode", w.Mode, "allow_plain", w.AllowPlain)
 	return a, nil
+}
+
+// plainAllowed reports whether the listener relays clients without TLS
+// now.
+func (a *active) plainAllowed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.plain
+}
+
+// setPlain applies Listener.AllowPlain from a sync and reports a change.
+// Turned off, the clients relayed without TLS are closed, and their
+// connections to the container too, so the database ends their sessions
+// at once instead of when it next writes; TLS ones stay.
+func (a *active) setPlain(on bool) bool {
+	a.mu.Lock()
+	changed := a.plain != on
+	a.plain = on
+	var drop []net.Conn
+	if !on {
+		for c, upstream := range a.plainClients {
+			drop = append(drop, c, upstream)
+		}
+	}
+	a.mu.Unlock()
+	for _, c := range drop {
+		_ = c.Close()
+	}
+	return changed
+}
+
+// markPlain records a client the checks found to sign in without TLS,
+// relayed to upstream; false when plain clients are no longer allowed
+// (turned off while it was checked), and the caller closes it.
+func (a *active) markPlain(c, upstream net.Conn) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.plain || a.done {
+		return false
+	}
+	a.plainClients[c] = upstream
+	return true
 }
 
 // schedule (re)arms the expiry timer. Callers hold m.mu.
@@ -534,6 +590,7 @@ func (a *active) untrack(c net.Conn) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.conns, c)
+	delete(a.plainClients, c)
 	if _, ok := a.clients[c]; !ok {
 		return
 	}
@@ -615,11 +672,22 @@ func (m *Manager) acceptLoop(a *active) {
 }
 
 // relay serves one admitted client connection.
-func (m *Manager) relay(a *active, client net.Conn) {
-	defer a.untrack(client)
-	defer client.Close()
+func (m *Manager) relay(a *active, raw net.Conn) {
+	defer a.untrack(raw)
+	defer raw.Close()
 	if m.cfg.Resolve == nil {
 		return
+	}
+	// Read once: a client found plain after plain was turned off meanwhile is closed (markPlain).
+	allowPlain := a.plainAllowed()
+	client, plain := raw, false
+	if a.tlsConf != nil {
+		var err error
+		if client, plain, err = a.serveTLS(raw, allowPlain, m.idleTimeout(a)); err != nil {
+			m.log.Debug("portgate refused a database client", "service_id", a.svc, "listener", a.lid, "err", err)
+			return
+		}
+		defer client.Close()
 	}
 	// A Postgres client speaks first: a plain login is refused before the
 	// database sees the connection.
@@ -627,7 +695,7 @@ func (m *Manager) relay(a *active, client net.Conn) {
 	sslRequest := false
 	if a.check == TLSCheckPostgres {
 		var err error
-		if first, sslRequest, err = postgresStart(client, postgresStartWait); err != nil {
+		if first, sslRequest, plain, err = postgresStart(client, postgresStartWait, allowPlain); err != nil {
 			m.log.Debug("portgate refused a database client", "service_id", a.svc, "listener", a.lid, "err", err)
 			return
 		}
@@ -651,38 +719,64 @@ func (m *Manager) relay(a *active, client net.Conn) {
 	}
 	defer a.untrack(upstream)
 	defer upstream.Close()
-	if err := m.requireTLS(a, client, upstream, first, sslRequest); err != nil {
+	later, err := m.requireTLS(a, client, upstream, first, sslRequest, allowPlain)
+	if err != nil {
 		m.log.Debug("portgate refused a database client", "service_id", a.svc, "listener", a.lid, "err", err)
 		return
 	}
+	if (plain || later) && !a.markPlain(raw, upstream) {
+		m.log.Debug("portgate closed a client without TLS: plain clients are no longer allowed", "service_id", a.svc, "listener", a.lid)
+		return
+	}
 	pipe(client, upstream, m.idleTimeout(a))
+}
+
+// serveTLS gives a client of a TerminateTLS listener the gate's TLS. With
+// plain allowed it looks at the first bytes first (clientHello): a TLS
+// client gets the gate's TLS over them, any other is returned as it is
+// (plain), its first bytes read again by the relay. Without, every client
+// gets TLS as before, and a plain one fails the handshake.
+func (a *active) serveTLS(c net.Conn, allowPlain bool, wait time.Duration) (net.Conn, bool, error) {
+	if !allowPlain {
+		return tls.Server(c, a.tlsConf), false, nil
+	}
+	head, isTLS, err := clientHello(c, wait)
+	if err != nil {
+		return nil, false, err
+	}
+	replay := &replayConn{Conn: c, head: head}
+	if isTLS {
+		return tls.Server(replay, a.tlsConf), false, nil
+	}
+	return replay, true, nil
 }
 
 // requireTLS finishes a listener's TLS check once the container is
 // dialed: Postgres' opening goes to the database (and the answer to an
 // SSLRequest comes back through postgresAnswer); MySQL's greeting goes to
 // the client when it offers TLS, and the head of the client's SSLRequest
-// to the database. Nil for listeners without a check.
-func (m *Manager) requireTLS(a *active, client, upstream net.Conn, first []byte, sslRequest bool) error {
+// to the database. Nil for listeners without a check. With allowPlain a
+// plain client goes on too, and plain reports one found here (a MySQL
+// client, or a Postgres client after the database answered "N").
+func (m *Manager) requireTLS(a *active, client, upstream net.Conn, first []byte, sslRequest, allowPlain bool) (plain bool, err error) {
 	if a.check == TLSCheckMySQL {
-		var err error
-		if first, err = mysqlStart(client, upstream, mysqlStartWait); err != nil {
-			return err
+		if first, plain, err = mysqlStart(client, upstream, mysqlStartWait, allowPlain); err != nil {
+			return false, err
 		}
 	}
 	if len(first) == 0 {
-		return nil
+		return plain, nil
 	}
 	_ = upstream.SetWriteDeadline(time.Now().Add(m.cfg.ConnectTimeout))
-	_, err := upstream.Write(first)
+	_, err = upstream.Write(first)
 	_ = upstream.SetWriteDeadline(time.Time{})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if sslRequest {
-		return postgresAnswer(client, upstream, postgresStartWait)
+		return postgresAnswer(client, upstream, postgresStartWait, allowPlain)
 	}
-	return nil
+	return plain, nil
 }
 
 // dial connects to the service's container port: the address of a

@@ -15,7 +15,10 @@ import (
 // TLSCheck is how the gate makes sure a client of a database that
 // negotiates TLS inside its own protocol asks for it (Listener.RequireTLS).
 // The exposed port of such a database has no user of its own, so a plain
-// login there is refused by the gate before it reaches the database.
+// login there is refused by the gate before it reaches the database,
+// unless the owner allows plain clients (Listener.AllowPlain): then the
+// same reads tell a plain client from a TLS one, and the plain one goes
+// on to the database too.
 type TLSCheck int
 
 const (
@@ -79,66 +82,77 @@ const postgresRefusal = "this port only accepts TLS connections: connect with ss
 // returns it for the database; sslRequest reports an SSLRequest, which the
 // database answers with one byte (postgresAnswer). A GSSENCRequest is
 // answered "N" here and the next message checked. Anything else is
-// refused with an ErrorResponse (FATAL, 28000).
-func postgresStart(c net.Conn, wait time.Duration) (first []byte, sslRequest bool, err error) {
+// refused with an ErrorResponse (FATAL, 28000), unless allowPlain: then it
+// goes to the database like the rest, and plain reports a client that
+// signs in without TLS.
+func postgresStart(c net.Conn, wait time.Duration, allowPlain bool) (first []byte, sslRequest, plain bool, err error) {
 	_ = c.SetDeadline(time.Now().Add(wait))
 	defer func() { _ = c.SetDeadline(time.Time{}) }()
 	buf := make([]byte, 8)
 	for gss := false; ; gss = true {
 		if _, err := io.ReadFull(c, buf); err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 		if buf[0] == tlsHandshakeRecord {
-			return buf, false, nil
+			return buf, false, false, nil
 		}
 		length, code := binary.BigEndian.Uint32(buf[:4]), binary.BigEndian.Uint32(buf[4:])
 		switch {
 		case length == 8 && code == pgSSLRequestCode:
-			return buf, true, nil
+			return buf, true, false, nil
 		case length == 16 && code == pgCancelRequestCode && !gss:
-			return buf, false, nil
+			return buf, false, false, nil
 		case length == 8 && code == pgGSSENCRequestCode && !gss:
 			// No GSSAPI encryption here: libpq goes on with an SSLRequest
+			// (or, where plain clients are allowed, maybe a plain startup)
 			// on the same connection, which the database then sees first.
 			if _, err := c.Write([]byte{'N'}); err != nil {
-				return nil, false, err
+				return nil, false, false, err
 			}
 			continue
 		}
+		if allowPlain {
+			// The database reads the rest and answers it as it would directly.
+			return buf, false, true, nil
+		}
 		refusePostgres(c, length)
-		return nil, false, errPlainClient
+		return nil, false, false, errPlainClient
 	}
 }
 
 // postgresAnswer relays the database's answer to an SSLRequest. "S" goes
 // on to TLS. "N" (the database has no TLS yet) is passed on too, and the
 // plain startup message a client may then send is refused, so the port
-// stays TLS only while the agent turns TLS on.
-func postgresAnswer(client, upstream net.Conn, wait time.Duration) error {
+// stays TLS only while the agent turns TLS on. With allowPlain that
+// startup goes on to the database instead, and plain is true.
+func postgresAnswer(client, upstream net.Conn, wait time.Duration, allowPlain bool) (plain bool, err error) {
 	_ = upstream.SetReadDeadline(time.Now().Add(wait))
 	var b [1]byte
-	_, err := io.ReadFull(upstream, b[:])
+	_, err = io.ReadFull(upstream, b[:])
 	_ = upstream.SetReadDeadline(time.Time{})
 	if err != nil {
-		return err
+		return false, err
 	}
 	_ = client.SetDeadline(time.Now().Add(wait))
 	defer func() { _ = client.SetDeadline(time.Time{}) }()
 	if _, err := client.Write(b[:]); err != nil {
-		return err
+		return false, err
 	}
 	if b[0] == 'S' {
-		return nil
+		return false, nil
 	}
 	if b[0] != 'N' {
-		return fmt.Errorf("unexpected answer %q to an SSLRequest", b[0])
+		return false, fmt.Errorf("unexpected answer %q to an SSLRequest", b[0])
+	}
+	if allowPlain {
+		return true, nil
 	}
 	var head [8]byte
 	if _, err := io.ReadFull(client, head[:]); err != nil {
-		return err
+		return false, err
 	}
 	refusePostgres(client, binary.BigEndian.Uint32(head[:4]))
-	return errPlainClient
+	return false, errPlainClient
 }
 
 // refusePostgres reads the rest of a startup message of length (its first
@@ -212,7 +226,11 @@ var (
 // and the low 16 bits of its capability flags are returned for the
 // database, the rest follows in the relay. Anything else gets an ERR
 // packet (3159, HY000) with the next sequence id.
-func mysqlStart(client, upstream net.Conn, wait time.Duration) ([]byte, error) {
+//
+// With allowPlain a greeting without TLS goes to the client too, and a
+// plain answer goes on to the database (its head returned like an
+// SSLRequest's, plain true): the database signs the client in without TLS.
+func mysqlStart(client, upstream net.Conn, wait time.Duration, allowPlain bool) (first []byte, plain bool, err error) {
 	deadline := time.Now().Add(wait)
 	_ = upstream.SetReadDeadline(deadline)
 	_ = client.SetDeadline(deadline)
@@ -222,37 +240,97 @@ func mysqlStart(client, upstream net.Conn, wait time.Duration) ([]byte, error) {
 	}()
 	greeting, err := mysqlReadPacket(upstream, mysqlMaxGreeting)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if greeting[4] == 0xFF {
 		_, _ = client.Write(greeting)
-		return nil, errUpstreamRefused
+		return nil, false, errUpstreamRefused
 	}
-	if !mysqlOffersTLS(greeting[4:]) {
+	if !allowPlain && !mysqlOffersTLS(greeting[4:]) {
 		// Before the handshake the client has no 4.1 flags yet: no SQLSTATE marker.
 		_, _ = client.Write(mysqlError(greeting[3], mysqlInsecureTransport, "", mysqlNoTLS))
-		return nil, errNoTLSUpstream
+		return nil, false, errNoTLSUpstream
 	}
 	if _, err := client.Write(greeting); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	head := make([]byte, 6)
 	if _, err := io.ReadFull(client, head[:4]); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	length, seq := mysqlLength(head), head[3]
+	read := 4
 	if length == mysqlSSLRequestLength {
 		if _, err := io.ReadFull(client, head[4:]); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if binary.LittleEndian.Uint16(head[4:])&mysqlClientSSL != 0 {
-			return head, nil
+			return head, false, nil
 		}
 		length -= 2
+		read = 6
+	}
+	if allowPlain {
+		return head[:read], true, nil
 	}
 	_, _ = io.CopyN(io.Discard, client, int64(min(length, mysqlMaxDrain)))
 	_, _ = client.Write(mysqlError(seq+1, mysqlInsecureTransport, "HY000", mysqlRefusal))
-	return nil, errPlainClient
+	return nil, false, errPlainClient
+}
+
+// clientHelloHead is how many bytes clientHello reads from a client that
+// starts like a TLS record: the record header (type, version, length),
+// the handshake header (type, length) and the first byte of the
+// ClientHello's version.
+const clientHelloHead = 10
+
+// clientHello tells a TLS client of a port whose TLS the gate terminates
+// from a plain one, for a port that takes both (Listener.AllowPlain). It
+// reads one byte, and when that starts a TLS handshake record the rest of
+// clientHelloHead: a ClientHello has record version 3.x, handshake type 1
+// and a client version of 3.x. The plain protocols relayed there cannot
+// look like that: Redis commands start with "*" or a letter, ClickHouse's
+// native Hello with 0, and a MongoDB message whose length starts 0x16 0x03
+// has its responseTo (bytes 8 to 11) 0 in every request, where the
+// ClientHello's version is. What was read is returned, to be read again.
+func clientHello(c net.Conn, wait time.Duration) (head []byte, isTLS bool, err error) {
+	_ = c.SetReadDeadline(time.Now().Add(wait))
+	defer func() { _ = c.SetReadDeadline(time.Time{}) }()
+	head = make([]byte, clientHelloHead)
+	if _, err := io.ReadFull(c, head[:1]); err != nil {
+		return nil, false, err
+	}
+	if head[0] != tlsHandshakeRecord {
+		return head[:1], false, nil
+	}
+	if _, err := io.ReadFull(c, head[1:]); err != nil {
+		return nil, false, err
+	}
+	return head, head[1] == 3 && head[5] == 1 && head[9] == 3, nil
+}
+
+// replayConn reads again the bytes the gate read to look at a client
+// (clientHello) before the rest of the connection.
+type replayConn struct {
+	net.Conn
+	head []byte
+}
+
+func (r *replayConn) Read(b []byte) (int, error) {
+	if len(r.head) > 0 {
+		n := copy(b, r.head)
+		r.head = r.head[n:]
+		return n, nil
+	}
+	return r.Conn.Read(b)
+}
+
+// CloseWrite passes the relay's half close on (pipe).
+func (r *replayConn) CloseWrite() error {
+	if hc, ok := r.Conn.(interface{ CloseWrite() error }); ok {
+		return hc.CloseWrite()
+	}
+	return r.Conn.Close()
 }
 
 // mysqlReadPacket reads one packet, header included, of at most max bytes

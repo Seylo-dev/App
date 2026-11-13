@@ -60,6 +60,14 @@ type Listener struct {
 	// MariaDB) and refuses a client that does not ask for TLS, with the
 	// protocol's own error. What it read goes to the container unchanged.
 	RequireTLS TLSCheck
+	// AllowPlain (DatabaseExposure.allow_plain) relays database clients
+	// that do not ask for TLS too: RequireTLS passes them on instead of
+	// refusing them, and a TerminateTLS port tells a ClientHello from a
+	// plain client by its first bytes (clientHello) and relays the plain
+	// one as it is. TLS clients connect as before. It changes in place on
+	// a sync, without closing the socket or any TLS session; turned off,
+	// the plain sessions still open are closed.
+	AllowPlain bool
 }
 
 // Resolver returns the address ("10.0.3.4:5432") to relay a connection for

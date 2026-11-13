@@ -20,6 +20,14 @@ const Capability = "database.engines.v2"
 // exposure only to agents that advertise it.
 const ExposureCapability = "database.exposure.v2"
 
+// PlainExposureCapability is advertised by agents that read
+// DatabaseExposure.allow_plain (0.2.16): with it on, the portgate relays a
+// client that does not ask for TLS to the database instead of refusing it,
+// for every engine, and TLS clients connect as before. An older agent
+// ignores the field and keeps the port TLS only, so the panel sends it
+// only to agents that advertise this.
+const PlainExposureCapability = "database.exposure.plain.v1"
+
 // Port is the engine's main port inside the container (ClickHouse: the
 // native protocol), 0 for an engine this agent does not know.
 func Port(e agentv1.DatabaseEngine) uint32 {

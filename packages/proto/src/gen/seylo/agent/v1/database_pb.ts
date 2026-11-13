@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/database.proto.
  */
 export const file_seylo_agent_v1_database: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zZXlsby9hZ2VudC92MS9kYXRhYmFzZS5wcm90bxIOc2V5bG8uYWdlbnQudjEiiQIKDERhdGFiYXNlU3BlYxIuCgZlbmdpbmUYASABKA4yHi5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUVuZ2luZRIPCgd2ZXJzaW9uGAIgASgJEjgKC2NyZWRlbnRpYWxzGAMgASgLMiMuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VDcmVkZW50aWFscxIsCgV0b29scxgEIAEoCzIdLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlVG9vbHMSMgoIZXhwb3N1cmUYBSABKAsyIC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUV4cG9zdXJlEhwKFHJldGlyZWRfZXhwb3NlZF91c2VyGAYgASgJIlMKE0RhdGFiYXNlQ3JlZGVudGlhbHMSEgoKYWRtaW5fdXNlchgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIQCghkYXRhYmFzZRgDIAEoCSJXCg1EYXRhYmFzZVRvb2xzEg4KBndlYl91aRgBIAEoCBI2ChN3ZWJfdWlfaWRsZV90aW1lb3V0GAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIooBChBEYXRhYmFzZUV4cG9zdXJlEg8KB2VuYWJsZWQYASABKAgSEQoJaG9zdF9wb3J0GAIgASgNEhwKFGFsbG93ZWRfc291cmNlX2NpZHJzGAMgAygJEhQKDHRsc19ob3N0bmFtZRgEIAEoCRIMCgR1c2VyGAUgASgJEhAKCHBhc3N3b3JkGAYgASgJKrMCCg5EYXRhYmFzZUVuZ2luZRIfChtEQVRBQkFTRV9FTkdJTkVfVU5TUEVDSUZJRUQQABIcChhEQVRBQkFTRV9FTkdJTkVfUE9TVEdSRVMQARIZChVEQVRBQkFTRV9FTkdJTkVfTVlTUUwQAhIbChdEQVRBQkFTRV9FTkdJTkVfTUFSSUFEQhADEhkKFURBVEFCQVNFX0VOR0lORV9NT05HTxAEEhkKFURBVEFCQVNFX0VOR0lORV9SRURJUxAFEhoKFkRBVEFCQVNFX0VOR0lORV9WQUxLRVkQBhIZChVEQVRBQkFTRV9FTkdJTkVfS0VZREIQBxIdChlEQVRBQkFTRV9FTkdJTkVfRFJBR09ORkxZEAgSHgoaREFUQUJBU0VfRU5HSU5FX0NMSUNLSE9VU0UQCUK4AQoSY29tLnNleWxvLmFnZW50LnYxQg1EYXRhYmFzZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_duration]);
+  fileDesc("Ch1zZXlsby9hZ2VudC92MS9kYXRhYmFzZS5wcm90bxIOc2V5bG8uYWdlbnQudjEiiQIKDERhdGFiYXNlU3BlYxIuCgZlbmdpbmUYASABKA4yHi5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUVuZ2luZRIPCgd2ZXJzaW9uGAIgASgJEjgKC2NyZWRlbnRpYWxzGAMgASgLMiMuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VDcmVkZW50aWFscxIsCgV0b29scxgEIAEoCzIdLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlVG9vbHMSMgoIZXhwb3N1cmUYBSABKAsyIC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUV4cG9zdXJlEhwKFHJldGlyZWRfZXhwb3NlZF91c2VyGAYgASgJIlMKE0RhdGFiYXNlQ3JlZGVudGlhbHMSEgoKYWRtaW5fdXNlchgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIQCghkYXRhYmFzZRgDIAEoCSJXCg1EYXRhYmFzZVRvb2xzEg4KBndlYl91aRgBIAEoCBI2ChN3ZWJfdWlfaWRsZV90aW1lb3V0GAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIp8BChBEYXRhYmFzZUV4cG9zdXJlEg8KB2VuYWJsZWQYASABKAgSEQoJaG9zdF9wb3J0GAIgASgNEhwKFGFsbG93ZWRfc291cmNlX2NpZHJzGAMgAygJEhQKDHRsc19ob3N0bmFtZRgEIAEoCRIMCgR1c2VyGAUgASgJEhAKCHBhc3N3b3JkGAYgASgJEhMKC2FsbG93X3BsYWluGAcgASgIKrMCCg5EYXRhYmFzZUVuZ2luZRIfChtEQVRBQkFTRV9FTkdJTkVfVU5TUEVDSUZJRUQQABIcChhEQVRBQkFTRV9FTkdJTkVfUE9TVEdSRVMQARIZChVEQVRBQkFTRV9FTkdJTkVfTVlTUUwQAhIbChdEQVRBQkFTRV9FTkdJTkVfTUFSSUFEQhADEhkKFURBVEFCQVNFX0VOR0lORV9NT05HTxAEEhkKFURBVEFCQVNFX0VOR0lORV9SRURJUxAFEhoKFkRBVEFCQVNFX0VOR0lORV9WQUxLRVkQBhIZChVEQVRBQkFTRV9FTkdJTkVfS0VZREIQBxIdChlEQVRBQkFTRV9FTkdJTkVfRFJBR09ORkxZEAgSHgoaREFUQUJBU0VfRU5HSU5FX0NMSUNLSE9VU0UQCUK4AQoSY29tLnNleWxvLmFnZW50LnYxQg1EYXRhYmFzZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_duration]);
 
 /**
  * DatabaseSpec is set on SERVICE_KIND_DATABASE services. The image, env and
@@ -140,7 +140,8 @@ export const DatabaseToolsSchema: GenMessage<DatabaseTools> = /*@__PURE__*/
  * their protocol with their own certificate, it refuses a client that
  * does not ask for TLS. Agents without "database.exposure.v2" relay
  * Postgres, MySQL and MariaDB without that check, so the panel sends their
- * exposure only to agents that advertise it.
+ * exposure only to agents that advertise it. With allow_plain the port
+ * also takes clients that do not ask for TLS.
  *
  * @generated from message seylo.agent.v1.DatabaseExposure
  */
@@ -184,6 +185,23 @@ export type DatabaseExposure = Message<"seylo.agent.v1.DatabaseExposure"> & {
    * @generated from field: string password = 6;
    */
   password: string;
+
+  /**
+   * The owner's opt-in to clients without TLS: the portgate relays a
+   * client that does not ask for TLS to the database instead of refusing
+   * it, and TLS clients connect as before (Postgres, MySQL and MariaDB
+   * with the database's own TLS, the other engines with the gate's).
+   * Turned off, new plain clients are refused again and the plain
+   * sessions still open are closed; TLS sessions stay. Agents that
+   * advertise "database.exposure.plain.v1" read it; an older agent ignores
+   * it and keeps the port TLS only, and the panel sends it only to agents
+   * that advertise it.
+   *
+   * added in 0.2.16 (exposure.plain)
+   *
+   * @generated from field: bool allow_plain = 7;
+   */
+  allowPlain: boolean;
 };
 
 /**
