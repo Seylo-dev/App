@@ -3032,7 +3032,12 @@ Tailscale from the tailnet, `tailscale down` reopening IP access, the
 `seylo panel tailscale` and `ip-access` commands). Check 41 moves the
 panel from A to B and back (0.2.8), check 42 exports a service with its
 volume data and a Postgres and imports them on C (0.2.10), and check 43
-changes a MongoDB database from 7.0 to 8.0 in place (0.2.9). Outside the
+changes a MongoDB database from 7.0 to 8.0 in place (0.2.9). Check 44
+moves a Postgres with rows, exposed over TLS, from B to C (0.2.16): the
+rows and the stored password on C, the exposed port on C's address with
+TLS and the same allowed IPs (closed on B), an app on C that waited
+reaching it by its internal URL without a deploy, a backup on C, and B
+dropping its copy (written, not yet run). Outside the
 checklist, `test/e2e-colima/extra-installs.sh` installs on Debian 12 and on
 Ubuntu with ufw, and `.github/workflows/install-smoke.yml` installs each published
 release on GitHub's amd64 and arm64 runners (`test/install-smoke/smoke.sh`).
@@ -4239,6 +4244,62 @@ copy with it. While the move copies (`deployments.moveCopying`),
 move deletes the old node's data once the new node serves.
 `ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
+
+Moving a database (0.2.16) is the same move: its data volume is copied
+while it is stopped (the downtime grows with its size), and it starts on
+the new node with its data, users and passwords, so the panel's stored
+credentials still sign in. Its IP:port access follows once the new node
+is live (`services/access-move.ts` `moveAccessToNode`, in the transaction
+of `deployments/engine.ts` `succeed` that removes the old placement):
+every `port_exposures` row of the service on the old node (a database's
+exposed port, timed exposes, the first-run port) moves to the new node,
+on the same port unless another service has it there (then 0: the new
+node's agent picks one and reports it, `recordReportedPorts`), with its
+allowed IPs, TLS, `allowPlain` and timed end; a failed move leaves them
+on the old node. Before 0.2.16 they stayed on the old node (timed exposes
+and first-run ports went dark, a database's port checks looked at the
+wrong node): at start the exposures module moves rows on a node their
+service no longer runs on to its one node (`followPlacements`). Its
+`INTERNAL_*` address stays the same, but there is no private network
+between nodes, so only services on the new node reach it; services that
+read `EXPOSED_*` get the new node's address on their next deploy (the
+same TLS host name, whose DNS must then point at the new node). Refused
+besides the checks above, with the same checks `services.moveImpact`
+lists (`move.ts` `movableFrom`, `assertRunsOn`, `assertCanStartMove`,
+`assertCopyNode`): a target whose agent does not run its engine, or,
+while it is exposed, cannot keep the port TLS only
+(`database.exposure.v2`: the port would close there) or, with
+`allowPlain`, cannot take clients without TLS
+(`database.exposure.plain.v1`) (CONFLICT `reason: agentTooOld`); with
+volumes, a node offline (UNAVAILABLE `reason: offline`) or whose agent
+cannot copy volumes (NOT_IMPLEMENTED `reason: agentTooOld`); any service
+while one of its backups or restores runs (CONFLICT `reason:
+backupRunning|restoreRunning`); protected services, services on more than
+one node and ones never deployed now carry `reason: protected`,
+`placements`, `notDeployed` (`noImage` without an image). While a move
+runs, `backups.runNow` (Back up now) and `backups.restore` refuse the
+service (CONFLICT `reason: moving`, `backups/runs.ts` `assertNotMoving`;
+the restore's own backup first too), and a schedule due meanwhile stays
+due and runs the first minute after the move ends, on the new node
+(`backups/schedule.ts`).
+
+`services.moveImpact` (0.2.16, `services/move-impact.ts`, a query with
+`services.view`) says beforehand what `services.move` does: `blocker` (the
+first refusal that holds for every node: compose, protected, placements,
+copying, exporting, importing, notDeployed, deployRunning, noImage,
+backupRunning, restoreRunning, or the old node offline or too old to copy
+volumes), `targets` (every other node with `online`, `address` and the
+refusal a move there gets: disabled, agentTooOld, offline), `volumes`,
+`dataSize` (a database's size inside the engine at its newest
+whole-server backup whose contents were measured), `lastBackupAt`,
+`backupSchedules` (enabled ones), `exposure` (the database's port, TLS
+host name and `allowPlain`, the open timed exposes, the first-run port),
+`exposedReferrers` (services of the project referencing its
+`EXPOSED_URL`, `EXPOSED_HOST` or `EXPOSED_PORT`), `internalReferrers` (an
+internal built-in such as `INTERNAL_URL`, or its name typed in as a host,
+`move-impact.ts` `addressUsers`), each with its keys and nodes, and
+`hiddenReferrers`; names and keys only where the caller may see them, as
+`services.moveProjectImpact`.
 
 Moves to another project (`services.moveProjectImpact`,
 `services.moveProject`, `services/move-project.ts`, `impact.ts`): the op's
@@ -6226,6 +6287,28 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
+- A database's Advanced tab (0.2.16, `service-tabs.ts` `databaseTabs`,
+  between Alerts and Notes; `service/advanced/advanced-page.tsx`): the
+  Move card, Resource limits and the crash policy, nothing its engine
+  sets (health check, replicas and nodes, container settings, ports).
+  A database has no Deploy button, so its limits are "Save and restart":
+  after a confirm, `services.setResources` and then `deployments.deploy`
+  (a recreate of the image it runs, offline for a few seconds). The menus'
+  Move to another node shows for databases too (`hasTab("advanced")`).
+  The Move card (`advanced/move-card.tsx`, apps and cron services too)
+  reads `services.moveImpact`: a refused or offline node is disabled in
+  the picker with a short reason and the panel's message is listed under
+  it, a blocker (a running deploy or backup) shows above it and keeps Move
+  off, and once a node is picked the card says what happens there
+  (`advanced/move-notes.ts` `moveNotes`: the downtime and the size at the
+  last backup, or none without volumes; the same internal address and the
+  services on other nodes that lose it; the exposed port and timed exposes
+  moving to the new node's address, a TLS host name's DNS; the services
+  reading `EXPOSED_*` that need a deploy; backup schedules; the last
+  backup with Back up now, `backups/back-up-now.ts`; the old copy). The
+  confirm dialog repeats the downtime and what asks something of you. An
+  app goes to its Deployments tab to follow the move; a database, which
+  has none, shows the running move on the card with its log.
 - A failed deploy (0.2.16, `components/service/deploy-failure.tsx`): the
   deploy log dialog and the Deployments history row show `error` (the
   reason alone), "Use port <port>" for each of `portHint.listening` (up to
@@ -6770,7 +6853,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   in `apps/web/src/components/menus/`: `service-items.tsx` (Open, Open in
   new tab, Deploy, Cancel deploy or Restart/Stop/Start, a Box's Stop and
   Open editor, Logs, Console, Clone, Move to project, Move to another node
-  (the Advanced tab's Move card, `#move`), Copy address or internal
+  (the Advanced tab's Move card, `#move`; databases too since 0.2.16), Copy address or internal
   address, Copy ID, Delete; the header's and the old service menu's rules),
   `project-items.tsx` (Open, Open in new tab, New service sub menu, Rename,
   Collapse/Expand, Hide/Unhide project, Settings, Copy ID, Delete, disabled
@@ -6837,7 +6920,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo
-  data, with the ops answered and recorded per test), and since 0.2.1
+  data, with the ops answered and recorded per test),
+  `database-move.spec.ts` (0.2.16, a database's Advanced tab on the demo
+  data, `demo/service.ts` `moveImpactOf`: the tab between Alerts and Notes
+  with the Move card, Save and restart and the crash policy only; a node
+  the panel refuses disabled with why; what happens, on the card and in
+  the dialog, with the internal and `EXPOSED_*` users listed; a blocker
+  keeping Move off and the panel's refusal in the dialog; the move sent to
+  the node picked; Move to another node in the database's menu), and since 0.2.1
   `nodes-build-default.spec.ts` (Add node's Build images on this node:
   ticked by default, the request carries the choice, Change),
   `panel-access.spec.ts` (the Panel domain card's switches in every state,
