@@ -636,7 +636,7 @@ export type BackupResult = Message<"seylo.agent.v1.BackupResult"> & {
   prunedObjectKeys: string[];
 
   /**
-   * added in 0.2.15: database backups only, what the object holds as
+   * added in 0.2.16: database backups only, what the object holds as
    * measured right before the dump. Unset from older agents.
    *
    * @generated from field: seylo.agent.v1.BackupContents contents = 10;
@@ -644,7 +644,7 @@ export type BackupResult = Message<"seylo.agent.v1.BackupResult"> & {
   contents?: BackupContents | undefined;
 
   /**
-   * added in 0.2.15: for a backup of chosen databases or tables, the
+   * added in 0.2.16: for a backup of chosen databases or tables, the
    * chosen names that were skipped because they no longer exist; for a
    * backup of everything, why the contents could not be measured (the
    * backup itself is complete).

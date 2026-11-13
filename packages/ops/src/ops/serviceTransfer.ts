@@ -330,7 +330,7 @@ export const PortableBackupPolicy = Type.Object({
   keepLast: Type.Integer({ minimum: 1, maximum: 1000 }),
   stopService: Type.Boolean(),
   enabled: Type.Boolean(),
-  /** Database backups of chosen databases or tables (0.2.15); left out is everything. Older panels ignore it and back up everything. */
+  /** Database backups of chosen databases or tables (0.2.16); left out is everything. Older panels ignore it and back up everything. */
   selection: Type.Optional(BackupSelection),
   /** Destinations are panel-wide (their keys too): matched by name on import. */
   destination: Type.Object({

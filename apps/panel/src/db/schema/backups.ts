@@ -107,7 +107,7 @@ export const backupRuns = sqliteTable(
     deletedAt: timestamp("deleted_at"),
     /** What was asked for, copied from the policy when the run started; null is everything. */
     selection: json<BackupSelection>("selection"),
-    /** What the backup holds (the agent's measurement); restores copy their source's. Null from older agents and for runs before 0.2.15. */
+    /** What the backup holds (the agent's measurement); restores copy their source's. Null from older agents and for runs before 0.2.16. */
     contents: json<BackupContents>("contents"),
     /** Chosen names the agent skipped because they were gone, or why it could not measure. */
     warnings: json<string[]>("warnings"),

@@ -126,7 +126,7 @@ export type DatabaseDump = Message<"seylo.agent.v1.DatabaseDump"> & {
   /**
    * Without selections: empty means everything on the server (every
    * database, for Postgres the roles too), set means that one database.
-   * Panels from 0.2.15 set it as well when exactly one database is
+   * Panels from 0.2.16 set it as well when exactly one database is
    * chosen, so an agent without backup.select.v1 would still dump only
    * that database. On a restore: the database a single-database object
    * goes into (empty: the service's main database).
@@ -136,7 +136,7 @@ export type DatabaseDump = Message<"seylo.agent.v1.DatabaseDump"> & {
   database: string;
 
   /**
-   * added in 0.2.15 (backup.select.v1): what to back up, by name. Empty
+   * added in 0.2.16 (backup.select.v1): what to back up, by name. Empty
    * keeps the behaviour above. Set, the agent lists the server right
    * before the dump: a chosen database or table that no longer exists is
    * skipped with a line in BackupResult.warnings, and the backup fails
@@ -159,7 +159,7 @@ export const DatabaseDumpSchema: GenMessage<DatabaseDump> = /*@__PURE__*/
 
 /**
  * One chosen database, optionally only some of its tables (Postgres and
- * MySQL) or collections (MongoDB). added in 0.2.15
+ * MySQL) or collections (MongoDB). added in 0.2.16
  *
  * @generated from message seylo.agent.v1.DatabaseSelection
  */
@@ -185,7 +185,7 @@ export const DatabaseSelectionSchema: GenMessage<DatabaseSelection> = /*@__PURE_
   messageDesc(file_seylo_agent_v1_backup, 3);
 
 /**
- * A table or collection by name. added in 0.2.15
+ * A table or collection by name. added in 0.2.16
  *
  * @generated from message seylo.agent.v1.TableRef
  */
@@ -214,7 +214,7 @@ export const TableRefSchema: GenMessage<TableRef> = /*@__PURE__*/
 /**
  * What a backup holds, as the database reported it right before the dump:
  * names, approximate rows and sizes inside the database (not the size of
- * the compressed object). added in 0.2.15
+ * the compressed object). added in 0.2.16
  *
  * @generated from message seylo.agent.v1.BackupContents
  */
@@ -336,7 +336,7 @@ export const TableContentsSchema: GenMessage<TableContents> = /*@__PURE__*/
  * InspectDatabaseRequest lists a database service's databases (database
  * empty: names, sizes and table counts, no tables) or one database's
  * tables or collections, through the same helper and sign-in as a backup.
- * Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.15
+ * Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.16
  *
  * @generated from message seylo.agent.v1.InspectDatabaseRequest
  */

@@ -102,7 +102,7 @@ test("each backup lists its databases as chips, the file size and the time it to
       selection: { databases: [{ name: "shop", tables: [{ schema: "public", name: "orders" }] }] },
       contents: { wholeServer: false, databases: [db("shop", 1_240_000, 1)] },
     }),
-    // Made before 0.2.15, or by an older agent: what it held was never recorded.
+    // Made before 0.2.16, or by an older agent: what it held was never recorded.
     run("r-old", { sizeBytes: 5_000_000 }),
     // Complete, but the listing before it failed (MySQL 5.7 before the fix): not "skipped".
     run("r-unmeasured", {

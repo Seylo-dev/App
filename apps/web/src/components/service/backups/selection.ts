@@ -91,7 +91,7 @@ export const maxRunChips = 6;
 
 /**
  * The chips under a database run: "Everything on this server" for a
- * backup of everything (also every run from before 0.2.15: none recorded
+ * backup of everything (also every run from before 0.2.16: none recorded
  * what it held), then one per database with its size ("shop 380 MB", for
  * some tables "shop · 2 tables 1.2 MB"), at most six and "+N", and what
  * its warnings are. A backup's warnings depend on its scope: of chosen

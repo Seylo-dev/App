@@ -1545,10 +1545,10 @@ type BackupResult struct {
 	FinishedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	// Objects deleted by retention (keep_last) after this run succeeded.
 	PrunedObjectKeys []string `protobuf:"bytes,9,rep,name=pruned_object_keys,json=prunedObjectKeys,proto3" json:"pruned_object_keys,omitempty"`
-	// added in 0.2.15: database backups only, what the object holds as
+	// added in 0.2.16: database backups only, what the object holds as
 	// measured right before the dump. Unset from older agents.
 	Contents *BackupContents `protobuf:"bytes,10,opt,name=contents,proto3" json:"contents,omitempty"`
-	// added in 0.2.15: for a backup of chosen databases or tables, the
+	// added in 0.2.16: for a backup of chosen databases or tables, the
 	// chosen names that were skipped because they no longer exist; for a
 	// backup of everything, why the contents could not be measured (the
 	// backup itself is complete).

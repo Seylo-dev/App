@@ -41,12 +41,12 @@ message BackupSubject {
 message DatabaseDump {
   // Without selections: empty means everything on the server (every
   // database, for Postgres the roles too), set means that one database.
-  // Panels from 0.2.15 set it as well when exactly one database is
+  // Panels from 0.2.16 set it as well when exactly one database is
   // chosen, so an agent without backup.select.v1 would still dump only
   // that database. On a restore: the database a single-database object
   // goes into (empty: the service's main database).
   string database = 1;
-  // added in 0.2.15 (backup.select.v1): what to back up, by name. Empty
+  // added in 0.2.16 (backup.select.v1): what to back up, by name. Empty
   // keeps the behaviour above. Set, the agent lists the server right
   // before the dump: a chosen database or table that no longer exists is
   // skipped with a line in BackupResult.warnings, and the backup fails
@@ -58,14 +58,14 @@ message DatabaseDump {
 }
 
 // One chosen database, optionally only some of its tables (Postgres and
-// MySQL) or collections (MongoDB). added in 0.2.15
+// MySQL) or collections (MongoDB). added in 0.2.16
 message DatabaseSelection {
   string database = 1;
   // Empty: the whole database.
   repeated TableRef tables = 2;
 }
 
-// A table or collection by name. added in 0.2.15
+// A table or collection by name. added in 0.2.16
 message TableRef {
   // Postgres only: the table's schema. Separate from name, never a dotted
   // string.
@@ -75,7 +75,7 @@ message TableRef {
 
 // What a backup holds, as the database reported it right before the dump:
 // names, approximate rows and sizes inside the database (not the size of
-// the compressed object). added in 0.2.15
+// the compressed object). added in 0.2.16
 message BackupContents {
   // Everything on the server (no selection): databases lists what was
   // there. A whole-server backup whose measurement failed has
@@ -113,7 +113,7 @@ message TableContents {
 // InspectDatabaseRequest lists a database service's databases (database
 // empty: names, sizes and table counts, no tables) or one database's
 // tables or collections, through the same helper and sign-in as a backup.
-// Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.15
+// Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.16
 message InspectDatabaseRequest {
   string service_id = 1;
   string database = 2;
@@ -152,7 +152,7 @@ message RunBackupResponse {}
 // where ext is ".tar.gz" for volumes, ".dump" for a Postgres custom-format
 // dump of one database, ".sql.gz" for pg_dumpall, mysqldump and
 // mariadb-dump, ".archive.gz" for mongodump, ".rdb.gz" for Redis and
-// ".bundle" (0.2.15) for several chosen Postgres or MongoDB databases in
+// ".bundle" (0.2.16) for several chosen Postgres or MongoDB databases in
 // one object (one pg_dump or mongodump per database, framed as
 // go/internal/backup/bundle.go describes). Keys sort by time, which is
 // what retention relies on. Restores read the format from the extension.

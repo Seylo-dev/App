@@ -27,7 +27,7 @@ export const restoreTimeoutMs = 6 * 60 * 60 * 1000;
 /** Backup id of one-off runs; scheduled runs use their policy id. */
 export const manualBackupId = "manual";
 
-/** Agents that back up chosen databases and tables, write .bundle objects and report contents (0.2.15). */
+/** Agents that back up chosen databases and tables, write .bundle objects and report contents (0.2.16). */
 export const selectCapability = "backup.select.v1";
 
 /** The engines whose backups can hold chosen databases and tables. */
@@ -269,7 +269,7 @@ function assertSignedBackups(agents: Pick<Deps["agents"], "capabilities">, nodeI
   }
 }
 
-/** A backup or restore of chosen databases needs an agent that has selections (0.2.15). */
+/** A backup or restore of chosen databases needs an agent that has selections (0.2.16). */
 export function assertSelectable(
   agents: Pick<Deps["agents"], "capabilities">,
   nodeId: string,

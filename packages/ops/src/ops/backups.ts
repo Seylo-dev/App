@@ -156,7 +156,7 @@ export const Run = Type.Object({
   selection: Type.Union([BackupSelection, Type.Null()]),
   /** Database runs: everything, chosen databases or some tables of one; null for volumes. */
   scope: Type.Union([BackupScope, Type.Null()]),
-  /** What the backup holds per database (restores: their backup's); tables come from backups.runContents. Null for volumes, nodes older than 0.2.15 and runs before it. */
+  /** What the backup holds per database (restores: their backup's); tables come from backups.runContents. Null for volumes, nodes older than 0.2.16 and runs before it. */
   contents: Type.Union([BackupContents, Type.Null()]),
   /**
    * Backups of chosen databases or tables: the names skipped because they no longer existed. Backups of everything: why
@@ -284,7 +284,7 @@ export const createPolicy = defineOp({
   kind: "mutation",
   summary: "Add a backup schedule",
   description:
-    "Schedules backups of a service's database or one of its volumes to a destination, keeping the newest keepLast. Database services back up with the engine's dump tool; volumes as a tar.gz archive. selection (PostgreSQL, MySQL, MariaDB, MongoDB; needs nodes from 0.2.15) backs up only the chosen databases, or with exactly one database only some of its tables or collections (PostgreSQL tables with their schema); left out or null backs up everything on the server, for PostgreSQL the users and roles too. List the names with backups.listDatabases. A chosen name that no longer exists at backup time is skipped with a warning on the run; when nothing is left the run fails.",
+    "Schedules backups of a service's database or one of its volumes to a destination, keeping the newest keepLast. Database services back up with the engine's dump tool; volumes as a tar.gz archive. selection (PostgreSQL, MySQL, MariaDB, MongoDB; needs nodes from 0.2.16) backs up only the chosen databases, or with exactly one database only some of its tables or collections (PostgreSQL tables with their schema); left out or null backs up everything on the server, for PostgreSQL the users and roles too. List the names with backups.listDatabases. A chosen name that no longer exists at backup time is skipped with a warning on the run; when nothing is left the run fails.",
   input: Type.Object({
     serviceId: Id,
     target: BackupTarget,
@@ -454,7 +454,7 @@ export const listDatabases = defineOp({
   kind: "query",
   summary: "List what a database backup can hold",
   description:
-    "Lists a running database's databases with their sizes (PostgreSQL: not the templates; MySQL and MariaDB: not mysql, sys and the schema databases; MongoDB: not admin, local and config), or with database set that database's tables (PostgreSQL schema.table, partitions counted in their table) or collections, with sizes and approximate rows: the names backups.createPolicy takes in selection. Read live through the node, which must be 0.2.15 or later. state says why there is nothing to list: stopped, offline (the node is not connected), agentTooOld, signInFailed (the stored login no longer signs in) or failed; message says what to do.",
+    "Lists a running database's databases with their sizes (PostgreSQL: not the templates; MySQL and MariaDB: not mysql, sys and the schema databases; MongoDB: not admin, local and config), or with database set that database's tables (PostgreSQL schema.table, partitions counted in their table) or collections, with sizes and approximate rows: the names backups.createPolicy takes in selection. Read live through the node, which must be 0.2.16 or later. state says why there is nothing to list: stopped, offline (the node is not connected), agentTooOld, signInFailed (the stored login no longer signs in) or failed; message says what to do.",
   input: Type.Object({ serviceId: Id, database: Type.Optional(ObjectName) }),
   output: Type.Object({
     state: Type.Union([
@@ -484,7 +484,7 @@ export const runContents = defineOp({
   kind: "query",
   summary: "What a backup holds",
   description:
-    "The full contents of one backup run: per database its tables or collections with sizes inside the database and approximate rows, as the node measured them right before the dump (at most 500 per database and 2000 per backup; tablesTruncated says when more were there), and the warnings. contents is null for volume backups and backups made by nodes older than 0.2.15.",
+    "The full contents of one backup run: per database its tables or collections with sizes inside the database and approximate rows, as the node measured them right before the dump (at most 500 per database and 2000 per backup; tablesTruncated says when more were there), and the warnings. contents is null for volume backups and backups made by nodes older than 0.2.16.",
   input: Type.Object({ serviceId: Id, runId: Id }),
   output: Type.Object({
     scope: Type.Union([BackupScope, Type.Null()]),

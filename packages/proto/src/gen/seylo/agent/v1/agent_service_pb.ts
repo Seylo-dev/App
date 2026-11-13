@@ -307,7 +307,7 @@ export const AgentService: GenService<{
    * The databases and tables of a database service, for choosing what a
    * backup holds. Its capability also says the agent takes
    * DatabaseDump.selections, writes .bundle objects and reports
-   * BackupResult.contents. added in 0.2.15
+   * BackupResult.contents. added in 0.2.16
    *
    * @generated from rpc seylo.agent.v1.AgentService.InspectDatabase
    */

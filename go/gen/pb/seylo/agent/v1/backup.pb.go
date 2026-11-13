@@ -287,12 +287,12 @@ type DatabaseDump struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Without selections: empty means everything on the server (every
 	// database, for Postgres the roles too), set means that one database.
-	// Panels from 0.2.15 set it as well when exactly one database is
+	// Panels from 0.2.16 set it as well when exactly one database is
 	// chosen, so an agent without backup.select.v1 would still dump only
 	// that database. On a restore: the database a single-database object
 	// goes into (empty: the service's main database).
 	Database string `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
-	// added in 0.2.15 (backup.select.v1): what to back up, by name. Empty
+	// added in 0.2.16 (backup.select.v1): what to back up, by name. Empty
 	// keeps the behaviour above. Set, the agent lists the server right
 	// before the dump: a chosen database or table that no longer exists is
 	// skipped with a line in BackupResult.warnings, and the backup fails
@@ -350,7 +350,7 @@ func (x *DatabaseDump) GetSelections() []*DatabaseSelection {
 }
 
 // One chosen database, optionally only some of its tables (Postgres and
-// MySQL) or collections (MongoDB). added in 0.2.15
+// MySQL) or collections (MongoDB). added in 0.2.16
 type DatabaseSelection struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Database string                 `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
@@ -404,7 +404,7 @@ func (x *DatabaseSelection) GetTables() []*TableRef {
 	return nil
 }
 
-// A table or collection by name. added in 0.2.15
+// A table or collection by name. added in 0.2.16
 type TableRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Postgres only: the table's schema. Separate from name, never a dotted
@@ -461,7 +461,7 @@ func (x *TableRef) GetName() string {
 
 // What a backup holds, as the database reported it right before the dump:
 // names, approximate rows and sizes inside the database (not the size of
-// the compressed object). added in 0.2.15
+// the compressed object). added in 0.2.16
 type BackupContents struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Everything on the server (no selection): databases lists what was
@@ -682,7 +682,7 @@ func (x *TableContents) GetApproxRows() int64 {
 // InspectDatabaseRequest lists a database service's databases (database
 // empty: names, sizes and table counts, no tables) or one database's
 // tables or collections, through the same helper and sign-in as a backup.
-// Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.15
+// Postgres, MySQL, MariaDB and MongoDB only. added in 0.2.16
 type InspectDatabaseRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServiceId     string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
