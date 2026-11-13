@@ -224,6 +224,20 @@ func (e *itEnv) get(host, path string, mod ...func(*http.Request)) (int, string,
 	return resp.StatusCode, string(body), resp.Header
 }
 
+// tryGet is get for a moment when Traefik may not answer at all: a transport
+// error comes back as ok false instead of failing the test.
+func (e *itEnv) tryGet(host, path string) (int, bool) {
+	req, _ := http.NewRequestWithContext(e.ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s", e.httpPort, path), nil)
+	req.Host = host
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, true
+}
+
 var noRedirect = &http.Client{
 	Timeout:       5 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },

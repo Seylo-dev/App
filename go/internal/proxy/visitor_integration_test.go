@@ -595,8 +595,11 @@ func TestIntegrationTraefikRecreateGap(t *testing.T) {
 	}
 	attached := time.Since(start)
 	deadline := time.Now().Add(30 * time.Second)
+	// Until routing is back a request may fail outright (a pooled connection to the
+	// old container is reset, the new port mapping is not up yet): that is the gap
+	// being measured, not a failure of the test, so only the deadline counts.
 	for {
-		if code, _, _ := e.get("gap.it.test", "/"); code == 200 {
+		if code, ok := e.tryGet("gap.it.test", "/"); ok && code == 200 {
 			break
 		}
 		if time.Now().After(deadline) {
