@@ -417,13 +417,21 @@ test("Ask before destructive actions off: an MCP token's destructive call runs r
   expect(pendingApprovals()).toHaveLength(1);
   expect(panel.deps.db.select().from(projects).where(eq(projects.id, kept)).get()).toBeDefined();
 
+  const initialize = () =>
+    rpc(writer.access_token, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "t", version: "1" },
+    });
+  // The instructions name what waits, a database's clients without TLS too.
+  expect((await initialize()).body.result.instructions).toContain(
+    "Destructive actions, backup download links and letting a database's clients in without TLS (databases_setExposure allowPlain, or an emptied allowedCidrs while it is on) are queued for a person to approve",
+  );
   expect((await callOp(panel, mcp.update, { askBeforeDestructive: false }, { cookie: owner.cookie })).status).toBe(200);
-  const init = await rpc(writer.access_token, "initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "t", version: "1" },
-  });
-  expect(init.body.result.instructions).toContain("Destructive actions and backup download links run right away");
+  const init = await initialize();
+  expect(init.body.result.instructions).toContain(
+    "Destructive actions, backup download links and letting a database's clients in without TLS run right away",
+  );
 
   // Off: it runs at once, with no approval, and the activity log has it.
   const temp = await createProject("Temp");

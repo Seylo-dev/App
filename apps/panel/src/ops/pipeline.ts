@@ -6,9 +6,10 @@
 //     -> audit
 //
 // Calls a model made (MCP and AI transports, or any MCP token) only reach
-// ops marked mcp: true, and destructive ones (and modelApproval ones, which
-// hand data out of the panel) need a person's approval (MCP tokens skip it
-// while "Ask before destructive actions" is off).
+// ops marked mcp: true, and destructive ones (and modelApproval ones: those
+// that hand data out of the panel, and the inputs of a "conditional" one
+// that its handler's check picks) need a person's approval (MCP tokens skip
+// it while "Ask before destructive actions" is off).
 //
 // Input is validated before the permission check because project and
 // service permissions read the resource id from the input. Anonymous
@@ -129,7 +130,14 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
         // Counted until its audit row is written, so a move that starts meanwhile waits for both.
         written = beginWrite(deps.db);
       }
-      if (needsPerson(op) && fromModel(call, principal) && !call.approvalId && !autoMode && !approvalWaived(deps, principal)) {
+      // A person's own call never reaches needsPerson, so a conditional op's check runs for models only.
+      if (
+        fromModel(call, principal) &&
+        !call.approvalId &&
+        !autoMode &&
+        needsPerson(op, handler, input, { db: deps.db, access }) &&
+        !approvalWaived(deps, principal)
+      ) {
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
       }
 
@@ -184,9 +192,16 @@ function authorize(
   return target;
 }
 
-/** Ops a model's call waits on a person for: destructive ones, and modelApproval ones (data leaving the panel). */
-function needsPerson(op: AnyOpContract): boolean {
-  return op.kind === "destructive" || op.modelApproval === true;
+/**
+ * Whether a model's call waits on a person: destructive ops, modelApproval
+ * true ones (data leaving the panel), and the calls of a "conditional" one
+ * that its handler's check picks (without the check, which collectHandlers
+ * refuses, every call waits).
+ */
+function needsPerson(op: AnyOpContract, handler: OpHandler, input: unknown, check: { db: PanelDb; access: Access }): boolean {
+  if (op.kind === "destructive" || op.modelApproval === true) return true;
+  if (op.modelApproval !== "conditional") return false;
+  return handler.modelApproval?.(input as never, check) ?? true;
 }
 
 /** Calls a model made: MCP and AI transports, and MCP tokens on any transport. */

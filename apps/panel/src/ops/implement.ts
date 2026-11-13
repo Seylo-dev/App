@@ -76,14 +76,29 @@ export interface OpHandler<C extends AnyOpContract = AnyOpContract> {
    * the requester. Set with implement()'s options.
    */
   guard?(input: OpInput<C>, check: { db: PanelDb; access: Access }): void;
+  /**
+   * For a contract with modelApproval "conditional" (and only there,
+   * collectHandlers checks both ways): whether this call waits for a
+   * person's approval when a model makes it, from the input and the
+   * resource as it is now (databases.setExposure: true when it lets
+   * clients in without TLS). The pipeline asks it only for a model's call
+   * without an approval, after the permission check and the guard; a
+   * person's own call never runs it. Set with implement()'s options.
+   */
+  modelApproval?(input: OpInput<C>, check: { db: PanelDb; access: Access }): boolean;
 }
 
 export function implement<C extends AnyOpContract>(
   contract: C,
   run: OpHandler<C>["run"],
-  options: { guard?: OpHandler<C>["guard"] } = {},
+  options: { guard?: OpHandler<C>["guard"]; modelApproval?: OpHandler<C>["modelApproval"] } = {},
 ): OpHandler<C> {
-  return options.guard ? { contract, run, guard: options.guard } : { contract, run };
+  return {
+    contract,
+    run,
+    ...(options.guard ? { guard: options.guard } : {}),
+    ...(options.modelApproval ? { modelApproval: options.modelApproval } : {}),
+  };
 }
 
 /**

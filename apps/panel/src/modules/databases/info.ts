@@ -78,21 +78,25 @@ export function findDatabase(db: PanelDb, serviceId: string): DatabaseRow | unde
   return db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, serviceId)).get();
 }
 
+/** The database's exposure row. A version without TLS (MariaDB 10.11) is never exposed: a row from before 0.2.9 reads as closed. */
+export function exposureOf(db: PanelDb, row: DatabaseRow): ExposureRow | null {
+  if (exposureRefusal(row) !== null) return null;
+  return (
+    db
+      .select()
+      .from(portExposures)
+      .where(and(eq(portExposures.serviceId, row.serviceId), eq(portExposures.kind, "database")))
+      .get() ?? null
+  );
+}
+
 export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: string): DatabaseInfo {
   const service = getService(deps.db, serviceId);
   const row = findDatabase(deps.db, serviceId);
   if (!row) throw new OpError("NOT_FOUND", `${service.name} is not a database.`, { serviceId });
   const engine = engines[row.engine];
   const adminPassword = readSecret(deps, serviceId, adminPasswordSecret) ?? "";
-  // A version without TLS (MariaDB 10.11) is never exposed: a row from before 0.2.9 reads as closed.
-  const exposure =
-    exposureRefusal(row) === null
-      ? (deps.db
-          .select()
-          .from(portExposures)
-          .where(and(eq(portExposures.serviceId, serviceId), eq(portExposures.kind, "database")))
-          .get() ?? null)
-      : null;
+  const exposure = exposureOf(deps.db, row);
   const node = serviceNodes(deps.db, serviceId)[0] ?? null;
   return {
     service,

@@ -1701,6 +1701,21 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   (403) unless the call carries
   `approvalId`, which only the approvals module sets when it replays a call
   a person approved (the approvals module checks that the approval matches the op and input).
+  `modelApproval: "conditional"` (0.2.16; `databases.setExposure`) holds
+  only some of a mutation's calls: its handler's check
+  (`implement(op, run, { modelApproval })`, `(input, { db, access }) =>
+  boolean`, from the validated input and the resource as it is now)
+  picks them, and the others run as ordinary changes. `collectHandlers`
+  refuses a "conditional" contract whose handler has no check and a check
+  on any other contract (a handler without one would hold every call).
+  The pipeline asks the check only for a model's call without an
+  `approvalId` and outside auto mode, after the permission check and the
+  guard, so a person's own call (a session, an `api` key) never runs it
+  and never waits. A held call then goes the way of a destructive one:
+  `APPROVAL_REQUIRED`, queued by the MCP tool as an approval (the
+  assistant queues every change anyway), replayed on approval, and run
+  right away for `mcp` tokens while "Ask before destructive actions" is
+  off.
   An op's handler may carry a guard (`implement(op, run, { guard })`, a
   check beyond `op.permission` that needs the resource, such as
   `backups.downloadUrl`'s `databases.credentials` on a database): the
@@ -2092,8 +2107,9 @@ never type the ids by hand.
   `POST /oauth/token` (code + S256 PKCE,
   rotating refresh tokens, access tokens 24 h, a grant lives 90 days),
   `POST /oauth/revoke`. A token sees only the tools it could use;
-  destructive calls become approvals while "Ask before destructive
-  actions" is on. `mcp.info` also answers a snippet per AI tool and
+  destructive calls (and `modelApproval` ones) become approvals while
+  "Ask before destructive actions" is on, and `initialize`'s instructions
+  name them. `mcp.info` also answers a snippet per AI tool and
   one-click install links (`modules/mcp/hosts.ts`, each tool's documented
   format, the server named after the brand slug).
 
@@ -5539,7 +5555,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `plainConnections` "allowed" (with `openToEveryone` when
   `allowedCidrs` is empty) or "tlsOnly"; emptying the allow list while it
   stays on is audited as `plainConnections` "allowed" with
-  `openToEveryone` true too. `databases.get exposure` has
+  `openToEveryone` true too. Those two are also what a model's call waits
+  for a person on (`modelApproval: "conditional"`, the handler's
+  `weakensTls` reads the same `plainChange` the audit does): turning it
+  on (from off, exposing again included) and emptying a non-empty allow
+  list while it stays on. Sending `allowPlain: true` while it is already
+  on, other lists, ports and host names, `allowPlain: false` (with an
+  empty list too) and turning exposure off run as before.
+  `databases.get exposure` has
   `allowPlain` (the setting) and `plainNeedsNodeUpdate` (the node's agent
   is older: the port stays TLS only whatever the setting says, and the
   desired state sends `allow_plain` false); `databases.connection

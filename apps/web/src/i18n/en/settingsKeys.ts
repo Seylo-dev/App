@@ -39,7 +39,7 @@ export default {
       mcp: "Recommended. The tool can look but not change anything.",
     },
     mcpWrites:
-      "Deploys, restarts and edits (env, domains, files) run right away. Deleting something or changing it for good, such as a backup restore, waits in Approvals until a person approves it, and so does a backup download.",
+      "Deploys, restarts and edits (env, domains, files) run right away. Deleting something or changing it for good, such as a backup restore, waits in Approvals until a person approves it, and so do a backup download and opening a database to connections without TLS.",
     mcpWritesNoAsk:
       "Deploys, restarts, edits and deletes all run right away: Ask before destructive actions is off in the MCP server settings. Every call is in the activity log.",
     projects: "Projects",
@@ -66,18 +66,18 @@ export default {
     enabledHint: "Off refuses every token and sign-in from AI tools but keeps them, so turning it back on restores access.",
     askBeforeDestructive: "Ask before destructive actions",
     askBeforeDestructiveHint:
-      "Deleting something or changing it for good waits in Approvals until a person approves it, and so does a backup download. Off, AI tools allowed to change things do it right away. It is still in the activity log.",
+      "Deleting something or changing it for good waits in Approvals until a person approves it, and so do a backup download and opening a database to connections without TLS. Off, AI tools allowed to change things do it right away. It is still in the activity log.",
     readOnlyByDefault: "New AI tools start read-only",
     readOnlyByDefaultHint:
       "What the sign-in page picks when an AI tool connects. Off, it picks Read and change. The person signing in can still pick either.",
     safetyTitle: { readOnly: "Read-only by default", write: "Changes allowed by default" },
     safety: {
       readOnlyAsk:
-        "AI tools see the same actions as you, but tokens start read-only. Anything that deletes something or changes it for good waits until a person approves it, and so does a backup download.",
+        "AI tools see the same actions as you, but tokens start read-only. Anything that deletes something or changes it for good waits until a person approves it, and so do a backup download and opening a database to connections without TLS.",
       readOnlyNoAsk:
         "AI tools see the same actions as you, but tokens start read-only. Tools you let change things can also delete them right away, without asking. Every call is in the activity log.",
       writeAsk:
-        "New AI tools get read and change access unless you pick Read only when they connect. Anything that deletes something or changes it for good still waits until a person approves it, and so does a backup download.",
+        "New AI tools get read and change access unless you pick Read only when they connect. Anything that deletes something or changes it for good still waits until a person approves it, and so do a backup download and opening a database to connections without TLS.",
       writeNoAsk:
         "New AI tools get read and change access unless you pick Read only when they connect, and they can delete things right away, without asking. Every call is in the activity log.",
     },

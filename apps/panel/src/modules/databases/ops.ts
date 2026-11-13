@@ -8,11 +8,12 @@
 // owner allows them, allowPlain).
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { databases as dbOps, domains as domainOps, env as envOps, OpError, terminals } from "@seylo/ops";
+import { databases as dbOps, domains as domainOps, env as envOps, OpError, type OpInput, terminals } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, gt } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
 import { userOf } from "../../auth/principal";
+import type { PanelDb } from "../../db/client";
 import { portExposures, serviceDatabases } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
@@ -46,9 +47,12 @@ import { imageVersion } from "./images";
 import {
   adminPasswordSecret,
   type DatabaseInfo,
+  type ExposureRow,
   exposedAddress,
   exposedConnection,
+  exposureOf,
   exposureState,
+  findDatabase,
   internalConnection,
   loadDatabase,
   reportedExposedPort,
@@ -271,7 +275,7 @@ export const openShell = implement(dbOps.openShell, async (input, ctx) => {
   return { ticket: ticket.ticket, socketPath: ticket.url, client: info.engine.shellClient, expiresAt: ticket.expiresAt };
 });
 
-export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
+function exposeDatabase(input: OpInput<typeof dbOps.setExposure>, ctx: OpContext): Database {
   const info = loadDatabase(ctx, input.serviceId);
   if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
   const node = info.node;
@@ -311,8 +315,7 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
   if (input.allowPlain && !input.enabled) {
     throw new OpError("BAD_REQUEST", "Connections without TLS need exposure on.", { field: "allowPlain" });
   }
-  const wasPlain = info.exposure?.allowPlain ?? false;
-  const allowPlain = input.enabled ? (input.allowPlain ?? wasPlain) : false;
+  const { wasPlain, allowPlain, openedToEveryone } = plainChange(input, info.exposure, cidrs);
   // An older agent ignores the field and stays TLS only: refuse turning it on there instead of a switch that does nothing.
   if (allowPlain && !wasPlain && !nodeHasCapability(ctx.db, ctx.agents, node.id, plainExposureCapability)) {
     throw new OpError(
@@ -322,7 +325,6 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
     );
   }
   // Emptying the allow list while it stays on opens plain clients to every IP: audited the same way as turning it on there.
-  const openedToEveryone = allowPlain && wasPlain && cidrs.length === 0 && (info.exposure?.allowedCidrs.length ?? 0) > 0;
   if (allowPlain !== wasPlain || openedToEveryone) {
     // The input says what was asked; this says what changed (turning exposure off ends it too).
     ctx.auditDetails?.({
@@ -372,4 +374,35 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
   afterChange(ctx, info);
   invalidateService(ctx, info.service.id, [domainOps.list.id]);
   return toDatabase(loadDatabase(ctx, info.service.id), ctx.agents);
-});
+}
+
+export const setExposure = implement(dbOps.setExposure, exposeDatabase, { modelApproval: weakensTls });
+
+/**
+ * What a setExposure call does to clients without TLS, from its input, the
+ * stored exposure row and the allow list it leaves (cidrs): whether they
+ * were let in, whether they are after it, and whether it opens them to
+ * every IP (an allow list emptied while they stay let in). The handler
+ * audits from it and weakensTls from it, so the two agree.
+ */
+function plainChange(input: OpInput<typeof dbOps.setExposure>, exposure: ExposureRow | null, cidrs: readonly string[]) {
+  const wasPlain = exposure?.allowPlain ?? false;
+  const allowPlain = input.enabled ? (input.allowPlain ?? wasPlain) : false;
+  const openedToEveryone = allowPlain && wasPlain && cidrs.length === 0 && (exposure?.allowedCidrs.length ?? 0) > 0;
+  return { wasPlain, allowPlain, openedToEveryone };
+}
+
+/**
+ * setExposure's modelApproval check (its contract says "conditional"): a
+ * model's call that lets clients in without TLS, or opens them to every IP,
+ * waits for a person's approval. Every other change, turning them off
+ * among them, runs as before.
+ */
+function weakensTls(input: OpInput<typeof dbOps.setExposure>, check: { db: PanelDb }): boolean {
+  const row = findDatabase(check.db, input.serviceId);
+  // Not a database: the handler refuses it at once.
+  if (!row) return false;
+  const exposure = exposureOf(check.db, row);
+  const { wasPlain, allowPlain, openedToEveryone } = plainChange(input, exposure, input.allowedCidrs ?? exposure?.allowedCidrs ?? []);
+  return allowPlain && (!wasPlain || openedToEveryone);
+}

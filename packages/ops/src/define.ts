@@ -51,11 +51,16 @@ export interface OpDefinition<Kind extends OpKind, Input extends TObject, Output
   readonly mcp: boolean;
   /**
    * A mutation that model callers (MCP, AI) may only run once a person
-   * approved it, like a destructive op, though it deletes nothing: it hands
-   * data out of the panel (backups.downloadUrl). MCP tokens skip it while
-   * "Ask before destructive actions" is off, as they skip destructive ones.
+   * approved it, like a destructive op, though it deletes nothing. true:
+   * every call, as it hands data out of the panel (backups.downloadUrl).
+   * "conditional": only the calls its panel handler's modelApproval check
+   * picks from the input and the resource as it is now, for an op where
+   * some inputs weaken a protection (databases.setExposure letting clients
+   * in without TLS) and the rest are ordinary changes. MCP tokens skip it
+   * while "Ask before destructive actions" is off, as they skip destructive
+   * ones.
    */
-  readonly modelApproval?: true;
+  readonly modelApproval?: true | "conditional";
   /** Written to the audit log. Every mutation and destructive op must audit. */
   readonly audit: boolean;
   readonly rateLimit?: RateLimitClass;
