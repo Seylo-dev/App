@@ -1719,6 +1719,33 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   assistant queues every change anyway), replayed on approval, and run
   right away for `mcp` tokens while "Ask before destructive actions" is
   off.
+  A handler may also carry a precheck (0.2.17; `implement(op, run, {
+  precheck })`, `(input, { db, agents }) => void`, read only): the
+  refusals it would make anyway before changing anything. The pipeline
+  runs it for a call it is about to hold, just before
+  `APPROVAL_REQUIRED`, and the assistant's queue runs it
+  (`OpRunner.precheck`) after `OpRunner.authorize`, so the model gets the
+  handler's OpError at once (MCP: the tool's error text; the assistant:
+  the tool call's error and tool result) and no approval is made that
+  would only fail once approved. The handler still makes every check
+  itself. `databases.setExposure`'s is `planExposure`, the checks its
+  handler runs in the same order: no node, no TLS (`noTls`), the node's
+  agent (`agentTooOld`, also for `allowPlain`), a TLS host name that is
+  none or someone else's, allow list entries that are not addresses or
+  KeyDB without one (BAD_REQUEST), `allowPlain` with exposure off
+  (BAD_REQUEST) and a port open on the node for something else (CONFLICT,
+  checked again as it is written).
+  And an approval warning (0.2.17; `implement(op, run, { approvalWarning
+  })`, `(input, { db }) => ApprovalWarning | null`): what approving a
+  pending call weakens. `toApproval` asks it (`OpRunner.approvalWarning`)
+  for pending approvals only, from the sealed input parsed again and the
+  resource as it is when the approval is read, so it says what approving
+  does now; a check that throws reads as none (logged). It is
+  `Approval.warning`, absent otherwise. `databases.setExposure`'s
+  (`plainWarning`, which `weakensTls` reads too) is `kind`
+  "plainConnections" with `change` "allow" (clients without TLS let in)
+  or "widen" (let in from more addresses while they are), `allowedCidrs`
+  (the list approving leaves) and `openToEveryone`.
   An op's handler may carry a guard (`implement(op, run, { guard })`, a
   check beyond `op.permission` that needs the resource, such as
   `backups.downloadUrl`'s `databases.credentials` on a database): the
@@ -5619,13 +5646,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `plainConnections` "allowed" (with `openToEveryone` when
   `allowedCidrs` is empty, holds a /0 or ranges adding up to every IPv4
   or every IPv6 address, such as 0.0.0.0/1 with 128.0.0.0/1:
-  `http/ip-ranges.ts` `allowListOpensAFamily`) or "tlsOnly"; widening a
+  `allowListOpensToEveryone`) or "tlsOnly"; widening a
   non-empty allow list while it stays on (emptying it, or an entry the
   stored list does not hold, as `heldByAllowList` reads it: one stored
   entry of the same family covering its whole range, IPv4-mapped IPv6
   staying IPv6 as on the node; a range split across two stored entries
-  counts as new) is audited as `plainConnections` "allowed" with
-  `openToEveryone` too. Those two are also what a model's call waits for
+  counts as new: `widensAllowList`) is audited as `plainConnections`
+  "allowed" with `openToEveryone` too. These read lists the way the
+  portgate does (netip.ParsePrefix) and live in `@seylo/ops`
+  (`allow-lists.ts`, pure, no `node:net`; 0.2.17, before in
+  `http/ip-ranges.ts`), so the web app's confirmations below read them the
+  same way. Those two are also what a model's call waits for
   a person on (`modelApproval: "conditional"`, the handler's
   `weakensTls` reads the same `plainChange` the audit does): turning it
   on (from off, exposing again included) and widening a non-empty allow
@@ -5634,7 +5665,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   wait like an empty one. Sending `allowPlain: true` while it is already
   on, a list inside the stored one (from an empty list any list),
   ports and host names, `allowPlain: false` (with an empty or catch-all
-  list too) and turning exposure off run as before.
+  list too) and turning exposure off run as before. A call the handler
+  would refuse anyway is refused at once instead of held (0.2.17, its
+  precheck `planExposure`: `agentTooOld`, `noTls`, BAD_REQUEST, a taken
+  port), and the assistant's queue refuses those the same way, `allowPlain`
+  with exposure off included. A waiting approval of a call that
+  `weakensTls` has `warning` (`plainWarning`: "allow" or "widen", the
+  allow list it leaves, `openToEveryone`), read as approving it would run
+  now; the Approvals page and the assistant's card show it as a "Without
+  TLS" chip (red while every IP gets in, else amber), a note with what it
+  allows and to whom in the Connection tab's colors, and a red Approve
+  that asks first, like a destructive one.
   `databases.get exposure` has
   `allowPlain` (the setting) and `plainNeedsNodeUpdate` (the node's agent
   is older: the port stays TLS only whatever the setting says, and the
@@ -5649,9 +5690,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (what travels unencrypted, the password itself for the Redis-like
   engines and ClickHouse, the allow list or, with none, that the port is
   open to every IP in stronger words, and to prefer TLS or a timed
-  expose), off does not; with it on, saving an empty allow list in the
-  exposure settings (one that was not empty) asks to confirm with the
-  same open-to-every-IP warning, the chip says "TLS optional" and a line
+  expose), off does not; with it on, saving an allow list in the
+  exposure settings that lets every IP in (empty, or a catch-all:
+  `allowListOpensToEveryone`, 0.2.17; before, only an empty one) and lets
+  in addresses the saved one did not (`widensAllowList`) asks to confirm
+  with the same open-to-every-IP warning, which also says a catch-all
+  saved list is open to every IP, the chip says "TLS optional" and a line
   says plain clients are accepted too (MySQL: they need the
   server's public key, `--get-server-public-key` or
   `allowPublicKeyRetrieval=true`); on an older agent the switch says it
@@ -6718,6 +6762,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and toasts sit above it (`--toast-lift`), so it never covers a page's
   last buttons. The Approvals page shows each request's source as chips
   (Assistant and the chat, linking to it for its owner; MCP and the token).
+  A pending approval with `warning` (0.2.17,
+  `components/approvals/approval-warning.tsx`) gets its chip and note on
+  both the page and the card, and its Approve button is red and asks
+  first, as for a destructive op.
 - Dashboard Nodes card, Live (`components/dashboard/node-usage.tsx`): the
   Live chip in the header is a toggle and on by default; picking 1h, 24h
   or 7d turns it off (the range picker shows no choice while Live is on),
