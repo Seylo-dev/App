@@ -1,5 +1,6 @@
 // Address parsing and CIDR matching for the panel's own rules (which
-// forwarded client address to believe, how rate limits group addresses).
+// forwarded client address to believe, how rate limits group addresses,
+// whether a new allow list lets more addresses in).
 // Pure functions over strings, no DNS.
 
 import { isIP } from "node:net";
@@ -86,4 +87,68 @@ function samePrefix(a: Uint8Array, b: Uint8Array, bits: number): boolean {
   if (rest === 0) return true;
   const mask = (0xff << (8 - rest)) & 0xff;
   return ((a[whole] ?? 0) & mask) === ((b[whole] ?? 0) & mask);
+}
+
+/**
+ * An allow list entry the way a node's portgate reads it (Go's
+ * netip.ParsePrefix): IPv4 or IPv6 as written, so ::ffff:a.b.c.d/128 stays
+ * IPv6 and lets no IPv4 client in, unlike parseCidr. A bare address is its
+ * own /32 or /128; null when it is not an entry.
+ */
+function allowEntry(text: string): Cidr | null {
+  const [address = "", bitsText, extra] = text.trim().toLowerCase().split("/");
+  const kind = isIP(address);
+  if (kind === 0 || extra !== undefined || address.includes("%")) return null;
+  const bytes = kind === 4 ? new Uint8Array(address.split(".").map(Number)) : ipv6Bytes(address);
+  const max = kind === 4 ? 32 : 128;
+  const bits = bitsText === undefined ? max : Number(bitsText);
+  if (!bytes || bitsText === "" || !Number.isInteger(bits) || bits < 0 || bits > max) return null;
+  return { bytes, bits };
+}
+
+/**
+ * Whether every address `entry` lets in is let in by `list` already: one
+ * of its entries holds the whole range (same family, as short a prefix or
+ * shorter). A range split across several entries counts as not held, so a
+ * caller that asks before widening a list asks a little too often, never
+ * too rarely. An empty list holds nothing here; what it means (no limit)
+ * is the caller's.
+ */
+export function heldByAllowList(entry: string, list: readonly string[]): boolean {
+  const inner = allowEntry(entry);
+  if (!inner) return false;
+  return list.some((text) => {
+    const outer = allowEntry(text);
+    return (
+      !!outer && outer.bytes.length === inner.bytes.length && inner.bits >= outer.bits && samePrefix(inner.bytes, outer.bytes, outer.bits)
+    );
+  });
+}
+
+/**
+ * Whether the entries together let in every IPv4 address or every IPv6
+ * address: a /0, or ranges that add up to one (0.0.0.0/1 with 128.0.0.0/1).
+ * Entries that are not addresses add nothing.
+ */
+export function allowListOpensAFamily(list: readonly string[]): boolean {
+  const entries = list.map(allowEntry).filter((entry): entry is Cidr => entry !== null);
+  return [4, 16].some((size) => {
+    const total = BigInt(size * 8);
+    const spans = entries
+      .filter((entry) => entry.bytes.length === size)
+      .map((entry) => {
+        const width = 1n << (total - BigInt(entry.bits));
+        const value = entry.bytes.reduce((sum, byte) => (sum << 8n) | BigInt(byte), 0n);
+        const start = value - (value % width);
+        return [start, start + width] as const;
+      })
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    // Walk the sorted ranges from address 0: a gap before the end means some addresses stay out.
+    let next = 0n;
+    for (const [start, end] of spans) {
+      if (start > next) return false;
+      if (end > next) next = end;
+    }
+    return next === 1n << total;
+  });
 }
