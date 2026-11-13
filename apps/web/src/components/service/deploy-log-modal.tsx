@@ -2,7 +2,9 @@
 // commit, status and who/when, the five step cards, the whole log in a
 // virtualized LogViewer, and Copy / Download / Close. Up to 1280px wide, so
 // build output lines fit; on a phone it takes the screen less 16px a side
-// and the step cards wrap.
+// and the step cards wrap. A failed deploy shows its error, Use port when
+// the app listened on another port, and the new container's last output
+// collapsed under it (deploy-failure.tsx), apart from the step log.
 
 import { deployments } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -13,6 +15,7 @@ import { LogViewer, useLogBuffer } from "@seylo/ui/components/log-viewer";
 import { IconCopy, IconDownload, IconX } from "@tabler/icons-react";
 import { t } from "../../i18n/t";
 import { useLiveUp } from "../../lib/live";
+import { LastOutput, UsePortButtons, usePortChoices } from "./deploy-failure";
 import { bufferText, downloadText, useDeploymentLog } from "./deploy-log";
 import { type Deployment, StepCards } from "./deploy-steps";
 import { deploymentDurationMs, deploymentTitle, deploymentVersion, healthFailed, type TitleSource, triggerLabel } from "./deployment-meta";
@@ -121,6 +124,12 @@ function ModalBody({ serviceId, source, initial }: { serviceId: string; source?:
           <StepCards steps={d.steps} buildWait={d.buildWait} />
         </div>
         {d.error && <p className="m-0 px-5 pb-3 text-[12.5px] leading-[1.45] text-chip-red-fg">{d.error}</p>}
+        {usePortChoices(d).length > 0 && (
+          <div className="px-5 pb-3">
+            <UsePortButtons serviceId={serviceId} d={d} />
+          </div>
+        )}
+        {d.lastOutput && <LastOutput d={d} className="mx-5 mb-3" />}
         <div className="shrink-0 px-5">
           {log.error && log.lines === 0 ? (
             <OpErrorNote error={log.error} />

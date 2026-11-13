@@ -110,4 +110,17 @@ export default {
     emptyLog: "This deploy wrote no log lines.",
     waiting: "Waiting for the first lines…",
   },
+  /** Under a failed deploy: the new container's own output, apart from the deploy log (0.2.16). */
+  lastOutput: {
+    title: "Last output of the new container",
+    on: "on {node}",
+    lines: { one: "{count} line", other: "{count} lines" },
+  },
+  /** A failed deploy whose app listens on another port than the service's (Deployment.portHint). */
+  usePort: {
+    button: "Use port {port}",
+    title: "Set the service's port to {port}, move its domains on port {from} there, and deploy",
+    started: "Port {port} set. Deploying.",
+    startedLater: "Port {port} set. Deploying; the domains move to it when the new version rolls out.",
+  },
 } as const;

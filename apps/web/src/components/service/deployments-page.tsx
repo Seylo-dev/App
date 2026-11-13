@@ -33,6 +33,7 @@ import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
 import { useActiveDeploy } from "./active-deploy";
 import { buildNodeText } from "./build-node";
+import { LastOutput, UsePortButtons } from "./deploy-failure";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
 import { type Deployment, StepChips } from "./deploy-steps";
@@ -257,6 +258,8 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
           </span>
         </div>
         {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
+        {failed && <UsePortButtons serviceId={service.id} d={d} />}
+        {failed && <LastOutput d={d} />}
         <PrivateRepoHint service={service} d={d} />
         {failed && <DeployHostAction service={service} error={d.error} />}
         {running ? <StepChips steps={d.steps} buildWait={d.buildWait} /> : <DeploymentChips d={d} now={now} />}

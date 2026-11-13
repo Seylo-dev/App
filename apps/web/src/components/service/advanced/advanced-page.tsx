@@ -18,6 +18,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { isPanelService } from "../../../lib/service-display";
+import { useActiveDeploy } from "../active-deploy";
 import { describeCron } from "../cron-text";
 import { MaintenanceCard } from "../domains/access-cards";
 import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
@@ -270,6 +271,11 @@ function PlacementCard({ service }: { service: ServiceDetail }) {
   const [sticky, setSticky] = useState(service.stickySessions);
   const [entry, setEntry] = useState<string | null>(service.entryNodeId);
   const save = useOpMutation(services.setPlacements, { onSuccess: useSaved() });
+  // Other nodes wait for a running deploy, which rolls out on the nodes it started with (replica counts do not).
+  const busy = useActiveDeploy(service.id) !== null;
+  const nodesChanged =
+    rows.length !== service.placements.length || rows.some((r) => !service.placements.some((p) => p.nodeId === r.nodeId));
+  const waits = busy && nodesChanged;
   const hasVolumes = volumesOf(service).length > 0;
   const all =
     nodes.data?.nodes ?? service.placements.map((p) => ({ id: p.nodeId, name: p.nodeName, online: true, canBuild: false, queued: 0 }));
@@ -288,7 +294,8 @@ function PlacementCard({ service }: { service: ServiceDetail }) {
           <Button
             size="sm"
             variant="primary"
-            disabled={save.isPending || rows.length === 0}
+            disabled={save.isPending || rows.length === 0 || waits}
+            title={waits ? t("serviceAdvanced.placement.deployBusy") : undefined}
             onClick={() =>
               save.mutate({
                 serviceId: service.id,
@@ -300,7 +307,7 @@ function PlacementCard({ service }: { service: ServiceDetail }) {
           >
             {t("service.save")}
           </Button>
-          <span>{t("serviceAdvanced.placement.deploysNow", { count: total })}</span>
+          <span>{waits ? t("serviceAdvanced.placement.deployBusy") : t("serviceAdvanced.placement.deploysNow", { count: total })}</span>
           <MutationError error={save.error} />
         </>
       }
@@ -387,6 +394,7 @@ function MoveCard({ service }: { service: ServiceDetail }) {
   const navigate = useNavigate();
   const [to, setTo] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const busy = useActiveDeploy(service.id) !== null;
   const move = useOpMutation(services.move, {
     onSuccess: () => {
       toast.success(t("serviceEnv.moveStarted"));
@@ -414,7 +422,11 @@ function MoveCard({ service }: { service: ServiceDetail }) {
             </SelectContent>
           </Select>
         </Field>
-        <Button onClick={() => setConfirm(true)} disabled={!target || move.isPending}>
+        <Button
+          onClick={() => setConfirm(true)}
+          disabled={!target || move.isPending || busy}
+          title={busy ? t("serviceAdvanced.placement.deployBusy") : undefined}
+        >
           {t("serviceAdvanced.move.button")}
         </Button>
         <MutationError error={move.error} />

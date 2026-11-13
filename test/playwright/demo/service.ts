@@ -166,6 +166,12 @@ export const servicesById = {
 
 const step = (key: string, status: string, node: unknown, detail: string, durationMs: number | null) => ({ key, status, node, detail, durationMs });
 
+/** The failed deploy (5a2c9d1): the app listened on 6000, the service's port is 3001 (agents from 0.2.16 say so). */
+export const failedDeployError =
+  "us-ash-1: not healthy after 1m0s: health check never passed: tcp check on port 3001: dial tcp 10.0.3.4:3001: connect: connection refused. The app listens on port 6000, not 3001. Set the service's port to 6000 (Ports in the Container section of its Advanced tab) and point its domains there, or make the app listen on port 3001. The previous version stayed live.";
+/** Its new container's last output (Deployment.lastOutput), never in the deploy log. */
+export const failedDeployOutput = ["[Cloudflare R2] Connected", "Server is running on port 6000", "Heartbeat 1", "Heartbeat 2"];
+
 const deployments = [
   {
     id: "d000000000000010",
@@ -228,7 +234,10 @@ const deployments = [
     durationMs: failed ? 110_000 : 53_000,
     canRollback: !live && !failed,
     rollbackOf: null,
-    error: failed ? "No answer on port 3001 within 60s. The previous version stayed live." : null,
+    error: failed ? failedDeployError : null,
+    // The app listened on 6000 (agents from 0.2.16 read it): its own output and Use port 6000.
+    lastOutput: failed ? { node: us, lines: failedDeployOutput } : null,
+    portHint: failed ? { node: us, port: 3001, listening: [6000], loopbackOnly: [], canUsePort: true } : null,
     createdAt: ago(age),
     startedAt: ago(age),
     finishedAt: ago(age - 53_000),

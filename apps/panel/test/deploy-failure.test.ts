@@ -92,7 +92,7 @@ const domainPorts = (id: string) =>
     .map((d) => `${d.host}:${d.port}`);
 
 /** The target ports of the routes the node gets for the service (domains/desired.ts). */
-const routesOf = (id: string) => serviceNetworking(panel.deps, id, nodeA).routing.routes.map((r) => r.targetPort);
+const routesOf = (id: string) => serviceNetworking(panel.deps, id, nodeA).routing.routes?.map((r) => r.targetPort) ?? [];
 
 function addDomain(serviceId: string, host: string, targetPort: number) {
   panel.deps.db.insert(domains).values({ serviceId, host, targetPort, https: "off" }).run();

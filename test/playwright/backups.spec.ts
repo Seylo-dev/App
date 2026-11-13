@@ -2,7 +2,8 @@
 // at once (backups.runAll; before, only the first), and so does the
 // database Connection tab's; a schedule's own menu backs up just that one.
 // A schedule the panel refused before storing its run is named in the
-// toast ("1 could not start: ..."). Each row of the "Backups and
+// toast ("1 could not start: ..."), and one whose backup still runs is
+// refused by the panel (0.2.16), which the menu says as news. Each row of the "Backups and
 // restores" card names what it holds ("Database", "Volume uploads",
 // "Restore of the <date> backup of Database"), and a backup that is there has Download, which opens the
 // link the panel signs straight from the bucket. A backup whose destination
@@ -219,6 +220,13 @@ test.describe("backups", () => {
         },
         "backups.runNow": (input) => {
           one.push(input);
+          // Since 0.2.16 the panel refuses a schedule whose backup still runs; the second click here is that.
+          if (one.length === 2) {
+            throw new DemoRefusal(409, "CONFLICT", "A backup of this schedule is still running. Wait for it to finish, then back up again.", {
+              reason: "running",
+              runId: "r1000000000000002",
+            });
+          }
           return startedRun(threeSchedules[1] as Policy);
         },
       },
@@ -239,6 +247,12 @@ test.describe("backups", () => {
     await page.getByRole("menuitem", { name: "Back up now" }).click();
     await expect.poll(() => one).toEqual([{ serviceId: svc.db, policyId: "b000000000000002" }]);
     expect(all).toHaveLength(1);
+    // Again while that backup runs: refused, and said as news, not as an error.
+    await uploads.getByRole("button", { name: "Backup actions" }).click();
+    await page.getByRole("menuitem", { name: "Back up now" }).click();
+    await expect(page.getByText("This schedule is still backing up. Back it up again once that backup is done.")).toBeVisible();
+    await page.screenshot({ path: `${shots}/schedule-still-running.png` });
+    expect(one).toHaveLength(2);
 
     // The database Connection tab's Back up now is the same one; a schedule that could not start is named.
     await page.goto(`/p/${ids.acme}/s/${svc.db}/connection`);
@@ -246,7 +260,7 @@ test.describe("backups", () => {
     await card.getByRole("button", { name: "Back up now" }).click();
     await expect(page.getByText("Started 1 backup. 1 could not start: That volume does not belong to this service.")).toBeVisible();
     expect(all).toEqual([{ serviceId: svc.db }, { serviceId: svc.db }]);
-    expect(one).toHaveLength(1);
+    expect(one).toHaveLength(2);
   });
 
   test("each row names what it backed up, and a restore which backup it restored", async ({ page }) => {

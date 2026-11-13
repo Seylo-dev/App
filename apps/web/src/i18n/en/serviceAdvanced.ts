@@ -68,6 +68,8 @@ export default {
     entryHint: "Takes the public traffic: point domains at this node. Its edge spreads requests over every node above.",
     entryFirst: "{name} (first node)",
     deploysNow: { one: "Deploys {count} replica right away.", other: "Deploys {count} replicas right away." },
+    /** Other nodes (and Move) while a deploy runs: it rolls out on the nodes it started with. */
+    deployBusy: "A deploy is in progress. Wait for it, or cancel it, to change the nodes.",
   },
   move: {
     title: "Move to another node",
