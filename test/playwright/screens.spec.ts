@@ -72,6 +72,8 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["database-connection", service(svc.db, "connection")],
   ["database-users", service(svc.db, "users")],
   ["database-backups", service(svc.db, "backups")],
+  // Move to another node, limits and the crash policy (database-move.spec.ts covers the move).
+  ["database-advanced", service(svc.db, "advanced")],
   ["redis-connection", service(svc.redis, "connection")],
   ["clickhouse-connection", service(svc.clickhouse, "connection")],
   ["redis-users", service(svc.redis, "users")],

@@ -102,7 +102,9 @@ export function MoveCard({ service }: { service: ServiceDetail }) {
             void refetch();
             setConfirm(true);
           }}
-          disabled={!target || move.isPending || blocker !== null || moving !== null}
+          // A deploy in progress holds it at once, before the impact's next read says so.
+          disabled={!target || move.isPending || blocker !== null || active !== null}
+          title={active && !moving ? t("serviceAdvanced.placement.deployBusy") : undefined}
         >
           {t("serviceAdvanced.move.button")}
         </Button>
