@@ -419,9 +419,3 @@ func slowValkey(t *testing.T, addr, pw string, useTLS bool) func(string) error {
 	}
 	return func(word string) error { return say("ECHO " + word) }
 }
-
-// lastLine is a client's last line of output (warnings come first).
-func lastLine(out string) string {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	return strings.TrimSpace(lines[len(lines)-1])
-}
