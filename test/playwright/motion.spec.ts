@@ -159,7 +159,8 @@ test.describe("motion", () => {
     // Main navigation.
     await page.goto("/nodes");
     await expect(navLink(page, /^Nodes \d+$/)).toHaveAttribute("data-status", "active");
-    await expectSameWeight('nav[aria-label="Main"] > #sidebar-menu > div > a');
+    // The links sit in a non-shrinking wrapper since the projects list scrolls on its own (sidebar.tsx).
+    await expectSameWeight('nav[aria-label="Main"] > #sidebar-menu > div > div > a');
 
     // Settings sections.
     await page.goto("/settings/people");
