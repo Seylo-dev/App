@@ -170,4 +170,37 @@ test.describe("database move", () => {
     await expect(page).toHaveURL(new RegExp(`/s/${svc.db}/advanced#move`));
     await expect(page.locator("#move")).toBeVisible();
   });
+
+  test("Save and restart saves the limits, then restarts the database with them after a confirm", async ({ page }) => {
+    const sent: string[] = [];
+    const inputs: Record<string, unknown>[] = [];
+    await installDemo(page, {
+      overrides: {
+        "services.setResources": (input) => {
+          sent.push("services.setResources");
+          inputs.push(input);
+          const { serviceId: _, ...resources } = input;
+          return resources;
+        },
+        "deployments.deploy": (input) => {
+          sent.push("deployments.deploy");
+          inputs.push(input);
+          return { id: "d000000000000098", serviceId: input.serviceId, generation: 43, status: "queued", trigger: "manual" };
+        },
+      },
+    });
+    await page.goto(advanced);
+    const main = page.getByRole("main");
+    await main.getByLabel("Memory limit (MB)").fill("512");
+    await main.getByRole("button", { name: "Save and restart" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByRole("heading", { name: "Restart db with these limits?" })).toBeVisible();
+    await expect(dialog).toContainText("offline for a few seconds; its data stays");
+    expect(sent).toEqual([]);
+    await dialog.getByRole("button", { name: "Save and restart" }).click();
+    await expect(page.getByText("db restarts with the new limits")).toBeVisible();
+    expect(sent).toEqual(["services.setResources", "deployments.deploy"]);
+    expect(inputs[0]).toMatchObject({ serviceId: svc.db, memoryLimitBytes: 512_000_000 });
+    expect(inputs[1]).toEqual({ serviceId: svc.db });
+  });
 });

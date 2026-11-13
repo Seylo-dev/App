@@ -9,7 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { parseEnv } from "@seylo/env-analyzer";
-import { backups as backupOps, databases as dbOps, env, projects, services as serviceOps } from "@seylo/ops";
+import { backups as backupOps, databases as dbOps, deployments as deploymentOps, env, projects, services as serviceOps } from "@seylo/ops";
 import { DeployStage, ServicePhase } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { backupDestinations, backupPolicies, backupRuns, deployments, nodes, portExposures, servicePlacements } from "../src/db/schema";
@@ -390,6 +390,27 @@ describe("moving a database", () => {
     ]);
     // Nothing left to move.
     expect(followPlacements(panel.deps.db)).toEqual([]);
+  });
+});
+
+// The web's Advanced tab of a database: its crash policy applies at once, its limits with the deploy
+// its Save and restart starts (a database has no Deploy button).
+test("a database takes the crash policy at once and resource limits with its next deploy", async () => {
+  const id = await liveDb({ exposed: false });
+  const crash = await callOp(panel, serviceOps.setCrashPolicy, { serviceId: id, restart: true, stopAfterCrashes: 4 }, { cookie });
+  expect(crash.status).toBe(200);
+  expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.crashPolicy).toMatchObject({ restart: true, stopAfterCrashes: 4 });
+  const limits = { memoryLimitBytes: 512_000_000, memoryReservationBytes: null, cpuWeight: 200, pidsLimit: 256 };
+  expect((await callOp(panel, serviceOps.setResources, { serviceId: id, ...limits }, { cookie })).body).toEqual(limits);
+  // The running generation keeps what it was deployed with.
+  expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.resources?.memoryLimitBytes).toBeUndefined();
+  const dep = await callOp(panel, deploymentOps.deploy, { serviceId: id }, { cookie });
+  expect(dep.status).toBe(200);
+  await fleet.settle();
+  expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.resources).toMatchObject({
+    memoryLimitBytes: 512_000_000n,
+    cpuWeight: 200,
+    pidsLimit: 256,
   });
 });
 
