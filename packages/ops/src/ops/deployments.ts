@@ -134,9 +134,11 @@ export const Deployment = Type.Object({
    * node read it from the container (agents from 0.2.16): port is the port
    * checked, listening the other ports it listens on on all addresses
    * (services.usePort switches the service to one of them, when canUsePort:
-   * an app service that is not a compose member), loopbackOnly those it
-   * listens on only on 127.0.0.1 (it must listen on 0.0.0.0 instead). null
-   * otherwise. Added in 0.2.16.
+   * an app service that is not a compose member, on the service's newest
+   * deployment, and not when the checked port itself is bound only to
+   * 127.0.0.1, the mistake to fix then), loopbackOnly those it listens on
+   * only on 127.0.0.1 (it must listen on 0.0.0.0 instead). null otherwise.
+   * Added in 0.2.16.
    */
   portHint: Type.Union([
     Type.Object({

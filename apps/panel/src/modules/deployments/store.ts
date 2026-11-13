@@ -9,7 +9,7 @@ import {
   services as serviceOps,
 } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, max } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import {
   buildInFlight,
@@ -26,7 +26,7 @@ import type { Deps } from "../../deps";
 import { waitingBuilds, waitingDetail } from "../builds/slots";
 import { databaseKinds } from "../domains/lookup";
 import { nodeNames } from "../services/rows";
-import { lastOutputOf, portHintOf } from "./failure";
+import { lastOutputOf, legacyError, maxLastOutputLines, portHintOf } from "./failure";
 
 export type DeploymentRow = typeof deployments.$inferSelect;
 export type Deployment = Static<typeof deploymentOps.Deployment>;
@@ -177,6 +177,19 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
           .filter((s) => s.kind === "app" && s.parentId === null)
           .map((s) => s.id),
   );
+  // Use port belongs to the service's newest deployment only: once another deploy was started (it went live
+  // on the port, it runs, or it was Use port's own), an older failure's hint is history, not advice.
+  const newest = new Map(
+    failedServices.length === 0
+      ? []
+      : db
+          .select({ serviceId: deployments.serviceId, generation: max(deployments.generation) })
+          .from(deployments)
+          .where(inArray(deployments.serviceId, failedServices))
+          .groupBy(deployments.serviceId)
+          .all()
+          .map((g) => [g.serviceId, g.generation]),
+  );
   // Builds waiting for a free slot on their node: their clone step says so instead of "Fetching source".
   const waits = waitingBuilds(
     db,
@@ -223,8 +236,17 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
     const databaseImage = databaseImages.get(r.serviceId);
     const wait = waits.get(r.id);
     const buildWait = wait ? { node: ref(wait.nodeId) as { id: string; name: string }, position: wait.position } : null;
-    const output = r.status === "failed" ? lastOutputOf(r.nodeResults) : null;
+    let output = r.status === "failed" ? lastOutputOf(r.nodeResults) : null;
     const hint = r.status === "failed" ? portHintOf(r.nodeResults) : null;
+    // Failed before 0.2.16: the app's output is still in the stored error; split it off as it is read.
+    let error = r.error;
+    const legacy = r.status === "failed" && !output ? legacyError(r.error) : null;
+    if (legacy) {
+      error = legacy.error;
+      const nodeId =
+        Object.entries(r.nodeResults).find(([, n]) => n.status === "failed")?.[0] ?? r.targetNodeIds[0] ?? Object.keys(r.nodeResults)[0];
+      if (nodeId && legacy.lines.length > 0) output = { nodeId, lines: legacy.lines.slice(-maxLastOutputLines) };
+    }
     return {
       id: r.id,
       serviceId: r.serviceId,
@@ -258,7 +280,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       durationMs: r.finishedAt && r.startedAt ? Math.max(0, r.finishedAt.getTime() - r.startedAt.getTime()) : null,
       canRollback: r.status === "superseded" && keep.has(r.id) && (databaseImage === undefined || sameDatabaseImage(r, databaseImage)),
       rollbackOf: r.rollbackOf,
-      error: r.error,
+      error,
       lastOutput: output ? { node: ref(output.nodeId) as { id: string; name: string }, lines: output.lines } : null,
       portHint: hint
         ? {
@@ -266,7 +288,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
             port: hint.port,
             listening: hint.listening,
             loopbackOnly: hint.loopbackOnly,
-            canUsePort: hint.listening.length > 0 && ownApps.has(r.serviceId),
+            canUsePort: hint.switchable && ownApps.has(r.serviceId) && newest.get(r.serviceId) === r.generation,
           }
         : null,
       createdAt: r.createdAt.toISOString(),

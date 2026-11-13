@@ -54,11 +54,12 @@ import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
 import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-sha";
 import { dataVolumes, writeSpec } from "../services/insert";
+import { accessText, moveAccess } from "../services/port-move";
 import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService } from "../services/rows";
 import { assertImageAllowed } from "../services/source-guard";
 import { needsBuild, readSpec, runSettingsOf, withFirstPort } from "../services/spec";
-import { reportedFailure } from "./failure";
+import { reportedFailure, sentence, stateFailureReason } from "./failure";
 import { reportedHealth, reportedWaitMs } from "./image-health";
 import { appendLog, LineSplitter, maxLineLength } from "./logs";
 import { registryGcJobType } from "./registry-gc";
@@ -710,7 +711,8 @@ async function rollout(s: EngineState, d: DeploymentRow): Promise<void> {
   let movedDomains = 0;
   const current = db.transaction((tx) => {
     tx.update(services).set({ targetDeploymentId: d.id, generation: d.generation, stopped: false }).where(eq(services.id, svc.id)).run();
-    // services.usePort: the domains go to the new port with the new containers, in the same desired state.
+    // services.usePort: the domains, the IP:port access and the tunnel go to the new port with the new
+    // containers, in the same desired state.
     const move = d.portMove;
     if (move && !move.applied && move.domainIds.length > 0) {
       movedDomains = tx
@@ -720,6 +722,7 @@ async function rollout(s: EngineState, d: DeploymentRow): Promise<void> {
         .returning({ id: domains.id })
         .all().length;
     }
+    if (move && !move.applied) moveAccess(tx, svc.id, move);
     return tx
       .update(deployments)
       .set({
@@ -734,14 +737,21 @@ async function rollout(s: EngineState, d: DeploymentRow): Promise<void> {
       .get();
   });
   log(s, current, "ship", `Rolling out generation ${d.generation} on ${names.join(", ")}.`);
-  if (movedDomains > 0 && d.portMove) {
-    log(
-      s,
-      current,
-      "ship",
-      `${movedDomains === 1 ? "Its domain moves" : `${movedDomains} domains move`} to port ${d.portMove.toPort} with it.`,
-    );
-    s.deps.live.publish(`service:${svc.id}`, { type: "invalidate", ops: ["domains.list", "exposures.get", "env.references"] });
+  const access = d.portMove && !d.portMove.applied ? accessText(d.portMove) : "";
+  if ((movedDomains > 0 || access) && d.portMove) {
+    if (movedDomains > 0) {
+      log(
+        s,
+        current,
+        "ship",
+        `${movedDomains === 1 ? "Its domain moves" : `${movedDomains} domains move`} to port ${d.portMove.toPort} with it.`,
+      );
+    }
+    if (access) log(s, current, "ship", `${access} move${access.includes(" and ") ? "" : "s"} to port ${d.portMove.toPort} with it.`);
+    s.deps.live.publish(`service:${svc.id}`, {
+      type: "invalidate",
+      ops: ["domains.list", "exposures.get", "env.references", "tunnels.get"],
+    });
   }
   s.deps.agents.desired.markDirty({ serviceId: svc.id });
   publishDeploymentChange(s.deps, svc.id, d.id);
@@ -775,7 +785,11 @@ export function recordDeployProgress(s: Pick<EngineState, "deps">, nodeId: strin
       ),
     )
     .get();
-  if (!d || !(nodeId in d.nodeResults)) return null;
+  if (!d) {
+    if (progress.stage === DeployStage.FAILED) recordLateFailure(s, nodeId, progress);
+    return null;
+  }
+  if (!(nodeId in d.nodeResults)) return null;
   let steps = d.steps;
   const results = { ...d.nodeResults };
   const name = nodeNameOf(s, nodeId);
@@ -828,6 +842,47 @@ export function recordDeployProgress(s: Pick<EngineState, "deps">, nodeId: strin
   }
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   return d.id;
+}
+
+/**
+ * A node's FAILED DeployProgress that came after its state report: on a
+ * first deploy (nothing live) the node reports the service FAILED in a
+ * state delta right after it queues the event, and when the delta wins,
+ * checkRollout (resultsFromState) has already failed the deployment from
+ * the state's message. The event still carries what the state does not:
+ * the new container's last output and the ports it listens on, which the
+ * deploy dialog shows and Use port needs. Merged into the node's result of
+ * the failed deployment of that generation, once.
+ */
+function recordLateFailure(s: Pick<EngineState, "deps">, nodeId: string, progress: DeployProgress): void {
+  const { db } = s.deps;
+  const d = db
+    .select()
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.serviceId, progress.serviceId),
+        eq(deployments.generation, Number(progress.generation)),
+        eq(deployments.status, "failed"),
+      ),
+    )
+    .get();
+  const current = d?.nodeResults[nodeId];
+  if (!d || !current || current.lastOutput || current.notListening) return;
+  const { reason, extra } = reportedFailure(progress);
+  if (!extra.lastOutput && !extra.notListening) return;
+  const result: DeployNodeResult = {
+    ...current,
+    ...extra,
+    status: "failed",
+    message: current.status === "failed" && current.message ? current.message : reason || current.message,
+    digest: null,
+  };
+  db.update(deployments)
+    .set({ nodeResults: { ...d.nodeResults, [nodeId]: result } })
+    .where(eq(deployments.id, d.id))
+    .run();
+  publishDeploymentChange(s.deps, d.serviceId, d.id);
 }
 
 /**
@@ -888,7 +943,13 @@ function resultsFromState(s: EngineState, d: DeploymentRow): DeploymentRow["node
       mine.every((i) => i.state === InstanceState.RUNNING && i.health !== HealthState.UNHEALTHY && i.health !== HealthState.STARTING);
     if (healthy) results[nodeId] = { ...current, status: "ok", message: "", digest: mine[0]?.imageDigest || null };
     else if (status.phase === ServicePhase.FAILED)
-      results[nodeId] = { ...current, status: "failed", message: status.message || "The new version failed.", digest: null };
+      // The node's reason as its DeployProgress says it (the event may come after: recordLateFailure).
+      results[nodeId] = {
+        ...current,
+        status: "failed",
+        message: stateFailureReason(status.message) || "The new version failed.",
+        digest: null,
+      };
   }
   return results;
 }
@@ -958,12 +1019,6 @@ async function checkRollout(s: EngineState, d: DeploymentRow): Promise<void> {
       `${pending.map((id) => nodeName(s, id)).join(", ")} did not report the new version healthy within ${minutesText(capMs)}. The previous version stayed live.`,
     );
   }
-}
-
-/** A reason as one sentence: its own full stop, or one added. */
-function sentence(text: string): string {
-  const trimmed = text.trim();
-  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 function minutesText(ms: number): string {
@@ -1102,10 +1157,20 @@ export function finish(
   appendLog(s.deps, d.serviceId, d.id, lastStep(d), [message], outcome === "failed");
   const back = portBack as PortMove | null;
   if (back) {
+    // What moved with the port goes back with it: "The service's port, its domains and its IP:port access are back on 80".
+    const parts = [
+      "The service's port",
+      ...(back.applied
+        ? [
+            back.domainIds.length > 0 ? "its domains" : "",
+            (back.exposureIds?.length ?? 0) > 0 ? "its IP:port access" : "",
+            back.tunnel ? "its Cloudflare tunnel" : "",
+          ].filter(Boolean)
+        : []),
+    ];
+    const what = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
     appendLog(s.deps, d.serviceId, d.id, lastStep(d), [
-      back.applied && back.domainIds.length > 0
-        ? `The service's port and its domains are back on ${back.fromPort}, where the live version listens.`
-        : `The service's port is back on ${back.fromPort}, where the live version listens.`,
+      `${what} ${parts.length === 1 ? "is" : "are"} back on ${back.fromPort}, where the live version listens.`,
     ]);
     publishService(s.deps, d.serviceId);
   }
@@ -1178,13 +1243,14 @@ function restorePortMove(tx: Pick<Deps["db"], "select" | "insert" | "update" | "
       .where(and(eq(domains.serviceId, serviceId), inArray(domains.id, move.domainIds), eq(domains.targetPort, move.toPort)))
       .run();
   }
+  if (move.applied) moveAccess(tx, serviceId, { ...move, fromPort: move.toPort, toPort: move.fromPort });
 }
 
 /** The service and its Domains tab changed (a port move went back): open screens refetch. */
 function publishService(deps: Pick<Deps, "live">, serviceId: string): void {
   deps.live.publish(`service:${serviceId}`, {
     type: "invalidate",
-    ops: ["services.get", "domains.list", "exposures.get", "env.references"],
+    ops: ["services.get", "domains.list", "exposures.get", "env.references", "tunnels.get"],
   });
 }
 

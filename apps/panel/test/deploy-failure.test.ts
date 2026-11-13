@@ -6,7 +6,8 @@
 //     stands alone now; the output is Deployment.lastOutput. Agents before
 //     0.2.16 still send it inside the message, after "last output:".
 //   - The agent says which ports the app listens on (not_listening):
-//     Deployment.portHint, and services.usePort switches the service to one.
+//     Deployment.portHint, and services.usePort switches the service to one,
+//     with its domains, IP:port access and tunnel on the old port.
 //   - trust-api was moved to another node while it built and its rollout
 //     waited on a node that no longer had it. A change of nodes now waits
 //     for the deploy, a node that no longer holds the service fails the
@@ -15,11 +16,21 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { deployments as deploymentOps, projects, services as serviceOps } from "@seylo/ops";
-import { DeployStage } from "@seylo/proto";
+import { DeployStage, ServicePhase } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
-import { alerts, deploymentLogs, deployments, domains, servicePlacements, services } from "../src/db/schema";
+import {
+  alerts,
+  cloudflareTunnels,
+  deploymentLogs,
+  deployments,
+  domains,
+  portExposures,
+  servicePlacements,
+  services,
+} from "../src/db/schema";
+import { compileDesiredState } from "../src/desired/compile";
 import { engineFor } from "../src/modules/deployments/engine";
-import { splitLastOutput } from "../src/modules/deployments/failure";
+import { legacyError, splitLastOutput } from "../src/modules/deployments/failure";
 import { serviceNetworking } from "../src/modules/domains/desired";
 import { deploymentEnv, sealDeploymentEnv } from "../src/modules/env/desired";
 import { serviceSpecFor } from "../src/modules/services/desired";
@@ -94,6 +105,29 @@ const domainPorts = (id: string) =>
 /** The target ports of the routes the node gets for the service (domains/desired.ts). */
 const routesOf = (id: string) => serviceNetworking(panel.deps, id, nodeA).routing.routes?.map((r) => r.targetPort) ?? [];
 
+/** The service's container ports the node gets, and whether each carries the first-run IP:port listener. */
+function portsOnNode(id: string): [number, boolean][] {
+  const state = compileDesiredState(panel.deps.db, nodeA, {
+    revision: 1n,
+    secrets: panel.deps.secrets,
+    contributors: panel.deps.agents.desired.contributors(),
+  });
+  return state.services.find((x) => x.id === id)?.ports.map((p) => [p.containerPort, p.public !== undefined]) ?? [];
+}
+/** Where the service's IP:port access (services.create opens the first-run port) and its tunnel send traffic. */
+const accessPorts = (id: string) => ({
+  exposures: panel.deps.db
+    .select({ kind: portExposures.kind, port: portExposures.targetPort })
+    .from(portExposures)
+    .where(eq(portExposures.serviceId, id))
+    .all()
+    .map((e) => `${e.kind}:${e.port}`),
+  tunnel: panel.deps.db.select().from(cloudflareTunnels).where(eq(cloudflareTunnels.serviceId, id)).get()?.targetPort ?? null,
+});
+function addTunnel(serviceId: string, targetPort: number) {
+  panel.deps.db.insert(cloudflareTunnels).values({ serviceId, enabled: true, mode: "quick", targetPort }).run();
+}
+
 function addDomain(serviceId: string, host: string, targetPort: number) {
   panel.deps.db.insert(domains).values({ serviceId, host, targetPort, https: "off" }).run();
 }
@@ -144,6 +178,66 @@ describe("the new container's last output", () => {
     expect(alert?.message).not.toContain("last output");
   });
 
+  test("a deploy that failed before 0.2.16 is split as it is read: the error alone, the output in its block", async () => {
+    const id = await createApp("csspanel");
+    const d = await deploy(id);
+    const stored =
+      "il-ra: not healthy after 5m0s: health check never passed: tcp check on port 80: dial tcp 172.23.0.9:80: connect: connection refused" +
+      `\nlast output:\n${output.join("\n")} The previous version stayed live.`;
+    // As 0.2.14 stored it: the whole message in the error and in the node's result, no lastOutput.
+    panel.deps.db
+      .update(deployments)
+      .set({
+        status: "failed",
+        error: stored,
+        nodeResults: { [nodeA]: { status: "failed", message: stored.slice("il-ra: ".length), digest: null } },
+      })
+      .where(eq(deployments.id, d.id))
+      .run();
+    const shown = await view(id, d.id);
+    expect(shown.error).toBe(
+      "il-ra: not healthy after 5m0s: health check never passed: tcp check on port 80: dial tcp 172.23.0.9:80: connect: connection refused. The previous version stayed live.",
+    );
+    expect(shown.lastOutput).toEqual({ node: { id: nodeA, name: "start-app" }, lines: output });
+    const listed = (await callOp(panel, deploymentOps.list, { serviceId: id }, { cookie })).body.deployments[0];
+    expect(listed.error).toBe(shown.error);
+    expect(listed.lastOutput?.lines).toEqual(output);
+    // The stored row stays as it was; other errors are left alone.
+    expect(row(d.id)?.error).toBe(stored);
+    expect(legacyError("start-app: exit code 1. The previous version stayed live.")).toBeNull();
+    expect(legacyError(null)).toBeNull();
+    expect(legacyError("a: boom\nlast output:\nx\ny")).toEqual({ error: "a: boom", lines: ["x", "y"] });
+    expect(legacyError("a: boom.\nlast output:\nx\n The previous version stayed live.")).toEqual({
+      error: "a: boom. The previous version stayed live.",
+      lines: ["x"],
+    });
+  });
+
+  test("a first deploy whose FAILED state comes before its FAILED event still gets the output and the port hint", async () => {
+    const id = await createApp("first");
+    const d = await deploy(id);
+    // Nothing live: the node's state delta (phase FAILED, "deploy failed: " and the reason) wins the race.
+    fleet.reportRunning(nodeA, id, d.generation, "", ServicePhase.FAILED, `deploy failed: ${reason}`);
+    await fleet.settle();
+    const early = row(d.id);
+    expect(early?.status).toBe("failed");
+    expect(early?.error).toBe(`start-app: ${reason} The previous version stayed live.`);
+    expect((await view(id, d.id)).lastOutput).toBeNull();
+    // The event that came second carries what the state cannot.
+    fleet.deployProgress(nodeA, id, d.generation, DeployStage.FAILED, reason, { lastOutput: output, notListening });
+    await fleet.settle();
+    const shown = await view(id, d.id);
+    expect(shown.status).toBe("failed");
+    expect(shown.error).toBe(early?.error);
+    expect(shown.lastOutput).toEqual({ node: { id: nodeA, name: "start-app" }, lines: output });
+    expect(shown.portHint).toMatchObject({ port: 80, listening: [6000], canUsePort: true });
+    // Once: a replayed event does not touch it again.
+    fleet.deployProgress(nodeA, id, d.generation, DeployStage.FAILED, "other", { lastOutput: ["replayed"] });
+    await fleet.settle();
+    expect((await view(id, d.id)).lastOutput?.lines).toEqual(output);
+    expect(logOf(d.id).join("\n")).not.toContain("Heartbeat");
+  });
+
   test("splitLastOutput", () => {
     expect(splitLastOutput("boom")).toEqual({ reason: "boom", lines: [] });
     expect(splitLastOutput("boom\nlast output:\na\nb")).toEqual({ reason: "boom", lines: ["a", "b"] });
@@ -177,6 +271,32 @@ describe("Use port", () => {
     expect((await view(id, d.id)).portHint).toMatchObject({ listening: [], loopbackOnly: [6000], canUsePort: false });
   });
 
+  test("the checked port bound only to 127.0.0.1 and another on all addresses: no Use port for the other one", async () => {
+    const id = await createApp("inspector");
+    const d = await deploy(id);
+    // 80 on 127.0.0.1 is the mistake; 9229 (a Node inspector) or a metrics port is no port to switch to.
+    await failOn(nodeA, id, d, reason, {
+      notListening: { port: 80, read: true, listening: [{ port: 80, loopbackOnly: true }, { port: 9229 }] },
+    });
+    expect((await view(id, d.id)).portHint).toMatchObject({ port: 80, listening: [9229], loopbackOnly: [80], canUsePort: false });
+  });
+
+  test("only the service's newest deployment offers Use port: not once another deploy started or went live", async () => {
+    const id = await createApp("api");
+    const d1 = await deploy(id);
+    await failOn(nodeA, id, d1, reason, { notListening });
+    expect((await view(id, d1.id)).portHint?.canUsePort).toBe(true);
+    // The app was fixed to listen on 80 and deployed again: D1's hint is history while D2 runs and once it is live.
+    const d2 = await deploy(id);
+    expect(row(d2.id)?.status).toBe("deploying");
+    expect((await view(id, d1.id)).portHint?.canUsePort).toBe(false);
+    fleet.deployProgress(nodeA, id, d2.generation, DeployStage.SUCCEEDED);
+    await fleet.settle();
+    expect(row(d2.id)?.status).toBe("live");
+    const listed = (await callOp(panel, deploymentOps.list, { serviceId: id }, { cookie })).body.deployments;
+    expect(listed.find((x: { id: string }) => x.id === d1.id)?.portHint).toMatchObject({ listening: [6000], canUsePort: false });
+  });
+
   test("nothing listening, or sockets not read: no hint", async () => {
     const id = await createApp("worker");
     const d = await deploy(id);
@@ -205,15 +325,42 @@ describe("Use port", () => {
     const spec = serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA);
     expect(spec?.ports.map((p) => p.containerPort)).toEqual([6000]);
     expect(routesOf(id).sort()).toEqual([6000, 8080]);
-    expect(logOf(res.body.deploymentId).slice(0, 2)).toEqual([
+    expect(logOf(res.body.deploymentId).slice(0, 3)).toEqual([
       "clone: Port 80 changed to 6000 (Use port 6000).",
       "clone: api.example.com moved to port 6000.",
+      "clone: Its IP:port access moved to port 6000.",
     ]);
+    expect(accessPorts(id).exposures).toEqual(["first_run:6000"]);
     const audit = panel.deps.db
       .select()
       .from((await import("../src/db/schema")).auditLog)
       .all();
     expect(audit.some((a) => a.opId === serviceOps.usePort.id)).toBe(true);
+  });
+
+  test("an app without a domain: its IP:port access and its tunnel follow, so it has an address on the new port", async () => {
+    const id = await createApp("no-domain");
+    // services.create opened the first-run port on 80; a timed expose and a tunnel on 80, one timed expose elsewhere.
+    panel.deps.db
+      .insert(portExposures)
+      .values([
+        { serviceId: id, nodeId: nodeA, kind: "timed", listenPort: 0, targetPort: 80, expiresAt: new Date(Date.now() + 600_000) },
+        { serviceId: id, nodeId: nodeA, kind: "timed", listenPort: 0, targetPort: 9090, expiresAt: new Date(Date.now() + 600_000) },
+      ])
+      .run();
+    addTunnel(id, 80);
+    const d = await deploy(id);
+    expect(portsOnNode(id)).toEqual([[80, true]]);
+    await failOn(nodeA, id, d, reason, { notListening });
+    const res = await callOp(panel, serviceOps.usePort, { serviceId: id, port: 6000, fromPort: 80 }, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ domainIds: [], domainsMove: "now" });
+    await fleet.settle();
+    expect(row(res.body.deploymentId)?.status).toBe("deploying");
+    expect(accessPorts(id)).toEqual({ exposures: ["first_run:6000", "timed:6000", "timed:9090"], tunnel: 6000 });
+    // The node's PortSpec for 6000 carries the first-run listener (domains/contributor.ts matches it by container port).
+    expect(portsOnNode(id)).toEqual([[6000, true]]);
+    expect(logOf(res.body.deploymentId)).toContain("clone: Its IP:port access and its Cloudflare tunnel moved to port 6000.");
   });
 
   test("a built app's PORT follows the port", async () => {
@@ -256,6 +403,7 @@ describe("Use port", () => {
   test("with a live version: its domains keep the old port until the new containers roll out, and come back if they fail", async () => {
     const id = await createApp("api");
     addDomain(id, "api.example.com", 80);
+    addTunnel(id, 80);
     const live = await deploy(id);
     fleet.deployProgress(nodeA, id, live.generation, DeployStage.SUCCEEDED);
     await fleet.settle();
@@ -288,6 +436,10 @@ describe("Use port", () => {
     expect(domainPorts(id)).toEqual(["api.example.com:80"]);
     expect(portsOf(id)).toEqual([{ containerPort: 6000, protocol: "tcp" }]);
     expect(routesOf(id)[0]).toBe(80);
+    // So do its IP:port access and its tunnel, and the live version's PortSpec keeps the listener.
+    expect(accessPorts(id)).toEqual({ exposures: ["first_run:80"], tunnel: 80 });
+    expect(portsOnNode(id)).toEqual([[80, true]]);
+    expect(row(res.body.deploymentId)?.portMove).toMatchObject({ exposureIds: [expect.any(String)], tunnel: true, applied: false });
 
     // The build ends: the rollout and the domain move go out together.
     const build = fleet.builds.at(-1);
@@ -299,6 +451,9 @@ describe("Use port", () => {
     expect(rolling?.portMove).toMatchObject({ fromPort: 80, toPort: 6000, applied: true });
     expect(domainPorts(id)).toEqual(["api.example.com:6000"]);
     expect(routesOf(id)[0]).toBe(6000);
+    expect(accessPorts(id)).toEqual({ exposures: ["first_run:6000"], tunnel: 6000 });
+    expect(portsOnNode(id)).toEqual([[6000, true]]);
+    expect(logOf(res.body.deploymentId)).toContain("ship: Its IP:port access and its Cloudflare tunnel move to port 6000 with it.");
 
     // It fails after all: the live version listens on 80, so the domains and the port go back there.
     await failOn(nodeA, id, { generation: rolling?.generation as number }, "not healthy after 5m0s: health check never passed");
@@ -307,9 +462,11 @@ describe("Use port", () => {
     expect(domainPorts(id)).toEqual(["api.example.com:80"]);
     expect(portsOf(id)).toEqual([{ containerPort: 80, protocol: "tcp" }]);
     expect(logOf(res.body.deploymentId).at(-1)).toBe(
-      "health: The service's port and its domains are back on 80, where the live version listens.",
+      "health: The service's port, its domains, its IP:port access and its Cloudflare tunnel are back on 80, where the live version listens.",
     );
     expect(routesOf(id)[0]).toBe(80);
+    expect(accessPorts(id)).toEqual({ exposures: ["first_run:80"], tunnel: 80 });
+    expect(portsOnNode(id)).toEqual([[80, true]]);
   });
 
   test("with a live version and no domain, a cancelled Use port deploy puts the port back too", async () => {
@@ -321,10 +478,14 @@ describe("Use port", () => {
     expect(res.body).toMatchObject({ domainIds: [], domainsMove: "now" });
     await fleet.settle();
     expect(row(res.body.deploymentId)?.portMove).toMatchObject({ fromPort: 80, toPort: 6000, domainIds: [], applied: true });
+    expect(accessPorts(id).exposures).toEqual(["first_run:6000"]);
     const cancelled = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId: res.body.deploymentId }, { cookie });
     expect(cancelled.status).toBe(200);
     expect(portsOf(id)).toEqual([{ containerPort: 80, protocol: "tcp" }]);
-    expect(logOf(res.body.deploymentId).at(-1)).toBe("ship: The service's port is back on 80, where the live version listens.");
+    expect(accessPorts(id).exposures).toEqual(["first_run:80"]);
+    expect(logOf(res.body.deploymentId).at(-1)).toBe(
+      "ship: The service's port and its IP:port access are back on 80, where the live version listens.",
+    );
   });
 
   test("with a live version that goes live on the new port, the domains stay moved", async () => {

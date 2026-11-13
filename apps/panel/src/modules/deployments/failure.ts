@@ -26,6 +26,44 @@ export function splitLastOutput(message: string): { reason: string; lines: strin
   return { reason: message.slice(0, at), lines: lines.slice(-maxLastOutputLines) };
 }
 
+/** A reason as one sentence: its own full stop, or one added. */
+export function sentence(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+/** What finish() appends to the error of a rollout that failed while the previous version serves. */
+export const stayedLive = "The previous version stayed live.";
+
+/** What an agent puts before the reason in the status message of a service whose deploy failed (rollout.go failDeploy). */
+const statePrefix = "deploy failed: ";
+
+/** The reason in a ServiceStatus message of phase FAILED: as in the node's DeployProgress, without the agent's prefix. */
+export function stateFailureReason(message: string): string {
+  const { reason } = splitLastOutput(message);
+  return reason.startsWith(statePrefix) ? reason.slice(statePrefix.length) : reason;
+}
+
+/**
+ * A deployment that failed before 0.2.16 kept the output an agent appended
+ * to its reason in its error: "<node>: <reason>\nlast output:\n<lines>
+ * The previous version stayed live." Read now, the error is the reason
+ * (and the trailer) and the lines are the failed node's last output, as for
+ * a deploy that fails today. null for every other error.
+ */
+export function legacyError(error: string | null): { error: string; lines: string[] } | null {
+  if (!error?.includes(legacyMarker)) return null;
+  const { reason, lines } = splitLastOutput(error);
+  const last = lines.at(-1);
+  const trailer = ` ${stayedLive}`;
+  if (last?.endsWith(trailer)) {
+    const rest = last.slice(0, -trailer.length);
+    const kept = rest === "" ? lines.slice(0, -1) : [...lines.slice(0, -1), rest];
+    return { error: `${sentence(reason)} ${stayedLive}`, lines: kept };
+  }
+  return { error: reason, lines };
+}
+
 /** A FAILED DeployProgress: its reason, and what it adds to the node's result. */
 export function reportedFailure(progress: DeployProgress): {
   reason: string;
@@ -66,6 +104,13 @@ export interface PortHint {
   listening: number[];
   /** Ports it listens on only on a loopback address. */
   loopbackOnly: number[];
+  /**
+   * One of listening is the port to switch to (services.usePort): false
+   * when the app listens on the checked port itself, only on 127.0.0.1.
+   * That is the mistake to fix, and the other ports a debugger's or a
+   * metrics one (the agent's hint says so too).
+   */
+  switchable: boolean;
 }
 
 /**
@@ -80,7 +125,7 @@ export function portHintOf(results: Record<string, DeployNodeResult>): PortHint 
     const listening = nl.listening.filter((p) => !p.loopbackOnly && p.port !== nl.port).map((p) => p.port);
     const loopbackOnly = nl.listening.filter((p) => p.loopbackOnly).map((p) => p.port);
     if (listening.length === 0 && loopbackOnly.length === 0) continue;
-    return { nodeId, port: nl.port, listening, loopbackOnly };
+    return { nodeId, port: nl.port, listening, loopbackOnly, switchable: listening.length > 0 && !loopbackOnly.includes(nl.port) };
   }
   return null;
 }

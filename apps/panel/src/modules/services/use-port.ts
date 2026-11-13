@@ -1,18 +1,26 @@
 // services.usePort: "Use port 6000" in the deploy dialog of a deploy that
 // failed because the app listens on another port than the service's
 // (Deployment.portHint, from the agent's not_listening). The service's first
-// TCP port becomes the one the app listens on, its domains on the old port
-// follow, and a deploy starts.
+// TCP port becomes the one the app listens on, and what sent traffic to the
+// old port follows: its domains, its IP:port access (the first-run port and
+// open timed exposes) and its Cloudflare tunnel. Then a deploy starts.
 //
-// When a live version serves, its containers listen on the old port, so its
-// domains must keep pointing there until the new containers take over: the
+// When a live version serves, its containers listen on the old port, so
+// those must keep pointing there until the new containers take over: the
 // move is recorded on the new deployment (deployments.port_move), applied
 // by the deploy runner when it rolls out and undone, with the port, when it
 // fails or is cancelled (deployments/engine.ts). Without one (a first
-// deploy, a stopped service) nothing serves on the old port and the domains
-// move at once.
+// deploy, a stopped service) nothing serves on the old port and they move
+// at once.
 
-import { domains as domainOps, env as envOps, exposures as exposureOps, OpError, services as serviceOps } from "@seylo/ops";
+import {
+  domains as domainOps,
+  env as envOps,
+  exposures as exposureOps,
+  OpError,
+  services as serviceOps,
+  tunnels as tunnelOps,
+} from "@seylo/ops";
 import { and, eq, inArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains, type PortMove } from "../../db/schema";
@@ -23,6 +31,7 @@ import { invalidateService } from "../domains/lookup";
 import { panelServiceId } from "../nodes/panel-service";
 import { assertNoActiveCopy } from "./copies";
 import { actorOf, updateSpec } from "./ops";
+import { accessOn, accessText, moveAccess } from "./port-move";
 import { loadService } from "./rows";
 import { readSpec, withFirstPort } from "./spec";
 
@@ -68,23 +77,30 @@ export const usePort = implement(serviceOps.usePort, (input, ctx) => {
           .from(domains)
           .where(and(eq(domains.serviceId, svc.id), eq(domains.targetPort, from)))
           .all();
-  // A live version listens on the old port: its domains wait for the new containers, and the port and they
+  // The IP:port access and the tunnel on the old port: without them on the new one, an app without a
+  // domain has no address once it listens there (the first-run port goes with the PortSpec of its port).
+  const access = from === null || from === input.port ? { exposureIds: [], tunnel: false } : accessOn(ctx.db, svc.id, from);
+  // A live version listens on the old port: all of them wait for the new containers, and the port and they
   // go back if the new deployment does not go live (deployments.port_move, engine.ts restorePortMove).
   const live = svc.liveDeploymentId !== null && !svc.stopped;
   const atRollout = live && moved.length > 0;
   const ports = withFirstPort(spec.ports, input.port);
   updateSpec(ctx, svc.id, (s) => ({ ...s, ports }));
-  if (moved.length > 0 && !atRollout) {
-    ctx.db
-      .update(domains)
-      .set({ targetPort: input.port })
-      .where(
-        inArray(
-          domains.id,
-          moved.map((d) => d.id),
-        ),
-      )
-      .run();
+  const movesNow = !live && (moved.length > 0 || access.exposureIds.length > 0 || access.tunnel);
+  if (movesNow && from !== null) {
+    if (moved.length > 0) {
+      ctx.db
+        .update(domains)
+        .set({ targetPort: input.port })
+        .where(
+          inArray(
+            domains.id,
+            moved.map((d) => d.id),
+          ),
+        )
+        .run();
+    }
+    moveAccess(ctx.db, svc.id, { ...access, fromPort: from, toPort: input.port });
     afterDomainsMoved(ctx, svc.id);
   }
 
@@ -101,9 +117,24 @@ export const usePort = implement(serviceOps.usePort, (input, ctx) => {
         : `${names} moved to port ${input.port}.`,
     );
   }
+  const others = accessText(access);
+  if (others) {
+    notes.push(
+      live
+        ? `${others} move${others.includes(" and ") ? "" : "s"} to port ${input.port} when this deploy rolls out.`
+        : `${others} moved to port ${input.port}.`,
+    );
+  }
   const portMove: PortMove | null =
     live && from !== null && from !== input.port
-      ? { fromPort: from, toPort: input.port, domainIds: moved.map((d) => d.id), applied: false }
+      ? {
+          fromPort: from,
+          toPort: input.port,
+          domainIds: moved.map((d) => d.id),
+          exposureIds: access.exposureIds,
+          tunnel: access.tunnel,
+          applied: false,
+        }
       : null;
   const row = queueDeploy(ctx, {
     serviceId: svc.id,
@@ -129,5 +160,5 @@ function triggerOf(ctx: Parameters<typeof actorOf>[0]): "manual" | "api" {
 /** Domains changed outside the domains module: the routes go out and the Domains tab refreshes (domains/ops.ts afterChange). */
 export function afterDomainsMoved(deps: Pick<Deps, "agents" | "live">, serviceId: string): void {
   deps.agents.desired.markDirty({ serviceId });
-  invalidateService(deps, serviceId, [domainOps.list.id, exposureOps.get.id, envOps.references.id, serviceOps.get.id]);
+  invalidateService(deps, serviceId, [domainOps.list.id, exposureOps.get.id, envOps.references.id, serviceOps.get.id, tunnelOps.get.id]);
 }

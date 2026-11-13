@@ -458,7 +458,7 @@ export class FakeFleet {
   }
 
   /** The node reports the service running at a generation (healthy), through a state delta. */
-  reportRunning(nodeId: string, serviceId: string, generation: number, digest = "", phase = ServicePhase.RUNNING): void {
+  reportRunning(nodeId: string, serviceId: string, generation: number, digest = "", phase = ServicePhase.RUNNING, message = ""): void {
     const state = this.panel.deps.agents.state;
     if (!state.get(nodeId)?.synced) {
       state.applySnapshot(nodeId, create(StateSnapshotSchema, { epoch: 1n, seq: 0n, appliedRevision: 0n, services: [] }));
@@ -470,8 +470,9 @@ export class FakeFleet {
       serviceId,
       generation: BigInt(generation),
       phase,
+      message,
       instances:
-        phase === ServicePhase.STOPPED
+        phase === ServicePhase.STOPPED || phase === ServicePhase.FAILED
           ? []
           : [
               {

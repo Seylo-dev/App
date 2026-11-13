@@ -88,16 +88,20 @@ export interface ProjectMove {
 
 /**
  * services.usePort on a service whose live version serves (0.2.16): the
- * domains that sent traffic to the old port move to the new one when this
- * deployment rolls out (with its new containers), not before, so the live
- * version keeps its routes while it builds. If it then fails or is
- * cancelled, they and the service's port go back to the old one, where the
- * live version still listens.
+ * domains, the IP:port access and the tunnel that sent traffic to the old
+ * port move to the new one when this deployment rolls out (with its new
+ * containers), not before, so the live version keeps its routes while it
+ * builds. If it then fails or is cancelled, they and the service's port go
+ * back to the old one, where the live version still listens.
  */
 export interface PortMove {
   fromPort: number;
   toPort: number;
   domainIds: string[];
+  /** The first-run port and timed exposes (port_exposures) that forwarded to fromPort; they move with the domains. */
+  exposureIds?: string[];
+  /** The service's Cloudflare tunnel sent traffic to fromPort; it moves with the domains. */
+  tunnel?: boolean;
   /** Set once rollout() moved the domains. */
   applied: boolean;
 }
