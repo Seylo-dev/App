@@ -194,4 +194,16 @@ message OpenPort {
   // (every client sees it in the handshake), and a client can trust it by
   // this file.
   string certificate_pem = 9;
+  // Set for timed exposes: the TimedExpose.id this port belongs to, so
+  // the panel tells apart timed exposes of one container port that end at
+  // the same time. Agents from 0.2.16; older ones leave it empty and the
+  // panel matches by expires_at.
+  string timed_expose_id = 10; // added in 0.2.16
+  // On the exposed port of a Postgres or MySQL: whether dbtools.ExposedTLS
+  // has turned TLS on inside the database with the port's certificate in
+  // this agent run (it does so a few seconds after the port opens, and
+  // again after a restart of the agent). Postgres has TLS only from then
+  // on, so the panel asks timed exposes of it for TLS only once this is
+  // true. Unset on every other port and from agents before 0.2.16.
+  optional bool database_tls = 11; // added in 0.2.16
 }

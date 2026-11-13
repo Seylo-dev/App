@@ -1025,8 +1025,20 @@ type OpenPort struct {
 	// (every client sees it in the handshake), and a client can trust it by
 	// this file.
 	CertificatePem string `protobuf:"bytes,9,opt,name=certificate_pem,json=certificatePem,proto3" json:"certificate_pem,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Set for timed exposes: the TimedExpose.id this port belongs to, so
+	// the panel tells apart timed exposes of one container port that end at
+	// the same time. Agents from 0.2.16; older ones leave it empty and the
+	// panel matches by expires_at.
+	TimedExposeId string `protobuf:"bytes,10,opt,name=timed_expose_id,json=timedExposeId,proto3" json:"timed_expose_id,omitempty"` // added in 0.2.16
+	// On the exposed port of a Postgres or MySQL: whether dbtools.ExposedTLS
+	// has turned TLS on inside the database with the port's certificate in
+	// this agent run (it does so a few seconds after the port opens, and
+	// again after a restart of the agent). Postgres has TLS only from then
+	// on, so the panel asks timed exposes of it for TLS only once this is
+	// true. Unset on every other port and from agents before 0.2.16.
+	DatabaseTls   *bool `protobuf:"varint,11,opt,name=database_tls,json=databaseTls,proto3,oneof" json:"database_tls,omitempty"` // added in 0.2.16
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *OpenPort) Reset() {
@@ -1122,6 +1134,20 @@ func (x *OpenPort) GetCertificatePem() string {
 	return ""
 }
 
+func (x *OpenPort) GetTimedExposeId() string {
+	if x != nil {
+		return x.TimedExposeId
+	}
+	return ""
+}
+
+func (x *OpenPort) GetDatabaseTls() bool {
+	if x != nil && x.DatabaseTls != nil {
+		return *x.DatabaseTls
+	}
+	return false
+}
+
 var File_seylo_agent_v1_state_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_state_proto_rawDesc = "" +
@@ -1190,7 +1216,7 @@ const file_seylo_agent_v1_state_proto_rawDesc = "" +
 	"\x05state\x18\x02 \x01(\x0e2\x1a.seylo.agent.v1.RouteStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12-\n" +
 	"\x12certificate_issuer\x18\x04 \x01(\tR\x11certificateIssuer\x12P\n" +
-	"\x16certificate_expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\"\xaa\x03\n" +
+	"\x16certificate_expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\"\x8b\x04\n" +
 	"\bOpenPort\x12\x1b\n" +
 	"\thost_port\x18\x01 \x01(\rR\bhostPort\x12%\n" +
 	"\x0econtainer_port\x18\x02 \x01(\rR\rcontainerPort\x129\n" +
@@ -1201,7 +1227,11 @@ const file_seylo_agent_v1_state_proto_rawDesc = "" +
 	"\x16certificate_expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\x126\n" +
 	"\x17certificate_self_signed\x18\a \x01(\bR\x15certificateSelfSigned\x12+\n" +
 	"\x11certificate_error\x18\b \x01(\tR\x10certificateError\x12'\n" +
-	"\x0fcertificate_pem\x18\t \x01(\tR\x0ecertificatePem*\xc5\x02\n" +
+	"\x0fcertificate_pem\x18\t \x01(\tR\x0ecertificatePem\x12&\n" +
+	"\x0ftimed_expose_id\x18\n" +
+	" \x01(\tR\rtimedExposeId\x12&\n" +
+	"\fdatabase_tls\x18\v \x01(\bH\x00R\vdatabaseTls\x88\x01\x01B\x0f\n" +
+	"\r_database_tls*\xc5\x02\n" +
 	"\fServicePhase\x12\x1d\n" +
 	"\x19SERVICE_PHASE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SERVICE_PHASE_PENDING\x10\x01\x12\x19\n" +
@@ -1306,6 +1336,7 @@ func file_seylo_agent_v1_state_proto_init() {
 		(*StateDelta_ServiceRemoved)(nil),
 		(*StateDelta_AppliedRevision)(nil),
 	}
+	file_seylo_agent_v1_state_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
