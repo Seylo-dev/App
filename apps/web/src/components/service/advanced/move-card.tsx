@@ -61,7 +61,9 @@ export function MoveCard({ service }: { service: ServiceDetail }) {
   const notes = target && impact.data ? moveNotes(service, impact.data, target) : null;
   const refused = targets.filter((n) => n.refusal);
   const moving = active?.trigger === "move" ? active : null;
-  if (service.placements.length !== 1) return null;
+  // A move adds the new node's placement before it stops and copies, so the
+  // service has two until the move ends: the card stays to show it, with its log.
+  if (service.placements.length !== 1 && !moving) return null;
   return (
     <SectionCard
       id={moveCardId}
@@ -79,53 +81,60 @@ export function MoveCard({ service }: { service: ServiceDetail }) {
       ) : (
         blocker && <Callout tone="neutral">{blocker.message}</Callout>
       )}
-      <div className="flex flex-wrap items-end gap-2">
-        <Field label={t("serviceAdvanced.move.to")} className="w-72">
-          <Select value={to ?? undefined} onValueChange={setTo} disabled={targets.length === 0}>
-            <SelectTrigger aria-label={t("serviceAdvanced.move.to")}>
-              <SelectValue placeholder={targets.length ? t("serviceAdvanced.move.pick") : t("serviceAdvanced.move.noOther")} />
-            </SelectTrigger>
-            <SelectContent>
-              {targets.map((n) => {
-                const hint = targetHint(n);
-                return (
-                  <SelectItem key={n.id} value={n.id} disabled={!pickable(n)}>
-                    {hint ? `${n.name} · ${hint}` : n.name}
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Button
-          onClick={() => {
-            void refetch();
-            setConfirm(true);
-          }}
-          // A deploy in progress holds it at once, before the impact's next read says so.
-          disabled={!target || move.isPending || blocker !== null || active !== null}
-          title={active && !moving ? t("serviceAdvanced.placement.deployBusy") : undefined}
-        >
-          {t("serviceAdvanced.move.button")}
-        </Button>
-        <MutationError error={move.error ?? impact.error} />
-      </div>
-      {refused.length > 0 && (
-        <div className="flex flex-col gap-1 text-[12.5px] text-muted-foreground">
-          <span>{t("serviceAdvanced.move.cannotGo")}</span>
-          <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5">
-            {refused.map((n) => (
-              <li key={n.id}>{n.refusal?.message}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {/* Before the move: everything it does, in plain words, for the node picked. */}
-      {notes && target && (
-        <div className="flex flex-col gap-2 border-t border-divider pt-4">
-          <span className="text-[13px] font-medium text-ink-strong">{t("serviceAdvanced.move.whatHappens", { node: target.name })}</span>
-          <MoveNotes service={service} label={t("serviceAdvanced.move.whatHappens", { node: target.name })} notes={notes} />
-        </div>
+      {/* While it moves there is nothing to pick: the row above and its log are the card. */}
+      {!moving && (
+        <>
+          <div className="flex flex-wrap items-end gap-2">
+            <Field label={t("serviceAdvanced.move.to")} className="w-72">
+              <Select value={to ?? undefined} onValueChange={setTo} disabled={targets.length === 0}>
+                <SelectTrigger aria-label={t("serviceAdvanced.move.to")}>
+                  <SelectValue placeholder={targets.length ? t("serviceAdvanced.move.pick") : t("serviceAdvanced.move.noOther")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {targets.map((n) => {
+                    const hint = targetHint(n);
+                    return (
+                      <SelectItem key={n.id} value={n.id} disabled={!pickable(n)}>
+                        {hint ? `${n.name} · ${hint}` : n.name}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Button
+              onClick={() => {
+                void refetch();
+                setConfirm(true);
+              }}
+              // A deploy in progress holds it at once, before the impact's next read says so.
+              disabled={!target || move.isPending || blocker !== null || active !== null}
+              title={active ? t("serviceAdvanced.placement.deployBusy") : undefined}
+            >
+              {t("serviceAdvanced.move.button")}
+            </Button>
+            <MutationError error={move.error ?? impact.error} />
+          </div>
+          {refused.length > 0 && (
+            <div className="flex flex-col gap-1 text-[12.5px] text-muted-foreground">
+              <span>{t("serviceAdvanced.move.cannotGo")}</span>
+              <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5">
+                {refused.map((n) => (
+                  <li key={n.id}>{n.refusal?.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {/* Before the move: everything it does, in plain words, for the node picked. */}
+          {notes && target && (
+            <div className="flex flex-col gap-2 border-t border-divider pt-4">
+              <span className="text-[13px] font-medium text-ink-strong">
+                {t("serviceAdvanced.move.whatHappens", { node: target.name })}
+              </span>
+              <MoveNotes service={service} label={t("serviceAdvanced.move.whatHappens", { node: target.name })} notes={notes} />
+            </div>
+          )}
+        </>
       )}
       <ConfirmDialog
         open={confirm}

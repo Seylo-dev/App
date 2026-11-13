@@ -6,7 +6,9 @@
 // timed expose moving to the new address, the services reading EXPOSED_*
 // that need a deploy, backups, the old copy), and the database's menu has
 // Move to another node. demo/service.ts moveImpactOf stands in for the
-// panel; the move itself is answered here.
+// panel; the move itself is answered here. While it moves, db has both
+// nodes' placements (the move job adds the new one first) and the card
+// shows the move with its log.
 //
 // Screenshots: $SHOTS_DIR/database-move/*.png.
 
@@ -14,7 +16,7 @@ import { mkdirSync } from "node:fs";
 import { ids } from "./demo/fixtures";
 import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
-import { moveImpactOf, ids as svc } from "./demo/service";
+import { handlers as serviceHandlers, moveImpactOf, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/database-move`;
@@ -65,14 +67,43 @@ test.describe("database move", () => {
     await page.screenshot({ path: `${shots}/advanced-tab.png`, fullPage: true });
   });
 
-  test("the Move dialog says what happens, and the move goes to the node picked", async ({ page }) => {
+  test("the Move dialog says what happens, the move goes to the node picked, and the card shows it while it runs", async ({ page }) => {
     const sent: Record<string, unknown>[] = [];
+    let moved = false;
+    const worker = serviceHandlers["deployments.list"]?.({ serviceId: svc.worker }) as { deployments: Record<string, unknown>[] };
+    const moveDeploy = {
+      ...worker.deployments[0],
+      id: "d000000000000099",
+      serviceId: svc.db,
+      status: "deploying",
+      trigger: "move",
+      actor: "you@example.com",
+      commit: null,
+      source: null,
+      builder: null,
+      builtOn: null,
+    };
     await installDemo(page, {
       overrides: {
         "services.move": (input) => {
           sent.push(input);
-          return { deploymentId: "d000000000000099" };
+          moved = true;
+          return { deploymentId: moveDeploy.id };
         },
+        // As the move job does: us-ash-1's placement first, then the stop and the copy.
+        "services.get": (input) => {
+          const base = serviceHandlers["services.get"]?.(input) as { placements: unknown[] };
+          if (!moved || input.serviceId !== svc.db) return base;
+          return { ...base, placements: [...base.placements, { nodeId: ids.us, nodeName: "us-ash-1", replicas: 1 }] };
+        },
+        "deployments.list": (input) =>
+          moved && input.serviceId === svc.db && String(input.active) === "true"
+            ? { deployments: [moveDeploy], nextCursor: null, keptImages: 0 }
+            : serviceHandlers["deployments.list"]?.(input),
+        "deployments.get": (input) =>
+          input.deploymentId === moveDeploy.id
+            ? { deployment: moveDeploy, logTopic: `deployment:${moveDeploy.id}` }
+            : serviceHandlers["deployments.get"]?.(input),
       },
     });
     await page.goto(advanced);
@@ -123,6 +154,15 @@ test.describe("database move", () => {
     // A database has no Deployments tab: it stays here.
     await expect(page).toHaveURL(new RegExp(`/s/${svc.db}/advanced`));
     expect(sent).toEqual([{ serviceId: svc.db, toNodeId: ids.us }]);
+
+    // On both nodes while it copies: the card stays, with the move and its log, and nothing to pick.
+    await page.reload();
+    await expect(move.getByText("db is moving to another node.")).toBeVisible();
+    await expect(move.getByLabel("Move to")).toHaveCount(0);
+    await expect(move.getByText("Cannot move to:")).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/moving.png`, fullPage: true });
+    await move.getByRole("button", { name: "View log" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
   });
 
   test("a move that cannot start now says why, and the panel's refusal shows in the dialog", async ({ page }) => {

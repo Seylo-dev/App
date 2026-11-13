@@ -6308,7 +6308,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   backup with Back up now, `backups/back-up-now.ts`; the old copy). The
   confirm dialog repeats the downtime and what asks something of you. An
   app goes to its Deployments tab to follow the move; a database, which
-  has none, shows the running move on the card with its log.
+  has none, shows the running move on the card with its log. The card is
+  for services on one node, but a move adds the new node's placement
+  before it stops and copies, so while a move deployment (`trigger:
+  "move"`) is active the card stays with two placements, showing only the
+  move and its log (no picker, refusals or notes).
 - A failed deploy (0.2.16, `components/service/deploy-failure.tsx`): the
   deploy log dialog and the Deployments history row show `error` (the
   reason alone), "Use port <port>" for each of `portHint.listening` (up to
@@ -6927,7 +6931,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the panel refuses disabled with why; what happens, on the card and in
   the dialog, with the internal and `EXPOSED_*` users listed; a blocker
   keeping Move off and the panel's refusal in the dialog; the move sent to
-  the node picked; Move to another node in the database's menu; Save and
+  the node picked, then the card with the move and its log while both
+  nodes are placed; Move to another node in the database's menu; Save and
   restart saving the limits, then deploying, after a confirm), and since 0.2.1
   `nodes-build-default.spec.ts` (Add node's Build images on this node:
   ticked by default, the request carries the choice, Change),

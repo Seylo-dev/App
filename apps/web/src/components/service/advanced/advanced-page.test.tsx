@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { services } from "@seylo/ops";
+import { deployments, services } from "@seylo/ops";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
 import type { ServiceDetail } from "../use-service";
@@ -60,10 +60,14 @@ const service = (kind: string) =>
     entryNodeId: null,
   }) as unknown as ServiceDetail;
 
-const page = (kind: string, answer = impact()) =>
-  renderStatic(() => <AdvancedPage service={service(kind)} />, [[services.moveImpact, { serviceId: "svcdb0000000003a" }, answer]]).then(
-    (html) => html.replace(/&#x27;/g, "'"),
-  );
+const page = (kind: string, answer = impact(), over: Partial<ServiceDetail> = {}, active: unknown[] = []) =>
+  renderStatic(
+    () => <AdvancedPage service={{ ...service(kind), ...over }} />,
+    [
+      [services.moveImpact, { serviceId: "svcdb0000000003a" }, answer],
+      [deployments.list, { serviceId: "svcdb0000000003a", active: true, limit: 1 }, { deployments: active }],
+    ],
+  ).then((html) => html.replace(/&#x27;/g, "'"));
 
 test("a database's Advanced tab: Move to another node, its limits with a restart, and its crash policy; nothing the engine manages", async () => {
   const out = await page("postgres");
@@ -105,4 +109,23 @@ test("an app keeps its full tab, with Save on the next deploy", async () => {
   expect(out).toContain(t("serviceAdvanced.move.description"));
   expect(out).toContain(t("serviceAdvanced.nextDeploy"));
   expect(out).not.toContain(t("serviceAdvanced.resources.saveAndRestart"));
+});
+
+test("a database's move in progress stays on the card with its log, with both nodes placed until it ends", async () => {
+  // The move job adds the new node's placement before it stops and copies.
+  const placements = [
+    { nodeId: "nodea00000000001", nodeName: "de-fsn-1", replicas: 1 },
+    { nodeId: "nodeb00000000002", nodeName: "us-ash-1", replicas: 1 },
+  ];
+  const moving = { id: "depmove000000001", serviceId: "svcdb0000000003a", status: "deploying", trigger: "move" };
+  const out = await page("postgres", impact(), { placements } as Partial<ServiceDetail>, [moving]);
+  expect(out).toContain(`id="move"`);
+  expect(out).toContain(t("serviceAdvanced.move.inProgress", { name: "db" }));
+  expect(out).toContain(t("databaseVersion.viewLog"));
+  // Nothing to pick while it moves.
+  expect(out).not.toContain(`aria-label="${t("serviceAdvanced.move.to")}"`);
+  expect(out).not.toContain(t("serviceAdvanced.move.cannotGo"));
+  // Two placements and no move: not a one-node service, no card.
+  const spread = await page("postgres", impact(), { placements } as Partial<ServiceDetail>);
+  expect(spread).not.toContain(`id="move"`);
 });
