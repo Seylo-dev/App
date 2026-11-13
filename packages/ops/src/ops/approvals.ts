@@ -50,7 +50,7 @@ export type ApprovalSource = Static<typeof ApprovalSource>;
  * read, so it says what approving does now. "plainConnections": a
  * databases.setExposure that lets the database's clients in without TLS
  * ("allow"), or, while they are let in, from more addresses ("widen").
- * added in 0.2.17
+ * added in 0.2.16
  */
 export const ApprovalWarning = Type.Object({
   kind: Type.Literal("plainConnections"),
@@ -68,7 +68,7 @@ export const Approval = Type.Object({
   /** The op's summary, for the list ("Delete a project"). */
   opSummary: Type.String(),
   opKind: Type.Union([Type.Literal("mutation"), Type.Literal("destructive")]),
-  /** Pending approvals only, when approving it weakens something (ApprovalWarning); absent otherwise. added in 0.2.17 */
+  /** Pending approvals only, when approving it weakens something (ApprovalWarning); absent otherwise. added in 0.2.16 */
   warning: Type.Optional(ApprovalWarning),
   /** The input with sensitive fields replaced by "[redacted]". */
   inputPreview: Type.Unknown(),

@@ -272,7 +272,7 @@ describe("moving a database", () => {
     ]);
   });
 
-  test("a cancel while its data is copied stops the copy, starts the old copy with its data, port and logins, and removes the new one (0.2.17)", async () => {
+  test("a cancel while its data is copied stops the copy, starts the old copy with its data, port and logins, and removes the new one (0.2.16)", async () => {
     const id = await liveDb();
     timedExpose(id, nodeA);
     fleet.volumes.set(nodeA, new Map([[`${id}/data`, new TextEncoder().encode("pgdata with the rows and the roles")]]));
@@ -312,7 +312,7 @@ describe("moving a database", () => {
     });
   });
 
-  test("once its data is copied and it starts on the new node, a cancel is refused (0.2.17)", async () => {
+  test("once its data is copied and it starts on the new node, a cancel is refused (0.2.16)", async () => {
     const id = await liveDb({ exposed: false });
     const deploymentId = await moveLive(id);
     const refused = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId }, { cookie });

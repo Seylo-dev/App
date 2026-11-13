@@ -1,7 +1,7 @@
 // The service header's run buttons on the demo data: Restart, Stop and
 // Start carry an icon next to their label, Deploy stays text only, and the
 // buttons keep their plain names (the icons are hidden from screen readers).
-// While an app moves to another node (0.2.17) the header says "Moving to
+// While an app moves to another node (0.2.16) the header says "Moving to
 // <node>...", Cancel move asks first, and Deploy waits for the move.
 
 import type { Locator } from "@playwright/test";
@@ -48,7 +48,7 @@ test.describe("service header", () => {
     await expect(header.getByRole("button", { name: "Restart", exact: true })).toHaveCount(0);
   });
 
-  test("an app moving to another node: Moving to <node>..., Cancel move after a confirm, Deploy waits (0.2.17)", async ({ page }) => {
+  test("an app moving to another node: Moving to <node>..., Cancel move after a confirm, Deploy waits (0.2.16)", async ({ page }) => {
     const de = { id: ids.de, name: "de-fsn-1" };
     const us = { id: ids.us, name: "us-ash-1" };
     const history = serviceHandlers["deployments.list"]?.({ serviceId: svc.worker }) as { deployments: Record<string, unknown>[] };

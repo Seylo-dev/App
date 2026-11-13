@@ -162,7 +162,7 @@ export const Deployment = Type.Object({
    * node's partial copy goes). Once a move with volumes starts on the new
    * node it is false, and it ends on its own: live there, or back on the
    * old node if it fails. null for other deployments and for moves to
-   * another project. Added in 0.2.17.
+   * another project. Added in 0.2.16.
    */
   move: Type.Union([Type.Object({ from: NodeRef, to: NodeRef, copying: Type.Boolean(), canCancel: Type.Boolean() }), Type.Null()]),
   createdAt: Timestamp,

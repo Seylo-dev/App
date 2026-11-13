@@ -8,8 +8,8 @@
 // Move to another node. demo/service.ts moveImpactOf stands in for the
 // panel; the move itself is answered here. While it moves, db has both
 // nodes' placements (the move job adds the new one first) and the card
-// shows the move with its log. Since 0.2.17 the header says "Moving to
-// <node>..." on every tab, with Cancel move after a confirm while the
+// shows the move with its log. The header says "Moving to <node>..." on
+// every tab, with Cancel move after a confirm while the
 // panel takes a cancel (Deployment.move.canCancel: while it copies) and
 // none once it starts on the new node, and never Cancel deploy, Restart,
 // Stop or Start meanwhile.

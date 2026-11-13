@@ -1719,7 +1719,7 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   assistant queues every change anyway), replayed on approval, and run
   right away for `mcp` tokens while "Ask before destructive actions" is
   off.
-  A handler may also carry a precheck (0.2.17; `implement(op, run, {
+  A handler may also carry a precheck (0.2.16; `implement(op, run, {
   precheck })`, `(input, { db, agents }) => void`, read only): the
   refusals it would make anyway before changing anything. The pipeline
   runs it for a call it is about to hold, just before
@@ -1735,7 +1735,7 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   KeyDB without one (BAD_REQUEST), `allowPlain` with exposure off
   (BAD_REQUEST) and a port open on the node for something else (CONFLICT,
   checked again as it is written).
-  And an approval warning (0.2.17; `implement(op, run, { approvalWarning
+  And an approval warning (0.2.16; `implement(op, run, { approvalWarning
   })`, `(input, { db }) => ApprovalWarning | null`): what approving a
   pending call weakens. `toApproval` asks it (`OpRunner.approvalWarning`)
   for pending approvals only, from the sealed input parsed again and the
@@ -4272,7 +4272,7 @@ move deletes the old node's data once the new node serves.
 `ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
-Cancelling a move to another node (0.2.17, `deployments.cancel`,
+Cancelling a move to another node (0.2.16, `deployments.cancel`,
 `deployments/engine.ts` `cancelDeployment`, `services/move-runs.ts`). A
 move without volumes is cancelled like any deploy until it ends: the old
 copy kept serving, the new node's placement goes. A move with volumes is
@@ -5696,9 +5696,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   counts as new: `widensAllowList`) is audited as `plainConnections`
   "allowed" with `openToEveryone` too. These read lists the way the
   portgate does (netip.ParsePrefix) and live in `@seylo/ops`
-  (`allow-lists.ts`, pure, no `node:net`; 0.2.17, before in
-  `http/ip-ranges.ts`), so the web app's confirmations below read them the
-  same way. Those two are also what a model's call waits for
+  (`allow-lists.ts`, pure, no `node:net`), so the web app's
+  confirmations below read them the same way. Those two are also what a
+  model's call waits for
   a person on (`modelApproval: "conditional"`, the handler's
   `weakensTls` reads the same `plainChange` the audit does): turning it
   on (from off, exposing again included) and widening a non-empty allow
@@ -5708,7 +5708,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   on, a list inside the stored one (from an empty list any list),
   ports and host names, `allowPlain: false` (with an empty or catch-all
   list too) and turning exposure off run as before. A call the handler
-  would refuse anyway is refused at once instead of held (0.2.17, its
+  would refuse anyway is refused at once instead of held (its
   precheck `planExposure`: `agentTooOld`, `noTls`, BAD_REQUEST, a taken
   port), and the assistant's queue refuses those the same way, `allowPlain`
   with exposure off included. A waiting approval of a call that
@@ -5734,9 +5734,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   open to every IP in stronger words, and to prefer TLS or a timed
   expose), off does not; with it on, saving an allow list in the
   exposure settings that lets every IP in (empty, or a catch-all:
-  `allowListOpensToEveryone`, 0.2.17; before, only an empty one) and lets
-  in addresses the saved one did not (`widensAllowList`) asks to confirm
-  with the same open-to-every-IP warning, which also says a catch-all
+  `allowListOpensToEveryone`) and lets in addresses the saved one did
+  not (`widensAllowList`) asks to confirm with the same
+  open-to-every-IP warning, which also says a catch-all
   saved list is open to every IP, the chip says "TLS optional" and a line
   says plain clients are accepted too (MySQL: they need the
   server's public key, `--get-server-public-key` or
@@ -6804,7 +6804,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and toasts sit above it (`--toast-lift`), so it never covers a page's
   last buttons. The Approvals page shows each request's source as chips
   (Assistant and the chat, linking to it for its owner; MCP and the token).
-  A pending approval with `warning` (0.2.17,
+  A pending approval with `warning` (0.2.16,
   `components/approvals/approval-warning.tsx`) gets its chip and note on
   both the page and the card, and its Approve button is red and asks
   first, as for a destructive op.
@@ -6935,7 +6935,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   column of relative times ("12 minutes ago", "in 10 months") has a fixed
   `width: timeColumnWidth` (130 px) in both states: Activity's When,
   People's Last sign-in, and the API key and MCP token tables' Last used
-  and Expires (0.2.17; before, the last three took their text's width, so
+  and Expires (0.2.16; before, the last three took their text's width, so
   the header moved as the clock went on). `loading.spec.ts` checks the
   Activity, People, API keys and MCP tokens tables with the page's clock
   pinned to the demo data's moment (`demoNow`) and 9 and 50 minutes on.
@@ -6957,7 +6957,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   in `apps/web/src/components/menus/`: `service-items.tsx` (Open, Open in
   new tab, Deploy, Cancel deploy or Restart/Stop/Start, while it moves to
   another node only Cancel move when `Deployment.move.canCancel` (any
-  kind, since 0.2.17), a Box's Stop and
+  kind), a Box's Stop and
   Open editor, Logs, Console, Clone, Move to project, Move to another node
   (the Advanced tab's Move card, `#move`; databases too since 0.2.16), Copy address or internal
   address, Copy ID, Delete; the header's and the old service menu's rules),
@@ -7035,13 +7035,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   keeping Move off and the panel's refusal in the dialog; the move sent to
   the node picked, then the card with the move and its log while both
   nodes are placed; Move to another node in the database's menu; Save and
-  restart saving the limits, then deploying, after a confirm; since 0.2.17
-  the header while it moves: "Moving to us-ash-1..." with what it does on
+  restart saving the limits, then deploying, after a confirm; the header
+  while it moves: "Moving to us-ash-1..." with what it does on
   hover, no Cancel deploy, Restart, Stop or Start in the header or the
   menu, Cancel move while it copies with its dialog, Keep moving sending
   nothing and the confirm sending `deployments.cancel`, and no Cancel move
   once it starts on the new node), `service-header.spec.ts` (the run
-  buttons' icons; since 0.2.17 an app moving without volumes: "Moving to
+  buttons' icons; an app moving without volumes: "Moving to
   us-ash-1...", Deploy waiting with why, Cancel move after a confirm), and since 0.2.1
   `nodes-build-default.spec.ts` (Add node's Build images on this node:
   ticked by default, the request carries the choice, Change),

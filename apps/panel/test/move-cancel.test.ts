@@ -1,5 +1,5 @@
 // Cancelling a move to another node (deployments.cancel of a services.move
-// deployment, 0.2.17) on a fake fleet. A move with volumes is cancelled
+// deployment, 0.2.16) on a fake fleet. A move with volumes is cancelled
 // only while it copies: the copy's streams close first (ExportVolume on
 // the old node, ImportVolume on the new one) or its wait for the old copy
 // to stop ends, and only then the service goes back to the old node and

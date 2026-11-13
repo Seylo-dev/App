@@ -94,14 +94,14 @@ export interface OpHandler<C extends AnyOpContract = AnyOpContract> {
    * change (OpRunner.precheck). Throws the handler's OpError, so the model
    * hears it at once instead of an approval that fails once approved.
    * Read only: the handler still makes every check itself. Set with
-   * implement()'s options. added in 0.2.17
+   * implement()'s options. added in 0.2.16
    */
   precheck?(input: OpInput<C>, check: { db: PanelDb; agents: Deps["agents"] }): void;
   /**
    * What approving a pending call of this op weakens, for the Approvals
    * page and the assistant's card (Approval.warning), from its input and
    * the resource as it is now; null for an ordinary change. Set with
-   * implement()'s options. added in 0.2.17
+   * implement()'s options. added in 0.2.16
    */
   approvalWarning?(input: OpInput<C>, check: { db: PanelDb }): approvals.ApprovalWarning | null;
 }

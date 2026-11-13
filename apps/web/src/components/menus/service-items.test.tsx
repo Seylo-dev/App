@@ -91,7 +91,7 @@ test("while a deploy runs: Cancel deploy, and Deploy waits with the header's rea
   expect(item(entries, "deploy")?.disabledReason).toBe(t("service.header.deployBusyHint"));
 });
 
-describe("while it moves to another node (0.2.17)", () => {
+describe("while it moves to another node (0.2.16)", () => {
   test("an app: Cancel move while the panel takes one, never Cancel deploy, and Deploy waits for the move", () => {
     const entries = serviceMenuEntries({ ...base, status: "deploying" }, { ...ctx, busy: true, moving: { canCancel: true } });
     const list = entryIds(entries);

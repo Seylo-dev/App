@@ -28,10 +28,10 @@ export interface OpRunner {
    * The handler's refusals before a call is held for a person
    * (OpHandler.precheck), for the AI assistant, which queues its changes
    * itself: throws the handler's OpError; nothing for ops without one.
-   * added in 0.2.17
+   * added in 0.2.16
    */
   precheck: PrecheckOp;
-  /** What approving a pending call weakens (OpHandler.approvalWarning); null when nothing, or the op has no check. added in 0.2.17 */
+  /** What approving a pending call weakens (OpHandler.approvalWarning); null when nothing, or the op has no check. added in 0.2.16 */
   approvalWarning: ApprovalWarningOf;
 }
 

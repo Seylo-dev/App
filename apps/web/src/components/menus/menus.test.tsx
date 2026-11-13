@@ -145,7 +145,7 @@ describe("deployment row", () => {
     const list = entryIds(deploymentMenuEntries({ ...d, commit: null, canRollback: false, running: true }, { busy: true, act }));
     expect(list).toEqual(["viewLog", "redeployNoCache", "cancel", "copyId"]);
   });
-  test("a running move to another node: Cancel move while the panel takes one, else nothing to cancel (0.2.17)", () => {
+  test("a running move to another node: Cancel move while the panel takes one, else nothing to cancel (0.2.16)", () => {
     const move = { ...d, commit: null, canRollback: false, running: true };
     const entries = deploymentMenuEntries({ ...move, move: { canCancel: true } }, { busy: true, act });
     expect(entryIds(entries)).toEqual(["viewLog", "redeployNoCache", "cancelMove", "copyId"]);
