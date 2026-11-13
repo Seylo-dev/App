@@ -10,7 +10,7 @@ import (
 // InitFor decides ContainerSpec.Init for a service container
 // (ContainerConfig.init):
 //
-//   - INIT_MODE_UNSPECIFIED: nil, the daemon's default, as before 0.2.14
+//   - INIT_MODE_UNSPECIFIED: nil, the daemon's default, as before 0.2.15
 //     (specs of generations deployed before then carry it, so the
 //     containers they describe are made the same way again).
 //   - INIT_MODE_ON: true. INIT_MODE_OFF: false.

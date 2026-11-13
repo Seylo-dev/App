@@ -116,8 +116,8 @@ type FileConfig struct {
 	// with --pin at an IP address set it; the agent removes it once a
 	// panel answered (HelloAccepted.panel_address). A join's request ends
 	// with the first accepted join, whatever the panel answered: a panel
-	// before 0.2.14 never answers it, and on a resume the panel would take
-	// it for `seylo set-panel`. Added in 0.2.14.
+	// before 0.2.15 never answers it, and on a resume the panel would take
+	// it for `seylo set-panel`. Added in 0.2.15.
 	StayOnAddress bool `yaml:"stay_on_address,omitempty"`
 }
 

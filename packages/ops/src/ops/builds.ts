@@ -54,15 +54,15 @@ export const BuildNode = Type.Object({
   queued: Type.Integer({ minimum: 0 }),
   /**
    * Of those, the builds that hold a slot of the node's Builds at once:
-   * started on the node, or about to start in a free slot. Added in 0.2.14.
+   * started on the node, or about to start in a free slot. Added in 0.2.15.
    */
   running: Type.Integer({ minimum: 0 }),
-  /** Of those, the builds waiting for a free slot (queued minus running). Added in 0.2.14. */
+  /** Of those, the builds waiting for a free slot (queued minus running). Added in 0.2.15. */
   waiting: Type.Integer({ minimum: 0 }),
   /**
    * Builds at once as the node's agent applies it (at least 1; a node
    * without Can build runs 1). Its free slots are this minus queued, which
-   * the automatic build node pick prefers the most of. Added in 0.2.14.
+   * the automatic build node pick prefers the most of. Added in 0.2.15.
    */
   buildsAtOnce: Type.Integer({ minimum: 1 }),
 });
@@ -87,7 +87,7 @@ export const QueuedBuild = Type.Object({
   nodeName: Type.Union([Type.String(), Type.Null()]),
   builder: Builder,
   /**
-   * queued: not started on its node yet. Since 0.2.14 a build stays queued
+   * queued: not started on its node yet. Since 0.2.15 a build stays queued
    * while it waits for a free slot of its node's Builds at once, and is
    * running only once the node's agent really started it (it fetches the
    * source); before, it read running from the moment it was dispatched.
@@ -104,7 +104,7 @@ export const QueuedBuild = Type.Object({
    * True for a queued build with no free slot: the node's running builds and
    * the queued ones ahead of it fill its Builds at once. False for a queued
    * build about to start in a free slot, and for running builds. Added in
-   * 0.2.14.
+   * 0.2.15.
    */
   waiting: Type.Boolean(),
   commitSha: Type.Union([Type.String(), Type.Null()]),

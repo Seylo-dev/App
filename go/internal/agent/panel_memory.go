@@ -18,7 +18,7 @@ import (
 )
 
 // What the agent remembers about its panel across restarts and updates,
-// in <data dir>/state/panel.json (added in 0.2.14). Only the agent writes
+// in <data dir>/state/panel.json (added in 0.2.15). Only the agent writes
 // it; a missing or unreadable file starts empty.
 //
 //   - nodeName: the node's name in the panel (HelloAccepted.node_name), so

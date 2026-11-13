@@ -1,4 +1,4 @@
-// The image's own HEALTHCHECK as the nodes report it (agents from 0.2.14):
+// The image's own HEALTHCHECK as the nodes report it (agents from 0.2.15):
 // a rollout gated on it (HealthCheck.image) sends the check and how long it
 // waits with DEPLOY_STAGE_HEALTH_CHECKING, and the check again with its
 // final result. The panel keeps both in the node's result, waits as long as

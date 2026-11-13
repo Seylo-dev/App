@@ -1,4 +1,4 @@
-// Migration 0018 (0.2.14) adds nodes.parallel_builds_auto, "Builds at
+// Migration 0018 (0.2.15) adds nodes.parallel_builds_auto, "Builds at
 // once" on Auto (modules/nodes/parallel-builds.ts). Its default is on, so
 // every node made after it starts on Auto, but the nodes of a panel.db as
 // 0.2.13 left it keep the number their owner set: the migration turns Auto

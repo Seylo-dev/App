@@ -201,7 +201,7 @@ func TestImageHealthCheckWithoutOneIsTCP(t *testing.T) {
 	}
 }
 
-// Without HealthCheck.image (a generation a panel before 0.2.14 deployed, or
+// Without HealthCheck.image (a generation a panel before 0.2.15 deployed, or
 // a check of the service's own) Docker's status of the image's HEALTHCHECK
 // does not gate anything.
 func TestImageHealthCheckOnlyWhenAsked(t *testing.T) {

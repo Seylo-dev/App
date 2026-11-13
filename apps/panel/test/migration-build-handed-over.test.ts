@@ -1,4 +1,4 @@
-// The build_handed_over migration (0.2.14) adds builds.handed_over_at: when
+// The build_handed_over migration (0.2.15) adds builds.handed_over_at: when
 // the deploy runner opened the build's Build stream on its node, the order
 // the node's agent queues builds in (modules/builds/slots.ts queueOrder).
 // Builds still queued or running when the panel updates were handed over

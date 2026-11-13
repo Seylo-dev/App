@@ -1,4 +1,4 @@
-// NODE_ENV=production for apps (env/desired.ts withNodeEnv, 0.2.14): every
+// NODE_ENV=production for apps (env/desired.ts withNodeEnv, 0.2.15): every
 // app's deploy starts with it unless its own .env or the project's shared
 // variables set NODE_ENV (any value, also empty), like PORT for built apps.
 // Image apps, compose members and PR previews get it too; databases, Boxes,
@@ -122,7 +122,7 @@ describe("NODE_ENV in what apps deploy with", () => {
   }
 
   test("a built app runs with NODE_ENV=production, but builds without it", async () => {
-    // Before 0.2.14: no NODE_ENV in the container unless the .env had one.
+    // Before 0.2.15: no NODE_ENV in the container unless the .env had one.
     const id = await builtApp("api");
     writeServiceEnv(panel.deps.db, panel.deps.secrets, id, "GREETING=hi\n", null);
     const depId = await deploy(id);
@@ -213,7 +213,7 @@ describe("NODE_ENV in what apps deploy with", () => {
       const row = seedService(panel, { projectId, name: `x-${kind}`, kind, nodeIds: [nodeA] });
       expect(sealedNodeEnv(row.id)).toEqual([]);
     }
-    panel.deps.config.image = `ghcr.io/seylo-dev/seylo:0.2.14@sha256:${"a".repeat(64)}`;
+    panel.deps.config.image = `ghcr.io/seylo-dev/seylo:0.2.15@sha256:${"a".repeat(64)}`;
     expect(ensurePanelService(panel.deps)).toBe("created");
     expect(sealedNodeEnv(panelServiceId)).toEqual([]);
   });

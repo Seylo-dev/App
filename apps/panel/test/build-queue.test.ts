@@ -1,5 +1,5 @@
 // Builds that wait for a slot of their node's Builds at once (added in
-// 0.2.14). The agent queues a build it has no slot for and reports
+// 0.2.15). The agent queues a build it has no slot for and reports
 // BUILD_STAGE_QUEUED; the build row stays queued (startedAt null) until a
 // stage after the slot arrives, then runs from that moment. Waiting builds
 // say so on their deployment (buildWait, the clone step), their service

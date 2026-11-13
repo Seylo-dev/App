@@ -277,7 +277,7 @@ func TestMoveToTraefikDefaultCertificateIsNoInspection(t *testing.T) {
 }
 
 // A join's stay request ends with the join, also when the panel cannot
-// read it (before 0.2.14): sent again on a resume after the panel updated,
+// read it (before 0.2.15): sent again on a resume after the panel updated,
 // it would read as `seylo set-panel` and keep the node off the domain the
 // owner adds later.
 func TestJoinStayRequestEndsWithTheJoin(t *testing.T) {
@@ -303,7 +303,7 @@ func TestJoinStayRequestEndsWithTheJoin(t *testing.T) {
 		return cfg != nil && !cfg.StayOnAddress
 	})
 
-	// The panel updates to 0.2.14: the node's resume does not ask to stay.
+	// The panel updates to 0.2.15: the node's resume does not ask to stay.
 	panel.BeforePanelAddress(false)
 	hellos := len(panel.Hellos())
 	panel.DropConnections()

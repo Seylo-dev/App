@@ -45,7 +45,7 @@ import (
 // joined over the panel's IP and pin, and the panel names its domain on
 // every connect. Each try drops the session the panel just accepted, so
 // the node tries that address again only after that long, or when the
-// panel names another address or a pin for it. Since 0.2.14 that wait
+// panel names another address or a pin for it. Since 0.2.15 that wait
 // (from any address) is kept in state/panel.json, so restarts and updates
 // do not try it again either, and it goes once the panel stops naming the
 // address (panel_memory.go); `seylo set-panel` moves the node by hand. A

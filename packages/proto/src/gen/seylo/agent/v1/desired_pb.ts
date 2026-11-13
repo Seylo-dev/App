@@ -181,7 +181,7 @@ export type NodeSettings = Message<"seylo.agent.v1.NodeSettings"> & {
   /**
    * The node's name in the panel, so `seylo status` shows a rename made
    * while the agent is connected (HelloAccepted.node_name has it at each
-   * connect). Empty from older panels. Added in 0.2.14.
+   * connect). Empty from older panels. Added in 0.2.15.
    *
    * @generated from field: string node_name = 12;
    */

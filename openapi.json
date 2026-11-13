@@ -50922,7 +50922,7 @@
                       "type": "integer"
                     },
                     "parallelBuildsAuto": {
-                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                       "type": "boolean"
                     },
                     "wings": {
@@ -51811,7 +51811,7 @@
                             "type": "integer"
                           },
                           "parallelBuildsAuto": {
-                            "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                            "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                             "type": "boolean"
                           },
                           "wings": {
@@ -52583,7 +52583,7 @@
                       "type": "integer"
                     },
                     "parallelBuildsAuto": {
-                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                       "type": "boolean"
                     },
                     "wings": {
@@ -53343,7 +53343,7 @@
                       "type": "integer"
                     },
                     "parallelBuildsAuto": {
-                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                       "type": "boolean"
                     },
                     "wings": {
@@ -53888,7 +53888,7 @@
                       "type": "integer"
                     },
                     "parallelBuildsAuto": {
-                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                       "type": "boolean"
                     },
                     "wings": {
@@ -54441,7 +54441,7 @@
                       "type": "integer"
                     },
                     "parallelBuildsAuto": {
-                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                       "type": "boolean"
                     },
                     "wings": {
@@ -54939,7 +54939,7 @@
                     "type": "integer"
                   },
                   "parallelBuildsAuto": {
-                    "description": "true: Auto, one build per 4 CPU cores and per 4 GiB of memory, 1 to 16. false: a fixed number, the one that applies now unless maxParallelBuilds is given. Added in 0.2.14.",
+                    "description": "true: Auto, one build per 4 CPU cores and per 4 GiB of memory, 1 to 16. false: a fixed number, the one that applies now unless maxParallelBuilds is given. Added in 0.2.15.",
                     "type": "boolean"
                   },
                   "logRetention": {
@@ -55157,7 +55157,7 @@
                       "type": "integer"
                     },
                     "parallelBuildsAuto": {
-                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.",
+                      "description": "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.",
                       "type": "boolean"
                     },
                     "wings": {

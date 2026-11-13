@@ -104,6 +104,6 @@ test("the picker's load note says how many builds run and how many wait for a sl
   expect(buildLoadNote(node("a"))).toBeNull();
   expect(buildLoadNote(node("a", { queued: 2, running: 2 }))).toBe("2 running");
   expect(buildLoadNote(node("a", { queued: 3, running: 1, waiting: 2 }))).toBe("1 running, 2 waiting");
-  // A panel answer without the split (fixtures from before 0.2.14) keeps the old words.
+  // A panel answer without the split (fixtures from before 0.2.15) keeps the old words.
   expect(buildLoadNote({ queued: 3 })).toBe("3 builds queued");
 });

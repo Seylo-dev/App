@@ -1,6 +1,6 @@
 // What the health check card says applies when the service has no check of
 // its own: the image's HEALTHCHECK its node reported (apps and compose
-// members deployed from 0.2.14), else TCP on the first port, else "running".
+// members deployed from 0.2.15), else TCP on the first port, else "running".
 
 import { t } from "../../../i18n/t";
 import type { ServiceDetail } from "../use-service";

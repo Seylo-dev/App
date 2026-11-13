@@ -1,4 +1,4 @@
-// The init process (0.2.14): apps, compose members and cron services run
+// The init process (0.2.15): apps, compose members and cron services run
 // Docker's init by default (container.init "auto"), from their next deploy;
 // a deployment from before keeps no init, so nothing running is made again
 // on a panel update. Databases, Boxes and the panel never get one.
@@ -89,7 +89,7 @@ describe("the setting", () => {
     expect(bad.status).toBe(400);
   });
 
-  test("a deployment from before 0.2.14 keeps no init, so its containers are not made again", async () => {
+  test("a deployment from before 0.2.15 keeps no init, so its containers are not made again", async () => {
     const id = await createApp("api");
     const d = await deploy(id);
     const settings = panel.deps.db.select().from(deployments).where(eq(deployments.id, d.id)).get()?.runSettings ?? {};

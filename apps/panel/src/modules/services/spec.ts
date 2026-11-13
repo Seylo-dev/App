@@ -132,7 +132,7 @@ export interface RunSettings {
   /**
    * Without a check of its own (healthCheck null) the deploy waits for the
    * image's own HEALTHCHECK (HealthCheck.image in the spec). Set by deploys
-   * from 0.2.14; a snapshot from before has none, so the generation it
+   * from 0.2.15; a snapshot from before has none, so the generation it
    * describes keeps the TCP default it was deployed with.
    */
   imageHealthCheck: boolean;
@@ -231,7 +231,7 @@ export function checkSpec(spec: ServiceSpecJson): ServiceSpecJson {
 /**
  * The run settings a deploy snapshots now. The init process is written out
  * ("auto" when the service never chose), so a snapshot without one is from
- * before 0.2.14 and keeps containers as they were made.
+ * before 0.2.15 and keeps containers as they were made.
  */
 export function runSettingsOf(spec: ServiceSpecJson): RunSettings {
   return {
@@ -248,7 +248,7 @@ export function runSettingsOf(spec: ServiceSpecJson): RunSettings {
 
 /**
  * A stored snapshot, or the current settings when the deployment has none.
- * What deploys before 0.2.14 did not snapshot reads as they ran: no wait
+ * What deploys before 0.2.15 did not snapshot reads as they ran: no wait
  * for the image's HEALTHCHECK and no init process (container.init absent).
  */
 export function readRunSettings(raw: unknown, fallback: ServiceSpecJson): RunSettings {

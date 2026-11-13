@@ -12,7 +12,7 @@ import (
 // entrypoint and command; an image that cannot be read counts as one
 // without an init of its own. The mode is part of SpecHash, so a container
 // keeps the init it was made with until a spec with another mode replaces
-// it, and specs from before 0.2.14 (no mode) make containers as before.
+// it, and specs from before 0.2.15 (no mode) make containers as before.
 func (w *worker) initFor(ctx context.Context, spec *agentv1.ServiceSpec, image string) *bool {
 	c := spec.GetContainer()
 	var img docker.Image

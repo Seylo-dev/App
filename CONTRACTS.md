@@ -74,7 +74,7 @@ packages use. "Built" means implemented and tested.
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
 | `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`); a route file it cannot write goes in the service's status (`ServiceStatus.route_write_error`, message and since when, cleared by the next write that works or once the wanted routes are the ones on file again or need no file, since 0.2.13; before, only a "writing routes" warning every 10 s in the journal) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
-| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.14); `WaitHealthy` returns a `*NotListeningError` (wraps `ErrNeverHealthy`) when the default check was refused all along until the deadline, since 0.2.14 | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
+| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.15); `WaitHealthy` returns a `*NotListeningError` (wraps `ErrNeverHealthy`) when the default check was refused all along until the deadline, since 0.2.15 | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; an ACME route with `acme_challenge_on_https` (the panel's domains whose DNS does not point straight at the node, the panel's own domain, every tool host) answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.13; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https, the challenge path over https kept for the app on a domain without `acme_challenge_on_https`, and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with a redirect to https for every path and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareHTTPSRedirect`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
@@ -188,7 +188,7 @@ containers that kept the old servers it names them: build workers as
 above, apps with the panel's Restart (in place, no deploy), others with
 `docker restart`. The check never changes daemon.json or restarts Docker.
 
-Stale build workers heal themselves (since 0.2.14): a build worker is the
+Stale build workers heal themselves (since 0.2.15): a build worker is the
 agent's own container and a restart keeps its build cache (the builder's
 state volume), so the agent restarts one without a usable server itself,
 judged by this check's own code (`nodecheck.WorkerDNS`, the worker's
@@ -336,9 +336,9 @@ so the update holds back none of their certificates); for 0.2.10
 service export and import) and `0017_transfer_volumes`
 (`service_exports.volumes`, `node_id` without a foreign key, `stop_service`
 and `source_stopped`, so a download that stopped its service starts it
-again after a panel restart); for 0.2.14 `0018_parallel_builds_auto`
+again after a panel restart); for 0.2.15 `0018_parallel_builds_auto`
 (`nodes.parallel_builds_auto`, default true for new nodes, set false on
-existing ones so they keep their fixed builds at once); for 0.2.15
+existing ones so they keep their fixed builds at once),
 `0019_build_handed_over` (`builds.handed_over_at`, set to `created_at` on
 builds queued or running at the update) and `0020_build_progress_logged`
 (`builds.progress_logged`, default '[]')), which the panel applies at start, also
@@ -569,7 +569,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   env of whatever it builds, from any project (the service's own node
   first, else the builder with the most free build slots, its Builds at
   once minus its builds running or queued, then the fewest builds in
-  flight, then by name, since 0.2.14: before, the fewest builds in
+  flight, then by name, since 0.2.15: before, the fewest builds in
   flight, which put a build behind a one-slot node's build while an
   eight-slot node had free slots; automatic picks skip a node whose
   agent reports no docker buildx, `NodeFacts.buildx.installed` false;
@@ -588,7 +588,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `state/desired.pb` for the same rule. `agent.SaveConfig` (the agent's own writes) keeps
   unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
   makes every new FileConfig key pick a side.
-- Builds at once (0.2.14): `NodeSettings.max_parallel_builds` is the
+- Builds at once (0.2.15): `NodeSettings.max_parallel_builds` is the
   node's fixed `nodes.max_parallel_builds`, or with
   `nodes.parallel_builds_auto` on, `autoParallelBuilds` of its stored
   facts (`packages/ops/src/parallel-builds.ts`, the one function the
@@ -618,7 +618,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   pin mismatch or another panel (see "Panel identity"); ALREADY_CONNECTED
   retries normally. A pin mismatch at `panel_url` with a fallback to try
   next (see "Moving to the panel's new address") waits 1 s instead.
-  Since 0.2.14 the agent keeps what it learned about its panel in
+  Since 0.2.15 the agent keeps what it learned about its panel in
   `state/panel.json` (`agent/panel_memory.go`, 0600, written only by the
   agent; missing or unreadable starts empty): the panel's name for the
   node (`HelloAccepted.node_name`), failed moves that wait for their retry
@@ -632,7 +632,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   line that names the node) shows `NodeSettings.node_name` from the
   stored desired state, else the stored HelloAccepted name, else
   config.yml's `node_name`, else the hostname: before the first connect
-  to a 0.2.14 panel it is the hostname, as before, and a node renamed in
+  to a 0.2.15 panel it is the hostname, as before, and a node renamed in
   the panel no longer prints its hostname as its name. AGENT_TOO_OLD also
   makes the agent install the latest signed release itself
   (`update.AgentUpdater.UpdateToLatest`: `<release base>/latest/download/
@@ -719,7 +719,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   fallback is dialed once `panel_url` failed for 5 minutes (then every 5
   minutes), so a node whose panel domain was removed or changed finds the
   panel again; moving from one domain to the next keeps that pinned
-  address as the fallback. Since 0.2.14 a connect to `panel_url` that
+  address as the fallback. Since 0.2.15 a connect to `panel_url` that
   fails on a certificate the node will never trust (an issuer it does not
   trust, as TLS inspection re-signs the domain's certificate, or a key
   that is not the pinned one: `inspectedCertificate`) dials a standing
@@ -745,7 +745,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   address with the reason, and is retried after an hour or an agent
   restart; every successful move sends the resolve. A move that failed on
   an inspected certificate (above) sets `NodeAlert.inspected_certificate`
-  when it started from a pinned `https://` address, and since 0.2.14 its
+  when it started from a pinned `https://` address, and since 0.2.15 its
   wait (24 h from a pinned address, else 1 h) is kept in
   `state/panel.json`: restarts and updates do not try it again (before,
   each one dropped the first accepted session for the move and raised the
@@ -765,7 +765,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   recorded panel identity). Root only (`run it as root`). It refuses a
   node without `node_id` (join again) and plain `http://` to another host
   without `--insecure` (join's rule; `--pin` needs `https://`); the same
-  address and pin as `panel_url` changes nothing but, since 0.2.14,
+  address and pin as `panel_url` changes nothing but, since 0.2.15,
   `stay_on_address` (below; then it restarts the agent). Before writing anything it dials the address (the pin, else the
   system roots), resumes as the node with `agent.key` (a ClientHello
   without facts: the CLI has only their machine part, and the panel's
@@ -789,7 +789,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `panel_key`, `panel_proves`, `staged` and every other key stay), restarts
   `seylo.service` and prints the restarted agent's `Panel:` line (and
   `Error:`) once it connected or was refused, or after 30 s, with how to
-  go back. Since 0.2.14 it also writes `stay_on_address: true`: the agent
+  go back. Since 0.2.15 it also writes `stay_on_address: true`: the agent
   sends `ClientHello.stay_on_address` on every connect until a
   HelloAccepted carries `panel_address` (the panel read it), then drops
   the key, and the panel records Panel address "stay" for the node (by
@@ -798,9 +798,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (`TestJoinDecidesEveryConfigKey`: Join replaces it). A join's request
   goes with the join credential only: the agent drops the key after the
   first accepted join hello whatever the panel answered (a panel before
-  0.2.14 never answers it, and a resume that still carried it would be
+  0.2.15 never answers it, and a resume that still carried it would be
   recorded as `seylo set-panel`); `set-panel` needs a `node_id`, so a key
-  on a resume is always its own. Before 0.2.14, at a
+  on a resume is always its own. Before 0.2.15, at a
   pinned IP the agent tried the domain the panel names and kept the pinned
   address when its certificate was refused (`untrustedMoveRetryAfter`,
   under `pinnedCommand`). Add node prints the
@@ -855,7 +855,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   ApplyService still answers INVALID_ARGUMENT for its one spec. Either
   way the service's log gets one SYSTEM line per refused generation.
 - The image's own HEALTHCHECK (`HealthCheck.image`, `ImageProbe`, since
-  0.2.14; `reconcile/imagehealth.go`): the deploy and the runtime watch of
+  0.2.15; `reconcile/imagehealth.go`): the deploy and the runtime watch of
   a spec with it follow Docker's health status of the container
   (`docker.ContainerDetails.Health`, from inspect, read every 500 ms while
   a deploy waits): healthy passes, unhealthy fails the deploy at once with
@@ -866,7 +866,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   declares none, or HEALTHCHECK NONE) gets the default check: TCP on the
   first port. A prober given the image check (a project move's check on
   the new address) runs that default too. Wait: without
-  `DeployStrategy.health_timeout` (panels from 0.2.14 leave it unset at the
+  `DeployStrategy.health_timeout` (panels from 0.2.15 leave it unset at the
   default 300 s) the rollout waits `max(5m, start_period + retries x
   (interval + timeout) + 1m)` (`health.ImageWait`, Docker's defaults 30s,
   30s, 0, 3); a timeout the spec sets wins, and the progress message and
@@ -884,7 +884,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   container is made, so switching between a check of its own and none would
   need new containers, while health checks stay out of `SpecHash`. Older
   agents read `HealthCheck.image` as no probe: the TCP default.
-- The init process (`ContainerConfig.init`, `InitMode`, since 0.2.14;
+- The init process (`ContainerConfig.init`, `InitMode`, since 0.2.15;
   `docker/init.go`, `reconcile/init.go`): service containers and cron
   runs (`jobrun.Spec.Init`, `cron/local.go` `runSpec`) get
   `HostConfig.Init` from `docker.InitFor`: ON true, OFF false, AUTO true
@@ -895,7 +895,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   dumb-init, docker-init, catatonit, or s6-*), then false. AUTO reads the
   image's ENTRYPOINT and CMD (`docker.Image.Entrypoint`/`Cmd`); an image
   that cannot be read counts as one without an init. UNSPECIFIED (every
-  spec from before 0.2.14) sends no `Init` at all: the daemon's default,
+  spec from before 0.2.15) sends no `Init` at all: the daemon's default,
   as before. The mode is part of `SpecHash` (it is in ContainerConfig) and
   its zero value is not encoded, so a spec from before hashes exactly as
   under 0.2.13 (`TestInitModeSpecHash`, golden value) and an agent update
@@ -1061,7 +1061,7 @@ local API, join and resume. The areas:
   removes one a cut-off run left behind.
 - Every container gets `traefik.enable=false` and `--cgroup-parent=seylo.slice`
   and Docker restart policy `no`. Service containers and cron runs also
-  get `--init` by their spec's `ContainerConfig.init` (since 0.2.14, see
+  get `--init` by their spec's `ContainerConfig.init` (since 0.2.15, see
   "The init process" under Protocol); other helpers leave it to the daemon.
 - Names: containers `seylo-<service>-<generation>[-<replica>]`, networks
   `seylo-p-<project>`, `seylo-edge` and `seylo-edge6`, route files `seylo-<service>.yml`,
@@ -1149,7 +1149,7 @@ local API, join and resume. The areas:
   start again, so an unverified generation is never adopted as serving,
   never replaces the old one and is never reported SUCCEEDED.
 - A deploy that is not healthy within its health timeout fails with "not
-  healthy after <timeout>: <the last check's error>". Since 0.2.14 (the
+  healthy after <timeout>: <the last check's error>". Since 0.2.15 (the
   agent's text; the panel shows it as it comes, also in the alert), when
   the check was the default one (no probe set: TCP on the first TCP port)
   and every try that ran to its end had its connection refused
@@ -1216,7 +1216,7 @@ local API, join and resume. The areas:
   binaries live in `<datadir>/tools`. A builder's container
   (`buildx_buildkit_<builder>0`) runs on Docker's default bridge, so it
   gets the DNS servers Docker gives every container, and keeps the ones it
-  started with: since 0.2.14 a build first restarts an existing builder's
+  started with: since 0.2.15 a build first restarts an existing builder's
   worker that has none it can use while new containers get some (see
   "Stale build workers heal themselves" under the Container DNS check),
   never one another build runs on. A build that failed
@@ -1257,7 +1257,7 @@ local API, join and resume. The areas:
   a router there) without appending that node
   (`forwardedHeaders.notAppendXForwardedFor`), so an app sees the visitor as
   the last X-Forwarded-For hop and as X-Real-Ip, and the scheme the visitor
-  used as X-Forwarded-Proto, also through another node (from 0.2.14;
+  used as X-Forwarded-Proto, also through another node (from 0.2.15;
   before, the forwarding node's address and `https`). IPv6 visitors: on a
   host with a public IPv6 address where turning on IPv6 forwarding does not
   stop the kernel taking router advertisements (`proxy.VisitorIPv6`: no
@@ -2193,7 +2193,7 @@ never type the ids by hand.
   `gitProviders.commitStatus` job from `onDeploymentChange`
   (`deployments/store.ts`): pending ("Deploy queued"), pending "Waiting
   for a build slot" while the deploy builds but its build waits for a
-  free slot on its node (`builds/slots.ts` `waitingBuilds`, since 0.2.14;
+  free slot on its node (`builds/slots.ts` `waitingBuilds`, since 0.2.15;
   before, running from the dispatch), running ("Building and deploying")
   once the build has its slot, success, failed, cancelled,
   never back from running to pending: a commit shown running stays so
@@ -2751,7 +2751,7 @@ never type the ids by hand.
   gave it only to services created from 0.2.2 on). The New app dialog's
   Set up later sends no port (it shows no Port field), so an empty app
   opens no first-run IP:port access.
-- NODE_ENV (0.2.14, `env/desired.ts` `withNodeEnv`): every app (kind
+- NODE_ENV (0.2.15, `env/desired.ts` `withNodeEnv`): every app (kind
   `app`: built from a repository, an image, an inline Dockerfile or an
   upload, compose members and PR previews) gets `NODE_ENV=production` in
   the env its deploy starts with, next to PORT, unless that env already has
@@ -3697,7 +3697,7 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   `panelAddress` (null while offline) for the node sheet. A failed move (`NODE_ALERT_KIND_PANEL_MOVE_FAILED`) raises one
   `node_health_check_failed` alert per streak, resolved by the agent; one
   with `inspected_certificate` gets the key
-  `node-alert:<node>:9:inspected:<ms>`. Panel address (since 0.2.14,
+  `node-alert:<node>:9:inspected:<ms>`. Panel address (since 0.2.15,
   `agent-hub/panel-address.ts`, setting `nodePanelAddress` by node id):
   "follow" (the default) gets the domain as above, "stay" gets no
   `panel_url` (`agentMoveTarget` null, and `askNodesToMove` skips it).
@@ -3711,7 +3711,7 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   pin), by "join"; each new record writes an audit event
   `nodes.panelAddressRequest`. Without a stored choice, a node with an
   open PANEL_MOVE_FAILED alert whose key carries `inspected:` (or, from
-  agents before 0.2.14, whose message mentions TLS inspection, an unknown
+  agents before 0.2.15, whose message mentions TLS inspection, an unknown
   authority or the pinned key, unless it says the address answered with
   Traefik's own certificate: `answers with Traefik's own certificate` or
   `issued by "TRAEFIK DEFAULT CERT"`) counts as "stay", by
@@ -3722,7 +3722,7 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   (`nodes.rename` recompiles the node). `nodes.get` returns
   `panelAddressChoice`, `panelAddressChoiceBy` (`owner`, `node`, `join`,
   `inspectedCertificate`, `default`) and `panelAddressChoiceAt`, left out
-  for the panel node. Why a node is offline (since 0.2.14): a refused
+  for the panel node. Why a node is offline (since 0.2.15): a refused
   resume of a known, enabled, offline node is kept in
   `nodeHelloRejections` (AGENT_TOO_OLD only with the node's valid
   signature, BAD_SIGNATURE as it is; the same reason within a minute is
@@ -3750,14 +3750,14 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   sensitive), which Add node shows under it as "Already joined? Point it
   here" for a node that joined over the domain and went offline that way
   (Protocol, "Pointing a joined node at another address by hand"). An
-  agent that cannot connect reports nothing meanwhile; since 0.2.14 it
+  agent that cannot connect reports nothing meanwhile; since 0.2.15 it
   sends its last connect error once it is back (`ClientHello.away`), and
   the node's page shows it. The
   agent's dial error names the refused certificate's issuer
   (`conn.certificateHint`: TLS inspection, with exempting the domain,
   joining with the IP and `--pin`, or since 0.2.13 `seylo set-panel` as
   the ways out, or Traefik's own certificate when the panel's server has
-  none for the name; since 0.2.14 also when it came in place of the pin,
+  none for the name; since 0.2.15 also when it came in place of the pin,
   `conn.TraefikDefaultCertificate`), a pin mismatch too, and the installer shows that
   hint instead of the ports one. A join on a node
   already joined to the same `panel_url` joins again with the token (as
@@ -3774,7 +3774,7 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   `https://` address whose move to the domain fails on an untrusted issuer
   or a pin mismatch tries it again after 24 h (`untrustedMoveRetryAfter`)
   instead of 1 h, keeping its session meanwhile; another address tries at
-  once, and since 0.2.14 an agent restart no longer does (the wait is in
+  once, and since 0.2.15 an agent restart no longer does (the wait is in
   `state/panel.json`), and the open alert keeps the node on "stay" anyway.
 - PanelService (`agent-hub/panel-service.ts`): ReportCrash stores
   `crash_reports`, ReportEvent stores a capped copy in `agent_reports` (30
@@ -4517,7 +4517,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the only way to create service rows (checks name, node and spec).
   `services.spec` JSON is `ServiceSpecJson` in `services/spec.ts`; run
   settings are snapshotted per deployment (`deployments.run_settings`),
-  so they reach nodes on the next deploy. Since 0.2.14 a snapshot has
+  so they reach nodes on the next deploy. Since 0.2.15 a snapshot has
   `imageHealthCheck: true`: an app or compose member without a check of
   its own (not the panel, not a member whose compose file turns health
   checks off, `member.imageHealthCheck: false`) is sent
@@ -4534,7 +4534,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   off; optional in `ContainerSettings`, so stored rows and export files
   from before validate; `services.get` always says, "auto" when unset;
   `services.update` sets it, the Advanced tab's Container card). A
-  snapshot from 0.2.14 writes it out (`runSettingsOf`: "auto" when unset)
+  snapshot from 0.2.15 writes it out (`runSettingsOf`: "auto" when unset)
   and `serviceSpecFor` sends it for apps, compose members and cron
   services (`initModeOf`); a snapshot without it (from before, or none)
   sends UNSPECIFIED, and so do databases, Boxes and the panel. A compose
@@ -4546,7 +4546,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   machine on the deployment row, kicked by ops, agent events and the
   `deployments.tick` job (timeouts, recovery after a restart). A deploy
   switches `services.target_deployment_id` and marks the service dirty.
-- Build rows (since 0.2.14): a build is `queued` (`started_at` null) from
+- Build rows (since 0.2.15): a build is `queued` (`started_at` null) from
   the moment the runner dispatches it until its node's agent reports a
   stage after its slot of Builds at once (`BUILD_STAGE_FETCHING_SOURCE` or
   later: agents of every supported version send FETCHING_SOURCE right
@@ -4640,7 +4640,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `POST /api/hooks/deploy/<token>` (deploy trigger URLs),
   `POST /api/uploads/services/<serviceId>` (a `.tar.gz` source, then a deploy).
 - Live: deployment log lines on `deployment:<id>` (`{ type: "log", lines }`),
-  invalidations on `service:<id>` (for a preview's deploy, since 0.2.14,
+  invalidations on `service:<id>` (for a preview's deploy, since 0.2.15,
   also `previews.list` on `service:<id>` of the service it previews,
   whose Previews tab shows its latest deploy and whose page follows that
   topic; not on `project:<id>`, which only the sidebar follows, while the
@@ -4720,7 +4720,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   secrets; addresses are open). Shared variables reach every service of the
   project, so anyone who can run code in one service of a project can read
   them: a per-service grant is not a boundary for shared variables.
-- One variable at a time (added in 0.2.14): `env.setVariable` (`env.edit`
+- One variable at a time (added in 0.2.15): `env.setVariable` (`env.edit`
   on the service) and `env.setSharedVariable` (`env.edit` on the project)
   take `{key, value: string | null, expectedUpdatedAt?}` and change the
   saved text with `@seylo/env-analyzer` `setEnvVariable`, inside the write

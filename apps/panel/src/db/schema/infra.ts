@@ -84,7 +84,7 @@ export const nodes = sqliteTable(
      * "Builds at once" on Auto: the panel sends autoParallelBuilds of the node's stored facts
      * (@seylo/ops, one per 4 cores and 4 GiB, 1..16) instead of maxParallelBuilds. Every new
      * node starts on it (the default); migration 0018 turned it off for the nodes before it, so
-     * they keep their number. Added in 0.2.14.
+     * they keep their number. Added in 0.2.15.
      */
     parallelBuildsAuto: integer("parallel_builds_auto", { mode: "boolean" }).notNull().default(true),
     /** Per-service log store limits sent in NodeSettings.log_retention. */

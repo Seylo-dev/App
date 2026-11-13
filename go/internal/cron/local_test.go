@@ -225,7 +225,7 @@ func TestScheduledRunUsesServiceContainerAndRedacts(t *testing.T) {
 	if !strings.HasPrefix(spec.Name, "seylo-svc1-cron-") {
 		t.Errorf("name = %q", spec.Name)
 	}
-	// A spec from before 0.2.14 names no init: the daemon's default, as before.
+	// A spec from before 0.2.15 names no init: the daemon's default, as before.
 	if spec.Init != agentv1.InitMode_INIT_MODE_UNSPECIFIED {
 		t.Errorf("init = %v", spec.Init)
 	}

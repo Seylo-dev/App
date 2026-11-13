@@ -1,4 +1,4 @@
-// "Builds at once" on Auto (0.2.14): the panel sends the number Auto works
+// "Builds at once" on Auto (0.2.15): the panel sends the number Auto works
 // out from the node's stored facts as NodeSettings.max_parallel_builds (0
 // while Can build is off), follows the machine when its cores or memory
 // change, starts new nodes on Auto, and nodes.updateSettings switches

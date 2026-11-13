@@ -1,4 +1,4 @@
-// The image's own HEALTHCHECK (0.2.14): apps and compose members without a
+// The image's own HEALTHCHECK (0.2.15): apps and compose members without a
 // check of their own are sent HealthCheck.image from their next deploy, the
 // default health timeout is left to the node (which waits longer for the
 // image's start period), and what the node reports is kept with the
@@ -66,7 +66,7 @@ async function goLive(serviceId: string, d: { generation: number }) {
 const specOf = (id: string) => serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA);
 const row = (id: string) => panel.deps.db.select().from(deployments).where(eq(deployments.id, id)).get();
 
-// The api's HEALTHCHECK as an agent from 0.2.14 reports it.
+// The api's HEALTHCHECK as an agent from 0.2.15 reports it.
 const respoCheck = {
   test: ["CMD-SHELL", "bun run healthcheck"],
   interval: durationFromMs(10_000),
@@ -117,7 +117,7 @@ describe("the spec", () => {
     expect(specOf(id)?.healthCheck?.probe.case).toBe("http");
   });
 
-  test("a generation deployed before 0.2.14 keeps the TCP default until the next deploy", async () => {
+  test("a generation deployed before 0.2.15 keeps the TCP default until the next deploy", async () => {
     const id = await createApp("api");
     const d = await deploy(id);
     // A snapshot from before: no imageHealthCheck key.

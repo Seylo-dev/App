@@ -236,10 +236,10 @@ function healthCheckOf(h: NonNullable<RunSettings["healthCheck"]>): NonNullable<
 
 /**
  * The image's own HEALTHCHECK as the check of an app or compose member
- * without one of its own (HealthCheck.image): deployed from 0.2.14
+ * without one of its own (HealthCheck.image): deployed from 0.2.15
  * (run.imageHealthCheck), not the panel, and not a member whose compose file
  * turns health checks off. Undefined otherwise: TCP on the first port, as
- * before. Agents before 0.2.14 read it as that default too.
+ * before. Agents before 0.2.15 read it as that default too.
  */
 function imageHealthCheckOf(run: RunSettings, kind: ServiceKind, isProtected: boolean): ServiceSpecInit["healthCheck"] {
   if (!run.imageHealthCheck || isProtected || run.member?.imageHealthCheck === false) return undefined;
@@ -260,8 +260,8 @@ const initModes = { auto: InitMode.AUTO, on: InitMode.ON, off: InitMode.OFF } as
 
 /**
  * ContainerConfig.init: the deployment's init process for apps, compose
- * members and cron services. Unspecified (no init, as before 0.2.14) for a
- * snapshot from before 0.2.14, which has none, so the generation it
+ * members and cron services. Unspecified (no init, as before 0.2.15) for a
+ * snapshot from before 0.2.15, which has none, so the generation it
  * describes keeps the hash of the containers running it; and always for
  * databases, Boxes and the panel.
  */

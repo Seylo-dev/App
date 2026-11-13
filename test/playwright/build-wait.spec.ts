@@ -1,5 +1,5 @@
 // A deploy whose build waits for a free slot of its node's Builds at once
-// (0.2.14), on the demo data: the panel marks the deployment (buildWait) and
+// (0.2.15), on the demo data: the panel marks the deployment (buildWait) and
 // the service (buildWaiting), and its clone step says where it stands. The
 // header, the deploy row, the log modal, the Overview's Deploys card, the
 // Previews tab (which follows its previews' deploys on its service's topic)

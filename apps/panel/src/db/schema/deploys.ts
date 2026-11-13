@@ -30,7 +30,7 @@ export interface DeployNodeResult {
   digest: string | null;
   /**
    * The image HEALTHCHECK the node gated the rollout on (DeployProgress
-   * image_health_check, agents from 0.2.14), seconds with Docker's defaults
+   * image_health_check, agents from 0.2.15), seconds with Docker's defaults
    * filled in. Absent when none applied.
    */
   imageHealthCheck?: StoredImageHealthCheck;

@@ -28,7 +28,7 @@ func TestInitForModes(t *testing.T) {
 		img        Image
 		want       string
 	}{
-		// Specs from before 0.2.14: as they were made.
+		// Specs from before 0.2.15: as they were made.
 		{"unspecified", agentv1.InitMode_INIT_MODE_UNSPECIFIED, nil, nil, node, "daemon default"},
 		{"on", agentv1.InitMode_INIT_MODE_ON, nil, nil, s6, "on"},
 		{"off", agentv1.InitMode_INIT_MODE_OFF, nil, nil, node, "off"},

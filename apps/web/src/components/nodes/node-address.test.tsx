@@ -27,7 +27,7 @@ const node = (values: Partial<NodeDetail>) =>
     publicIpv6: null,
     publicAddress: null,
     wildcardDomain: null,
-    agentVersion: "0.2.14",
+    agentVersion: "0.2.15",
     updateAvailable: false,
     canBuild: false,
     canBuildWarning: null,

@@ -179,7 +179,7 @@ type NodeSettings struct {
 	Tailnet *TailnetServe `protobuf:"bytes,11,opt,name=tailnet,proto3" json:"tailnet,omitempty"` // added in 0.2.1 (tailnet)
 	// The node's name in the panel, so `seylo status` shows a rename made
 	// while the agent is connected (HelloAccepted.node_name has it at each
-	// connect). Empty from older panels. Added in 0.2.14.
+	// connect). Empty from older panels. Added in 0.2.15.
 	NodeName      string `protobuf:"bytes,12,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

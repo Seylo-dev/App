@@ -168,7 +168,7 @@ type ContainerSpec struct {
 	// forwards signals to the main process and reaps zombies (docker run
 	// --init). False runs none, whatever the daemon's default; nil leaves
 	// it to the daemon (no init unless daemon.json says "init": true), as
-	// before 0.2.14. InitFor decides it for a service.
+	// before 0.2.15. InitFor decides it for a service.
 	Init *bool
 	// OpenStdin keeps stdin open so the Console can write to it.
 	OpenStdin bool

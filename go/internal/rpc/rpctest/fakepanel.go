@@ -81,8 +81,8 @@ type FakePanel struct {
 	// choices is each node's Panel address: a hello with stay_on_address
 	// makes it STAY, and a STAY node gets no panel_url (like the panel).
 	choices map[string]agentv1.PanelAddressChoice
-	// before0214 acts as a panel before 0.2.14 (BeforePanelAddress).
-	before0214 bool
+	// before0215 acts as a panel before 0.2.15 (BeforePanelAddress).
+	before0215 bool
 }
 
 // Report is one delivered outbox report.
@@ -183,13 +183,13 @@ func (p *FakePanel) SetNodeName(nodeID, name string) {
 	p.names[nodeID] = name
 }
 
-// BeforePanelAddress makes the panel act as one before 0.2.14 (true): it
+// BeforePanelAddress makes the panel act as one before 0.2.15 (true): it
 // ignores ClientHello.stay_on_address, and HelloAccepted carries neither
 // panel_address nor node_name. false is the current panel again.
 func (p *FakePanel) BeforePanelAddress(old bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.before0214 = old
+	p.before0215 = old
 }
 
 // SetPanelAddressChoice sets nodeID's Panel address, as the owner would.
@@ -494,7 +494,7 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeID, drops = id, p.drops
 		p.hosts = append(p.hosts, r.Host)
-		if h.GetStayOnAddress() && !p.before0214 {
+		if h.GetStayOnAddress() && !p.before0215 {
 			p.choices[id] = agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_STAY
 		}
 		choice, ok := p.choices[id]
@@ -506,7 +506,7 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 		if choice == agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_STAY {
 			acc.PanelUrl, acc.PanelPin = "", ""
 		}
-		if p.before0214 {
+		if p.before0215 {
 			acc.PanelAddress, acc.NodeName = agentv1.PanelAddressChoice_PANEL_ADDRESS_CHOICE_UNSPECIFIED, ""
 		}
 		if p.signAccepts {

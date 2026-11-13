@@ -92,7 +92,7 @@ export const Deployment = Type.Object({
    * at once: the node and the build's place among that node's queued builds
    * (builds.queue position, 1 = next to start). The clone step then says
    * "Waiting for a build slot on <node> - 2 ahead". null otherwise, also
-   * while a queued build is about to start in a free slot. Added in 0.2.14.
+   * while a queued build is about to start in a free slot. Added in 0.2.15.
    */
   buildWait: Type.Union([Type.Object({ node: NodeRef, position: Type.Integer({ minimum: 1 }) }), Type.Null()]),
   shippedTo: Type.Array(NodeRef),

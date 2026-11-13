@@ -298,7 +298,7 @@ export const ServiceSummary = Type.Object({
   status: ServiceStatus,
   /**
    * True while status is building and the deploy's build waits for a free
-   * slot of its node's Builds at once (Deployment.buildWait). Added in 0.2.14.
+   * slot of its node's Builds at once (Deployment.buildWait). Added in 0.2.15.
    */
   buildWaiting: Type.Boolean(),
   source: SourceSummary,
@@ -402,10 +402,10 @@ export const ServiceDetail = Type.Object({
   healthCheck: Type.Union([HealthCheck, Type.Null()]),
   /**
    * Without a check of its own (healthCheck null), apps and compose members
-   * deployed from 0.2.14 wait for their image's own HEALTHCHECK: what the
+   * deployed from 0.2.15 wait for their image's own HEALTHCHECK: what the
    * node reported for the live deployment (else the one rolling out). Null
    * when the image declares none, before such a deploy and on nodes before
-   * 0.2.14: then TCP on the first port applies.
+   * 0.2.15: then TCP on the first port applies.
    */
   imageHealthCheck: Type.Optional(Type.Union([ImageHealthCheck, Type.Null()])),
   crashPolicy: CrashPolicy,
@@ -430,7 +430,7 @@ export const ServiceDetail = Type.Object({
       id: Id,
       name: ServiceName,
       status: ServiceStatus,
-      /** As ServiceSummary.buildWaiting. Added in 0.2.14. */
+      /** As ServiceSummary.buildWaiting. Added in 0.2.15. */
       buildWaiting: Type.Boolean(),
     }),
   ),

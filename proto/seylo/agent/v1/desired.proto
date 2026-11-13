@@ -62,7 +62,7 @@ message NodeSettings {
   TailnetServe tailnet = 11; // added in 0.2.1 (tailnet)
   // The node's name in the panel, so `seylo status` shows a rename made
   // while the agent is connected (HelloAccepted.node_name has it at each
-  // connect). Empty from older panels. Added in 0.2.14.
+  // connect). Empty from older panels. Added in 0.2.15.
   string node_name = 12;
 }
 

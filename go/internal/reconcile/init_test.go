@@ -46,7 +46,7 @@ func TestInitModeSpecHash(t *testing.T) {
 	}
 }
 
-// An agent before 0.2.14 keeps a new panel's init mode as an unknown field
+// An agent before 0.2.15 keeps a new panel's init mode as an unknown field
 // of ContainerConfig and hashes it at the end of the message; after its
 // update it knows the field, which encodes at the same place. The hash
 // stays, so the containers the old agent made are adopted, without init

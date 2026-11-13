@@ -158,7 +158,7 @@ test("an open move alert about an inspected certificate keeps the node on its ad
   expect(agentMoveTarget(panel.deps.db, agent.nodeId)).not.toBeNull();
 });
 
-test("an agent before 0.2.14 says so in the message only", async () => {
+test("an agent before 0.2.15 says so in the message only", async () => {
   liveDomain();
   const agent = await twoNodes();
   await reportMoveAlert(agent, 1n, {

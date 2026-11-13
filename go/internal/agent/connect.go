@@ -492,7 +492,7 @@ func (c *connector) hello(cfg FileConfig, server *agentv1.ServerHello) (*agentv1
 // afterHandshake records what the first accepted connection taught us:
 // the node id after a join and the pin after trust-on-first-use. A join's
 // stay request (stay_on_address) ends with the join, answered or not: a
-// panel before 0.2.14 never answers it, and sent again on a resume once
+// panel before 0.2.15 never answers it, and sent again on a resume once
 // the panel updated, it would be recorded as `seylo set-panel`. Memory is
 // updated even when config.yml cannot be written: the panel has used up
 // the join token by now, so the next connection must resume with the node

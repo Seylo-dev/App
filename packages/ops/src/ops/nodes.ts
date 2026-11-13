@@ -109,7 +109,7 @@ export const NodeHealthReport = Type.Object({
 });
 
 /**
- * Where the node's agent dials (added in 0.2.14). "follow": it moves to the
+ * Where the node's agent dials (added in 0.2.15). "follow": it moves to the
  * panel's domain once that is live. "stay": the panel never names the
  * domain to it, so it keeps the address it dials (the panel's IP and pin,
  * for a network that decrypts HTTPS).
@@ -132,14 +132,14 @@ export const PanelAddressChoiceBy = Type.Union([
   Type.Literal("default"),
 ]);
 
-/** The panel refused the agent's last connect while the node was offline (added in 0.2.14). */
+/** The panel refused the agent's last connect while the node was offline (added in 0.2.15). */
 export const NodeRejectedHello = Type.Object({
   reason: Type.String({ description: 'The HelloRejectReason, "AGENT_TOO_OLD" or "BAD_SIGNATURE".' }),
   message: Type.String({ description: "What the panel told the agent." }),
   at: Timestamp,
 });
 
-/** The node's last time away with a reason, from the agent once it connected again (added in 0.2.14). */
+/** The node's last time away with a reason, from the agent once it connected again (added in 0.2.15). */
 export const NodeOfflineReport = Type.Object({
   from: Timestamp,
   to: Timestamp,
@@ -153,7 +153,7 @@ export const LogRetention = Type.Object({
 });
 
 const parallelBuildsAutoText =
-  "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.14 start on Auto; nodes from before keep their fixed number.";
+  "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.";
 
 /** One row of the Nodes table and the dashboard node chips. */
 export const Node = Type.Object({
@@ -202,7 +202,7 @@ export const Node = Type.Object({
     maximum: maxParallelBuildsLimit,
     description: "Builds at once that apply now: the fixed number, or what Auto works out when parallelBuildsAuto is true.",
   }),
-  /** Added in 0.2.14. Nodes that join start on Auto; nodes from before keep their fixed number. */
+  /** Added in 0.2.15. Nodes that join start on Auto; nodes from before keep their fixed number. */
   parallelBuildsAuto: Type.Boolean({ description: parallelBuildsAutoText }),
   wings: WingsInfo,
   gamesFirstCpu: Type.Boolean(),
@@ -220,7 +220,7 @@ export const Node = Type.Object({
   /**
    * Offline only: the panel refused the agent's last connect since it was
    * last seen (a too old agent, a key that does not match), so the row says
-   * why. Left out otherwise (added in 0.2.14).
+   * why. Left out otherwise (added in 0.2.15).
    */
   rejectedHello: Type.Optional(NodeRejectedHello),
   createdAt: Timestamp,
@@ -269,12 +269,12 @@ export const NodeDetail = Type.Composite([
      * "http://127.0.0.1:3000" for the panel node; null while it is offline.
      */
     panelAddress: Nullable(Type.String()),
-    /** The Panel address setting; left out for the panel node, which dials loopback (added in 0.2.14). */
+    /** The Panel address setting; left out for the panel node, which dials loopback (added in 0.2.15). */
     panelAddressChoice: Type.Optional(PanelAddressChoice),
     panelAddressChoiceBy: Type.Optional(PanelAddressChoiceBy),
     /** When it was chosen; null for the default. */
     panelAddressChoiceAt: Type.Optional(Nullable(Timestamp)),
-    /** The last time the node was away with a reason its agent reported; left out when there is none (added in 0.2.14). */
+    /** The last time the node was away with a reason its agent reported; left out when there is none (added in 0.2.15). */
     lastOffline: Type.Optional(NodeOfflineReport),
   }),
 ]);
@@ -497,12 +497,12 @@ export const updateSettings = defineOp({
     parallelBuildsAuto: Type.Optional(
       Type.Boolean({
         description:
-          "true: Auto, one build per 4 CPU cores and per 4 GiB of memory, 1 to 16. false: a fixed number, the one that applies now unless maxParallelBuilds is given. Added in 0.2.14.",
+          "true: Auto, one build per 4 CPU cores and per 4 GiB of memory, 1 to 16. false: a fixed number, the one that applies now unless maxParallelBuilds is given. Added in 0.2.15.",
       }),
     ),
     logRetention: Type.Optional(LogRetention),
     /**
-     * The node's Panel address (added in 0.2.14). "follow" on an online node
+     * The node's Panel address (added in 0.2.15). "follow" on an online node
      * that does not dial the live domain reconnects it so it moves now. The
      * panel node refuses it (CONFLICT, details.reason "panelNode").
      */

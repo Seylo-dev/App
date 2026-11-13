@@ -14,7 +14,7 @@ import (
 )
 
 // A cron run gets the service's init process: Docker's init as PID 1 with
-// Auto (and On), none for a spec from before 0.2.14 or Off.
+// Auto (and On), none for a spec from before 0.2.15 or Off.
 func TestRunInitProcess(t *testing.T) {
 	e := itest.New(t)
 	for _, c := range []struct {

@@ -152,7 +152,7 @@ export type ClientHello = Message<"seylo.agent.v1.ClientHello"> & {
    * while the panel has a domain, whose join command was passed over) and
    * then names no other address in HelloAccepted.panel_url. The agent
    * sends it on every connect until a HelloAccepted carries panel_address,
-   * which says the panel read it. Older panels ignore it. Added in 0.2.14.
+   * which says the panel read it. Older panels ignore it. Added in 0.2.15.
    *
    * @generated from field: bool stay_on_address = 5;
    */
@@ -163,7 +163,7 @@ export type ClientHello = Message<"seylo.agent.v1.ClientHello"> & {
    * session (or since it started), set when at least one connect failed
    * meanwhile: the panel shows it on the node's page ("Was offline from
    * ... to ...: <reason>"). Kept in the agent's state dir across restarts
-   * and cleared once a session is accepted. Added in 0.2.14.
+   * and cleared once a session is accepted. Added in 0.2.15.
    *
    * @generated from field: seylo.agent.v1.AwayReport away = 6;
    */
@@ -179,7 +179,7 @@ export const ClientHelloSchema: GenMessage<ClientHello> = /*@__PURE__*/
 
 /**
  * AwayReport is the last connect error an agent had while it could not
- * reach the panel. Added in 0.2.14.
+ * reach the panel. Added in 0.2.15.
  *
  * @generated from message seylo.agent.v1.AwayReport
  */
@@ -359,7 +359,7 @@ export type HelloAccepted = Message<"seylo.agent.v1.HelloAccepted"> & {
   /**
    * The node's Panel address setting: FOLLOW (the default) names the
    * panel's domain in panel_url once it is live; STAY never does, so the
-   * node keeps the address it dials. Set by panels since 0.2.14 (older
+   * node keeps the address it dials. Set by panels since 0.2.15 (older
    * ones leave it UNSPECIFIED); agents take it as the answer to
    * ClientHello.stay_on_address. Not covered by panel_signature: it only
    * ends the agent's request.
@@ -371,7 +371,7 @@ export type HelloAccepted = Message<"seylo.agent.v1.HelloAccepted"> & {
   /**
    * The node's name in the panel (as renamed there), which `seylo status`
    * shows once the agent connected. Empty from older panels. Display
-   * only, not covered by panel_signature. Added in 0.2.14.
+   * only, not covered by panel_signature. Added in 0.2.15.
    *
    * @generated from field: string node_name = 8;
    */
@@ -436,7 +436,7 @@ export const HelloRejectedSchema: GenMessage<HelloRejected> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_handshake, 7);
 
 /**
- * Where a node's agent dials, as the owner chose it per node. Added in 0.2.14.
+ * Where a node's agent dials, as the owner chose it per node. Added in 0.2.15.
  *
  * @generated from enum seylo.agent.v1.PanelAddressChoice
  */

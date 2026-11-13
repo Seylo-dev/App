@@ -326,11 +326,11 @@ export type ContainerConfig = Message<"seylo.agent.v1.ContainerConfig"> & {
    * Whether the container runs Docker's init (docker run --init:
    * docker-init, which is Tini, as PID 1, forwarding signals to the main
    * process and reaping zombies). Unspecified means no init: what agents
-   * and panels before 0.2.14 do, and what the specs of generations
+   * and panels before 0.2.15 do, and what the specs of generations
    * deployed before then keep, so they still match the containers that
-   * run them. Panels from 0.2.14 send it for app services, compose
+   * run them. Panels from 0.2.15 send it for app services, compose
    * members and cron services from their next deploy (never for
-   * databases, Boxes or the panel). Agents before 0.2.14 ignore it. It is
+   * databases, Boxes or the panel). Agents before 0.2.15 ignore it. It is
    * part of the spec hash, so a change makes new containers.
    *
    * @generated from field: seylo.agent.v1.InitMode init = 7;
@@ -571,13 +571,13 @@ export type HealthCheck = Message<"seylo.agent.v1.HealthCheck"> & {
   } | {
     /**
      * Docker's own health status of the container, from the HEALTHCHECK
-     * its image declares (added in 0.2.14). Panels from 0.2.14 send it for
+     * its image declares (added in 0.2.15). Panels from 0.2.15 send it for
      * app services and compose members without a check of their own, from
      * their next deploy. A container Docker runs no check for (the image
      * declares none, or HEALTHCHECK NONE) gets the default instead: TCP on
      * the first port. The fields below are not used with it: Docker runs
      * the image's command with the image's interval, timeout, start period
-     * and retries. Agents before 0.2.14 do not know it and use the default.
+     * and retries. Agents before 0.2.15 do not know it and use the default.
      *
      * @generated from field: seylo.agent.v1.ImageProbe image = 8;
      */
@@ -905,9 +905,9 @@ export type DeployStrategy = Message<"seylo.agent.v1.DeployStrategy"> & {
    * How long a new generation may take to become healthy before the deploy
    * fails and the old generation keeps serving. Unset is 5m; with
    * HealthCheck.image on a container Docker runs the image's check for
-   * (agents from 0.2.14), at least the image's start period plus its
+   * (agents from 0.2.15), at least the image's start period plus its
    * retries times its interval and timeout, plus a minute. Panels from
-   * 0.2.14 leave it unset while the service keeps the default (300s).
+   * 0.2.15 leave it unset while the service keeps the default (300s).
    *
    * @generated from field: google.protobuf.Duration health_timeout = 2;
    */
@@ -1140,7 +1140,7 @@ export const ServiceKindSchema: GenEnum<ServiceKind> = /*@__PURE__*/
  */
 export enum InitMode {
   /**
-   * No init (as before 0.2.14).
+   * No init (as before 0.2.15).
    *
    * @generated from enum value: INIT_MODE_UNSPECIFIED = 0;
    */

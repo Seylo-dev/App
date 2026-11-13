@@ -14,7 +14,7 @@ import (
 )
 
 // The image's own HEALTHCHECK (HealthCheck.image, sent by panels from
-// 0.2.14 for apps and compose members without a check of their own): the
+// 0.2.15 for apps and compose members without a check of their own): the
 // deploy and the runtime watch follow Docker's health status of the
 // container, which Docker gets by running the image's command with the
 // image's interval, timeout, start period and retries. Nothing here runs

@@ -308,7 +308,7 @@ export type DeployProgress = Message<"seylo.agent.v1.DeployProgress"> & {
   /**
    * The image HEALTHCHECK the new generation is gated on (HealthCheck.image
    * on an image that declares one), with DEPLOY_STAGE_HEALTH_CHECKING and
-   * the final stages. Unset otherwise, and from agents before 0.2.14.
+   * the final stages. Unset otherwise, and from agents before 0.2.15.
    *
    * @generated from field: seylo.agent.v1.ImageHealthCheck image_health_check = 5;
    */
@@ -317,7 +317,7 @@ export type DeployProgress = Message<"seylo.agent.v1.DeployProgress"> & {
   /**
    * With DEPLOY_STAGE_HEALTH_CHECKING: how long the agent waits for the new
    * generation to become healthy (DeployStrategy.health_timeout, or longer
-   * for the image's HEALTHCHECK). Unset from agents before 0.2.14.
+   * for the image's HEALTHCHECK). Unset from agents before 0.2.15.
    *
    * @generated from field: google.protobuf.Duration health_timeout = 6;
    */
@@ -592,7 +592,7 @@ export type NodeAlert = Message<"seylo.agent.v1.NodeAlert"> & {
    * issuer the node does not trust, or did not match the pin (what TLS
    * inspection makes of a certificate). While such an alert is open the
    * panel treats the node's Panel address as "stay" until the owner
-   * chooses one. Added in 0.2.14; older agents leave it false and the
+   * chooses one. Added in 0.2.15; older agents leave it false and the
    * panel reads the message.
    *
    * @generated from field: bool inspected_certificate = 5;

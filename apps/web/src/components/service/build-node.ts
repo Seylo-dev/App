@@ -26,7 +26,7 @@ const usable = (node: BuildNode) => cantBuildNote(node) === null;
 
 /**
  * Free build slots, as pickBuildNode counts them: below 0 when builds wait
- * there. A panel answer without buildsAtOnce (before 0.2.14) counts 0, so
+ * there. A panel answer without buildsAtOnce (before 0.2.15) counts 0, so
  * the order falls back to the fewest builds in flight.
  */
 function freeSlots(node: Pick<BuildNode, "queued"> & { buildsAtOnce?: number }): number {

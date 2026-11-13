@@ -1,5 +1,5 @@
 // What the panel keeps per node about how its agent reaches the panel
-// (added in 0.2.14), in panel.db settings so it holds while the node is
+// (added in 0.2.15), in panel.db settings so it holds while the node is
 // offline and across panel restarts:
 //
 //   - Panel address: "follow" (the default) names the live panel domain in
@@ -74,7 +74,7 @@ export const moveFailedAlertPrefix = (nodeId: string) => `node-alert:${nodeId}:$
 export const inspectedKeyMark = "inspected:";
 
 /**
- * Text of a move alert from an agent before 0.2.14 that failed on an
+ * Text of a move alert from an agent before 0.2.15 that failed on an
  * inspected certificate: the agent's own sentence about TLS inspection, or
  * Go's error for an issuer it does not trust or a pin that does not match.
  */

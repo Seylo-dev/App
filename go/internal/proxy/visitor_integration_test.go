@@ -480,7 +480,7 @@ func withVisitorIPv6(e *itEnv, cfg *TraefikConfig) { cfg.IPv6Network = e.prefix 
 // node that forwards to the copy on another node. Every event must arrive
 // within a second of being sent (nothing buffers it) and every stream must
 // reach its end. It passed with Traefik's default timeouts as they are
-// (verified before 0.2.14 changed anything), so they stay.
+// (verified before 0.2.15 changed anything), so they stay.
 func TestIntegrationEventStreams(t *testing.T) {
 	gaps := os.Getenv("SEYLO_IT_SSE_GAPS")
 	if gaps == "" {

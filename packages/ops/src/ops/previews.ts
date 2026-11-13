@@ -33,7 +33,7 @@ export const Preview = Type.Object({
   /**
    * True while that deployment is building but its build waits for a free
    * slot of its node's Builds at once (its Deployment.buildWait is set).
-   * Added in 0.2.14.
+   * Added in 0.2.15.
    */
   buildWaiting: Type.Boolean(),
   closedAt: Type.Union([Timestamp, Type.Null()]),
