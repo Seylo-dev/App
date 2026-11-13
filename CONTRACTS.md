@@ -74,7 +74,7 @@ packages use. "Built" means implemented and tested.
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
 | `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`); a route file it cannot write goes in the service's status (`ServiceStatus.route_write_error`, message and since when, cleared by the next write that works or once the wanted routes are the ones on file again or need no file, since 0.2.13; before, only a "writing routes" warning every 10 s in the journal) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
-| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.15); `WaitHealthy` returns a `*NotListeningError` (wraps `ErrNeverHealthy`) when the default check was refused all along until the deadline, since 0.2.15 | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
+| `health` | Service health probes; Docker's verdicts on an image's own HEALTHCHECK (`FromDocker`, `ImageCheck`, `ImageWait`, since 0.2.15); `WaitHealthy` returns a `*NotListeningError` (wraps `ErrNeverHealthy`) when the default check was refused all along until the deadline, since 0.2.15; `ReadListening` reads the TCP ports a container listens on from `/proc/<pid>/net/tcp` and `tcp6`, since 0.2.16 | Built (`Probes`, `Watch`; the image check verified in the VM, `TestITImageHealthCheckGatesTheSwitch`, `TestITImageHealthCheckUnhealthyFails`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; an ACME route with `acme_challenge_on_https` (the panel's domains whose DNS does not point straight at the node, the panel's own domain, every tool host) answers Let's Encrypt's HTTP-01 challenge on websecure too, `addAcmeChallenge` to `acme-http@internal`, and every route the origin path on websecure, since 0.2.13; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), a held domain served over https, the challenge path over https kept for the app on a domain without `acme_challenge_on_https`, and the first certificate validated over a redirect to https behind a stand-in for Cloudflare with a redirect to https for every path and SSL/TLS Full in both modes (`TestIntegrationBehindCloudflareHTTPSRedirect`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
@@ -1175,6 +1175,32 @@ local API, join and resume. The areas:
   HTTP or command check, or a TCP check of the service's own keeps the
   plain error. Defaults and the check itself are unchanged. VM test:
   reconcile's `TestITWorkerNotListening` (busybox `sleep` with port 80).
+- Since 0.2.16 a failed deploy's message is the reason alone: the new
+  container's last output lines (20, secrets redacted) go in
+  `DeployProgress.last_output`; before, they followed the reason after
+  "\nlast output:\n", and the panel still splits that off for older agents
+  (see "A failed rollout" under Services and deploys). Before the hint,
+  with the container still running, the agent reads what it listens on
+  (`reconcile.listeningOf`: `InspectContainer` for its pid, then
+  `health.ReadListening(Options.ProcDir, pid)` over `/proc/<pid>/net/tcp`
+  and `tcp6`, the container's own network namespace, so nothing has to be
+  in the image; LISTEN sockets, one entry per port, loopback only when
+  every socket on it is bound to 127.0.0.0/8 or ::1; Docker's embedded
+  DNS server on 127.0.0.11, in every container on a user-defined network,
+  is left out). The result goes in `DeployProgress.not_listening` (`port`
+  checked, `read`, `listening`). When it listens on other ports on all
+  addresses the hint is "The app listens on port 6000, not 80. Set the
+  service's port to 6000 (Ports in the Container section of its Advanced
+  tab) and point its domains there, or make the app listen on port 80."
+  (several: "ports 3000 and 6000"; a compose member names its stack's
+  compose file); when only on a loopback address, "The app listens only on
+  127.0.0.1:6000; it must listen on 0.0.0.0 (all addresses), on port 80
+  (or the service's port must be 6000)." (on the checked port itself:
+  "...for the health check and its domains to reach it."). Nothing
+  listening, or sockets that could not be read (`read` false: no /proc,
+  not allowed, the container gone), keep the hint above. VM test:
+  reconcile's `TestITListensOnAnotherPort` (busybox `httpd -p 6000` and
+  `-p 127.0.0.1:6000` with port 80).
 - A service moved to another project (`services.moveProject`) arrives as a
   spec whose `project_id` changed. When that is the only change
   (`SpecHash` with the old project equals the container's), reconcile
@@ -4539,8 +4565,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the default 300 (`defaultHealthTimeoutSeconds`). The image check and the
   wait a node reports go in its `deployments.node_results` entry
   (`imageHealthCheck`, `healthWaitSeconds`, `deployments/image-health.ts`);
-  the rollout deadline is the longer of the setting and that wait, plus
-  5 minutes, and `services.get` returns `imageHealthCheck` from the live
+  the rollout watchdog's wait is the longer of the setting and that wait,
+  plus 5 minutes (see the rollout bullet below), and `services.get`
+  returns `imageHealthCheck` from the live
   deployment (else the target), which the health check card shows.
   The init process is `container.init` (`services.InitProcess`: auto, on,
   off; optional in `ContainerSettings`, so stored rows and export files
@@ -4558,6 +4585,76 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   machine on the deployment row, kicked by ops, agent events and the
   `deployments.tick` job (timeouts, recovery after a restart). A deploy
   switches `services.target_deployment_id` and marks the service dirty.
+- Rollouts (`engine.ts` `checkRollout`, since 0.2.16). A deploy rolls out
+  on the nodes it started with (`deployments.target_node_ids`), so where a
+  service runs changes only between deploys: `services.setPlacements`
+  with other nodes (replica counts, sticky sessions and the entry node
+  alone are fine) and `services.move` are refused while a deploy of the
+  service is queued, building or deploying (CONFLICT `reason:
+  deployRunning`, `deploymentId`, `serviceId`, `queue.ts`
+  `assertNoDeployForPlacement`; before, trust-api moved to il-ra while it
+  built and its rollout waited on start-app, which no longer had it).
+  Refusing was chosen over cancelling and restarting the deploy on the
+  new nodes: nothing the person did not ask for is thrown away (a build
+  that ran for minutes, a deploy someone else started), a move's volume
+  copy never races a rollout, and the error names the deploy to wait for
+  or cancel; the Advanced tab disables Save (a node change) and Move
+  while one runs. A pending node that no longer has a placement of the
+  service (its desired state does not hold it: a node removed, an older
+  panel's move) fails the rollout at the next check: "<node> no longer
+  runs this service: its nodes changed after this deploy started, so
+  nothing rolls it out there. Deploy again to roll it out on <nodes>."
+  The watchdog: every DeployProgress a node sends for the rollout sets
+  `node_results.<node>.progressAt`, and a pending node quiet for the
+  health timeout (the longer of the setting and the node's reported wait)
+  plus 5 minutes (`rolloutGraceMs`), counted from its last progress or
+  the rollout's start, fails it: "No progress from <node> for N
+  minutes" (" (<node> is offline)" when it is), "The previous version
+  stayed live." Before, the whole rollout had that much from its start,
+  so a slow pull failed one that was progressing and the message said
+  only "did not report the new version healthy within 600s"; that message
+  stays for the hard end three such periods after the start
+  (`rolloutStages`), however the rollout progresses.
+- A failed rollout (`engine.ts` `recordDeployProgress`, `failure.ts`,
+  since 0.2.16): the node's result keeps the reason as `message` and the
+  new container's output as `lastOutput` (DeployProgress `last_output`;
+  an agent before 0.2.16 appends it to the message after "\nlast
+  output:\n", which `splitLastOutput` cuts off, so the deployment's
+  `error`, the deploy log and the `deploy_failed` alert hold the reason
+  alone), and `notListening` (DeployProgress `not_listening`). The FAILED
+  progress is not logged as it comes (before, under "switch", with the
+  output line by line); `finish` logs "<node>: <reason>. The previous
+  version stayed live." once, under the step that ran. The report caps
+  `lastOutput` to its newest 200 lines (`field-caps.ts` `tailLists`).
+  `Deployment.lastOutput` (`{ node, lines }`, failed deployments only) and
+  `Deployment.portHint` (`{ node, port, listening, loopbackOnly,
+  canUsePort }`: the port checked, the other ports the app listens on on
+  all addresses, those only on a loopback address, and whether
+  `services.usePort` applies: an app that is not a compose member; null
+  when the sockets were not read or nothing listened) carry them.
+- `services.usePort { serviceId, port, fromPort? }` (`services/use-port.ts`,
+  since 0.2.16; permission `services.update`, and the handler also needs
+  `services.deploy`; audited): the deploy dialog's "Use port 6000". It
+  refuses a compose member (`reason: compose`), other kinds than app
+  (`notApp`), a running deploy (`deployRunning`), a clone copy, no source,
+  and a first TCP port that is no longer `fromPort` (`portChanged`), all
+  before it changes anything; then the service's first TCP port becomes
+  `port` (`spec.ts` `withFirstPort`: replaced in place, or added first,
+  without a second entry of it), the domains whose `target_port` was the
+  old port move to `port`, and a deploy is queued with log lines that say
+  so. A built app's PORT follows (`withPortEnv` reads the first port when
+  the deploy seals its env). Without a live version that serves (none, or
+  the service is stopped) the domains move at once. With one, its
+  containers listen on the old port: the move is stored on the new
+  deployment (`deployments.port_move`, migration 0021: `fromPort`,
+  `toPort`, `domainIds`, `applied`) and `rollout()` applies it in the
+  transaction that makes the deployment the target, so the routes reach
+  the agent with the new generation and switch with its containers; if
+  that deployment then fails or is cancelled, `finish` puts the service's
+  first port back on `fromPort` (when it is still `toPort`) and the moved
+  domains with it (when `applied`), and logs "The service's port and its
+  domains are back on <port>, where the live version listens." The
+  answer says which (`domainsMove`: `now` or `rollout`).
 - Build rows (since 0.2.15): a build is `queued` (`started_at` null) from
   the moment the runner dispatches it until its node's agent reports a
   stage after its slot of Builds at once (`BUILD_STAGE_FETCHING_SOURCE` or
@@ -4625,7 +4722,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the key is `<stage>:<message>`, once per build, so such a run's stages
   are not logged again. DeployProgress has one path per stage
   (progress as events, finals as durable reports, deduped by outbox id),
-  so its `<node>: <message>` lines are logged as they come. Timeouts (`engine.ts`
+  so its `<node>: <message>` lines are logged as they come (a FAILED one
+  by `finish`, once, since 0.2.16). Timeouts (`engine.ts`
   `buildTimeout`): a running build fails 90 minutes after its start; a
   queued one waits while its node's queue moves and fails once no build
   started or ended on that node for 90 minutes (the node lost it), and in
@@ -5046,7 +5144,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   node) is in `skipped` with reason `error` and `error` (the OpError's
   message; an unexpected error is logged and named generically). The
   toast counts both as "could not start". `backups.runNow` with a `policyId` still starts that
-  one schedule (enabled or not). The Backups tab's header Back up now
+  one schedule (enabled or not); since 0.2.16 it makes the same running
+  check first and refuses a schedule whose backup still runs (CONFLICT
+  `reason: running`, with `runId`; before, it started a second run of
+  it), which a schedule's menu shows as an info toast ("This schedule is
+  still backing up.", `back-up-now.ts` `runNowRefusal`). One-off
+  backups (no `policyId`) are not checked. The Backups tab's header Back up now
   and the database Connection tab's both call `runAll`
   (`web/.../backups/back-up-now.ts`; before 0.2.15 they ran only the
   first schedule), and a database without a schedule still gets a
@@ -5783,6 +5886,18 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
+- A failed deploy (0.2.16, `components/service/deploy-failure.tsx`): the
+  deploy log dialog and the Deployments history row show `error` (the
+  reason alone), "Use port <port>" for each of `portHint.listening` (up to
+  three, when `canUsePort`; `services.usePort` with `fromPort`, a toast
+  says whether the domains move now or with the rollout) and
+  `lastOutput` in a collapsed `<details>` block of its own ("Last output
+  of the new container", the node, the line count; monospace, dimmed, a
+  copy button), never in the step log or the red error. The Advanced
+  tab's Replicas and nodes card disables Save while a deploy runs and
+  the nodes changed (replica counts alone stay savable), and Move waits
+  too, with the reason as the button's title (`useActiveDeploy`).
+  Playwright: `deploy-failure.spec.ts`.
 - Service export and import (0.2.10): the Export card on the Settings tab
   (owners and admins, `auth.whoami`; compose and protected services show
   why instead) opens `components/service/transfer/export-dialog.tsx`; New
