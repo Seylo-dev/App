@@ -6,9 +6,15 @@
 import { avatars, viewer, ids as world } from "./fixtures";
 
 type Input = Record<string, any>;
-const now = Date.now();
-const ago = (min: number) => new Date(now - min * 60_000).toISOString();
-const ahead = (min: number) => new Date(now + min * 60_000).toISOString();
+/**
+ * The moment the demo's times count from (ago(3) is three minutes before it):
+ * when the worker first loaded this file, which in a full run is many specs
+ * before the one that shows them. A spec that measures relative times pins
+ * the page's clock to it (page.clock.setFixedTime).
+ */
+export const demoNow = Date.now();
+const ago = (min: number) => new Date(demoNow - min * 60_000).toISOString();
+const ahead = (min: number) => new Date(demoNow + min * 60_000).toISOString();
 
 const nodes = [
   { id: world.de, name: "de-fsn-1", status: "online" },
@@ -20,8 +26,8 @@ export const fixtures: Record<string, unknown> = {
   // Project settings > Internal git hosts.
   "git.listInternalHosts": {
     items: [
-      { host: "gitea.lan:3000", approvedBy: { id: viewer.id, name: "You" }, createdAt: new Date(now - 86_400_000).toISOString(), usedBy: 2 },
-      { host: "10.0.0.7", approvedBy: null, createdAt: new Date(now - 7 * 86_400_000).toISOString(), usedBy: 1 },
+      { host: "gitea.lan:3000", approvedBy: { id: viewer.id, name: "You" }, createdAt: new Date(demoNow - 86_400_000).toISOString(), usedBy: 2 },
+      { host: "10.0.0.7", approvedBy: null, createdAt: new Date(demoNow - 7 * 86_400_000).toISOString(), usedBy: 1 },
     ],
   },
   "settings.general": {

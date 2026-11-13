@@ -7,6 +7,7 @@ import type { Locator, Page } from "@playwright/test";
 import { hostShellStatus, ids, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
+import { demoNow } from "./demo/settings";
 import { dashboardHeading, expect, stateFile, test, withDashboardView } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
@@ -62,23 +63,36 @@ test.describe("loading placeholders", () => {
 
   test("tables: the header cells keep their places when the rows arrive", async ({ page }) => {
     await slowDemo(page);
-    for (const [path, name] of [
-      ["/activity", "Activity"],
-      ["/settings/people", "People"],
-      ["/settings/api-keys", "API keys"],
+    // The rows' times are relative ("3 minutes ago") and count from when the demo data was made, which in a
+    // full run is many specs before this one. So the page's clock is pinned: at that moment, then 9 and 50
+    // minutes on, where a full run gets here ("12 minutes ago", "1 hour ago"). Before (0.2.16) the time
+    // columns took their text's width: People's header moved 5.6px at 9 minutes, the API keys' 23px at 50.
+    for (const [minutes, signedIn, keyUsed] of [
+      [0, "3 minutes ago", "30 minutes ago"],
+      [9, "12 minutes ago", "39 minutes ago"],
+      [50, "53 minutes ago", "1 hour ago"],
     ] as const) {
-      await page.goto(path);
-      const table = page.getByRole("table", { name });
-      await expect(table.locator('[data-slot="skeleton"]').first()).toBeVisible();
-      const before = await boxes(table.locator("th"));
-      await expect(table.locator('[data-slot="skeleton"]')).toHaveCount(0, { timeout: 15_000 });
-      const after = await boxes(table.locator("th"));
-      expect(after.length).toBe(before.length);
-      after.forEach((cell, i) => {
-        // The widths are what typical rows give, so a few pixels either way.
-        expectClose(cell.x, before[i]?.x ?? Number.NaN, `${path} th ${i} x`, 5);
-        expectClose(cell.width, before[i]?.width ?? Number.NaN, `${path} th ${i} width`, 5);
-      });
+      await page.clock.setFixedTime(demoNow + minutes * 60_000);
+      for (const [path, name, firstRowReads] of [
+        ["/activity", "Activity", null],
+        ["/settings/people", "People", signedIn],
+        ["/settings/api-keys", "API keys", keyUsed],
+        ["/settings/api-keys", "MCP tokens", null],
+      ] as const) {
+        await page.goto(path);
+        const table = page.getByRole("table", { name });
+        await expect(table.locator('[data-slot="skeleton"]').first()).toBeVisible();
+        const before = await boxes(table.locator("th"));
+        await expect(table.locator('[data-slot="skeleton"]')).toHaveCount(0, { timeout: 15_000 });
+        if (firstRowReads) await expect(table.locator("tbody tr").first()).toContainText(firstRowReads);
+        const after = await boxes(table.locator("th"));
+        expect(after.length).toBe(before.length);
+        after.forEach((cell, i) => {
+          // The widths are what typical rows give, so a few pixels either way.
+          expectClose(cell.x, before[i]?.x ?? Number.NaN, `${name} at +${minutes} min th ${i} x`, 5);
+          expectClose(cell.width, before[i]?.width ?? Number.NaN, `${name} at +${minutes} min th ${i} width`, 5);
+        });
+      }
     }
   });
 

@@ -6887,6 +6887,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   renders every component, see `packages/ui/README.md`. New components go
   in `packages/ui/src/components/` and use tokens only. The kit's own words
   come in through `UiLabelsProvider` (the `kit` i18n section).
+- Tables while loading: `DataTable`'s skeleton rows give each column its
+  `skeletonWidth` (what typical rows give it; one column takes the rest),
+  so the header cells stay within a few pixels when the rows arrive. A
+  column of relative times ("12 minutes ago", "in 10 months") has a fixed
+  `width: timeColumnWidth` (130 px) in both states: Activity's When,
+  People's Last sign-in, and the API key and MCP token tables' Last used
+  and Expires (0.2.17; before, the last three took their text's width, so
+  the header moved as the clock went on). `loading.spec.ts` checks the
+  Activity, People, API keys and MCP tokens tables with the page's clock
+  pinned to the demo data's moment (`demoNow`) and 9 and 50 minutes on.
 - Context menus (0.2.16): kit `context-menu.tsx` (`ContextMenu*`, the
   dropdown's parts and classes from `lib/menu-styles.ts`; right-click,
   touch long-press, the context menu key and Shift+F10; the browser's own

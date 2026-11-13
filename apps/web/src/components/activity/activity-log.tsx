@@ -10,7 +10,7 @@ import { Avatar } from "@seylo/ui/components/avatar";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { CodeBlock } from "@seylo/ui/components/code-block";
-import { DataTable, type DataTableColumn } from "@seylo/ui/components/data-table";
+import { DataTable, type DataTableColumn, timeColumnWidth } from "@seylo/ui/components/data-table";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { Tip } from "@seylo/ui/components/tooltip";
@@ -57,7 +57,7 @@ function activityColumns(target: boolean): DataTableColumn<ActivityEntry>[] {
     {
       id: "when",
       header: t("activity.when"),
-      width: "130px",
+      width: timeColumnWidth,
       hideOnMobile: true,
       cell: (e) => <When at={e.at} />,
     },

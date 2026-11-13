@@ -60,7 +60,7 @@ i18n section. Without the provider each label shows its own key.
 | `empty-state` | `EmptyState` icon, title, description, action | `compact` inside tables |
 | `key-value` | `KeyValue` rows or grid of label and value | `mono` values; long values wrap, never an ellipsis |
 | `stat-tile` | `StatTile` label, value, unit, delta, sparkline | `bare` inside another card |
-| `data-table` | `DataTable` sortable columns, empty state, skeleton rows, row-actions menu, row click | client-side sort (`lib/sort`), `minWidth` scrolls sideways |
+| `data-table` | `DataTable` sortable columns, empty state, skeleton rows, row-actions menu, row click | client-side sort (`lib/sort`), `minWidth` scrolls sideways; skeleton rows take each column's `skeletonWidth`; a column of relative times gets `width: timeColumnWidth` |
 | `input`, `textarea` | `Input`, `Label`, `Textarea` (`mono`) | |
 | `select` | `Select`, `SelectTrigger` (size sm, `loading`), `SelectContent`, `SelectItem`, ... | looks like `Input`; `loading` shows a skeleton line until the options are in, never a "Loading" placeholder |
 | `switch`, `checkbox`, `radio-group` | `Switch` (size sm), `Checkbox` (indeterminate), `RadioGroup`, `RadioGroupItem`, `RadioCard` | `RadioCard` for big choices (builders, plans) |

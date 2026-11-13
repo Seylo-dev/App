@@ -28,7 +28,8 @@ export interface DataTableColumn<T> {
    * The width this column usually ends up with once rows are in, like "18%"
    * (of the table) or "140px". Only the loading placeholder cells take it,
    * so the header stays where it is when the rows arrive. Give it to every
-   * column but one: that one takes the rest, as it does with real rows.
+   * column but one and those with a `width`: that one takes the rest, as it
+   * does with real rows.
    */
   skeletonWidth?: string;
   /** 2 when the cells show a 13px line over a 12px detail line (a name and its email), so placeholder rows are as tall. */
@@ -37,6 +38,15 @@ export interface DataTableColumn<T> {
   /** Hide the column under the md breakpoint. */
   hideOnMobile?: boolean;
 }
+
+/**
+ * The `width` of a column of relative times ("12 minutes ago", "in 10
+ * months", a date): the longest of them fits, and the column keeps it
+ * whatever the rows say. Sized to its text, such a column moved the others
+ * as the clock went on ("3 minutes ago" to "12 minutes ago" moved People's
+ * header 5.6px), so no loading placeholder could hold the header in place.
+ */
+export const timeColumnWidth = "130px";
 
 export interface RowAction {
   label: string;

@@ -6,7 +6,7 @@ import { apiKeys, type OpOutput } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
-import { DataTable } from "@seylo/ui/components/data-table";
+import { DataTable, timeColumnWidth } from "@seylo/ui/components/data-table";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { IconKey } from "@tabler/icons-react";
 import type * as React from "react";
@@ -20,14 +20,11 @@ import { OpErrorCallout } from "../op-state";
 type Key = OpOutput<typeof apiKeys.list>["keys"][number];
 
 /**
- * What the columns get with typical keys, for the loading rows (the scope
- * column takes the rest). MCP tokens carry the client's name, so their
- * name column is wider.
+ * What the name column gets with typical keys, for the loading rows (the
+ * two time columns keep one width and the scope column takes the rest).
+ * MCP tokens carry the client's name, so their name column is wider.
  */
-const skeletonWidths = {
-  api: { name: "19.5%", used: "16%", expires: "14%" },
-  mcp: { name: "34%", used: "14.5%", expires: "12%" },
-} as const;
+const nameSkeletonWidth = { api: "19.8%", mcp: "33.2%" } as const;
 
 export function KeyTable({
   kind,
@@ -64,7 +61,7 @@ export function KeyTable({
           {
             id: "name",
             header: t("settingsKeys.create.name"),
-            skeletonWidth: skeletonWidths[kind].name,
+            skeletonWidth: nameSkeletonWidth[kind],
             skeletonLines: 2,
             sortValue: (key) => key.name,
             cell: (key) => (
@@ -102,7 +99,7 @@ export function KeyTable({
             id: "used",
             header: t("settingsKeys.lastUsed"),
             hideOnMobile: true,
-            skeletonWidth: skeletonWidths[kind].used,
+            width: timeColumnWidth,
             sortValue: (key) => key.lastUsedAt ?? "",
             cell: (key) => (
               <span className="text-muted-foreground">{key.lastUsedAt ? formatRelative(key.lastUsedAt) : t("settings.never")}</span>
@@ -112,7 +109,7 @@ export function KeyTable({
             id: "expires",
             header: t("settingsKeys.expires"),
             hideOnMobile: true,
-            skeletonWidth: skeletonWidths[kind].expires,
+            width: timeColumnWidth,
             align: "right",
             sortValue: (key) => key.expiresAt ?? "9999",
             cell: (key) => (

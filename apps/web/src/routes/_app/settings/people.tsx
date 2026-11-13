@@ -7,7 +7,7 @@ import { useOp } from "@seylo/ops/react";
 import { Avatar } from "@seylo/ui/components/avatar";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
-import { DataTable } from "@seylo/ui/components/data-table";
+import { DataTable, timeColumnWidth } from "@seylo/ui/components/data-table";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
 import { SectionCard } from "@seylo/ui/components/section-card";
@@ -128,7 +128,7 @@ function UsersSection() {
               id: "access",
               header: t("settingsPeople.users.access"),
               hideOnMobile: true,
-              skeletonWidth: "19.5%",
+              skeletonWidth: "19.3%",
               cell: (u) =>
                 u.role === "member" ? (
                   <span className="text-muted-foreground">{t("settingsPeople.users.grants", { count: u.grantCount })}</span>
@@ -140,7 +140,7 @@ function UsersSection() {
               id: "security",
               header: t("settingsPeople.users.security"),
               hideOnMobile: true,
-              skeletonWidth: "17.5%",
+              skeletonWidth: "17.3%",
               cell: (u) => (
                 <span className="flex gap-1">
                   {u.twoFactor ? (
@@ -156,7 +156,7 @@ function UsersSection() {
               id: "last",
               header: t("settingsPeople.users.lastLogin"),
               hideOnMobile: true,
-              skeletonWidth: "13%",
+              width: timeColumnWidth,
               sortValue: (u) => u.lastLoginAt ?? "",
               cell: (u) => (
                 <span className="text-muted-foreground">{u.lastLoginAt ? formatRelative(u.lastLoginAt) : t("settings.never")}</span>
@@ -167,7 +167,7 @@ function UsersSection() {
               header: t("settingsPeople.users.status"),
               align: "right",
               hideOnMobile: true,
-              skeletonWidth: "11.5%",
+              skeletonWidth: "11.4%",
               cell: (u) => <Chip tone={u.status === "active" ? "green" : "red"}>{t(`settingsPeople.status.${u.status}`)}</Chip>,
             },
           ]}
