@@ -320,7 +320,9 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
       { field: "allowPlain", reason: "agentTooOld" },
     );
   }
-  if (allowPlain !== wasPlain) {
+  // Emptying the allow list while it stays on opens plain clients to every IP: audited the same way as turning it on there.
+  const openedToEveryone = allowPlain && wasPlain && cidrs.length === 0 && (info.exposure?.allowedCidrs.length ?? 0) > 0;
+  if (allowPlain !== wasPlain || openedToEveryone) {
     // The input says what was asked; this says what changed (turning exposure off ends it too).
     ctx.auditDetails?.({
       plainConnections: allowPlain ? "allowed" : "tlsOnly",

@@ -3,7 +3,7 @@ import { databases } from "@seylo/ops";
 import { t } from "../../../i18n/t";
 import { renderStatic } from "../../../test/render";
 import type { ServiceDetail } from "../use-service";
-import { ConnectionPage, PlainWarning } from "./connection-page";
+import { ConnectionPage, opensPlainToEveryone, PlainWarning } from "./connection-page";
 
 const db = {
   serviceId: "svc-db",
@@ -309,4 +309,18 @@ test("the confirmation says it more strongly when the port is open to every IP",
   for (const engine of ["valkey", "clickhouse"]) {
     expect(await warning({ ...db, engine })).toContain(t("serviceDatabase.plain.confirm.passwordInClear"));
   }
+});
+
+test("emptying the allow list while connections without TLS are allowed asks first, with the open-to-every-IP warning", async () => {
+  const limited = { ...db, exposure: { ...db.exposure, allowedCidrs: ["203.0.113.7/32"] } };
+  const plainLimited = { ...limited, exposure: { ...limited.exposure, allowPlain: true } };
+  expect(opensPlainToEveryone(plainLimited as never, [])).toBe(true);
+  // Still limited, TLS only, or open to every IP already (turning plain on said so then): saved as it is.
+  expect(opensPlainToEveryone(plainLimited as never, ["198.51.100.0/24"])).toBe(false);
+  expect(opensPlainToEveryone(limited as never, [])).toBe(false);
+  expect(opensPlainToEveryone({ ...db, exposure: { ...db.exposure, allowPlain: true } } as never, [])).toBe(false);
+  // The warning is about the list about to be saved, not the saved one.
+  const warning = text(await renderStatic(() => <PlainWarning db={plainLimited as never} allowedCidrs={[]} />, []));
+  expect(warning).toContain(t("serviceDatabase.plain.confirm.openToEveryone"));
+  expect(warning).not.toContain("The allowed IPs still apply");
 });

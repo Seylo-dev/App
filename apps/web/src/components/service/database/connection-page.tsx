@@ -453,10 +453,11 @@ function PlainRow({ service, db }: { service: ServiceDetail; db: Db }) {
 /**
  * What the confirmation adds to its description: the password itself for
  * engines that send it as it is, who can connect (in strong words when the
- * port is open to every IP), and what to prefer.
+ * port is open to every IP), and what to prefer. allowedCidrs is the allow
+ * list it applies to: the saved one, or the one about to be saved.
  */
-export function PlainWarning({ db }: { db: Db }) {
-  const open = db.exposure.allowedCidrs.length === 0;
+export function PlainWarning({ db, allowedCidrs = db.exposure.allowedCidrs }: { db: Db; allowedCidrs?: string[] }) {
+  const open = allowedCidrs.length === 0;
   return (
     <div className="flex flex-col gap-2 text-[12.5px] leading-normal">
       {passwordInClear.has(db.engine) && <p className="m-0 text-ink-strong">{t("serviceDatabase.plain.confirm.passwordInClear")}</p>}
@@ -466,7 +467,7 @@ export function PlainWarning({ db }: { db: Db }) {
         </p>
       ) : (
         <p role="note" className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-chip-amber-fg">
-          {t("serviceDatabase.plain.confirm.limited", { cidrs: db.exposure.allowedCidrs.join(", ") })}
+          {t("serviceDatabase.plain.confirm.limited", { cidrs: allowedCidrs.join(", ") })}
         </p>
       )}
       <p className="m-0 text-ink-strong">{t("serviceDatabase.plain.confirm.prefer")}</p>
@@ -475,9 +476,20 @@ export function PlainWarning({ db }: { db: Db }) {
 }
 
 /**
+ * Saving this allow list opens a port that takes clients without TLS to
+ * every IP: the list empties while connections without TLS are allowed.
+ * Already open to every IP is not new (turning plain on said so then).
+ */
+export function opensPlainToEveryone(db: Db, allowedCidrs: string[]): boolean {
+  return db.exposure.allowPlain && allowedCidrs.length === 0 && db.exposure.allowedCidrs.length > 0;
+}
+
+/**
  * Exposure settings, and the step before exposing: the port the node opens
  * (empty lets it pick a free one), who may connect and the certificate's
- * name. Submitting exposes a database that is not exposed yet.
+ * name. Submitting exposes a database that is not exposed yet. Emptying the
+ * allow list while connections without TLS are allowed asks first, with the
+ * same warning as turning them on there.
  */
 function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: Db; onClose: () => void }) {
   const exposing = !db.exposure.enabled;
@@ -485,12 +497,23 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
   const [cidrs, setCidrs] = useState(db.exposure.allowedCidrs.join("\n"));
   const [tlsHostname, setTls] = useState(db.exposure.tlsHostname ?? "");
   const [port, setPort] = useState(db.exposure.port ? String(db.exposure.port) : "");
+  const [asking, setAsking] = useState(false);
   const invalidate = useInvalidate();
   const set = useOpMutation(databases.setExposure, {
     onSuccess: () => {
       invalidate(databases.get, databases.connection);
       onClose();
     },
+  });
+  const input = () => ({
+    serviceId: service.id,
+    enabled: true,
+    allowedCidrs: cidrs
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+    tlsHostname: tlsHostname.trim() || null,
+    ...(validPort(port) ? { port: Number(port) } : {}),
   });
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -499,17 +522,9 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            const p = Number(port);
-            set.mutate({
-              serviceId: service.id,
-              enabled: true,
-              allowedCidrs: cidrs
-                .split(/[\s,]+/)
-                .map((s) => s.trim())
-                .filter(Boolean),
-              tlsHostname: tlsHostname.trim() || null,
-              ...(validPort(port) ? { port: p } : {}),
-            });
+            const next = input();
+            if (opensPlainToEveryone(db, next.allowedCidrs)) setAsking(true);
+            else set.mutate(next);
           }}
         >
           <div className="flex flex-col gap-1">
@@ -560,6 +575,19 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
             </Button>
           </div>
         </form>
+        <ConfirmDialog
+          open={asking}
+          onOpenChange={setAsking}
+          destructive
+          title={t("serviceDatabase.plain.openConfirm.title")}
+          description={t("serviceDatabase.plain.openConfirm.body", { name: service.name })}
+          confirmLabel={t("serviceDatabase.plain.openConfirm.button")}
+          onConfirm={async () => {
+            await set.mutateAsync(input());
+          }}
+        >
+          <PlainWarning db={db} allowedCidrs={[]} />
+        </ConfirmDialog>
       </DialogContent>
     </Dialog>
   );

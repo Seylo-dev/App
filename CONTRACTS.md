@@ -5444,7 +5444,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   is never refused. Same permission as the rest of exposure
   (`databases.expose`); audited with the input and, when it changed,
   `plainConnections` "allowed" (with `openToEveryone` when
-  `allowedCidrs` is empty) or "tlsOnly". `databases.get exposure` has
+  `allowedCidrs` is empty) or "tlsOnly"; emptying the allow list while it
+  stays on is audited as `plainConnections` "allowed" with
+  `openToEveryone` true too. `databases.get exposure` has
   `allowPlain` (the setting) and `plainNeedsNodeUpdate` (the node's agent
   is older: the port stays TLS only whatever the setting says, and the
   desired state sends `allow_plain` false); `databases.connection
@@ -5458,8 +5460,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (what travels unencrypted, the password itself for the Redis-like
   engines and ClickHouse, the allow list or, with none, that the port is
   open to every IP in stronger words, and to prefer TLS or a timed
-  expose), off does not; with it on the chip says "TLS optional" and a
-  line says plain clients are accepted too (MySQL: they need the
+  expose), off does not; with it on, saving an empty allow list in the
+  exposure settings (one that was not empty) asks to confirm with the
+  same open-to-every-IP warning, the chip says "TLS optional" and a line
+  says plain clients are accepted too (MySQL: they need the
   server's public key, `--get-server-public-key` or
   `allowPublicKeyRetrieval=true`); on an older agent the switch says it
   needs the node's agent 0.2.16. MariaDB 10.11 stays never exposed.

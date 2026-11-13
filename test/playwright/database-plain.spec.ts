@@ -1,9 +1,10 @@
 // Connections without TLS on an exposed database (databases.setExposure
 // allowPlain), on the demo data: the switch on the Exposed connection card,
 // the confirmation before it turns on (in stronger words while the port is
-// open to every IP), no confirmation to turn it off, and the note while the
-// node's agent is older than 0.2.16. databases.get and setExposure are
-// answered here, from one state the page changes.
+// open to every IP), the same strong words before the exposure settings
+// empty the allow list while it is on, no confirmation to turn it off, and
+// the note while the node's agent is older than 0.2.16. databases.get and
+// setExposure are answered here, from one state the page changes.
 //
 // Screenshots: $SHOTS_DIR/database-plain/*.png.
 
@@ -33,6 +34,7 @@ async function demo(page: Page, exposure: { allowedCidrs?: string[]; allowPlain?
       "databases.setExposure": (input) => {
         calls.push(input);
         if (typeof input.allowPlain === "boolean") state.allowPlain = input.allowPlain;
+        if (Array.isArray(input.allowedCidrs)) state.allowedCidrs = input.allowedCidrs as string[];
         return database();
       },
     },
@@ -61,7 +63,7 @@ test.describe("database connections without TLS", () => {
       "Clients that do not ask for TLS can then sign in to db. Their queries, the data they get back and, with some sign-in methods, the password travel unencrypted",
     );
     await expect(dialog.getByRole("note")).toHaveText(
-      "This port is open to every IP address: anyone who has or guesses the password can sign in without TLS from anywhere, and everything sent can be read on the way. Limit it to your IPs first if you can.",
+      "With no allowed IPs this port is open to every IP address: anyone who has or guesses the password can sign in without TLS from anywhere, and everything sent can be read on the way. Limit it to your IPs if you can.",
     );
     await expect(dialog).toContainText("TLS clients keep working as before. Prefer TLS, or a timed expose for a one-off connection.");
     // Nothing changes until it is confirmed.
@@ -95,6 +97,56 @@ test.describe("database connections without TLS", () => {
     await expect(dialog).toHaveCount(0);
     await expect(card.getByLabel("Allow connections without TLS")).not.toBeChecked();
     expect(calls).toEqual([]);
+  });
+
+  test("emptying the allow list while it is on asks first, in the strong words", async ({ page }) => {
+    const { card, calls } = await demo(page, { allowedCidrs: ["203.0.113.7/32"], allowPlain: true });
+    await expect(card.getByLabel("Allow connections without TLS")).toBeChecked();
+    await card.getByRole("button", { name: "Port and access" }).click();
+    const settings = page.getByRole("dialog", { name: "Exposure settings" });
+    await settings.getByLabel("Allowed IPs").fill("");
+    await settings.getByRole("button", { name: "Save" }).click();
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm.getByRole("heading", { name: "Open this port to every IP?" })).toBeVisible();
+    await expect(confirm).toContainText(
+      "Connections without TLS are allowed on db, so with no allowed IPs clients that do not ask for TLS can sign in from every IP address.",
+    );
+    await expect(confirm.getByRole("note")).toHaveText(
+      "With no allowed IPs this port is open to every IP address: anyone who has or guesses the password can sign in without TLS from anywhere, and everything sent can be read on the way. Limit it to your IPs if you can.",
+    );
+    // Nothing is saved until it is confirmed; Cancel goes back to the settings as they were typed.
+    expect(calls).toEqual([]);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/confirm-empty-allow-list.png` });
+    await confirm.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(settings.getByLabel("Allowed IPs")).toHaveValue("");
+    expect(calls).toEqual([]);
+
+    await settings.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Open to every IP" }).click();
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0]).toMatchObject({ serviceId: svc.db, enabled: true, allowedCidrs: [] });
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect(settings).toHaveCount(0);
+    await expect(card).toContainText("Allowed from: anywhere");
+
+    // Already open to every IP, or another list: saved without asking.
+    await card.getByRole("button", { name: "Limit to IPs" }).click();
+    await page.getByRole("dialog", { name: "Exposure settings" }).getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => calls.length).toBe(2);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  });
+
+  test("with TLS only, emptying the allow list does not ask", async ({ page }) => {
+    const { card, calls } = await demo(page, { allowedCidrs: ["203.0.113.7/32"] });
+    await card.getByRole("button", { name: "Port and access" }).click();
+    const settings = page.getByRole("dialog", { name: "Exposure settings" });
+    await settings.getByLabel("Allowed IPs").fill("");
+    await settings.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0]).toMatchObject({ allowedCidrs: [] });
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
   });
 
   test("turning it off needs no confirmation", async ({ page }) => {

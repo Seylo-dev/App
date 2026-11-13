@@ -109,6 +109,30 @@ test("it is audited: the input, and what changed with it", async () => {
   expect(rows[4]).toMatchObject({ enabled: false, plainConnections: "tlsOnly" });
 });
 
+test("emptying the allow list while it is on is audited as opening it to every IP", async () => {
+  const { serviceId } = await exposedDb("mysql");
+  const set = async (input: Record<string, unknown>) =>
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, ...input }, { cookie })).status).toBe(200);
+  await set({ allowedCidrs: ["203.0.113.7"] });
+  await set({ allowPlain: true });
+  await set({ allowedCidrs: [] });
+  // Already open to every IP: nothing new about plain clients.
+  await set({ allowedCidrs: [] });
+  await set({ allowedCidrs: ["203.0.113.7"] });
+  // TLS only: an empty allow list says nothing about plain clients either.
+  await set({ allowPlain: false });
+  await set({ allowedCidrs: [] });
+  const rows = audited();
+  expect(rows).toHaveLength(8);
+  expect(rows[1]).not.toHaveProperty("plainConnections");
+  expect(rows[2]).toMatchObject({ allowPlain: true, plainConnections: "allowed", openToEveryone: false });
+  expect(rows[3]).toMatchObject({ allowedCidrs: [], plainConnections: "allowed", openToEveryone: true });
+  expect(rows[4]).not.toHaveProperty("plainConnections");
+  expect(rows[5]).not.toHaveProperty("plainConnections");
+  expect(rows[6]).toMatchObject({ plainConnections: "tlsOnly" });
+  expect(rows[7]).not.toHaveProperty("plainConnections");
+});
+
 test("it needs databases.expose, like the rest of exposure", async () => {
   const { serviceId, project } = await exposedDb();
   const member = await createUser(panel, "member");
