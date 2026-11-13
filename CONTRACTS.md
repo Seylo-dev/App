@@ -23,7 +23,7 @@ packages/brand/           generated brand constants for TypeScript (@seylo/brand
 packages/proto/           generated protocol + frame codec for TypeScript (@seylo/proto)
 packages/ops/             operation registry: contracts, generators, typed client (@seylo/ops)
 packages/ui/              UI kit (shadcn-style components) and design tokens (@seylo/ui)
-packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, hardcoded service addresses (`hardcoded-reference`), references the app gets as text (`single-quoted-reference`, `bare-reference`), literal host names (`hostMentions`), which variables are secrets (`classifySecret`, `publicPrefixes`), one-variable edits (`setEnvVariable`) (@seylo/env-analyzer)
+packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references (${{svc.LIST[n]}} for one item of a list variable, `DOMAINS`), cross-node diagnostics, hardcoded service addresses (`hardcoded-reference`), references the app gets as text (`single-quoted-reference`, `bare-reference`), literal host names (`hostMentions`), which variables are secrets (`classifySecret`, `publicPrefixes`), one-variable edits (`setEnvVariable`) (@seylo/env-analyzer)
 packages/zip/             streaming zip writer (store, deflate, data descriptors, zip64) and a strict zip reader that runs in browsers (@seylo/zip/write, @seylo/zip/read)
 installer/                install.sh.tmpl + generated brand.env and install.sh (scripts/render-installer.sh)
 openapi.json              generated from the op registry (scripts/gen-openapi.ts)
@@ -4721,6 +4721,66 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   secrets; addresses are open). Shared variables reach every service of the
   project, so anyone who can run code in one service of a project can read
   them: a per-service grant is not a boundary for shared variables.
+- List variables and indexes (added in 0.2.16): `DOMAINS` (apps, compose
+  members, Boxes; `appVariables` in `env-analyzer/src/builtins.ts`, right
+  after `DOMAIN`, scope `public`, not sensitive) is every host the service
+  answers on, comma separated with no blanks: `env/graph.ts` `domainHosts`
+  takes `domains/rows.ts` `serviceDomains` (the Domains tab's order:
+  primary first, then oldest first), leaves out redirect-only domains
+  (`forward`), keeps a host with several paths once (case-insensitive,
+  the first spelling) and wildcard hosts as written; `""` without a
+  domain. Its builtin definition says `list: true` (and `item: "domain"`
+  for messages); `env.references` sends `list: true` on that
+  `ReferenceVariable` and leaves the field out on every other variable,
+  so another list only needs the flag in `builtins.ts`. A reference may
+  pick one item: `${{target.VARIABLE[n]}}`, `n` digits right after the
+  name, 0-based (`DOMAINS[0]` is the primary, the same host as `DOMAIN`),
+  also inside longer values; `EnvReference.index` and `indexRange` (the
+  brackets) are set only then, `variable` stays the bare name, so
+  permission checks, cycles, impact and visibility go by `DOMAINS`
+  (an address, open like `DOMAIN`). Anything else in brackets after a
+  name (`[]`, `[-1]`, `[ 1 ]`, `[x]`, `[1.5]`, a blank before `[`, an
+  unclosed `[1`) is a `malformed-reference` syntax error on the brackets
+  (save refused), `params` `variable`, `index` (inside the brackets) and
+  `written` (the brackets as typed). An index on a variable without
+  `list` (another built-in, a target's own variable, a shared variable)
+  is `not-a-list` (error, on the name and brackets; `params` `target`,
+  `variable`, `key`, `index`, `lists` (the target's list variables),
+  `reference` (the reference without the index); fixes: a list a typo
+  away first (`DOMAIN[1]` -> `${{api.DOMAINS[1]}}`), then the reference
+  without the index); it resolves to nothing, so the reference stays as
+  written like one to an unknown variable. An index past the end of the
+  list as it is now is `index-out-of-range` (warning, no fix): "api has 2
+  domains: DOMAINS[0] and DOMAINS[1]" (1: "DOMAINS[0]", 3 or more:
+  "DOMAINS[0] to DOMAINS[2]", none: "api has no domains yet"), `params`
+  `target`, `variable`, `key`, `index`, `count`, `item`, `indexes`; it
+  resolves to `""` and replaces `empty-reference` for an indexed
+  reference. An unknown variable with an index suggests only list
+  variables. Resolution (`resolveEnv`, the panel graph's `resolveService`
+  and every variable that references one) uses `referenceValue`: the
+  value, or item `n` (`""` past the end); `substituteReferences` hands
+  the lookup `(target, variable, index | null)`. `describeReference`
+  returns the resolved `value` (the item for an index), and
+  `referenceCompletions` follows a list with two or more items by one
+  completion per item (`label` `api.DOMAINS[1]`, `index`, `value`).
+  Adding, removing, re-pointing (forward) or changing the primary domain
+  changes `DOMAINS` in `env.references` at once (domains ops invalidate
+  it, as for `DOMAIN`) and in running containers on their next deploy,
+  which seals the resolved env (`sealDeploymentEnv`); a restart keeps the
+  old values. A target's own key named `DOMAINS` is shadowed by the
+  built-in for other services' references, as for every built-in name.
+  Shared variables take no references, so `${{api.DOMAINS[1]}}` there is
+  refused by `env.setShared` like any other. Hints: `single-quoted-reference`
+  takes indexed references; `bare-reference` counts `api.DOMAINS[1]` as
+  one token when the variable is a list (the target's, or a built-in list
+  name for a name that is no target), its fix `${{api.DOMAINS[1]}}`, and
+  leaves `api.URL[1]` alone; `hardcoded-reference` compares a host key's
+  whole value with a target's `DOMAINS` when it has two or more hosts
+  (`ALLOWED_HOSTS=a.com,b.com` -> `${{web.DOMAINS}}`; exactly, so another
+  order or a blank after a comma is no match) and with each item
+  (`WWW_HOST=b.com` -> `${{web.DOMAINS[1]}}`, `params.matched`
+  `DOMAINS[1]`), `DOMAIN` winning over `DOMAINS[0]`, mail keys skipped as
+  for `DOMAIN`. The agent resolves nothing: it gets the sealed values.
 - One variable at a time (added in 0.2.15): `env.setVariable` (`env.edit`
   on the service) and `env.setSharedVariable` (`env.edit` on the project)
   take `{key, value: string | null, expectedUpdatedAt?}` and change the
@@ -6148,12 +6208,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `hardcoded-reference` hint and its fix keep the info severity, a blue
   underline outside the problem count; `single-quoted-reference` and
   `bare-reference` are warnings, amber and counted like `empty-reference`,
-  and `fixTitle` names the double-quote fix "Use double quotes"), `env/references-panel.tsx` (the References panel: first the
+  and `fixTitle` names the double-quote fix "Use double quotes"; `not-a-list`
+  and `index-out-of-range` get catalog messages, the latter in "domains"
+  only for `params.item` `domain` (else the analyzer's English), and a
+  `malformed-reference` with `params.variable` is the index message; the
+  hover (`referenceHover`) shows an indexed reference's item and "Item 2
+  of 2 in DOMAINS", completions (`referenceSuggestions`, also after `[`)
+  show each list item's value as its detail, and `completionTail`
+  replaces an index typed after the cursor too), `env/references-panel.tsx` (the References panel: first the
   edited service with `env.references` `self.builtins` only, each inserting
   `${{<its name>.VAR}}`, never its own .env keys, and no such group when
   `self.builtins` is empty or missing; then `targets`. A variable whose
-  value is `""` right now gets no chip (`hasValue`: `URL` and `DOMAIN`
-  before a domain, `EXPOSED_*` of a database not exposed, an empty shared
+  value is `""` right now gets no chip (`hasValue`: `URL`, `DOMAIN` and
+  `DOMAINS` before a domain, `EXPOSED_*` of a database not exposed, an empty shared
   variable), and a group left with no chip is not shown, so the empty-state
   text shows when nothing is left; a `null` value, hidden from the caller
   (no `env.view` on the target, a database credential without

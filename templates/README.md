@@ -88,7 +88,8 @@ resolves on every deploy, so a reset database password reaches the app) and
 `PRIMARY_DOMAIN` (the node's automatic domain). Database services offer
 `INTERNAL_URL`, `INTERNAL_HOST`, `INTERNAL_PORT`, `USER`, `PASSWORD` and
 `DATABASE` (`clickhouse` also `INTERNAL_HTTP_URL` and `INTERNAL_HTTP_PORT`);
-apps offer `URL`, `DOMAIN` and `INTERNAL_URL`.
+apps offer `URL`, `DOMAIN`, `DOMAINS` (every domain host, primary first,
+comma separated; `${{service.DOMAINS[1]}}` is the second) and `INTERNAL_URL`.
 
 Pin image tags. Every template is run by
 `apps/panel/test/templates.test.ts`, which checks the output and that each
