@@ -5,6 +5,9 @@
 // ("Restart api?" with Approve and Reject): it is the same approval as on
 // the Approvals page (approvals.get, invalidated live), so deciding in
 // either place updates both, and the reply goes on once it is decided.
+// One that weakens something (Approval.warning: a database's clients let
+// in without TLS) says what and to whom, and Approve asks first in red,
+// like a destructive one.
 
 import { type ai, approvals } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -28,6 +31,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useId, useState } from "react";
 import { t } from "../../i18n/t";
+import { ApprovalWarningChip, ApprovalWarningNote } from "../approvals/approval-warning";
 import { formatRelative } from "../settings/format";
 import { useSettingsMutation } from "../settings/mutation";
 import { actionPhrase, isDestructive, isLookup, type Phase } from "./phrases";
@@ -191,6 +195,9 @@ function ApprovalCard({ part, approvalId }: { part: ToolCall; approvalId: string
   const question = actionPhrase(part.opId, "ask", name);
   const destructive = approval ? approval.opKind === "destructive" : isDestructive(part.opId);
   const pending = approval?.status === "pending" && part.status === "needs_approval";
+  const warning = pending ? approval?.warning : undefined;
+  // Both ask before they run, with a red button.
+  const careful = destructive || !!warning;
   const busy = approve.isPending || deny.isPending;
   const place = where(part.target);
   const error = approve.error ?? deny.error;
@@ -224,6 +231,7 @@ function ApprovalCard({ part, approvalId }: { part: ToolCall; approvalId: string
             {t("assistant.card.destructive")}
           </Chip>
         )}
+        {warning && <ApprovalWarningChip warning={warning} className="px-1.5 py-px text-[11px]" />}
         {/* While it waits, Approve and Reject say so; after, the chip says how it went. */}
         {approval && !pending && (
           <Chip tone={decidedTones[approval.status]} className="px-1.5 py-px text-[11px]">
@@ -233,6 +241,7 @@ function ApprovalCard({ part, approvalId }: { part: ToolCall; approvalId: string
         <TargetLink target={part.target} />
         <DetailsToggle open={open} onToggle={() => setOpen(!open)} controls={detailsId} />
       </div>
+      {warning && <ApprovalWarningNote warning={warning} name={name ?? ""} className="px-2.5 py-2 text-[12px]" />}
       {approval?.status === "expired" && <p className="m-0 text-[12px] text-muted-foreground">{t("assistant.card.expired")}</p>}
       {approval?.error && <p className="m-0 line-clamp-2 text-[12px] text-chip-red-fg">{approval.error}</p>}
       {error && (
@@ -247,9 +256,9 @@ function ApprovalCard({ part, approvalId }: { part: ToolCall; approvalId: string
           </Button>
           <Button
             size="sm"
-            variant={destructive ? "destructive" : "primary"}
+            variant={careful ? "destructive" : "primary"}
             disabled={busy}
-            onClick={() => (destructive ? setConfirming(true) : approve.mutate({ approvalId }))}
+            onClick={() => (careful ? setConfirming(true) : approve.mutate({ approvalId }))}
           >
             {approve.isPending ? t("assistant.card.approving") : t("assistant.card.approve")}
           </Button>
@@ -262,14 +271,16 @@ function ApprovalCard({ part, approvalId }: { part: ToolCall; approvalId: string
         open={confirming}
         onOpenChange={setConfirming}
         title={question}
-        description={t("assistant.card.confirmDestructive")}
+        description={destructive ? t("assistant.card.confirmDestructive") : t("approvals.plain.confirm")}
         confirmLabel={t("assistant.card.approve")}
         destructive
         onConfirm={() => {
           setConfirming(false);
           approve.mutate({ approvalId });
         }}
-      />
+      >
+        {warning && !destructive && <ApprovalWarningNote warning={warning} name={name ?? ""} className="text-[12.5px]" />}
+      </ConfirmDialog>
     </CardFrame>
   );
 }

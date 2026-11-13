@@ -41,4 +41,17 @@ export default {
   confirmTitle: 'Run "{action}"?',
   confirmDescription: "It runs right away as you, with your permissions.",
   confirmDestructive: "It runs right away as you and deletes data that cannot be recovered.",
+  /** A waiting databases.setExposure that lets a database's clients in without TLS (Approval.warning plainConnections). */
+  plain: {
+    chip: "Without TLS",
+    theDatabase: "the database",
+    allow:
+      "Approving lets clients that do not ask for TLS sign in to {name}. Their queries, the data they get back and, with some sign-in methods, the password travel unencrypted.",
+    widen:
+      "Clients that do not ask for TLS can already sign in to {name}; approving lets them in from more addresses. Their queries, the data they get back and, with some sign-in methods, the password travel unencrypted.",
+    openToEveryone:
+      "From every IP address: the allowed IPs are empty or cover every address, so anyone who has or guesses the password can sign in without TLS.",
+    limited: "Only from {cidrs}.",
+    confirm: "It runs right away as you and lets clients in without TLS. Prefer TLS, or a timed expose for a one-off connection.",
+  },
 } as const;

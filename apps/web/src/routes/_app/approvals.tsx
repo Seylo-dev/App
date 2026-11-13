@@ -4,7 +4,10 @@
 // wants it, and the exact (redacted) input. Approving runs it at once with
 // the approver's own permissions; denying tells the model, with a note.
 // The assistant's chat shows the same approval as a card (one record), so
-// deciding in either place updates both.
+// deciding in either place updates both. One that weakens something
+// (Approval.warning: a database's clients let in without TLS) says what
+// and to whom, and approving it asks first with a red button, like a
+// destructive one.
 
 import { approvals, type OpOutput } from "@seylo/ops";
 import { Alert } from "@seylo/ui/components/alert";
@@ -23,6 +26,7 @@ import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconChevronUp, IconMessage, IconPlugConnected, IconShieldCheck, IconSparkles } from "@tabler/icons-react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { ApprovalWarningChip, ApprovalWarningNote } from "../../components/approvals/approval-warning";
 import { useAssistant, useAssistantAccess } from "../../components/assistant/assistant-context";
 import { formatDateTime, formatRelative } from "../../components/settings/format";
 import { useSettingsMutation } from "../../components/settings/mutation";
@@ -149,6 +153,9 @@ function ApprovalCard({ approval }: { approval: Approval }) {
   });
   const deny = useSettingsMutation(approvals.deny, { invalidates: refresh, success: t("approvals.denied") });
   const destructive = approval.opKind === "destructive";
+  const warning = approval.warning;
+  // Both ask before they run, with a red button.
+  const careful = destructive || !!warning;
 
   return (
     <Card className="gap-3 px-5 py-4" aria-label={approval.opSummary}>
@@ -157,6 +164,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <b className="text-[14.5px] font-semibold">{approval.opSummary}</b>
           {destructive && <Chip tone="red">{t("approvals.destructive")}</Chip>}
+          {warning && <ApprovalWarningChip warning={warning} />}
         </div>
         <Chip tone={statusTones[approval.status]} className="shrink-0">
           {t(`approvals.statuses.${approval.status}`)}
@@ -188,6 +196,8 @@ function ApprovalCard({ approval }: { approval: Approval }) {
         {pending && <span>{t("approvals.expires", { when: formatRelative(approval.expiresAt) })}</span>}
         <span className="font-mono">{approval.opId}</span>
       </div>
+
+      {warning && <ApprovalWarningNote warning={warning} name={approval.target?.name ?? ""} className="text-[13px]" />}
 
       {approval.reason && (
         <blockquote className="m-0 rounded-control bg-raised px-3.5 py-2.5 text-[13px] text-ink-strong">
@@ -226,7 +236,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       {pending && !denying && (
         <div className="flex flex-wrap justify-end gap-2 border-t border-divider pt-3">
           <Button onClick={() => setDenying(true)}>{t("approvals.deny")}</Button>
-          <Button variant={destructive ? "destructive" : "primary"} disabled={approve.isPending} onClick={() => setConfirmApprove(true)}>
+          <Button variant={careful ? "destructive" : "primary"} disabled={approve.isPending} onClick={() => setConfirmApprove(true)}>
             {approve.isPending ? t("approvals.running") : t("approvals.approve")}
           </Button>
         </div>
@@ -265,14 +275,18 @@ function ApprovalCard({ approval }: { approval: Approval }) {
         open={confirmApprove}
         onOpenChange={setConfirmApprove}
         title={t("approvals.confirmTitle", { action: approval.opSummary })}
-        description={destructive ? t("approvals.confirmDestructive") : t("approvals.confirmDescription")}
+        description={
+          destructive ? t("approvals.confirmDestructive") : warning ? t("approvals.plain.confirm") : t("approvals.confirmDescription")
+        }
         confirmLabel={t("approvals.approve")}
-        destructive={destructive}
+        destructive={careful}
         onConfirm={() => {
           setConfirmApprove(false);
           approve.mutate({ approvalId: approval.id });
         }}
-      />
+      >
+        {warning && <ApprovalWarningNote warning={warning} name={approval.target?.name ?? ""} className="text-[12.5px]" />}
+      </ConfirmDialog>
     </Card>
   );
 }

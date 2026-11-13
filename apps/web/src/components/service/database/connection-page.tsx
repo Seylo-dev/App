@@ -7,7 +7,7 @@
 // summary, and Change links next to the user and the password, which open
 // the Users tab (users-page.tsx) with the main user's dialog.
 
-import { backups, databases, type OpOutput } from "@seylo/ops";
+import { allowListOpensToEveryone, backups, databases, type OpOutput, widensAllowList } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
@@ -436,7 +436,7 @@ function PlainRow({ service, db }: { service: ServiceDetail; db: Db }) {
       <ConfirmDialog
         open={asking}
         onOpenChange={setAsking}
-        destructive={e.allowedCidrs.length === 0}
+        destructive={allowListOpensToEveryone(e.allowedCidrs)}
         title={t("serviceDatabase.plain.confirm.title")}
         description={t("serviceDatabase.plain.confirm.body", { name: service.name })}
         confirmLabel={t("serviceDatabase.plain.confirm.button")}
@@ -453,11 +453,12 @@ function PlainRow({ service, db }: { service: ServiceDetail; db: Db }) {
 /**
  * What the confirmation adds to its description: the password itself for
  * engines that send it as it is, who can connect (in strong words when the
- * port is open to every IP), and what to prefer. allowedCidrs is the allow
- * list it applies to: the saved one, or the one about to be saved.
+ * port is open to every IP: no allowed IPs, or ones that cover every
+ * address, such as 0.0.0.0/0), and what to prefer. allowedCidrs is the
+ * allow list it applies to: the saved one, or the one about to be saved.
  */
 export function PlainWarning({ db, allowedCidrs = db.exposure.allowedCidrs }: { db: Db; allowedCidrs?: string[] }) {
-  const open = allowedCidrs.length === 0;
+  const open = allowListOpensToEveryone(allowedCidrs);
   return (
     <div className="flex flex-col gap-2 text-[12.5px] leading-normal">
       {passwordInClear.has(db.engine) && <p className="m-0 text-ink-strong">{t("serviceDatabase.plain.confirm.passwordInClear")}</p>}
@@ -477,19 +478,23 @@ export function PlainWarning({ db, allowedCidrs = db.exposure.allowedCidrs }: { 
 
 /**
  * Saving this allow list opens a port that takes clients without TLS to
- * every IP: the list empties while connections without TLS are allowed.
- * Already open to every IP is not new (turning plain on said so then).
+ * every IP: while connections without TLS are allowed, the list empties
+ * or covers every address (0.0.0.0/0, ::/0, 0.0.0.0/1 with 128.0.0.0/1),
+ * and lets in addresses the saved one did not. The panel's audit and a
+ * model's approval read lists the same way (@seylo/ops allow-lists.ts).
+ * A list as open as the saved one is not new (turning plain on said so).
  */
 export function opensPlainToEveryone(db: Db, allowedCidrs: string[]): boolean {
-  return db.exposure.allowPlain && allowedCidrs.length === 0 && db.exposure.allowedCidrs.length > 0;
+  return db.exposure.allowPlain && allowListOpensToEveryone(allowedCidrs) && widensAllowList(db.exposure.allowedCidrs, allowedCidrs);
 }
 
 /**
  * Exposure settings, and the step before exposing: the port the node opens
  * (empty lets it pick a free one), who may connect and the certificate's
- * name. Submitting exposes a database that is not exposed yet. Emptying the
- * allow list while connections without TLS are allowed asks first, with the
- * same warning as turning them on there.
+ * name. Submitting exposes a database that is not exposed yet. Saving an
+ * allow list that lets every IP in (empty, or a catch-all such as
+ * 0.0.0.0/0) while connections without TLS are allowed asks first, with
+ * the same warning as turning them on there.
  */
 function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: Db; onClose: () => void }) {
   const exposing = !db.exposure.enabled;
@@ -586,7 +591,7 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
             await set.mutateAsync(input());
           }}
         >
-          <PlainWarning db={db} allowedCidrs={[]} />
+          <PlainWarning db={db} allowedCidrs={input().allowedCidrs} />
         </ConfirmDialog>
       </DialogContent>
     </Dialog>

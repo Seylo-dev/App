@@ -43,15 +43,15 @@ export default {
       body: "Clients that do not ask for TLS can then sign in to {name}. Their queries, the data they get back and, with some sign-in methods, the password travel unencrypted: anyone on the network path can read them.",
       passwordInClear: "This engine's clients send the password itself unencrypted.",
       openToEveryone:
-        "With no allowed IPs this port is open to every IP address: anyone who has or guesses the password can sign in without TLS from anywhere, and everything sent can be read on the way. Limit it to your IPs if you can.",
+        "With no allowed IPs, or ones that cover every address such as 0.0.0.0/0, this port is open to every IP address: anyone who has or guesses the password can sign in without TLS from anywhere, and everything sent can be read on the way. Limit it to your IPs if you can.",
       limited: "The allowed IPs still apply: only {cidrs} can connect.",
       prefer: "TLS clients keep working as before. Prefer TLS, or a timed expose for a one-off connection.",
       button: "Allow without TLS",
     },
-    /** Saving an empty allow list in the exposure settings while connections without TLS are allowed. */
+    /** Saving an allow list that lets every IP in (empty, or a catch-all such as 0.0.0.0/0) while connections without TLS are allowed. */
     openConfirm: {
       title: "Open this port to every IP?",
-      body: "Connections without TLS are allowed on {name}, so with no allowed IPs clients that do not ask for TLS can sign in from every IP address.",
+      body: "Connections without TLS are allowed on {name}, and this allow list lets every IP address in, so clients that do not ask for TLS can sign in from anywhere.",
       button: "Open to every IP",
     },
   },

@@ -81,4 +81,57 @@ describe("action cards", () => {
     expect(decided).toContain("Done by Owner");
     expect(decided).not.toContain(">Approve<");
   });
+
+  test("a held change that lets a database's clients in without TLS says what and to whom, and Approve is red", async () => {
+    const db = { ...target, id: "svc0000000000003", name: "shop-db" };
+    const expose: ToolCall = {
+      ...restart,
+      opId: "databases.setExposure",
+      input: { serviceId: db.id, enabled: true, allowPlain: true },
+      status: "needs_approval",
+      approvalId: approval.id,
+      resultPreview: null,
+      target: db,
+    };
+    const held = {
+      ...approval,
+      opId: "databases.setExposure",
+      opSummary: "Expose a database",
+      inputPreview: expose.input,
+      target: { type: "service", id: db.id, name: db.name },
+    };
+    const card = (answer: object) =>
+      renderStatic(() => <ToolCallCard part={expose} />, [[approvals.get, { approvalId: approval.id }, answer]]);
+    const approveButton = (out: string) => out.slice(out.lastIndexOf("<button", out.indexOf(">Approve<")), out.indexOf(">Approve<"));
+
+    const open = await card({
+      ...held,
+      warning: { kind: "plainConnections", change: "allow", allowedCidrs: [], openToEveryone: true },
+    });
+    expect(open).toContain(">Without TLS<");
+    expect(open).toContain(
+      "Approving lets clients that do not ask for TLS sign in to shop-db. Their queries, the data they get back and, with some sign-in methods, the password travel unencrypted.",
+    );
+    expect(open).toContain("From every IP address: the allowed IPs are empty or cover every address");
+    expect(open).toContain("bg-chip-red-bg");
+    expect(approveButton(open)).toContain("bg-destructive");
+
+    const limited = await card({
+      ...held,
+      warning: { kind: "plainConnections", change: "widen", allowedCidrs: ["198.51.100.0/24", "203.0.113.7/32"], openToEveryone: false },
+    });
+    expect(limited).toContain(
+      "Clients that do not ask for TLS can already sign in to shop-db; approving lets them in from more addresses.",
+    );
+    expect(limited).toContain("Only from 198.51.100.0/24, 203.0.113.7/32.");
+    expect(limited).toContain("bg-chip-amber-bg");
+    expect(limited).not.toContain("From every IP address");
+    expect(approveButton(limited)).toContain("bg-destructive");
+
+    // The same op without a warning (a narrower list, TLS only) is an ordinary change.
+    const ordinary = await card(held);
+    expect(ordinary).not.toContain(">Without TLS<");
+    expect(ordinary).not.toContain('data-slot="approval-warning"');
+    expect(approveButton(ordinary)).toContain("bg-primary");
+  });
 });

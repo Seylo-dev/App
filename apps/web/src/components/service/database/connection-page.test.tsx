@@ -324,3 +324,33 @@ test("emptying the allow list while connections without TLS are allowed asks fir
   expect(warning).toContain(t("serviceDatabase.plain.confirm.openToEveryone"));
   expect(warning).not.toContain("The allowed IPs still apply");
 });
+
+test("a catch-all allow list asks like an empty one, and the warning calls it open to every IP", async () => {
+  const plainLimited = { ...db, exposure: { ...db.exposure, allowedCidrs: ["203.0.113.7/32"], allowPlain: true } };
+  // Every IPv4 address, every IPv6 address, both, the same in two halves, as typed (spaces, capitals).
+  for (const list of [["0.0.0.0/0"], ["::/0"], ["0.0.0.0/0", "::/0"], ["0.0.0.0/1", "128.0.0.0/1"], ["203.0.113.7", " ::/0 "]]) {
+    expect([list, opensPlainToEveryone(plainLimited as never, list)]).toEqual([list, true]);
+  }
+  // Half of the addresses, or the saved address and another one: limited, saved as they are.
+  expect(opensPlainToEveryone(plainLimited as never, ["0.0.0.0/1"])).toBe(false);
+  expect(opensPlainToEveryone(plainLimited as never, ["203.0.113.7/32", "198.51.100.9"])).toBe(false);
+  // Already as open (a catch-all saved, or nothing saved), or TLS only: nothing new about plain clients.
+  const plainOpen = { ...db, exposure: { ...db.exposure, allowedCidrs: ["0.0.0.0/0"], allowPlain: true } };
+  expect(opensPlainToEveryone(plainOpen as never, ["0.0.0.0/0"])).toBe(false);
+  expect(opensPlainToEveryone(plainOpen as never, ["0.0.0.0/1", "128.0.0.0/1"])).toBe(false);
+  expect(opensPlainToEveryone({ ...db, exposure: { ...db.exposure, allowPlain: true } } as never, ["0.0.0.0/0"])).toBe(false);
+  expect(opensPlainToEveryone({ ...plainLimited, exposure: { ...plainLimited.exposure, allowPlain: false } } as never, ["::/0"])).toBe(
+    false,
+  );
+  // From a catch-all to no list at all lets IPv6 in too: asked again.
+  expect(opensPlainToEveryone(plainOpen as never, [])).toBe(true);
+
+  const warning = async (allowedCidrs: string[]) =>
+    text(await renderStatic(() => <PlainWarning db={plainLimited as never} allowedCidrs={allowedCidrs} />, []));
+  for (const list of [["0.0.0.0/0"], ["0.0.0.0/1", "128.0.0.0/1"]]) {
+    const open = await warning(list);
+    expect(open).toContain(t("serviceDatabase.plain.confirm.openToEveryone"));
+    expect(open).not.toContain("The allowed IPs still apply");
+  }
+  expect(await warning(["0.0.0.0/1"])).toContain(t("serviceDatabase.plain.confirm.limited", { cidrs: "0.0.0.0/1" }));
+});
