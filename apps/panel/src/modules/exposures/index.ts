@@ -1,7 +1,8 @@
 // Exposures: first-run IP:port access (redirect-then-close once a domain is
 // live) and timed exposes locked to an IP or CIDR, both through the agent's
 // portgate. A scheduled job sweeps ended rows every minute; ports the
-// agents picked are recorded from their service status.
+// agents picked are recorded from their service status. Rows follow a
+// service moved to another node (services/access-move.ts).
 
 import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
 import type { ServiceStatus } from "@seylo/proto";
@@ -9,6 +10,7 @@ import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { invalidateService } from "../domains/lookup";
 import { defineModule } from "../module";
+import { followPlacements } from "../services/access-move";
 import { recordReportedPorts, sweepAndMark } from "./logic";
 import { close, extendTimed, get, openTimed, setFirstRun } from "./ops";
 
@@ -71,6 +73,8 @@ export default defineModule({
   ops: [get, setFirstRun, openTimed, extendTimed, close],
   jobs: [sweep],
   start(deps) {
+    // Rows a move before 0.2.16 left on the old node go to the node the service runs on.
+    for (const serviceId of followPlacements(deps.db)) deps.agents.desired.markDirty({ serviceId });
     trackPorts(deps);
     deps.schedules.ensure({ key: sweepType, jobType: sweepType, intervalSeconds: 60 });
   },

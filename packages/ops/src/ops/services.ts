@@ -664,12 +664,97 @@ export const move = defineOp({
   kind: "mutation",
   summary: "Move a service to another node",
   description:
-    "Moves a single-node service to another node: deploys it there, copies its volumes while the old copy is stopped, switches traffic, then removes the old copy. Progress shows as a deployment with trigger move; on failure the service stays on the old node. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of that deploy) while a deploy of the service is queued or running.",
+    "Moves a single-node service to another node: deploys it there, copies its volumes while the old copy is stopped, switches traffic, then removes the old copy. Its IP:port access (a database's exposed port, timed exposes, the first-run port) moves to the new node once it is live, on the same port unless another service has it there. Progress shows as a deployment with trigger move; on failure the service stays on the old node. services.moveImpact says beforehand what changes and which nodes can take it. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of that deploy) while a deploy of the service is queued or running, and (reason backupRunning or restoreRunning) while one of its backups or restores runs; with volumes, refused while either node is offline (UNAVAILABLE, reason offline) or its agent cannot copy volumes (NOT_IMPLEMENTED, reason agentTooOld); a database also needs a target whose agent runs its engine and, while exposed, keeps its port TLS only and takes clients without TLS when it allows them (CONFLICT, reason agentTooOld).",
   input: Type.Object({ serviceId: Id, toNodeId: Id }),
   output: Type.Object({ deploymentId: Id }),
   permission: permission.service("services.move", serviceScope),
   mcp: true,
   audit: true,
+});
+
+/** Why services.move refuses: the reason it answers with (CONFLICT, UNAVAILABLE or NOT_IMPLEMENTED) and its message. */
+export const NodeMoveRefusal = Type.Object({
+  /**
+   * compose, protected, panel, placements (not on exactly one node),
+   * notDeployed, noImage, deployRunning, copying, exporting, importing,
+   * backupRunning, restoreRunning, disabled, offline, agentTooOld.
+   */
+  reason: Type.String(),
+  message: Type.String(),
+});
+
+/** A service of the same project that uses the moving service's address. */
+export const NodeMoveReferrer = Type.Object({
+  serviceId: Id,
+  name: ServiceName,
+  /** Their variables that do; empty when you cannot read their environment. */
+  keys: Type.Array(Type.String()),
+  /** The nodes it runs on. */
+  nodeIds: Type.Array(Id),
+});
+
+/** What moving a service to another node does (Added in 0.2.16). */
+export const NodeMoveImpact = Type.Object({
+  /** Why it cannot move to any node now; null when it can (to a target without a refusal of its own). */
+  blocker: Type.Union([NodeMoveRefusal, Type.Null()]),
+  /** Every other node, with why the service cannot move there (null when it can). */
+  targets: Type.Array(
+    Type.Object({
+      id: Id,
+      name: Type.String(),
+      online: Type.Boolean(),
+      /** Its public address (IPv4, else IPv6), what a database's EXPOSED_HOST is there without a TLS host name; null when unknown. */
+      address: Type.Union([Type.String(), Type.Null()]),
+      refusal: Type.Union([NodeMoveRefusal, Type.Null()]),
+    }),
+  ),
+  /** Its data volumes. With any it is stopped while they are copied (downtime grows with their size); without, both nodes run until the new one is live. */
+  volumes: Type.Array(Type.Object({ name: Type.String(), mountPath: Type.String() })),
+  /** A database's size inside the engine at its newest whole backup that measured it; null when the panel does not know. */
+  dataSize: Type.Union([Type.Object({ bytes: Type.Integer({ minimum: 0 }), measuredAt: Timestamp }), Type.Null()]),
+  /** The newest successful backup; a fresh one before moving is recommended. */
+  lastBackupAt: Type.Union([Timestamp, Type.Null()]),
+  /** Its backup schedules: they keep their times and run on the new node (one due during the move runs once it ends). */
+  backupSchedules: Type.Integer({ minimum: 0 }),
+  /** What listens on the node's own address: it moves to the new node's (the port too, unless another service has it there). */
+  exposure: Type.Object({
+    /** A database's exposed port: on with TLS, its allowed IPs and allowPlain, at the new node's address (the same TLS host name, whose DNS must then point there). */
+    database: Type.Union([
+      Type.Object({
+        port: Type.Union([Type.Integer({ minimum: 1, maximum: 65535 }), Type.Null()]),
+        tlsHostname: Type.Union([Type.String(), Type.Null()]),
+        allowPlain: Type.Boolean(),
+      }),
+      Type.Null(),
+    ]),
+    /** Open timed exposes; they keep their end and allowed IPs. */
+    timed: Type.Integer({ minimum: 0 }),
+    /** The first-run IP:port is open. */
+    firstRun: Type.Boolean(),
+  }),
+  /** Services of its project that read its EXPOSED_URL, EXPOSED_HOST or EXPOSED_PORT: they get the new address on their next deploy. */
+  exposedReferrers: Type.Array(NodeMoveReferrer),
+  /**
+   * Services of its project that use its internal address (INTERNAL_URL,
+   * INTERNAL_HOST, its name as a host): it stays the same, but there is no
+   * private network between nodes, so only those on the new node reach it.
+   */
+  internalReferrers: Type.Array(NodeMoveReferrer),
+  /** Services that reference it which you cannot see. */
+  hiddenReferrers: Type.Integer({ minimum: 0 }),
+});
+
+export const moveImpact = defineOp({
+  id: "services.moveImpact",
+  kind: "query",
+  summary: "Show what moving a service to another node does",
+  description:
+    "Lists what services.move would do and where it can go: why it cannot move now (blocker) and, per other node, why it cannot go there (offline, disabled, an agent too old to copy volumes or to run the database's engine and exposure); its volumes (copied while it is stopped) and a database's size at its last backup; its backups (they keep their schedules and run on the new node); what listens on the node's address and moves to the new node's (a database's exposed port, timed exposes, the first-run IP:port); and the services of its project that use its exposed address (they need a deploy) or its internal one (only those on the new node reach it). Names and keys only where you may see them. Added in 0.2.16.",
+  input: Type.Object({ serviceId: Id }),
+  output: NodeMoveImpact,
+  permission: permission.service("services.view", serviceScope),
+  mcp: true,
+  audit: false,
 });
 
 export const usePort = defineOp({

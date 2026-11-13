@@ -41,7 +41,7 @@ export interface InsertServiceInput {
 export function assertNode(tx: Tx, nodeId: string): { id: string; name: string } {
   const node = tx.select({ id: nodes.id, name: nodes.name, disabledAt: nodes.disabledAt }).from(nodes).where(eq(nodes.id, nodeId)).get();
   if (!node) throw new OpError("NOT_FOUND", "No node with this id.", { field: "nodeId" });
-  if (node.disabledAt) throw new OpError("CONFLICT", `${node.name} is disabled.`, { field: "nodeId" });
+  if (node.disabledAt) throw new OpError("CONFLICT", `${node.name} is disabled.`, { field: "nodeId", reason: "disabled" });
   return node;
 }
 

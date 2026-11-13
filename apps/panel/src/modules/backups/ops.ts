@@ -17,6 +17,7 @@ import { assertNoTransfer } from "../services/copies";
 import { presign } from "./presign";
 import {
   applyRetention,
+  assertNotMoving,
   assertSelectable,
   checkTarget,
   nextRun,
@@ -522,6 +523,8 @@ export const restore = implement(backupOps.restore, (input, ctx) => {
   if (running) throw new OpError("CONFLICT", "A restore of this service is already running.", { reason: "restoreRunning" });
   // An export reads the folder this writes, or an import still fills it.
   assertNoTransfer(ctx.db, service.id);
+  // A move copies (and then deletes) the folder this writes.
+  assertNotMoving(ctx.db, service, "Restore it");
   // Refused here, so no failed restore run is left in the list (the restore job checks again).
   if (!destinationOf(ctx, source)) {
     throw new OpError("CONFLICT", "The backup's destination was deleted, so the backup can no longer be restored from here.", {

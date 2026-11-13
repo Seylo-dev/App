@@ -54,6 +54,7 @@ import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
 import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-sha";
 import { panelServiceId } from "../nodes/panel-service";
+import { moveAccessToNode } from "../services/access-move";
 import { dataVolumes, writeSpec } from "../services/insert";
 import { accessText, livePortsOf, mainPortChange, movePointed, pointedAt, pointsAny } from "../services/port-move";
 import { restoreProjectMove } from "../services/project-move-restore";
@@ -1076,6 +1077,7 @@ function succeed(s: EngineState, d: DeploymentRow): void {
   const names = d.targetNodeIds.map((id) => nodeName(s, id)).join(", ");
   const done = { ship: `Running on ${names}`, health: "Healthy", switch: "Traffic switched" } as const;
   for (const key of ["ship", "health", "switch"] as const) steps = setStep(steps, key, "ok", { detail: done[key] });
+  let movedAccess = 0;
   db.transaction((tx) => {
     tx.update(deployments)
       .set({ status: "superseded" })
@@ -1083,14 +1085,27 @@ function succeed(s: EngineState, d: DeploymentRow): void {
       .run();
     tx.update(deployments).set({ status: "live", finishedAt: now, steps, imageDigest: digest }).where(eq(deployments.id, d.id)).run();
     tx.update(services).set({ liveDeploymentId: d.id }).where(eq(services.id, d.serviceId)).run();
-    // A move is done once the new node serves: the old copy goes.
+    // A move is done once the new node serves: the old copy goes, and its IP:port access follows to the new node.
     if (d.trigger === "move" && d.movedFromNodeId) {
       tx.delete(servicePlacements)
         .where(and(eq(servicePlacements.serviceId, d.serviceId), eq(servicePlacements.nodeId, d.movedFromNodeId)))
         .run();
+      const left = tx
+        .select({ nodeId: servicePlacements.nodeId })
+        .from(servicePlacements)
+        .where(eq(servicePlacements.serviceId, d.serviceId))
+        .all();
+      if (left.length === 1 && left[0]) movedAccess = moveAccessToNode(tx, d.serviceId, d.movedFromNodeId, left[0].nodeId);
     }
   });
-  if (d.trigger === "move" && d.movedFromNodeId) s.deps.agents.desired.markDirty({ nodeId: d.movedFromNodeId });
+  if (d.trigger === "move" && d.movedFromNodeId) {
+    s.deps.agents.desired.markDirty({ nodeId: d.movedFromNodeId });
+    s.deps.agents.desired.markDirty({ serviceId: d.serviceId });
+    // The address of its IP:port access changed: its screens and the project's references read it again.
+    s.deps.live.publish(`service:${d.serviceId}`, { type: "invalidate", ops: ["databases.get", "databases.connection", "exposures.get"] });
+    const projectId = db.select({ projectId: services.projectId }).from(services).where(eq(services.id, d.serviceId)).get()?.projectId;
+    if (projectId) s.deps.live.publish(`project:${projectId}`, { type: "invalidate", ops: ["env.references", "env.analyze"] });
+  }
   s.deps.jobs.enqueue(registryGcJobType, { serviceId: d.serviceId }, { dedupeKey: `registry-gc:${d.serviceId}` });
   const finalLine = d.projectMove
     ? "The service runs on its new project's network."
@@ -1098,6 +1113,7 @@ function succeed(s: EngineState, d: DeploymentRow): void {
       ? "The service runs on its new node."
       : "The new version is live.";
   appendLog(s.deps, d.serviceId, d.id, "switch", [finalLine]);
+  if (movedAccess > 0) appendLog(s.deps, d.serviceId, d.id, "switch", ["Its IP:port access moved with it, to the new node's address."]);
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   // A first deployment gave the service's domains their routes: the ones whose certificate waits are checked now.
   checkWaitingDomains(s.deps, d.serviceId);

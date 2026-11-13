@@ -72560,7 +72560,7 @@
       "post": {
         "operationId": "services.move",
         "summary": "Move a service to another node",
-        "description": "Moves a single-node service to another node: deploys it there, copies its volumes while the old copy is stopped, switches traffic, then removes the old copy. Progress shows as a deployment with trigger move; on failure the service stays on the old node. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of that deploy) while a deploy of the service is queued or running.",
+        "description": "Moves a single-node service to another node: deploys it there, copies its volumes while the old copy is stopped, switches traffic, then removes the old copy. Its IP:port access (a database's exposed port, timed exposes, the first-run port) moves to the new node once it is live, on the same port unless another service has it there. Progress shows as a deployment with trigger move; on failure the service stays on the old node. services.moveImpact says beforehand what changes and which nodes can take it. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of that deploy) while a deploy of the service is queued or running, and (reason backupRunning or restoreRunning) while one of its backups or restores runs; with volumes, refused while either node is offline (UNAVAILABLE, reason offline) or its agent cannot copy volumes (NOT_IMPLEMENTED, reason agentTooOld); a database also needs a target whose agent runs its engine and, while exposed, keeps its port TLS only and takes clients without TLS when it allows them (CONFLICT, reason agentTooOld).",
         "tags": [
           "services"
         ],
@@ -72626,6 +72626,349 @@
         },
         "x-op-kind": "mutation",
         "x-permission": "service:services.move",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/services.moveImpact": {
+      "get": {
+        "operationId": "services.moveImpact",
+        "summary": "Show what moving a service to another node does",
+        "description": "Lists what services.move would do and where it can go: why it cannot move now (blocker) and, per other node, why it cannot go there (offline, disabled, an agent too old to copy volumes or to run the database's engine and exposure); its volumes (copied while it is stopped) and a database's size at its last backup; its backups (they keep their schedules and run on the new node); what listens on the node's address and moves to the new node's (a database's exposed port, timed exposes, the first-run IP:port); and the services of its project that use its exposed address (they need a deploy) or its internal one (only those on the new node reach it). Names and keys only where you may see them. Added in 0.2.16.",
+        "tags": [
+          "services"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "blocker",
+                    "targets",
+                    "volumes",
+                    "dataSize",
+                    "lastBackupAt",
+                    "backupSchedules",
+                    "exposure",
+                    "exposedReferrers",
+                    "internalReferrers",
+                    "hiddenReferrers"
+                  ],
+                  "properties": {
+                    "blocker": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "reason",
+                            "message"
+                          ],
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "online",
+                          "address",
+                          "refusal"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "online": {
+                            "type": "boolean"
+                          },
+                          "address": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "refusal": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "reason",
+                                  "message"
+                                ],
+                                "properties": {
+                                  "reason": {
+                                    "type": "string"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "volumes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "mountPath": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "dataSize": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "bytes",
+                            "measuredAt"
+                          ],
+                          "properties": {
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "measuredAt": {
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastBackupAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "backupSchedules": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "exposure": {
+                      "type": "object",
+                      "required": [
+                        "database",
+                        "timed",
+                        "firstRun"
+                      ],
+                      "properties": {
+                        "database": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "port",
+                                "tlsHostname",
+                                "allowPlain"
+                              ],
+                              "properties": {
+                                "port": {
+                                  "anyOf": [
+                                    {
+                                      "minimum": 1,
+                                      "maximum": 65535,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "tlsHostname": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "allowPlain": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timed": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "firstRun": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "exposedReferrers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "serviceId",
+                          "name",
+                          "keys",
+                          "nodeIds"
+                        ],
+                        "properties": {
+                          "serviceId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "minLength": 1,
+                            "maxLength": 40,
+                            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                            "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                            "type": "string"
+                          },
+                          "keys": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "internalReferrers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "serviceId",
+                          "name",
+                          "keys",
+                          "nodeIds"
+                        ],
+                        "properties": {
+                          "serviceId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "minLength": 1,
+                            "maxLength": 40,
+                            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                            "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                            "type": "string"
+                          },
+                          "keys": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "hiddenReferrers": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:services.view",
         "x-mcp": true
       }
     },

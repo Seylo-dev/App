@@ -3,11 +3,14 @@
 // (its last scheduled one, or Back up now) is skipped this time, with a
 // warning in the panel log, and runs at its next time, so two runs of one
 // schedule never overlap. A run that cannot start (node offline) is
-// recorded as failed; the schedule keeps going.
+// recorded as failed; the schedule keeps going. A schedule whose service
+// is moving to another node waits: it stays due and runs once the move
+// ends, on the new node.
 
 import { and, eq, lte } from "drizzle-orm";
 import { backupPolicies } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { activeMove } from "../services/copies";
 import { nextRun, policyBackup, runningBackup, startBackup } from "./runs";
 
 /** Starts the due schedules; returns how many were due, the skipped ones included. */
@@ -18,6 +21,9 @@ export async function runDueBackups(deps: Pick<Deps, "db" | "secrets" | "agents"
     .where(and(eq(backupPolicies.enabled, true), lte(backupPolicies.nextRunAt, now)))
     .all();
   for (const policy of due) {
+    // A service moving to another node is stopped while its data is copied (startBackup refuses it):
+    // its schedule stays due and runs on the new node the first minute after the move ends.
+    if (activeMove(deps.db, policy.serviceId)) continue;
     // Move the schedule first, so a slow or failing start never fires twice.
     const next = nextRun(policy.schedule, now);
     deps.db.update(backupPolicies).set({ nextRunAt: next }).where(eq(backupPolicies.id, policy.id)).run();

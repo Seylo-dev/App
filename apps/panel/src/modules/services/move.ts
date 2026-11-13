@@ -8,59 +8,132 @@
 // is a deployment with trigger "move"; on failure the service stays on (or
 // goes back to) the old node. With volumes, the old node keeps its stopped
 // copy and its data until the new node is live, so a failed move loses
-// nothing (services/desired.ts keeps it stopped there meanwhile).
+// nothing (services/desired.ts keeps it stopped there meanwhile). Once the
+// new node is live its IP:port access follows (access-move.ts). The checks
+// are exported for services.moveImpact (move-impact.ts), which lists them
+// per node before anyone moves.
 
 import { OpError, services as serviceOps } from "@seylo/ops";
 import { InstanceState } from "@seylo/proto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
-import { deployments, servicePlacements, services } from "../../db/schema";
+import { backupRuns, deployments, servicePlacements, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
-import { implement } from "../../ops/implement";
-import { assertEngineRunsOn } from "../databases/capability";
+import { implement, type OpContext } from "../../ops/implement";
+import { assertEngineRunsOn, missingExposureCapability, nodeHasCapability } from "../databases/capability";
+import { plainExposureCapability, plainExposureVersion } from "../databases/engines";
+import { findDatabase, loadDatabase } from "../databases/info";
 import { engineFor, finish, nextGeneration } from "../deployments/engine";
 import { appendLog } from "../deployments/logs";
 import { assertNoDeployForPlacement } from "../deployments/queue";
-import { initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
+import { type DeploymentRow, initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
 import { assertNoActiveCopy } from "./copies";
 import { assertNode, dataVolumes } from "./insert";
 import { actorOf, publishService } from "./ops";
-import { loadService, nodeNames } from "./rows";
+import { loadService, nodeNames, type ServiceRow } from "./rows";
 import { pipeIntoVolume, readVolume } from "./volume-pipe";
 
 export const moveJobType = "services.move";
 const stopWaitMs = 2 * 60_000;
 
-export const move = implement(serviceOps.move, (input, ctx) => {
-  const svc = loadService(ctx.db, input.serviceId);
+/** Where the service runs now; refused (CONFLICT) for stacks and their members, protected services and services on more than one node. */
+export function movableFrom(ctx: Pick<OpContext, "db">, svc: ServiceRow): { from: string; replicas: number } {
   if (svc.kind === "compose" || svc.parentId)
     throw new OpError("CONFLICT", "Compose stacks move as a whole; moving one is not supported yet.", { reason: "compose" });
-  if (svc.protected) throw new OpError("CONFLICT", `${svc.name} is protected and cannot be moved.`);
+  if (svc.protected) throw new OpError("CONFLICT", `${svc.name} is protected and cannot be moved.`, { reason: "protected" });
   const placements = ctx.db.select().from(servicePlacements).where(eq(servicePlacements.serviceId, svc.id)).all();
-  if (placements.length !== 1)
-    throw new OpError("CONFLICT", "Only services on one node can be moved. Use replicas per node to spread a service instead.");
-  const from = (placements[0] as (typeof placements)[number]).nodeId;
+  const only = placements.length === 1 ? placements[0] : undefined;
+  if (!only)
+    throw new OpError("CONFLICT", "Only services on one node can be moved. Use replicas per node to spread a service instead.", {
+      reason: "placements",
+    });
+  return { from: only.nodeId, replicas: only.replicas };
+}
+
+/**
+ * Refuses a node that cannot run the service as it runs now: a database's
+ * engine (assertEngineRunsOn) and, while it is exposed, an agent that
+ * cannot keep its port TLS only (the port would close there, as
+ * databaseRuntime keeps it) or, when it allows clients without TLS, one
+ * that cannot take them (they would be refused there). CONFLICT, reason
+ * agentTooOld. Other services pass.
+ */
+export function assertRunsOn(ctx: Pick<OpContext, "db" | "agents" | "secrets">, svc: ServiceRow, nodeId: string): void {
+  const name = nodeNames(ctx.db, [nodeId]).get(nodeId);
+  assertEngineRunsOn(ctx.db, ctx.agents, svc.id, nodeId, name);
+  if (!findDatabase(ctx.db, svc.id)) return;
+  const info = loadDatabase(ctx, svc.id);
+  // Only what works now is refused to break: a port already closed for its node's update, or plain clients its node cannot take yet, stay so.
+  if (!info.exposure || info.exposureWaitsFor) return;
+  const where = name ?? "this node";
+  if (missingExposureCapability(ctx.db, ctx.agents, info.engine, nodeId)) {
+    throw new OpError(
+      "CONFLICT",
+      `The agent on ${where} cannot keep ${info.engine.label}'s exposed port TLS only yet, so the port would close there. Update the node first, or turn exposure off.`,
+      { field: "toNodeId", reason: "agentTooOld" },
+    );
+  }
+  if (info.exposure.allowPlain && !info.plainNeedsNodeUpdate && !nodeHasCapability(ctx.db, ctx.agents, nodeId, plainExposureCapability)) {
+    throw new OpError(
+      "CONFLICT",
+      `The agent on ${where} cannot take connections without TLS yet (it needs ${plainExposureVersion}), so clients without TLS would be refused there. Update the node first.`,
+      { field: "toNodeId", reason: "agentTooOld" },
+    );
+  }
+}
+
+/**
+ * What must hold before the move starts, whatever the target: a live
+ * version with an image, no deploy of it queued or running, and none of its
+ * backups or restores running (the move stops it and, once the new node
+ * serves, deletes the old node's folder those read or write).
+ */
+export function assertCanStartMove(ctx: Pick<OpContext, "db">, svc: ServiceRow): DeploymentRow {
+  if (!svc.liveDeploymentId) throw new OpError("CONFLICT", "Deploy the service before moving it.", { reason: "notDeployed" });
+  assertNoDeployForPlacement(ctx, svc.id);
+  const live = ctx.db.select().from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get();
+  if (!live?.imageRef) throw new OpError("CONFLICT", "The live version has no image to move.", { reason: "noImage" });
+  const running = ctx.db
+    .select({ kind: backupRuns.kind })
+    .from(backupRuns)
+    .where(and(eq(backupRuns.serviceId, svc.id), eq(backupRuns.status, "running")))
+    .get();
+  if (running?.kind === "restore")
+    throw new OpError("CONFLICT", `A restore of ${svc.name} is running. Move it once the restore ends.`, { reason: "restoreRunning" });
+  if (running)
+    throw new OpError("CONFLICT", `A backup of ${svc.name} is running. Move it once the backup ends.`, { reason: "backupRunning" });
+  return live;
+}
+
+/** With volumes, both nodes must be online and their agents able to copy them (UNAVAILABLE or NOT_IMPLEMENTED, reason offline or agentTooOld). */
+export function assertCopyNode(ctx: Pick<OpContext, "db" | "agents">, nodeId: string, role: "from" | "to"): void {
+  const name = nodeNames(ctx.db, [nodeId]).get(nodeId);
+  if (!ctx.agents.isOnline(nodeId))
+    throw new OpError("UNAVAILABLE", `${name} is offline; volumes can only be copied between online nodes.`, { reason: "offline", nodeId });
+  if (!ctx.agents.supports(nodeId, role === "from" ? "exportVolume" : "importVolume")) {
+    throw new OpError("NOT_IMPLEMENTED", `The agent on ${name} is too old to copy volumes. Update the node.`, {
+      reason: "agentTooOld",
+      nodeId,
+    });
+  }
+}
+
+export const move = implement(serviceOps.move, (input, ctx) => {
+  const svc = loadService(ctx.db, input.serviceId);
+  const { from, replicas } = movableFrom(ctx, svc);
   if (from === input.toNodeId) throw new OpError("BAD_REQUEST", "The service already runs on this node.", { field: "toNodeId" });
   assertNode(ctx.db, input.toNodeId);
   // A clone's data copy reads (or writes) its folder on this node; the move stops it and removes that folder.
   assertNoActiveCopy(ctx.db, svc.id, { anySource: true });
-  assertEngineRunsOn(ctx.db, ctx.agents, svc.id, input.toNodeId, nodeNames(ctx.db, [input.toNodeId]).get(input.toNodeId));
-  if (!svc.liveDeploymentId) throw new OpError("CONFLICT", "Deploy the service before moving it.");
-  assertNoDeployForPlacement(ctx, svc.id);
-  const live = ctx.db.select().from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get();
-  if (!live?.imageRef) throw new OpError("CONFLICT", "The live version has no image to move.");
+  assertRunsOn(ctx, svc, input.toNodeId);
+  const live = assertCanStartMove(ctx, svc);
 
   const volumes = dataVolumes(ctx.db, svc.id);
   const names = nodeNames(ctx.db, [from, input.toNodeId]);
   if (volumes.length > 0) {
-    for (const nodeId of [from, input.toNodeId]) {
-      if (!ctx.agents.isOnline(nodeId))
-        throw new OpError("UNAVAILABLE", `${names.get(nodeId)} is offline; volumes can only be copied between online nodes.`);
-      if (!ctx.agents.supports(nodeId, nodeId === from ? "exportVolume" : "importVolume")) {
-        throw new OpError("NOT_IMPLEMENTED", `The agent on ${names.get(nodeId)} is too old to copy volumes. Update the node.`);
-      }
-    }
+    assertCopyNode(ctx, from, "from");
+    assertCopyNode(ctx, input.toNodeId, "to");
   }
 
   const steps = setStep(initialSteps(false), "ship", "pending", {
@@ -94,9 +167,7 @@ export const move = implement(serviceOps.move, (input, ctx) => {
       .get();
     if (volumes.length === 0) {
       // Run on both nodes; the old placement goes once the new node is live.
-      tx.insert(servicePlacements)
-        .values({ serviceId: svc.id, nodeId: input.toNodeId, replicas: placements[0]?.replicas ?? 1 })
-        .run();
+      tx.insert(servicePlacements).values({ serviceId: svc.id, nodeId: input.toNodeId, replicas }).run();
     }
     return d;
   });

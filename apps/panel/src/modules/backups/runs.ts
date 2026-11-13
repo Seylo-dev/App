@@ -14,6 +14,7 @@ import type { BackupContents, BackupSelection } from "../../db/schema/backups";
 import type { Deps } from "../../deps";
 import { findDatabase } from "../databases/info";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
+import { activeMove } from "../services/copies";
 import { legacyKey } from "./address";
 import { backupFolder, expiredObjects, signedBackupsCapability, signedDestination } from "./signing";
 import { deleteObject, listObjects, storageConfig } from "./storage";
@@ -236,6 +237,19 @@ export function runningBackup(db: PanelDb, policyId: string): string | undefined
     .get()?.id;
 }
 
+/**
+ * CONFLICT (reason moving) while the service moves to another node
+ * (services.move): it is stopped while its data is copied, and the old
+ * node's folder goes once the new node serves, so a backup or restore
+ * would read a stopped database or write into data about to be removed.
+ * Scheduled backups wait for the move instead (schedule.ts).
+ */
+export function assertNotMoving(db: PanelDb, service: { id: string; name: string }, then: string): void {
+  if (activeMove(db, service.id)) {
+    throw new OpError("CONFLICT", `${service.name} is moving to another node. ${then} once the move ends.`, { reason: "moving" });
+  }
+}
+
 /** Checks the target exists on the service: a database service, or one of its data volumes. */
 export function checkTarget(db: PanelDb, serviceId: string, target: "database" | "volume", volumeId: string | null | undefined) {
   if (target === "database") {
@@ -332,6 +346,7 @@ function subjectOf(
 export async function startBackup(deps: Pick<Deps, "db" | "secrets" | "agents" | "live" | "logger">, what: BackupWhat): Promise<RunRow> {
   const service = getService(deps.db, what.serviceId);
   checkTarget(deps.db, service.id, what.target, what.volumeId);
+  assertNotMoving(deps.db, service, "Back it up");
   const destination = destinationRow(deps.db, what.destinationId);
   const node = serviceNodes(deps.db, service.id)[0];
   if (!node) throw new OpError("CONFLICT", "The service is not placed on a node.", { reason: "noNode" });

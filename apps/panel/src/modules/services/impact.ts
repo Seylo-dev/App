@@ -39,7 +39,7 @@ export interface ProjectEnv {
 }
 
 /** The value with every ${{...}} blanked out, so host names inside references never count. */
-function literalText(entry: ParsedEnv["entries"][number]): string {
+export function literalText(entry: ParsedEnv["entries"][number]): string {
   let value = entry.value;
   for (const ref of entry.references) value = value.split(ref.raw).join(" ".repeat(ref.raw.length));
   return value;
