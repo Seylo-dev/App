@@ -2079,9 +2079,11 @@ never type the ids by hand.
   service's latest crash in `crash_reports` (a SUCCEEDED also when its
   generation is newer than that crash's), so one from before the crash that
   arrives late leaves it open. A later crash of the same streak (streak > 1,
-  the panel holding as many of the node's crashes since its latest streak 1
-  crash as the streak counts) reopens the streak's alert instead of raising
-  another; otherwise it raises one.
+  the node's previous crash in `crash_reports` having streak - 1) reopens
+  the node's newest crash alert instead of raising another; otherwise it
+  raises one. Only that newest row counts, so the prune (a service's newest
+  200 crashes) does not break it, and a report the node's daily budget
+  dropped breaks it at one crash, not for the rest of the streak.
 - Email: `deps.notify.sendEmail({ to, subject, text, html? })` returns
   `"sent" | "noChannel" | "failed"` through the panel's SMTP channel.
 - Running ops for someone: `deps.ops.execute(call)` is the pipeline;

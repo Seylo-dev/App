@@ -10,8 +10,11 @@
 //
 // Now good news (a deploy that succeeded, a healthy check) ends a crash
 // alert only when it came after the latest crash or, for a deploy, is of a
-// newer generation; and a later crash of the same streak opens the streak's
-// alert again instead of raising another one. A new streak still alerts.
+// newer generation; and a later crash of the same streak (the node's
+// previous crash is the streak's previous one) opens the streak's alert
+// again instead of raising another one. A new streak still alerts. That
+// needs only the newest crash report, so it holds past the 200 crashes the
+// hourly prune keeps of a service and past reports the budget dropped.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
@@ -19,7 +22,9 @@ import { timestampFromMs } from "@bufbuild/protobuf/wkt";
 import { deployments as deploymentOps, projects, services as serviceOps } from "@seylo/ops";
 import { CrashAction, DeployProgressSchema, DeployStage, HealthChangedSchema, HealthState } from "@seylo/proto";
 import { and, asc, eq } from "drizzle-orm";
+import { reportBudget } from "../src/agent-hub/report-budget";
 import { alerts, crashReports, deployments } from "../src/db/schema";
+import { pruneTables, retention } from "../src/modules/nodes/retention";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
@@ -28,6 +33,7 @@ let fleet: FakeFleet;
 let cookie: string;
 let projectId: string;
 let node: string;
+const savedBudget = { ...reportBudget };
 
 beforeEach(async () => {
   panel = testPanel();
@@ -36,7 +42,10 @@ beforeEach(async () => {
   ({ cookie } = await createUser(panel, "owner"));
   projectId = (await callOp(panel, projects.create, { name: "e2e" }, { cookie })).body.id;
 });
-afterEach(() => panel.close());
+afterEach(() => {
+  Object.assign(reportBudget, savedBudget);
+  panel.close();
+});
 
 /** Times on the node's clock: seconds after the first deploy of the crasher. */
 const t0 = Date.now() - 3_600_000;
@@ -208,5 +217,56 @@ test("the first crash report a panel gets, with a streak above 1, raises the ale
   const { id, generation } = await crasher();
   await succeeded(id, generation, 1);
   await crash(id, generation, 3, 28);
+  expect(crashAlerts(id)).toEqual(["open"]);
+});
+
+test("a crash loop longer than the 200 crashes the hourly prune keeps of a service still has one alert", async () => {
+  const { id, generation } = await crasher();
+  await succeeded(id, generation, 1);
+  // Up 6 s, restarted 5 s after each crash.
+  const exitAt = (streak: number) => 6 + (streak - 1) * 11;
+  const crashes = retention.crashReportsPerService + 5;
+  for (let streak = 1; streak <= crashes; streak++) await crash(id, generation, streak, exitAt(streak));
+  pruneTables(panel.deps.db);
+  const held = panel.deps.db.select({ streak: crashReports.streak }).from(crashReports).where(eq(crashReports.serviceId, id)).all();
+  expect(held).toHaveLength(retention.crashReportsPerService);
+  // The streak's first crashes are gone.
+  expect(Math.min(...held.map((row) => row.streak))).toBe(6);
+  for (let streak = crashes + 1; streak <= crashes + 3; streak++) {
+    // The copy restarted after the previous crash passes its check a second before it exits.
+    healthy(id, exitAt(streak) - 1);
+    expect(crashAlerts(id)).toEqual(["resolved"]);
+    await crash(id, generation, streak, exitAt(streak));
+    expect(crashAlerts(id)).toEqual(["open"]);
+  }
+});
+
+test("a streak whose middle crashes the node's daily report budget dropped still has one alert", async () => {
+  const { id, generation } = await crasher();
+  await succeeded(id, generation, 1);
+  await crash(id, generation, 1, 6);
+  await crash(id, generation, 2, 17);
+  // Past the budget a report is acknowledged, but neither stored nor fanned out.
+  reportBudget.rowsPerDay = 0;
+  await crash(id, generation, 3, 28);
+  await crash(id, generation, 4, 39);
+  reportBudget.rowsPerDay = savedBudget.rowsPerDay;
+  await crash(id, generation, 5, 50);
+  expect(panel.deps.db.select().from(crashReports).where(eq(crashReports.serviceId, id)).all()).toHaveLength(3);
+  healthy(id, 60);
+  expect(crashAlerts(id)).toEqual(["resolved"]);
+  await crash(id, generation, 6, 61);
+  expect(crashAlerts(id)).toEqual(["open"]);
+});
+
+test("a crash that exited in the same millisecond as the one before it continues the streak", async () => {
+  const { id, generation } = await crasher();
+  await succeeded(id, generation, 1);
+  await crash(id, generation, 1, 6);
+  // Two copies exit at 17 s; the second report arrives after a third copy passed its check.
+  await crash(id, generation, 2, 17);
+  healthy(id, 17.5);
+  expect(crashAlerts(id)).toEqual(["resolved"]);
+  await crash(id, generation, 3, 17);
   expect(crashAlerts(id)).toEqual(["open"]);
 });

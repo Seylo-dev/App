@@ -6,7 +6,7 @@
 
 import { timestampMs } from "@bufbuild/protobuf/wkt";
 import { BuildStage, CrashAction, type CrashReport, DeployStage, type Event, HealthState, NodeAlertKind, UpdateTarget } from "@seylo/proto";
-import { and, count, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, lte, ne } from "drizzle-orm";
 import { inspectedKeyMark } from "../../agent-hub/panel-address";
 import { alerts, backupRuns, builds, crashReports, deployments, nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
@@ -82,37 +82,41 @@ function resolveCrashes(deps: Deps, serviceId: string, at: number, generation?: 
 }
 
 /**
- * The key of the crash alert of the streak a crash continues: the node's
- * newest crash alert for the service, when it was raised since the node's
- * latest streak 1 crash and the panel holds as many of the node's crashes
- * since then as the streak counts. Null otherwise (reports that never
- * arrived, a full outbox say, may hide the start of a new streak): the crash
- * raises an alert of its own.
+ * The key of the crash alert a crash of a streak (streak > 1) continues
+ * when none is open: the node's newest crash alert, when the node's
+ * previous crash in crash_reports is the streak's previous one (streak -
+ * 1). Every crash leaves a crash alert of its service open (it raises one,
+ * opens the streak's again or finds one open), on one node that node's
+ * newest, so a streak hands its alert on from crash to crash and only the
+ * newest row is needed: the hourly prune keeps a service's newest 200
+ * crashes, and reports the node's daily budget dropped break the chain at
+ * one crash, not for the rest of the streak. Null otherwise (reports that
+ * never arrived, a full outbox say, may hide the start of a new streak):
+ * the crash raises an alert of its own.
  */
-function streakAlertKey(deps: Deps, serviceId: string, nodeId: string, streak: number, at: number): string | null {
-  const ofNode = and(eq(crashReports.serviceId, serviceId), eq(crashReports.nodeId, nodeId));
-  const began = deps.db
-    .select({ at: crashReports.occurredAt })
+function streakAlertKey(deps: Deps, serviceId: string, nodeId: string, streak: number, crashId: string, at: number): string | null {
+  const previous = deps.db
+    .select({ streak: crashReports.streak })
     .from(crashReports)
-    .where(and(ofNode, lte(crashReports.streak, 1), lte(crashReports.occurredAt, new Date(at))))
-    .orderBy(desc(crashReports.occurredAt))
-    .get()?.at;
-  if (!began) return null;
-  const held = deps.db
-    .select({ n: count() })
-    .from(crashReports)
-    .where(and(ofNode, gte(crashReports.occurredAt, began), lte(crashReports.occurredAt, new Date(at))))
-    .get()?.n;
-  if (held !== streak) return null;
-  const prefix = crashPrefix(serviceId);
-  const newest = deps.db
-    .select({ key: alerts.eventKey })
-    .from(alerts)
-    .where(and(keyStartsWith(prefix), eq(alerts.nodeId, nodeId)))
-    .orderBy(desc(alerts.createdAt))
+    .where(
+      and(
+        eq(crashReports.serviceId, serviceId),
+        eq(crashReports.nodeId, nodeId),
+        lte(crashReports.occurredAt, new Date(at)),
+        ne(crashReports.id, crashId),
+      ),
+    )
+    .orderBy(desc(crashReports.occurredAt), desc(crashReports.createdAt))
     .get();
-  // Panels before 0.2.16 rounded the exit time in the key down; crash_reports rounds it to the nearest millisecond.
-  return newest && Number(newest.key.slice(prefix.length)) >= began.getTime() - 1 ? newest.key : null;
+  if (previous?.streak !== streak - 1) return null;
+  return (
+    deps.db
+      .select({ key: alerts.eventKey })
+      .from(alerts)
+      .where(and(keyStartsWith(crashPrefix(serviceId)), eq(alerts.nodeId, nodeId)))
+      .orderBy(desc(alerts.createdAt))
+      .get()?.key ?? null
+  );
 }
 
 /**
@@ -122,7 +126,7 @@ function streakAlertKey(deps: Deps, serviceId: string, nodeId: string, streak: n
  * may have resolved the streak's alert: the next crash opens that one
  * again instead of raising another.
  */
-export function recordCrash(deps: Deps, nodeId: string, report: CrashReport): void {
+export function recordCrash(deps: Deps, nodeId: string, report: CrashReport, crashId: string): void {
   const serviceId = report.serviceId;
   // As crash_reports.occurred_at holds it.
   const at = report.exitedAt ? timestampMs(report.exitedAt) : Date.now();
@@ -147,7 +151,7 @@ export function recordCrash(deps: Deps, nodeId: string, report: CrashReport): vo
     deps.alerts.resolve(prefix);
     raise();
   } else if (!deps.alerts.isOpen(prefix)) {
-    const key = streakAlertKey(deps, serviceId, nodeId, report.streak, at);
+    const key = streakAlertKey(deps, serviceId, nodeId, report.streak, crashId, at);
     if (!key || !deps.alerts.reopen(key)) raise();
   }
   if (report.action === CrashAction.GAVE_UP) {
@@ -327,5 +331,5 @@ export function subscribeAgentEvents(deps: Deps): void {
   });
 
   // Crash reports are durable reports of their own (PanelService.ReportCrash), deduped by the hub.
-  agents.onCrash((nodeId, report) => recordCrash(deps, nodeId, report));
+  agents.onCrash((nodeId, report, meta) => recordCrash(deps, nodeId, report, meta.crashId));
 }
