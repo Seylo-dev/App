@@ -6301,7 +6301,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   longer visible ids drop out silently (see "Services and deploys"). Hidden
   projects leave the sidebar's Projects list and the home page grid;
   "Hide project" and "Unhide project" are in the project's "..." menu
-  (`components/project-menu.tsx`) in the sidebar and on its home card,
+  (`components/project-menu.tsx`) in the sidebar and on its home card
+  (and its right-click menu there, since 0.2.16),
   and a hide toasts with Undo (`lib/use-hidden-projects.ts`). A folded
   "Hidden (N)" row ends the sidebar list and "Show hidden (N)" brings the
   cards back on the home page with a "Hidden" chip, without unhiding.
@@ -6486,9 +6487,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   440 px wide), `terminal/xterm-view.tsx` +
   `terminal/session.ts` + `terminal/use-terminal-session.ts` (ticketed
   terminal sockets, one xterm write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
-  `copy/` (the header's "..." `ServiceMenu` with the Clone and Move to
-  project dialogs, and `DataCopyNote` under the header while a clone's
-  data is copied). In
+  `copy/` (the Clone and Move to project dialogs, which take a service's
+  summary and read its source settings from `services.get`, and
+  `DataCopyNote` under the header while a clone's data is copied),
+  `settings/delete-service-dialog.tsx` (type-to-confirm Delete, from the
+  Settings tab and every service menu). In
   `components/settings/`: `action-picker.tsx` (`ActionPicker`),
   `actions.ts` (labels from the `settingsActions` i18n section; a test
   fails when an action has no label), `grant-scopes.tsx` (`ScopePicker`),
@@ -6498,6 +6501,46 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   renders every component, see `packages/ui/README.md`. New components go
   in `packages/ui/src/components/` and use tokens only. The kit's own words
   come in through `UiLabelsProvider` (the `kit` i18n section).
+- Context menus (0.2.16): kit `context-menu.tsx` (`ContextMenu*`, the
+  dropdown's parts and classes from `lib/menu-styles.ts`; right-click,
+  touch long-press, the context menu key and Shift+F10; the browser's own
+  menu on text fields, Monaco, xterm, `[data-native-context-menu]`,
+  selected text, portals and Shift+right-click; nothing on
+  `[data-no-context-menu]` grips) and `menu-items.tsx` (`MenuEntry`,
+  `MenuItems`, `RowContextMenu` on the row's own element with
+  `data-state="open"` for its selected look, `ActionsMenu` for the "...").
+  Every object has one entry list for its "..." and its right-click menu,
+  in `apps/web/src/components/menus/`: `service-items.tsx` (Open, Open in
+  new tab, Deploy, Cancel deploy or Restart/Stop/Start, a Box's Stop and
+  Open editor, Logs, Console, Clone, Move to project, Move to another node
+  (the Advanced tab's Move card, `#move`), Copy address or internal
+  address, Copy ID, Delete; the header's and the old service menu's rules),
+  `project-items.tsx` (Open, Open in new tab, New service sub menu, Rename,
+  Collapse/Expand, Hide/Unhide project, Settings, Copy ID, Delete, disabled
+  while it has services), `node-items.tsx` (the node sheet's views, Run
+  health checks, Update now, the addresses and id to copy) and
+  `row-items.tsx` (deployments, domains, backup schedules and runs, cron
+  jobs, uptime checks, database users, assistant chats). No new
+  client-side permission rules: items are hidden or disabled as before,
+  and the panel's refusal is toasted. Service menus build their entries
+  when they open (`menus/service-menu.tsx` `ServiceMenuItems`), and the
+  run actions are one hook (`menus/service-actions.ts`) the header's
+  buttons use too. Dialogs a menu opens live shell-wide in
+  `menus/object-actions.tsx` (Clone, Move to project, Stop, Delete
+  service; Rename and Delete project, `project/project-dialogs.tsx`), never
+  in the row, so they stay when the row goes. Right-click menus are on the
+  sidebar's project and service rows, the dashboard's Cards (title row,
+  service card), List (header, service row) and Table rows, the project
+  page's service cards (`ServiceCard`), the Nodes rows (which also get a
+  "..."), and the Deployments, Domains, Backups, Cron jobs, Alerts,
+  database Users and assistant chat rows, plus every `DataTable` with
+  `rowActions` (`rowActionEntries`). `menus/row-menu.tsx` `RowMenu` adds
+  the drag rules (`sortable.tsx`): no menu while a drag is on
+  (`isDragging`), and a menu that opens while a drag waits for its first
+  6 px drops it (`cancelPendingDrag`). A drag also ends on the pointer's
+  pointerup or pointercancel (`pointerReleased`): a touch swipe cancelled
+  for the scroll right after it started never got onDragCancel and left
+  every later tap swallowed.
 - Browser tests: `test/playwright/run.sh` starts a panel on a fresh data
   dir plus Vite and runs `smoke.spec.ts` (setup, sign-in, real panel),
   `databases.spec.ts` (the New database form with every engine, versions
@@ -6545,6 +6588,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   changed), `hide-projects.spec.ts` (Hide project from the sidebar and
   the home card on the real panel: Undo, a reload, Hidden (N) and Show
   hidden, the palette and the project page still open it, Unhide),
+  `context-menus.spec.ts` (0.2.16, the demo data: right-click on a
+  sidebar service and on the dashboard's Cards, List and Table views lists
+  the service's menu and Clone opens its dialog, which stays when the
+  project folds; Shift+F10 and the context menu key from the keyboard, the
+  grip opening nothing; a project row with Hide and Undo, the protected
+  Panel project, Rename; a node row and its Shell; each "..." menu equal to
+  its right-click menu for a service, a project, a deployment and a
+  domain; the browser's menu on Monaco, the logs, selected text and
+  Shift+right-click; a drag after a menu and a right-click that lifts
+  nothing; a touch long-press opening a card's menu without opening the
+  card, and a swipe opening nothing; screenshots light and dark),
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
   text unsaved), `env-references.spec.ts` (the References panel on the demo

@@ -6,7 +6,6 @@ import { auth, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
-import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
 import { SectionCard } from "@seylo/ui/components/section-card";
@@ -25,6 +24,7 @@ import { MutationError } from "../op-state";
 import { isDatabaseKind } from "../status";
 import { ExportDialog } from "../transfer/export-dialog";
 import type { ServiceDetail } from "../use-service";
+import { DeleteServiceDialog } from "./delete-service-dialog";
 
 const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -117,12 +117,6 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
       toast.success(t("serviceSettings.renamed"));
     },
   });
-  const remove = useOpMutation(services.remove, {
-    onSuccess: () => {
-      invalidate(services.list);
-      void navigate({ to: "/p/$projectId", params: { projectId: service.projectId } });
-    },
-  });
   const valid = namePattern.test(name) && name.length <= 40;
   const member = service.parentId !== null;
 
@@ -182,15 +176,11 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
         )}
       </SectionCard>
       {canExport && <ExportDialog service={service} open={exporting} onOpenChange={setExporting} />}
-      <ConfirmDialog
+      <DeleteServiceDialog
+        service={service}
         open={confirm}
         onOpenChange={setConfirm}
-        title={t("serviceSettings.delete.confirmTitle", { name: service.name })}
-        description={service.kind === "compose" ? t("serviceSettings.delete.confirmStack") : t("serviceSettings.delete.confirmBody")}
-        confirmText={service.name}
-        confirmLabel={t("serviceSettings.delete.confirm")}
-        destructive
-        onConfirm={() => remove.mutateAsync({ serviceId: service.id, confirmName: service.name }).then(() => undefined)}
+        onDeleted={() => void navigate({ to: "/p/$projectId", params: { projectId: service.projectId } })}
       />
     </div>
   );

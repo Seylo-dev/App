@@ -3,7 +3,8 @@
 // over a grid of compact service cards, the project page's cards made
 // smaller so four or five fit a row on a wide screen. Projects collapsed on
 // the home page (their own flag, apart from the sidebar's) show only their
-// title row.
+// title row. Right-clicking the title row opens the project's menu, a card
+// the service's (service-card.tsx).
 
 import { Chip } from "@seylo/ui/components/chip";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
@@ -18,7 +19,7 @@ import type { Project, ServiceSummary } from "../../lib/types";
 import { isCollapsedIn, useProjectPrefs } from "../../lib/use-project-prefs";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ServiceCard, ServiceCardSkeleton, useMemoryTotals } from "../project/service-card";
-import { ProjectMenu } from "../project-menu";
+import { ProjectContextMenu, ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { draggingClass, SortableCard, SortableGrip, SortableGroup, useSortableItem } from "../sortable";
 
@@ -96,79 +97,82 @@ function ProjectSection({
   const cards = services?.filter((service) => service.parentId === null) ?? [];
   return (
     <article ref={item.ref} style={item.style} className={cn("group/card flex min-w-0 flex-col gap-3", item.dragging && "z-20")}>
-      <div
-        {...item.handle}
-        className={cn(
-          "relative flex min-h-8 items-center gap-2.5 rounded-control",
-          draggingClass(item.dragging),
-          item.dragging && "bg-background",
-        )}
-      >
-        {item.enabled && <SortableGrip grip={item.grip} name={project.name} />}
-        <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} size="md" />
-        <Link
-          to="/p/$projectId"
-          params={{ projectId: project.id }}
-          className="flex min-w-0 cursor-pointer items-baseline gap-2 text-foreground hover:text-foreground"
-        >
-          <span className="truncate text-sm font-semibold">{project.name}</span>
-          <span className="text-xs whitespace-nowrap text-muted-foreground max-sm:hidden">
-            {t("sidebar.serviceCount", { count: project.serviceCount })}
-            {t("format.separator")}
-            {t("dashboard.nodeCount", { count: project.nodeCount })}
-          </span>
-        </Link>
-        {hidden && (
-          <Chip tone="track" className="shrink-0 px-[7px] py-0.5 text-[11.5px]">
-            {t("dashboard.hiddenChip")}
-          </Chip>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          <Link
-            to="/p/$projectId"
-            params={{ projectId: project.id }}
-            aria-label={t("dashboard.openProject", { name: project.name })}
-            className={action}
-          >
-            <IconArrowUpRight size={15} stroke={2} aria-hidden="true" />
-          </Link>
-          <Link
-            to="/p/$projectId"
-            params={{ projectId: project.id }}
-            search={{ tab: "settings" }}
-            aria-label={t("dashboard.projectSettings", { name: project.name })}
-            className={action}
-          >
-            <IconSettings size={15} stroke={2} aria-hidden="true" />
-          </Link>
-          {/* The protected Panel project takes no new services, as in the sidebar. */}
-          {!project.protected && (
-            <NewServiceMenu
-              projectId={project.id}
-              trigger={
-                <button type="button" aria-label={t("sidebar.newServiceIn", { name: project.name })} className={action}>
-                  <IconPlus size={15} stroke={2} aria-hidden="true" />
-                </button>
-              }
-            />
+      <ProjectContextMenu project={project} where="dashboard" hidden={hidden} onHiddenChange={onHiddenChange}>
+        <div
+          {...item.handle}
+          className={cn(
+            // While its menu is open the row takes a track fill, a few pixels past its edges (a ring, so nothing moves).
+            "relative flex min-h-8 items-center gap-2.5 rounded-control transition-[background-color,box-shadow] duration-200 data-[state=open]:bg-track data-[state=open]:shadow-[0_0_0_6px_var(--color-track)]",
+            draggingClass(item.dragging),
+            item.dragging && "bg-background",
           )}
-          <ProjectMenu name={project.name} hidden={hidden} onHiddenChange={onHiddenChange} className={action} />
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={open}
-            aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
-            className={action}
+        >
+          {item.enabled && <SortableGrip grip={item.grip} name={project.name} />}
+          <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} size="md" />
+          <Link
+            to="/p/$projectId"
+            params={{ projectId: project.id }}
+            className="flex min-w-0 cursor-pointer items-baseline gap-2 text-foreground hover:text-foreground"
           >
-            <IconChevronDown
-              size={14}
-              stroke={2}
-              aria-hidden="true"
-              className={cn("transition-transform duration-200", !open && "-rotate-90")}
-            />
-          </button>
+            <span className="truncate text-sm font-semibold">{project.name}</span>
+            <span className="text-xs whitespace-nowrap text-muted-foreground max-sm:hidden">
+              {t("sidebar.serviceCount", { count: project.serviceCount })}
+              {t("format.separator")}
+              {t("dashboard.nodeCount", { count: project.nodeCount })}
+            </span>
+          </Link>
+          {hidden && (
+            <Chip tone="track" className="shrink-0 px-[7px] py-0.5 text-[11.5px]">
+              {t("dashboard.hiddenChip")}
+            </Chip>
+          )}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            <Link
+              to="/p/$projectId"
+              params={{ projectId: project.id }}
+              aria-label={t("dashboard.openProject", { name: project.name })}
+              className={action}
+            >
+              <IconArrowUpRight size={15} stroke={2} aria-hidden="true" />
+            </Link>
+            <Link
+              to="/p/$projectId"
+              params={{ projectId: project.id }}
+              search={{ tab: "settings" }}
+              aria-label={t("dashboard.projectSettings", { name: project.name })}
+              className={action}
+            >
+              <IconSettings size={15} stroke={2} aria-hidden="true" />
+            </Link>
+            {/* The protected Panel project takes no new services, as in the sidebar. */}
+            {!project.protected && (
+              <NewServiceMenu
+                projectId={project.id}
+                trigger={
+                  <button type="button" aria-label={t("sidebar.newServiceIn", { name: project.name })} className={action}>
+                    <IconPlus size={15} stroke={2} aria-hidden="true" />
+                  </button>
+                }
+              />
+            )}
+            <ProjectMenu project={project} where="dashboard" hidden={hidden} onHiddenChange={onHiddenChange} className={action} />
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={open}
+              aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
+              className={action}
+            >
+              <IconChevronDown
+                size={14}
+                stroke={2}
+                aria-hidden="true"
+                className={cn("transition-transform duration-200", !open && "-rotate-90")}
+              />
+            </button>
+          </div>
         </div>
-      </div>
+      </ProjectContextMenu>
       {open && (
         <SortableGroup items={cards} onMove={onServiceOrder} layout="grid">
           {(ordered) => (

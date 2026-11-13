@@ -2,17 +2,20 @@
 // the titles (the panel searches, so it covers every chat, not just the
 // loaded ones), newest first with what waits and what is being answered,
 // the current one under a sliding background, and Rename and Delete in
-// each row's menu. The same list sits in a sheet on a phone.
+// each row's menu, also on right-click (menus/row-items.tsx, the same list
+// as the open chat's header menu). The same list sits in a sheet on a phone.
 
 import { ai } from "@seylo/ops";
 import { Button } from "@seylo/ui/components/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { ActiveIndicator } from "@seylo/ui/components/motion";
 import { LoadingRegion, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconDots, IconMessages, IconPencil, IconPlus, IconSearch, IconTrash } from "@tabler/icons-react";
+import { IconDots, IconMessages, IconPlus, IconSearch } from "@tabler/icons-react";
 import { useDeferredValue, useState } from "react";
 import { t } from "../../i18n/t";
+import { chatMenuEntries } from "../menus/row-items";
+import { RowMenu } from "../menus/row-menu";
 import { formatRelative } from "../settings/format";
 import { useOpPages } from "../settings/paging";
 import { ChatBadges, ChatTitle, type ConversationItem } from "./chat-controls";
@@ -116,52 +119,50 @@ function ChatRow({
   onSelect(): void;
   onDelete(): void;
 }) {
+  const menu = chatMenuEntries({ act: (action) => (action === "rename" ? onRenamingChange(true) : onDelete()) });
   return (
-    <div className="group relative isolate flex items-center rounded-control transition-interactive hover:bg-muted">
-      {active && <ActiveIndicator layoutId="assistant-chats" className="rounded-control bg-accent" />}
-      {renaming ? (
-        <div className="flex min-w-0 flex-1 px-1.5 py-1.5">
-          <ChatTitle conversation={chat} editing onEditingChange={onRenamingChange} className="text-[13px]" />
-        </div>
-      ) : (
-        <button
-          type="button"
-          aria-current={active ? "page" : undefined}
-          onClick={onSelect}
-          className={cn(
-            "flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 border-0 bg-transparent py-2 pr-9 pl-2.5 text-left",
-            active ? "text-accent-foreground" : "text-ink-strong hover:text-foreground",
-          )}
-        >
-          <span className="flex w-full min-w-0 items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-[13px]">{chat.title || t("assistant.untitled")}</span>
-            <ChatBadges item={chat} />
-          </span>
-          <span className={cn("text-[11.5px]", active ? "text-accent-foreground/75" : "text-ink-ghost")}>
-            {formatRelative(chat.updatedAt)}
-          </span>
-        </button>
-      )}
-      {!renaming && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={`${t("assistant.chatActions")}: ${chat.title || t("assistant.untitled")}`}
-            className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint opacity-0 transition-interactive group-hover:opacity-100 hover:bg-card hover:text-foreground focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+    // While its title is edited in place, the row keeps the browser's menu.
+    <RowMenu entries={menu} disabled={renaming} aria-label={t("assistant.chatActions")}>
+      <div className="group relative isolate flex items-center rounded-control transition-interactive hover:bg-muted data-[state=open]:bg-muted">
+        {active && <ActiveIndicator layoutId="assistant-chats" className="rounded-control bg-accent" />}
+        {renaming ? (
+          <div className="flex min-w-0 flex-1 px-1.5 py-1.5">
+            <ChatTitle conversation={chat} editing onEditingChange={onRenamingChange} className="text-[13px]" />
+          </div>
+        ) : (
+          <button
+            type="button"
+            aria-current={active ? "page" : undefined}
+            onClick={onSelect}
+            className={cn(
+              "flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 border-0 bg-transparent py-2 pr-9 pl-2.5 text-left",
+              active ? "text-accent-foreground" : "text-ink-strong hover:text-foreground",
+            )}
           >
-            <IconDots size={15} stroke={1.9} aria-hidden="true" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => onRenamingChange(true)}>
-              <IconPencil size={15} stroke={1.9} aria-hidden="true" />
-              {t("assistant.rename")}
-            </DropdownMenuItem>
-            <DropdownMenuItem destructive onSelect={onDelete}>
-              <IconTrash size={15} stroke={1.9} aria-hidden="true" />
-              {t("assistant.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </div>
+            <span className="flex w-full min-w-0 items-center gap-1.5">
+              <span className="min-w-0 flex-1 truncate text-[13px]">{chat.title || t("assistant.untitled")}</span>
+              <ChatBadges item={chat} />
+            </span>
+            <span className={cn("text-[11.5px]", active ? "text-accent-foreground/75" : "text-ink-ghost")}>
+              {formatRelative(chat.updatedAt)}
+            </span>
+          </button>
+        )}
+        {!renaming && (
+          <ActionsMenu
+            entries={menu}
+            trigger={
+              <button
+                type="button"
+                aria-label={`${t("assistant.chatActions")}: ${chat.title || t("assistant.untitled")}`}
+                className="absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint opacity-0 transition-interactive group-hover:opacity-100 hover:bg-card hover:text-foreground focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+              >
+                <IconDots size={15} stroke={1.9} aria-hidden="true" />
+              </button>
+            }
+          />
+        )}
+      </div>
+    </RowMenu>
   );
 }

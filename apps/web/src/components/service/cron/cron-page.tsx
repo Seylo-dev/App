@@ -11,9 +11,9 @@ import { CodeBlock, CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { DataTable } from "@seylo/ui/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
@@ -22,6 +22,8 @@ import { IconDots, IconPlus } from "@tabler/icons-react";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { cronJobMenuEntries } from "../../menus/row-items";
+import { RowMenu } from "../../menus/row-menu";
 import { describeCron, schedulePresets } from "../cron-text";
 import { Field, parseIntOrNull } from "../field";
 import { formatDateTime, formatDuration, formatRelative } from "../format";
@@ -80,41 +82,44 @@ function JobRow({ service, job: j, onEdit }: { service: ServiceDetail; job: Job;
     onError: fail,
   });
   const remove = useOpMutation(cron.remove, { onSuccess: () => invalidate(cron.list) });
+  const menu = cronJobMenuEntries({
+    act: (action) => {
+      if (action === "runNow") run.mutate({ serviceId: service.id, cronJobId: j.id });
+      else if (action === "edit") onEdit();
+      else setConfirm(true);
+    },
+  });
   return (
-    <div className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-3 text-[13px]">
-      <Switch
-        size="sm"
-        checked={j.enabled}
-        onCheckedChange={(enabled) => update.mutate({ serviceId: service.id, cronJobId: j.id, enabled })}
-        aria-label={t("serviceCron.enabled")}
-      />
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <b className="font-semibold">{j.name}</b>
-        <span className="text-[12.5px] text-ink-strong">
-          {describeCron(j.schedule)} · {j.timeZone}
-        </span>
-      </span>
-      {j.command && <CopyCode code={j.command} aria-label={t("serviceCron.command")} />}
-      <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        {j.lastRun && <Chip tone={resultTone[j.lastRun.result]}>{t(`serviceCron.result.${j.lastRun.result}`)}</Chip>}
-        {j.enabled && j.nextRunAt && <span>{t("serviceBackups.next", { when: formatRelative(j.nextRunAt) })}</span>}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" aria-label={t("serviceCron.actions", { name: j.name })}>
-              <IconDots size={15} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => run.mutate({ serviceId: service.id, cronJobId: j.id })}>
-              {t("serviceCron.runNow")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onEdit}>{t("service.edit")}</DropdownMenuItem>
-            <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-              {t("service.remove")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
+    <>
+      <RowMenu entries={menu} aria-label={t("serviceCron.actions", { name: j.name })}>
+        <div className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-3 text-[13px] transition-colors duration-200 data-[state=open]:bg-raised">
+          <Switch
+            size="sm"
+            checked={j.enabled}
+            onCheckedChange={(enabled) => update.mutate({ serviceId: service.id, cronJobId: j.id, enabled })}
+            aria-label={t("serviceCron.enabled")}
+          />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <b className="font-semibold">{j.name}</b>
+            <span className="text-[12.5px] text-ink-strong">
+              {describeCron(j.schedule)} · {j.timeZone}
+            </span>
+          </span>
+          {j.command && <CopyCode code={j.command} aria-label={t("serviceCron.command")} />}
+          <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {j.lastRun && <Chip tone={resultTone[j.lastRun.result]}>{t(`serviceCron.result.${j.lastRun.result}`)}</Chip>}
+            {j.enabled && j.nextRunAt && <span>{t("serviceBackups.next", { when: formatRelative(j.nextRunAt) })}</span>}
+            <ActionsMenu
+              entries={menu}
+              trigger={
+                <Button size="icon" variant="ghost" aria-label={t("serviceCron.actions", { name: j.name })}>
+                  <IconDots size={15} />
+                </Button>
+              }
+            />
+          </span>
+        </div>
+      </RowMenu>
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -124,7 +129,7 @@ function JobRow({ service, job: j, onEdit }: { service: ServiceDetail; job: Job;
         destructive
         onConfirm={() => remove.mutateAsync({ serviceId: service.id, cronJobId: j.id }).then(() => undefined)}
       />
-    </div>
+    </>
   );
 }
 

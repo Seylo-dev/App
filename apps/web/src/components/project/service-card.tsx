@@ -2,6 +2,8 @@
 // line, address, CPU and memory bars, node and last activity. The project
 // page shows it full size; the dashboard's Cards view shows the compact
 // one (smaller paddings, type and bars, the same facts) so more fit a row.
+// Right-clicking a card opens the service's menu (menus/service-menu.tsx);
+// the card lifts while it is open.
 
 import { nodes } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -11,8 +13,9 @@ import { cn } from "@seylo/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
 import { formatBytes, formatPercent } from "../../lib/format";
-import { kindTag, lastActivity, placementLine, sourceLine, statusDisplay } from "../../lib/service-display";
+import { isInternalAddress, kindTag, lastActivity, placementLine, sourceLine, statusDisplay } from "../../lib/service-display";
 import type { NodeRow, ServiceSummary } from "../../lib/types";
+import { ServiceContextMenu } from "../menus/service-menu";
 import { KindBadge } from "../new-service/kinds";
 
 /** The two sizes' classes, shared by the card and its placeholder so both are the same height. */
@@ -67,43 +70,45 @@ export function ServiceCard({
   const memory = service.memoryBytes;
   const memoryOf = service.memoryLimitBytes ?? memoryTotal;
   return (
-    <Link
-      to="/p/$projectId/s/$serviceId"
-      params={{ projectId: service.projectId, serviceId: service.id }}
-      data-slot="service-card"
-      className={cn(
-        "flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-card bg-card text-foreground shadow-card transition-shadow duration-200 hover:text-foreground hover:shadow-popover",
-        size.card,
-      )}
-    >
-      <div className={cn("flex items-center", size.head)}>
-        <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
-        <span className={cn("font-semibold", size.name)}>{service.name}</span>
-        <Chip tone={status.tone} className={cn("ml-auto", size.chip)}>
-          <StatusDot status={status.dot} pulse={status.dot === "busy"} />
-          {status.label}
-        </Chip>
-      </div>
-      <div className={cn("flex flex-col gap-1 text-ink-strong", size.lines)}>
-        <span className="truncate">{sourceLine(service)}</span>
-        <CardAddress service={service} />
-      </div>
-      <div className={cn("grid grid-cols-2", size.bars)}>
-        <UsageBar label={t("dashboard.cpu")} value={cpu === null ? "-" : formatPercent(cpu)} percent={cpu ?? 0} compact={compact} />
-        <UsageBar
-          label={t("dashboard.memory")}
-          value={memory === null ? "-" : formatBytes(memory)}
-          percent={memory !== null && memoryOf > 0 ? (memory / memoryOf) * 100 : 0}
-          compact={compact}
-        />
-      </div>
-      <div className={cn("flex items-center border-t border-divider text-muted-foreground", size.foot)}>
-        <Chip tone="track" className={cn("px-[7px] py-0.5", size.footChip)}>
-          {placementLine(service)}
-        </Chip>
-        <span className={cn("ml-auto", compact && "truncate")}>{lastActivity(service)}</span>
-      </div>
-    </Link>
+    <ServiceContextMenu service={service}>
+      <Link
+        to="/p/$projectId/s/$serviceId"
+        params={{ projectId: service.projectId, serviceId: service.id }}
+        data-slot="service-card"
+        className={cn(
+          "flex min-w-0 cursor-pointer flex-col overflow-hidden rounded-card bg-card text-foreground shadow-card transition-shadow duration-200 hover:text-foreground hover:shadow-popover data-[state=open]:shadow-popover",
+          size.card,
+        )}
+      >
+        <div className={cn("flex items-center", size.head)}>
+          <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
+          <span className={cn("font-semibold", size.name)}>{service.name}</span>
+          <Chip tone={status.tone} className={cn("ml-auto", size.chip)}>
+            <StatusDot status={status.dot} pulse={status.dot === "busy"} />
+            {status.label}
+          </Chip>
+        </div>
+        <div className={cn("flex flex-col gap-1 text-ink-strong", size.lines)}>
+          <span className="truncate">{sourceLine(service)}</span>
+          <CardAddress service={service} />
+        </div>
+        <div className={cn("grid grid-cols-2", size.bars)}>
+          <UsageBar label={t("dashboard.cpu")} value={cpu === null ? "-" : formatPercent(cpu)} percent={cpu ?? 0} compact={compact} />
+          <UsageBar
+            label={t("dashboard.memory")}
+            value={memory === null ? "-" : formatBytes(memory)}
+            percent={memory !== null && memoryOf > 0 ? (memory / memoryOf) * 100 : 0}
+            compact={compact}
+          />
+        </div>
+        <div className={cn("flex items-center border-t border-divider text-muted-foreground", size.foot)}>
+          <Chip tone="track" className={cn("px-[7px] py-0.5", size.footChip)}>
+            {placementLine(service)}
+          </Chip>
+          <span className={cn("ml-auto", compact && "truncate")}>{lastActivity(service)}</span>
+        </div>
+      </Link>
+    </ServiceContextMenu>
   );
 }
 
@@ -157,7 +162,7 @@ function CardAddress({ service }: { service: ServiceSummary }) {
       </span>
     );
   // The panel writes "<name>:<port>" when the service has a port but no domain.
-  const internal = address.startsWith(`${service.name}:`) && /^\d+$/.test(address.slice(service.name.length + 1));
+  const internal = isInternalAddress(service);
   return <span className={cn("truncate font-mono text-xs", internal ? "text-muted-foreground" : "text-link")}>{address}</span>;
 }
 

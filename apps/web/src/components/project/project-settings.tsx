@@ -5,7 +5,6 @@
 import { projects } from "@seylo/ops";
 import { useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
-import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { toast } from "@seylo/ui/components/toast";
@@ -15,6 +14,7 @@ import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { Project } from "../../lib/types";
 import { InternalGitHosts } from "../git/internal-hosts";
+import { DeleteProjectDialog } from "./project-dialogs";
 import { ProjectImageCard } from "./project-image-card";
 
 export function ProjectSettings({ project }: { project: Project }) {
@@ -23,7 +23,6 @@ export function ProjectSettings({ project }: { project: Project }) {
   const [description, setDescription] = useState(project.description);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const update = useOpMutation(projects.update, { onSuccess: () => toast.success(t("project.settings.saved")) });
-  const remove = useOpMutation(projects.remove);
   const dirty = name.trim() !== project.name || description.trim() !== project.description;
 
   const submit = (event: FormEvent) => {
@@ -93,19 +92,11 @@ export function ProjectSettings({ project }: { project: Project }) {
           </SectionCard>
         )}
       </div>
-      <ConfirmDialog
+      <DeleteProjectDialog
+        project={project}
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        destructive
-        title={t("project.deleteTitle", { name: project.name })}
-        description={t("project.deleteHint")}
-        confirmText={project.name}
-        confirmLabel={t("project.deleteProject")}
-        onConfirm={async () => {
-          await remove.mutateAsync({ projectId: project.id, confirmName: project.name });
-          toast.success(t("project.deleted", { name: project.name }));
-          void navigate({ to: "/" });
-        }}
+        onDeleted={() => void navigate({ to: "/" })}
       />
     </div>
   );

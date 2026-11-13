@@ -9,25 +9,30 @@
 // a warning. In a narrower list (a phone, a tablet, a small laptop next to
 // the sidebar) each node is a stacked row instead: the same facts and
 // controls one under the other, with their column names as small labels,
-// so nothing is cut off or scrolled out of view.
+// so nothing is cut off or scrolled out of view. Each row has a "..." next
+// to Health and Settings, and the same menu on right-click
+// (menus/node-items.tsx).
 
 import { nodes, system, updates } from "@seylo/ops";
-import { useOp, useOpMutation } from "@seylo/ops/react";
+import { opQueryKey, useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { ActionsMenu, type MenuEntry } from "@seylo/ui/components/menu-items";
 import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { Tip } from "@seylo/ui/components/tooltip";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconHeart, IconServer2 } from "@tabler/icons-react";
+import { IconDots, IconHeart, IconServer2 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
-import { errorMessage } from "../../lib/api";
+import { errorMessage, queryClient } from "../../lib/api";
 import { formatAgo, formatPercent, formatUsedOfTotal } from "../../lib/format";
 import type { NodeRow } from "../../lib/types";
 import { useTableFits } from "../../lib/use-table-fits";
+import { type NodeAction, nodeMenuEntries } from "../menus/node-items";
+import { copyWithToast, RowMenu } from "../menus/row-menu";
 import { QueryError } from "../query-error";
 import { DbIpLink } from "./node-settings";
 import type { NodeView } from "./node-sheet";
@@ -51,6 +56,8 @@ interface RowProps {
   update: { pending: boolean; run: () => void };
   /** Some node runs Wings: the table has the "Game servers first" column (only Wings nodes have the switch). */
   wingsColumn: boolean;
+  /** The row's menu: its "..." and its right-click menu. */
+  menu: MenuEntry[];
 }
 
 export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView) => void }) {
@@ -64,12 +71,45 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
     onSuccess: () => toast.info(t("nodes.updateStarted")),
     onError: failed,
   });
+  // Run health checks from a row's menu: the same op and report as the Health view's "Run checks now".
+  const runHealthCheck = useOpMutation(nodes.runHealthCheck, {
+    onSuccess: (fresh, { nodeId }) => {
+      queryClient.setQueryData(opQueryKey(nodes.healthReport, { nodeId }), fresh);
+      void list.refetch();
+      const name = list.data?.nodes.find((n) => n.id === nodeId)?.name ?? nodeId;
+      toast.success(t("menus.healthChecksDone", { name }));
+    },
+    onError: failed,
+  });
   const [measure, measureTable, wide] = useTableFits(tableWidth);
 
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
 
   // "Game servers first" only means something next to Wings: the column shows once some node runs it.
   const wingsColumn = list.data?.nodes.some((n) => n.wings.detected) ?? false;
+  const act = (node: NodeRow) => (action: NodeAction) => {
+    switch (action) {
+      case "open":
+        return onOpen(node.id, "overview");
+      case "health":
+      case "shell":
+      case "cleanup":
+      case "settings":
+        return onOpen(node.id, action);
+      case "runHealthChecks":
+        return runHealthCheck.mutate({ nodeId: node.id });
+      case "update":
+        return updateNode.mutate({ nodeId: node.id });
+      case "copyAddress":
+        return void copyWithToast(node.publicAddress ?? "");
+      case "copyIpv4":
+        return void copyWithToast(node.publicIpv4 ?? "");
+      case "copyIpv6":
+        return void copyWithToast(node.publicIpv6 ?? "");
+      case "copyId":
+        return void copyWithToast(node.id);
+    }
+  };
   const rowProps = (node: NodeRow): RowProps => ({
     node,
     onOpen,
@@ -77,6 +117,7 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
     gamesFirst: { pending: setGamesFirst.isPending, set: (enabled) => setGamesFirst.mutate({ nodeId: node.id, enabled }) },
     update: { pending: updateNode.isPending, run: () => updateNode.mutate({ nodeId: node.id }) },
     wingsColumn,
+    menu: nodeMenuEntries(node, { updatePending: updateNode.isPending, act: act(node) }),
   });
   const placeholders = list.isPending ? Math.max(1, nodeCount) : 0;
   const empty = list.data?.nodes.length === 0 && (
@@ -145,31 +186,33 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
 function TableRow(props: RowProps) {
   const { node } = props;
   return (
-    <tr>
-      <Td first>
-        <Identity {...props} />
-      </Td>
-      <Td>
-        <Address node={node} />
-      </Td>
-      <Td className="w-[230px]">
-        <Usage node={node} />
-      </Td>
-      <Td>
-        <Version {...props} />
-      </Td>
-      <Td>
-        <CanBuild {...props} />
-      </Td>
-      {props.wingsColumn && (
-        <Td className="text-[12.5px] leading-[18px] whitespace-nowrap text-muted-foreground">
-          {node.wings.detected ? <GamesFirst {...props} /> : t("nodes.noWings")}
+    <RowMenu entries={props.menu} aria-label={t("menus.actionsFor", { name: node.name })}>
+      <tr className="transition-colors duration-200 data-[state=open]:bg-raised">
+        <Td first>
+          <Identity {...props} />
         </Td>
-      )}
-      <Td last className="whitespace-nowrap">
-        <Actions {...props} className="justify-end" />
-      </Td>
-    </tr>
+        <Td>
+          <Address node={node} />
+        </Td>
+        <Td className="w-[230px]">
+          <Usage node={node} />
+        </Td>
+        <Td>
+          <Version {...props} />
+        </Td>
+        <Td>
+          <CanBuild {...props} />
+        </Td>
+        {props.wingsColumn && (
+          <Td className="text-[12.5px] leading-[18px] whitespace-nowrap text-muted-foreground">
+            {node.wings.detected ? <GamesFirst {...props} /> : t("nodes.noWings")}
+          </Td>
+        )}
+        <Td last className="whitespace-nowrap">
+          <Actions {...props} className="justify-end" />
+        </Td>
+      </tr>
+    </RowMenu>
   );
 }
 
@@ -177,25 +220,27 @@ function TableRow(props: RowProps) {
 function StackedRow(props: RowProps) {
   const { node } = props;
   return (
-    <li className="flex flex-col gap-3.5 border-t border-divider px-[18px] py-4 first:border-t-0">
-      <Identity {...props} />
-      <div className="flex flex-wrap gap-x-10 gap-y-3.5">
-        <Fact label={t("nodes.columns.address")}>
-          <Address node={node} />
+    <RowMenu entries={props.menu} aria-label={t("menus.actionsFor", { name: node.name })}>
+      <li className="flex flex-col gap-3.5 border-t border-divider px-[18px] py-4 transition-colors duration-200 first:border-t-0 data-[state=open]:bg-raised">
+        <Identity {...props} />
+        <div className="flex flex-wrap gap-x-10 gap-y-3.5">
+          <Fact label={t("nodes.columns.address")}>
+            <Address node={node} />
+          </Fact>
+          <Fact label={t("nodes.columns.version")}>
+            <Version {...props} />
+          </Fact>
+        </div>
+        <Fact label={t("nodes.columns.usage")} className="max-w-[420px]">
+          <Usage node={node} />
         </Fact>
-        <Fact label={t("nodes.columns.version")}>
-          <Version {...props} />
-        </Fact>
-      </div>
-      <Fact label={t("nodes.columns.usage")} className="max-w-[420px]">
-        <Usage node={node} />
-      </Fact>
-      <div className="flex flex-col gap-2.5">
-        <CanBuild {...props} labelled />
-        {node.wings.detected && <GamesFirst {...props} labelled />}
-      </div>
-      <Actions {...props} />
-    </li>
+        <div className="flex flex-col gap-2.5">
+          <CanBuild {...props} labelled />
+          {node.wings.detected && <GamesFirst {...props} labelled />}
+        </div>
+        <Actions {...props} />
+      </li>
+    </RowMenu>
   );
 }
 
@@ -359,7 +404,7 @@ function GamesFirst({ node, gamesFirst, labelled = false }: RowProps & { labelle
   );
 }
 
-function Actions({ node, onOpen, className }: RowProps & { className?: string }) {
+function Actions({ node, onOpen, menu, className }: RowProps & { className?: string }) {
   return (
     // A flex row: two inline buttons line up by their text baseline, and the icon pushed Health down.
     <div className={cn("flex items-center gap-1.5", className)}>
@@ -375,6 +420,14 @@ function Actions({ node, onOpen, className }: RowProps & { className?: string })
       <Button size="sm" className="h-7 rounded-[7px] bg-muted px-2.5 shadow-none" onClick={() => onOpen(node.id, "settings")}>
         {t("nodes.settings")}
       </Button>
+      <ActionsMenu
+        entries={menu}
+        trigger={
+          <Button size="icon" className="size-7 rounded-[7px] bg-muted shadow-none" aria-label={t("menus.moreFor", { name: node.name })}>
+            <IconDots size={14} stroke={2} aria-hidden="true" />
+          </Button>
+        }
+      />
     </div>
   );
 }
@@ -403,10 +456,11 @@ function NodeRowSkeleton() {
       <Td className="w-[98px]">
         <SkeletonText className="w-12 text-[12.5px] leading-[18px]" />
       </Td>
-      <Td last className="w-[190px] text-right whitespace-nowrap">
+      <Td last className="w-[216px] text-right whitespace-nowrap">
         <div className="flex justify-end gap-1.5">
           <Skeleton className="h-7 w-[74px] rounded-[7px]" />
           <Skeleton className="h-7 w-[66px] rounded-[7px]" />
+          <Skeleton className="size-7 rounded-[7px]" />
         </div>
       </Td>
     </tr>
@@ -433,6 +487,7 @@ function StackedRowSkeleton() {
       <div className="flex gap-1.5">
         <Skeleton className="h-7 w-[74px] rounded-[7px]" />
         <Skeleton className="h-7 w-[66px] rounded-[7px]" />
+        <Skeleton className="size-7 rounded-[7px]" />
       </div>
     </li>
   );

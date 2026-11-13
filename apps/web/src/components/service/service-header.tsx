@@ -1,24 +1,24 @@
 // The title row of every service screen (Service.dc.html): kind tile, name,
-// live status, nodes, main address, and the run actions for the kind.
+// live status, nodes, main address, and the run actions for the kind. The
+// buttons run through the same actions as the service's menus
+// (menus/service-actions.ts, menus/object-actions.tsx), and its "..." is
+// the service's whole menu, the one its rows show on right-click.
 
-import { boxes, databases, deployments, services } from "@seylo/ops";
-import { useOp, useOpMutation } from "@seylo/ops/react";
+import { databases } from "@seylo/ops";
+import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
-import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
-import { toast } from "@seylo/ui/components/toast";
 import { IconArrowUpRight, IconPlayerPlay, IconPlayerStop, IconRefresh, IconServer2 } from "@tabler/icons-react";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
-import { errorMessage } from "../../lib/api";
 import { isPanelService } from "../../lib/service-display";
+import { useObjectActions } from "../menus/object-actions";
+import { useServiceActions } from "../menus/service-actions";
+import { ServiceActionsMenu } from "../menus/service-menu";
 import { useActiveDeploy } from "./active-deploy";
-import { ServiceMenu } from "./copy/service-menu";
 import { customVersion, versionCardId } from "./database/version-card";
-import { useInvalidate } from "./invalidate";
 import { KindBadge } from "./kind-badge";
-import { isNotBuilt, retryOp } from "./op-state";
+import { retryOp } from "./op-state";
 import { isDatabaseKind } from "./status";
 import { ServiceStatusChip } from "./status-chip";
 import type { ServiceDetail } from "./use-service";
@@ -41,7 +41,7 @@ export function ServiceHeader({ service }: { service: ServiceDetail }) {
       <HeaderAddress service={service} href={href} />
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <HeaderActions service={service} />
-        <ServiceMenu service={service} />
+        <ServiceActionsMenu service={service} />
       </div>
     </header>
   );
@@ -88,47 +88,14 @@ function DatabaseSubtitle({ service }: { service: ServiceDetail }) {
 }
 
 function HeaderActions({ service }: { service: ServiceDetail }) {
-  const navigate = useNavigate();
-  const invalidate = useInvalidate();
-  const [confirmStop, setConfirmStop] = useState(false);
+  const actions = useServiceActions();
+  const objects = useObjectActions();
   // The panel's own service updates through Settings > Updates, never by a deploy or a stop.
   const panel = isPanelService(service);
   const deploys = (service.kind === "app" || service.kind === "cron") && !panel;
   // The deploy in progress (the oldest queued or running one): Cancel deploy stops it, and Deploy waits for it.
   const active = useActiveDeploy(service.id, deploys);
-
-  const onDone = (message: string) => () => {
-    toast.success(message);
-    invalidate(services.get, services.list);
-  };
-  const onFail = (error: unknown) =>
-    toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));
-
-  const restart = useOpMutation(services.restart, { onSuccess: onDone(t("service.header.restarted")), onError: onFail });
-  const stop = useOpMutation(services.stop, { onSuccess: onDone(t("service.header.stopped")), onError: onFail });
-  const start = useOpMutation(services.start, { onSuccess: onDone(t("service.header.started")), onError: onFail });
-  const deploy = useOpMutation(deployments.deploy, {
-    onSuccess: () => {
-      invalidate(deployments.list, services.get);
-      toast.success(t("service.header.deployStarted"), {
-        action: {
-          label: t("service.header.viewDeploy"),
-          onClick: () =>
-            void navigate({
-              to: "/p/$projectId/s/$serviceId/deployments",
-              params: { projectId: service.projectId, serviceId: service.id },
-            }),
-        },
-      });
-    },
-    onError: onFail,
-  });
-  const cancel = useOpMutation(deployments.cancel, { onSuccess: () => invalidate(deployments.list, services.get), onError: onFail });
-  const openBox = useOpMutation(boxes.open, {
-    onSuccess: (res) => window.open(res.url, "_blank", "noopener"),
-    onError: onFail,
-  });
-  const stopBox = useOpMutation(boxes.stop, { onSuccess: onDone(t("service.header.stopped")), onError: onFail });
+  const { restart, start, deploy, cancel, openBox, stopBox } = actions;
 
   if (service.kind === "box") {
     return (
@@ -147,7 +114,7 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
   return (
     <>
       {active ? (
-        <Button onClick={() => cancel.mutate({ serviceId: service.id, deploymentId: active.id })} disabled={cancel.isPending}>
+        <Button onClick={() => void actions.cancelDeploy(service.id, active.id)} disabled={cancel.isPending}>
           {t("service.header.cancelDeploy")}
         </Button>
       ) : (
@@ -166,7 +133,7 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
           ) : (
             service.status !== "idle" &&
             !panel && (
-              <Button onClick={() => setConfirmStop(true)} disabled={stop.isPending}>
+              <Button onClick={() => objects.openDialog({ kind: "service-stop", service })}>
                 <IconPlayerStop size={15} stroke={1.9} aria-hidden="true" />
                 {t("service.header.stop")}
               </Button>
@@ -177,21 +144,13 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
       {deploys && (
         <Button
           variant="primary"
-          onClick={() => deploy.mutate({ serviceId: service.id })}
+          onClick={() => actions.startDeploy(service)}
           disabled={deploy.isPending || active !== null}
           title={active ? t("service.header.deployBusyHint") : undefined}
         >
           {t(active ? "service.header.deployBusy" : "service.header.deploy")}
         </Button>
       )}
-      <ConfirmDialog
-        open={confirmStop}
-        onOpenChange={setConfirmStop}
-        title={t("service.header.stopTitle", { name: service.name })}
-        description={t("service.header.stopBody")}
-        confirmLabel={t("service.header.stop")}
-        onConfirm={() => stop.mutateAsync({ serviceId: service.id }).then(() => undefined)}
-      />
     </>
   );
 }

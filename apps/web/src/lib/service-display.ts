@@ -85,6 +85,12 @@ export function sourceLine(service: Pick<Summary, "source" | "address">): string
   return parts.join(t("format.separator"));
 }
 
+/** The address is the project-network "<name>:<port>" the panel writes for a service with a port but no domain. */
+export function isInternalAddress(service: Pick<Summary, "name" | "address">): boolean {
+  const { address, name } = service;
+  return address?.startsWith(`${name}:`) === true && /^\d+$/.test(address.slice(name.length + 1));
+}
+
 /** Where it runs: "de-fsn-1", or "de-fsn-1 +1" when load balanced. */
 export function placementLine(service: Pick<Summary, "placements">): string {
   const [first, ...rest] = service.placements;

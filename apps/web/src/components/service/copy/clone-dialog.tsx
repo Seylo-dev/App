@@ -4,7 +4,9 @@
 // on push (the source's setting to start with). services.clonePreview says
 // what comes along for this person (their permissions decide whether the
 // environment and the data can be copied); services.clone creates the
-// stopped copy.
+// stopped copy. Opened from a list row it has only the service's summary:
+// the source settings come from services.get (cached on the service page),
+// and Clone waits for them.
 
 import { projects, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -61,7 +63,7 @@ export function CloneDialog({
   open,
   onOpenChange,
 }: {
-  service: ServiceDetail;
+  service: Pick<ServiceDetail, "id" | "projectId" | "name" | "placements">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -74,9 +76,12 @@ export function CloneDialog({
   const [data, setData] = useState<"empty" | "copy">("empty");
   const [stopSource, setStopSource] = useState(true);
   const [autoDomain, setAutoDomain] = useState(true);
+  const detail = useOp(services.get, { serviceId: service.id }, { enabled: open, retry: retryOp });
+  const sourceConfig = detail.data?.sourceConfig;
   // Only repository sources have the switch (null for the others); the clone starts with the source's setting.
-  const sourcePush = deploysOnPush(service.sourceConfig);
-  const [deployOnPush, setDeployOnPush] = useState(sourcePush ?? false);
+  const sourcePush = sourceConfig ? deploysOnPush(sourceConfig) : null;
+  const [pushChoice, setDeployOnPush] = useState<boolean | null>(null);
+  const deployOnPush = pushChoice ?? sourcePush ?? false;
   const preview = useOp(services.clonePreview, { serviceId: service.id, projectId, nodeId }, { enabled: open && !!nodeId, retry: retryOp });
   const projectList = useOp(projects.list, {}, { enabled: open });
   const projectName = projectList.data?.projects.find((p) => p.id === projectId)?.name ?? "";
@@ -105,7 +110,7 @@ export function CloneDialog({
   const changed = p?.references.filter((r) => r.effect !== "renamed") ?? [];
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!p) return;
+    if (!p || !sourceConfig) return;
     clone.mutate({
       serviceId: service.id,
       projectId,
@@ -225,7 +230,7 @@ export function CloneDialog({
               {sourcePush !== null && (
                 <ToggleRow
                   title={t("serviceCopy.clone.deployOnPush")}
-                  description={pushNote(service.sourceConfig, sourcePush, deployOnPush, service.name)}
+                  description={sourceConfig ? pushNote(sourceConfig, sourcePush, deployOnPush, service.name) : undefined}
                   control={
                     <Switch checked={deployOnPush} onCheckedChange={setDeployOnPush} aria-label={t("serviceCopy.clone.deployOnPush")} />
                   }
@@ -274,7 +279,7 @@ export function CloneDialog({
           )}
           <div className="flex justify-end gap-2">
             <Button onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-            <Button type="submit" variant="primary" disabled={!p || clone.isPending || name.trim() === ""}>
+            <Button type="submit" variant="primary" disabled={!p || !sourceConfig || clone.isPending || name.trim() === ""}>
               {t("serviceCopy.clone.submit")}
             </Button>
           </div>

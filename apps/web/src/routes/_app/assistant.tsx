@@ -7,11 +7,11 @@
 
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { Sheet, SheetContent, SheetTitle } from "@seylo/ui/components/sheet";
 import { Skeleton } from "@seylo/ui/components/skeleton";
-import { IconDots, IconMenu2, IconPencil, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconDots, IconMenu2, IconSparkles } from "@tabler/icons-react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useAssistant, useAssistantAccess } from "../../components/assistant/assistant-context";
@@ -19,6 +19,7 @@ import { ChatBody } from "../../components/assistant/chat-body";
 import { AutoSwitch, ChatBadges, ChatTitle, DeleteChatDialog } from "../../components/assistant/chat-controls";
 import { SessionsList } from "../../components/assistant/sessions-list";
 import { useConversation } from "../../components/assistant/use-chat";
+import { chatMenuEntries } from "../../components/menus/row-items";
 import { t } from "../../i18n/t";
 
 interface AssistantSearch {
@@ -107,24 +108,20 @@ function AssistantChats() {
           </h1>
           <AutoSwitch />
           {conversation && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label={t("assistant.chatActions")}
-                className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
-              >
-                <IconDots size={16} stroke={1.9} aria-hidden="true" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setEditing(true)}>
-                  <IconPencil size={15} stroke={1.9} aria-hidden="true" />
-                  {t("assistant.rename")}
-                </DropdownMenuItem>
-                <DropdownMenuItem destructive onSelect={() => setDeleting({ id: conversation.id, title: conversation.title })}>
-                  <IconTrash size={15} stroke={1.9} aria-hidden="true" />
-                  {t("assistant.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ActionsMenu
+              entries={chatMenuEntries({
+                act: (action) => (action === "rename" ? setEditing(true) : setDeleting({ id: conversation.id, title: conversation.title })),
+              })}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={t("assistant.chatActions")}
+                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
+                >
+                  <IconDots size={16} stroke={1.9} aria-hidden="true" />
+                </button>
+              }
+            />
           )}
         </header>
         <ChatBody conversationId={current} onStarted={(id) => show(id, true)} onGone={() => show(null, true)} variant="page" />

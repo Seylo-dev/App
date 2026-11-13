@@ -42,7 +42,7 @@ export function MoveProjectDialog({
   open,
   onOpenChange,
 }: {
-  service: ServiceDetail;
+  service: Pick<ServiceDetail, "id" | "projectId" | "name">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {

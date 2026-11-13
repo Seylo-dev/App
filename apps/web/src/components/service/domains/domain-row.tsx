@@ -17,7 +17,9 @@
 // the certificate. A domain with no route on the service's node says why
 // instead (no-route.tsx: not deployed yet, a compose stack or cron service,
 // or the node's error writing the routes), and while the panel knows no
-// check could pass (routeless) nothing is checked again on its own.
+// check could pass (routeless) nothing is checked again on its own. The
+// row's "..." and its right-click menu are one list (menus/row-items.tsx);
+// the notes under the row keep the browser's menu, for their records and links.
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -25,13 +27,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { useCopy } from "@seylo/ui/components/copy-field";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@seylo/ui/components/dropdown-menu";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import {
@@ -50,6 +46,8 @@ import {
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { type DomainAction, domainMenuEntries } from "../../menus/row-items";
+import { copyWithToast, RowMenu } from "../../menus/row-menu";
 import { formatDate, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
@@ -127,6 +125,30 @@ export function DomainRow({
   const rateLimited =
     !d.noRoute && !waiting && !generating && !held && d.certificate.status === "failed" && isRateLimited(d.certificate.error);
   const mw = d.middlewares;
+  const act = (action: DomainAction) => {
+    switch (action) {
+      case "openNewTab":
+        return void window.open(d.url, "_blank", "noopener,noreferrer");
+      case "routing":
+      case "access":
+      case "certificate":
+        return onEdit(action);
+      case "regenerate":
+        return runRegenerate();
+      case "primary":
+        return primary.mutate({ serviceId, domainId: d.id });
+      case "copyDomain":
+        return void copyWithToast(d.host);
+      case "remove":
+        return setConfirm(true);
+    }
+  };
+  const menu = domainMenuEntries(d, {
+    linkable: !(d.forward || waiting || d.noRoute),
+    canRegenerate: canRegenerate(d),
+    regenerating: regenerate.isPending,
+    act,
+  });
   const Icon = d.forward
     ? IconCornerDownRight
     : tone === "error"
@@ -138,92 +160,84 @@ export function DomainRow({
           : IconLock;
 
   return (
-    <div
-      data-domain={d.host}
-      className={cn("flex flex-col gap-3 border-t border-divider px-5 py-3", waiting && "bg-chip-amber-bg/40 pb-4")}
-    >
-      {/* The icon stands apart, so every wrapped line starts at the address's left edge. */}
-      <div className="flex items-start gap-3">
-        <span aria-hidden="true" className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", tileTone[tone])}>
-          <Icon size={14} stroke={2.2} />
-        </span>
-        <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
-          {d.forward || waiting || d.noRoute ? (
-            <span className="font-mono text-[13px] font-medium">{d.url}</span>
-          ) : (
-            <a href={d.url} target="_blank" rel="noreferrer" className="font-mono text-[13px] font-medium">
-              {d.url}
-            </a>
+    <>
+      <RowMenu entries={menu} aria-label={t("serviceDomains.actions", { host: d.host })}>
+        <div
+          data-domain={d.host}
+          className={cn(
+            "flex flex-col gap-3 border-t border-divider px-5 py-3 transition-colors duration-200 data-[state=open]:bg-raised",
+            waiting && "bg-chip-amber-bg/40 pb-4",
           )}
-          {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
-          {d.auto && <Chip tone="gray">{t("serviceDomains.auto")}</Chip>}
-          <span className="flex items-center gap-3">
-            <IconArrowRight size={14} stroke={2} className="text-ink-ghost" aria-hidden="true" />
-            {d.forward ? (
-              <span className="text-[12.5px] text-ink-strong">
-                {t("serviceDomains.forwardTo", {
-                  code: d.forward.permanent ? "308" : "307",
-                  url: d.forward.url.replace(/^https?:\/\//, ""),
-                })}
+        >
+          {/* The icon stands apart, so every wrapped line starts at the address's left edge. */}
+          <div className="flex items-start gap-3">
+            <span aria-hidden="true" className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", tileTone[tone])}>
+              <Icon size={14} stroke={2.2} />
+            </span>
+            <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+              {d.forward || waiting || d.noRoute ? (
+                <span className="font-mono text-[13px] font-medium">{d.url}</span>
+              ) : (
+                <a href={d.url} target="_blank" rel="noreferrer" className="font-mono text-[13px] font-medium">
+                  {d.url}
+                </a>
+              )}
+              {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
+              {d.auto && <Chip tone="gray">{t("serviceDomains.auto")}</Chip>}
+              <span className="flex items-center gap-3">
+                <IconArrowRight size={14} stroke={2} className="text-ink-ghost" aria-hidden="true" />
+                {d.forward ? (
+                  <span className="text-[12.5px] text-ink-strong">
+                    {t("serviceDomains.forwardTo", {
+                      code: d.forward.permanent ? "308" : "307",
+                      url: d.forward.url.replace(/^https?:\/\//, ""),
+                    })}
+                  </span>
+                ) : (
+                  <span className="font-mono text-[12.5px] text-ink-strong">
+                    {serviceName}:{d.targetPort}
+                    {d.pathPrefix !== "/" ? d.pathPrefix : ""}
+                  </span>
+                )}
               </span>
-            ) : (
-              <span className="font-mono text-[12.5px] text-ink-strong">
-                {serviceName}:{d.targetPort}
-                {d.pathPrefix !== "/" ? d.pathPrefix : ""}
+              {!d.auto && <DnsChip d={d} />}
+              {mw.basicAuth && <Chip tone="gray">{t("serviceDomains.chips.basicAuth")}</Chip>}
+              {mw.ipAllowList.length > 0 && (
+                <Chip tone="gray">{t("serviceDomains.chips.allowlist", { count: mw.ipAllowList.length })}</Chip>
+              )}
+              {mw.rateLimit && <Chip tone="gray">{t("serviceDomains.chips.rateLimit", { average: mw.rateLimit.average })}</Chip>}
+              {mw.redirects.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.redirects", { count: mw.redirects.length })}</Chip>}
+              {/* On a phone the status takes its own line from the left edge, with the menu at the right. */}
+              <span className="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full">
+                <RowStatus
+                  d={d}
+                  waiting={waiting}
+                  held={held}
+                  generating={generating}
+                  onRegenerate={runRegenerate}
+                  busy={regenerate.isPending}
+                />
+                <ActionsMenu
+                  entries={menu}
+                  trigger={
+                    <Button size="icon" variant="ghost" className="ml-auto" aria-label={t("serviceDomains.actions", { host: d.host })}>
+                      <IconDots size={15} />
+                    </Button>
+                  }
+                />
               </span>
-            )}
-          </span>
-          {!d.auto && <DnsChip d={d} />}
-          {mw.basicAuth && <Chip tone="gray">{t("serviceDomains.chips.basicAuth")}</Chip>}
-          {mw.ipAllowList.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.allowlist", { count: mw.ipAllowList.length })}</Chip>}
-          {mw.rateLimit && <Chip tone="gray">{t("serviceDomains.chips.rateLimit", { average: mw.rateLimit.average })}</Chip>}
-          {mw.redirects.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.redirects", { count: mw.redirects.length })}</Chip>}
-          {/* On a phone the status takes its own line from the left edge, with the menu at the right. */}
-          <span className="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full">
-            <RowStatus
-              d={d}
-              waiting={waiting}
-              held={held}
-              generating={generating}
-              onRegenerate={runRegenerate}
-              busy={regenerate.isPending}
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" className="ml-auto" aria-label={t("serviceDomains.actions", { host: d.host })}>
-                  <IconDots size={15} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => onEdit("routing")}>{t("serviceDomains.menu.routing")}</DropdownMenuItem>
-                {!d.forward && <DropdownMenuItem onSelect={() => onEdit("access")}>{t("serviceDomains.menu.access")}</DropdownMenuItem>}
-                {!d.auto && (
-                  <DropdownMenuItem onSelect={() => onEdit("certificate")}>{t("serviceDomains.menu.certificate")}</DropdownMenuItem>
-                )}
-                {canRegenerate(d) && (
-                  <DropdownMenuItem disabled={regenerate.isPending} onSelect={runRegenerate}>
-                    {t("serviceDomains.regenerate")}
-                  </DropdownMenuItem>
-                )}
-                {!d.primary && !d.forward && (
-                  <DropdownMenuItem onSelect={() => primary.mutate({ serviceId, domainId: d.id })}>
-                    {t("serviceDomains.menu.primary")}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-                  {t("service.remove")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
+            </div>
+          </div>
+          {/* The notes keep the browser's menu: their records, addresses and links are what one copies there. */}
+          <div data-native-context-menu="" className="contents">
+            {d.noRoute && <NoRouteNote projectId={projectId} serviceId={serviceId} serviceName={serviceName} noRoute={d.noRoute} />}
+            {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} held={held} poll={!routeless(d)} />}
+            {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} held={held} />}
+            {rateLimited && <RateLimitNote />}
+            {(generating || held) && !d.noRoute && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
+          </div>
         </div>
-      </div>
-      {d.noRoute && <NoRouteNote projectId={projectId} serviceId={serviceId} serviceName={serviceName} noRoute={d.noRoute} />}
-      {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} held={held} poll={!routeless(d)} />}
-      {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} held={held} />}
-      {rateLimited && <RateLimitNote />}
-      {(generating || held) && !d.noRoute && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
+      </RowMenu>
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -233,7 +247,7 @@ export function DomainRow({
         destructive
         onConfirm={() => remove.mutateAsync({ serviceId, domainId: d.id }).then(() => undefined)}
       />
-    </div>
+    </>
   );
 }
 

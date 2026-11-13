@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { droppedOrder, isDropClick } from "./sortable";
+import { cancelPendingDrag, droppedOrder, isDragging, isDropClick, noteDragStart, pointerReleased } from "./sortable";
 
 test("the click right after a drop is swallowed, later ones are not", () => {
   expect(isDropClick(1, 1100, 1000)).toBe(true);
@@ -28,4 +28,24 @@ test("once the list has another order, that order shows", () => {
   expect(droppedOrder([b, a, c], { on: "a\nb\nc", ids: ["b", "a", "c"] })).toEqual([b, a, c]);
   expect(droppedOrder([a, c, b], { on: "a\nb\nc", ids: ["b", "a", "c"] })).toEqual([a, c, b]);
   expect(droppedOrder([a, b, c], null)).toEqual([a, b, c]);
+});
+
+test("a drag is on from its start until the pointer lets go, even when dnd-kit never says it ended", () => {
+  expect(isDragging()).toBe(false);
+  noteDragStart();
+  expect(isDragging()).toBe(true);
+  // A touch swipe the browser took over for a scroll: pointercancel, and no onDragCancel from dnd-kit.
+  pointerReleased(5000);
+  expect(isDragging()).toBe(false);
+  // Letting go again changes nothing.
+  pointerReleased(9000);
+  expect(isDragging()).toBe(false);
+});
+
+test("cancelPendingDrag sends the pointercancel dnd-kit's waiting sensor listens for", () => {
+  const target = new EventTarget();
+  const seen: string[] = [];
+  target.addEventListener("pointercancel", (event) => seen.push(event.type));
+  cancelPendingDrag(target);
+  expect(seen).toEqual(["pointercancel"]);
 });

@@ -9,15 +9,10 @@ import { Card } from "@seylo/ui/components/card";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@seylo/ui/components/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { ButtonSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
@@ -29,6 +24,8 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { alertCheckMenuEntries } from "../../menus/row-items";
+import { RowMenu } from "../../menus/row-menu";
 import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
 import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
@@ -253,49 +250,57 @@ function CheckRow({ service, check: c, onEdit }: { service: ServiceDetail; check
   const update = useOpMutation(uptime.update, { onSuccess: () => invalidate(uptime.list), onError: fail });
   const remove = useOpMutation(uptime.remove, { onSuccess: () => invalidate(uptime.list) });
   const look = statusLook[c.status];
+  const menu = alertCheckMenuEntries(c, {
+    act: (action) => {
+      if (action === "edit") onEdit();
+      else if (action === "toggle") update.mutate({ serviceId: service.id, checkId: c.id, enabled: !c.enabled });
+      else setConfirm(true);
+    },
+  });
   return (
-    <div className="flex flex-col gap-2 border-t border-divider px-5 py-3 text-[13px]">
-      <div className="flex flex-wrap items-center gap-3">
-        <Chip tone={look.tone}>
-          <StatusDot status={look.dot} pulse={c.status === "down"} />
-          {t(`serviceAlerts.status.${c.status}`)}
-        </Chip>
-        <b className="font-semibold">{c.name}</b>
-        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-          {c.method} {c.url}
-        </span>
-        <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {/* Each figure stays on one line; on a phone the figures wrap between them, never inside one. */}
-          <span className="flex flex-wrap gap-x-3 gap-y-1 whitespace-nowrap">
-            {c.uptime24h != null && <span>{t("serviceAlerts.uptime24h", { percent: c.uptime24h.toFixed(2) })}</span>}
-            {c.lastLatencyMs != null && <span>{c.lastLatencyMs} ms</span>}
-            {c.lastCheckedAt && <span>{formatRelative(c.lastCheckedAt)}</span>}
-          </span>
-          <span className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-              {t("serviceAlerts.history")}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" aria-label={t("serviceAlerts.checkActions", { name: c.name })}>
-                  <IconDots size={15} />
+    <>
+      <RowMenu entries={menu} aria-label={t("serviceAlerts.checkActions", { name: c.name })}>
+        <div className="flex flex-col gap-2 border-t border-divider px-5 py-3 text-[13px] transition-colors duration-200 data-[state=open]:bg-raised">
+          <div className="flex flex-wrap items-center gap-3">
+            <Chip tone={look.tone}>
+              <StatusDot status={look.dot} pulse={c.status === "down"} />
+              {t(`serviceAlerts.status.${c.status}`)}
+            </Chip>
+            <b className="font-semibold">{c.name}</b>
+            <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+              {c.method} {c.url}
+            </span>
+            <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              {/* Each figure stays on one line; on a phone the figures wrap between them, never inside one. */}
+              <span className="flex flex-wrap gap-x-3 gap-y-1 whitespace-nowrap">
+                {c.uptime24h != null && <span>{t("serviceAlerts.uptime24h", { percent: c.uptime24h.toFixed(2) })}</span>}
+                {c.lastLatencyMs != null && <span>{c.lastLatencyMs} ms</span>}
+                {c.lastCheckedAt && <span>{formatRelative(c.lastCheckedAt)}</span>}
+              </span>
+              <span className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+                  {t("serviceAlerts.history")}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={onEdit}>{t("service.edit")}</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => update.mutate({ serviceId: service.id, checkId: c.id, enabled: !c.enabled })}>
-                  {c.enabled ? t("serviceAlerts.pause") : t("serviceAlerts.resume")}
-                </DropdownMenuItem>
-                <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-                  {t("service.remove")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
-        </span>
-      </div>
-      {c.lastError && c.status === "down" && <span className="text-[12.5px] text-chip-red-fg">{c.lastError}</span>}
-      {open && <CheckHistory serviceId={service.id} checkId={c.id} />}
+                <ActionsMenu
+                  entries={menu}
+                  trigger={
+                    <Button size="icon" variant="ghost" aria-label={t("serviceAlerts.checkActions", { name: c.name })}>
+                      <IconDots size={15} />
+                    </Button>
+                  }
+                />
+              </span>
+            </span>
+          </div>
+          {c.lastError && c.status === "down" && <span className="text-[12.5px] text-chip-red-fg">{c.lastError}</span>}
+          {/* The history chart is not the check's row: it keeps the browser's menu. */}
+          {open && (
+            <div data-native-context-menu="" className="contents">
+              <CheckHistory serviceId={service.id} checkId={c.id} />
+            </div>
+          )}
+        </div>
+      </RowMenu>
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -305,7 +310,7 @@ function CheckRow({ service, check: c, onEdit }: { service: ServiceDetail; check
         destructive
         onConfirm={() => remove.mutateAsync({ serviceId: service.id, checkId: c.id }).then(() => undefined)}
       />
-    </div>
+    </>
   );
 }
 

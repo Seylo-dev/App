@@ -1,15 +1,16 @@
 // The Deployments tab (Deployments.dc.html): how this service is built and
 // shipped, the history with step chips, rollback and redeploy, the running
-// deploy's log on the side, and full logs in a modal.
+// deploy's log on the side, and full logs in a modal. A row's "..." and its
+// right-click menu are one list (menus/row-items.tsx).
 
 import { builds, deployments, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { LogViewer, useLogBuffer } from "@seylo/ui/components/log-viewer";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
@@ -31,6 +32,8 @@ import { errorMessage } from "../../lib/api";
 import { useLiveUp } from "../../lib/live";
 import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
+import { type DeploymentAction, deploymentMenuEntries } from "../menus/row-items";
+import { copyWithToast, RowMenu } from "../menus/row-menu";
 import { useActiveDeploy } from "./active-deploy";
 import { buildNodeText } from "./build-node";
 import { firstTcpPort, LastOutput, UsePortButtons } from "./deploy-failure";
@@ -228,87 +231,102 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
   const busy = useActiveDeploy(service.id) !== null;
   const failed = d.status === "failed";
   const version = deploymentVersion(d);
+  const act = (action: DeploymentAction) => {
+    switch (action) {
+      case "viewLog":
+        return onLogs();
+      case "redeployCommit":
+        return redeploy.mutate({ serviceId: service.id, commitSha: d.commit?.sha });
+      case "redeployNoCache":
+        return redeploy.mutate({ serviceId: service.id, noCache: true });
+      case "rollback":
+        return setConfirmRollback(true);
+      case "cancel":
+        return cancel.mutate({ serviceId: service.id, deploymentId: d.id });
+      case "copyCommit":
+        return void copyWithToast(d.commit?.sha ?? "");
+      case "copyId":
+        return void copyWithToast(d.id);
+    }
+  };
+  const menu = deploymentMenuEntries({ id: d.id, commit: d.commit, canRollback: d.canRollback, running }, { busy, act });
 
   return (
-    <div className={cn("flex flex-wrap items-start gap-3 border-t border-divider px-5 py-3.5", running && "bg-chip-amber-bg/40")}>
-      <span
-        aria-hidden="true"
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full",
-          running ? "bg-chip-amber-bg" : failed ? "bg-chip-red-bg" : d.status === "cancelled" ? "bg-muted" : "bg-chip-green-bg",
-        )}
-      >
-        {running ? (
-          <IconLoader2 size={16} stroke={2.6} className="animate-spin text-status-busy" />
-        ) : (
-          <span
-            className={cn("size-2 rounded-full", failed ? "bg-status-error" : d.status === "cancelled" ? "bg-status-off" : "bg-status-ok")}
-          />
-        )}
-      </span>
-      <div className="flex min-w-0 flex-[1_1_200px] flex-col gap-[7px]">
-        <div className="flex min-h-[22px] flex-wrap items-center gap-2">
-          <b className="text-[13.5px] font-semibold">{deploymentTitle(d, service.source)}</b>
-          {version && <span className="font-mono text-xs text-muted-foreground">{version}</span>}
-          {d.live ? (
-            <DeploymentStatusChip status="live" />
-          ) : healthFailed(d) ? (
-            <span className="rounded-chip bg-chip-red-bg px-[7px] py-0.5 text-[11.5px] font-medium text-chip-red-fg">
-              {t("serviceDeploys.healthFailed")}
-            </span>
-          ) : (
-            d.status !== "superseded" && <DeploymentStatusChip status={d.status} buildWaiting={d.buildWait != null} />
+    <>
+      <RowMenu entries={menu} aria-label={t("menus.actionsFor", { name: version || deploymentTitle(d, service.source) })}>
+        <div
+          className={cn(
+            "flex flex-wrap items-start gap-3 border-t border-divider px-5 py-3.5 transition-colors duration-200 data-[state=open]:bg-raised",
+            running && "bg-chip-amber-bg/40",
           )}
-          <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
-            {running && d.startedAt ? formatClock(now - Date.parse(d.startedAt)) : formatRelative(d.createdAt, now)}
-          </span>
-        </div>
-        {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
-        {failed && <UsePortButtons serviceId={service.id} d={d} servicePort={firstTcpPort(service)} />}
-        {failed && <LastOutput d={d} />}
-        <PrivateRepoHint service={service} d={d} />
-        {failed && <DeployHostAction service={service} error={d.error} />}
-        {running ? <StepChips steps={d.steps} buildWait={d.buildWait} /> : <DeploymentChips d={d} now={now} />}
-      </div>
-      <div className="ml-auto flex shrink-0 gap-1.5">
-        <RowButton icon={IconTerminal2} onClick={onLogs} haspopup>
-          {t("serviceDeploys.logs")}
-        </RowButton>
-        {d.canRollback && (
-          <RowButton
-            icon={IconArrowBackUp}
-            onClick={() => setConfirmRollback(true)}
-            disabled={rollback.isPending || busy}
-            title={busy ? t("service.header.deployBusyHint") : undefined}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full",
+              running ? "bg-chip-amber-bg" : failed ? "bg-chip-red-bg" : d.status === "cancelled" ? "bg-muted" : "bg-chip-green-bg",
+            )}
           >
-            {t("serviceDeploys.rollback")}
-          </RowButton>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" className="size-8 rounded-control bg-muted shadow-none" aria-label={t("serviceDeploys.more")}>
-              <IconDots size={15} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {d.commit && (
-              <DropdownMenuItem disabled={busy} onSelect={() => redeploy.mutate({ serviceId: service.id, commitSha: d.commit?.sha })}>
-                <IconRefresh size={15} />
-                {t("serviceDeploys.redeployCommit")}
-              </DropdownMenuItem>
+            {running ? (
+              <IconLoader2 size={16} stroke={2.6} className="animate-spin text-status-busy" />
+            ) : (
+              <span
+                className={cn(
+                  "size-2 rounded-full",
+                  failed ? "bg-status-error" : d.status === "cancelled" ? "bg-status-off" : "bg-status-ok",
+                )}
+              />
             )}
-            <DropdownMenuItem disabled={busy} onSelect={() => redeploy.mutate({ serviceId: service.id, noCache: true })}>
-              <IconRefresh size={15} />
-              {t("serviceDeploys.redeployNoCache")}
-            </DropdownMenuItem>
-            {running && (
-              <DropdownMenuItem destructive onSelect={() => cancel.mutate({ serviceId: service.id, deploymentId: d.id })}>
-                {t("service.header.cancelDeploy")}
-              </DropdownMenuItem>
+          </span>
+          <div className="flex min-w-0 flex-[1_1_200px] flex-col gap-[7px]">
+            <div className="flex min-h-[22px] flex-wrap items-center gap-2">
+              <b className="text-[13.5px] font-semibold">{deploymentTitle(d, service.source)}</b>
+              {version && <span className="font-mono text-xs text-muted-foreground">{version}</span>}
+              {d.live ? (
+                <DeploymentStatusChip status="live" />
+              ) : healthFailed(d) ? (
+                <span className="rounded-chip bg-chip-red-bg px-[7px] py-0.5 text-[11.5px] font-medium text-chip-red-fg">
+                  {t("serviceDeploys.healthFailed")}
+                </span>
+              ) : (
+                d.status !== "superseded" && <DeploymentStatusChip status={d.status} buildWaiting={d.buildWait != null} />
+              )}
+              <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
+                {running && d.startedAt ? formatClock(now - Date.parse(d.startedAt)) : formatRelative(d.createdAt, now)}
+              </span>
+            </div>
+            {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
+            {failed && <UsePortButtons serviceId={service.id} d={d} servicePort={firstTcpPort(service)} />}
+            {failed && <LastOutput d={d} />}
+            <PrivateRepoHint service={service} d={d} />
+            {failed && <DeployHostAction service={service} error={d.error} />}
+            {running ? <StepChips steps={d.steps} buildWait={d.buildWait} /> : <DeploymentChips d={d} now={now} />}
+          </div>
+          <div className="ml-auto flex shrink-0 gap-1.5">
+            <RowButton icon={IconTerminal2} onClick={onLogs} haspopup>
+              {t("serviceDeploys.logs")}
+            </RowButton>
+            {d.canRollback && (
+              <RowButton
+                icon={IconArrowBackUp}
+                onClick={() => setConfirmRollback(true)}
+                disabled={rollback.isPending || busy}
+                title={busy ? t("service.header.deployBusyHint") : undefined}
+              >
+                {t("serviceDeploys.rollback")}
+              </RowButton>
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+            <ActionsMenu
+              entries={menu}
+              trigger={
+                <Button size="icon" className="size-8 rounded-control bg-muted shadow-none" aria-label={t("serviceDeploys.more")}>
+                  <IconDots size={15} />
+                </Button>
+              }
+            />
+          </div>
+        </div>
+      </RowMenu>
       <ConfirmDialog
         open={confirmRollback}
         onOpenChange={setConfirmRollback}
@@ -317,7 +335,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
         confirmLabel={t("serviceDeploys.rollback")}
         onConfirm={() => rollback.mutateAsync({ serviceId: service.id, deploymentId: d.id }).then(() => undefined)}
       />
-    </div>
+    </>
   );
 }
 

@@ -4,7 +4,9 @@
 // Each row opens its service. Like the node list, it needs a certain
 // width: in a narrower card (a phone, a tablet, a small laptop next to the
 // sidebar) each service is a stacked row with the column names as labels,
-// and the sort moves to a row of buttons above the list.
+// and the sort moves to a row of buttons above the list. Right-clicking a
+// row opens the service's menu (menus/service-menu.tsx); the table keeps
+// its columns, so there is no "..." of its own.
 
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
@@ -21,6 +23,7 @@ import { useLiveTopics } from "../../lib/live";
 import { kindTag, placementLine, statusDisplay } from "../../lib/service-display";
 import type { Project, ServiceSummary } from "../../lib/types";
 import { useTableFits } from "../../lib/use-table-fits";
+import { ServiceContextMenu } from "../menus/service-menu";
 import { KindBadge } from "../new-service/kinds";
 import { useMemoryTotals } from "../project/service-card";
 import { ProjectTile } from "../project-tile";
@@ -250,38 +253,40 @@ function TableRow({ row, hidden, memoryOf }: CellProps) {
   const tag = kindTag(service);
   return (
     // The service link covers the row (its ::after), so the whole row opens it, with a real link's middle click and keys.
-    <tr className="relative transition-colors duration-200 hover:bg-raised">
-      <Td first>
-        <span className="flex items-center gap-2.5">
-          <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
-          <Link
-            to="/p/$projectId/s/$serviceId"
-            params={{ projectId: service.projectId, serviceId: service.id }}
-            className="cursor-pointer text-[13.5px] font-semibold text-foreground after:absolute after:inset-0 after:content-[''] hover:text-foreground"
-          >
-            {service.name}
-          </Link>
-        </span>
-      </Td>
-      <Td>
-        <ProjectName project={project} hidden={hidden} />
-      </Td>
-      <Td>
-        <StatusChip service={service} />
-      </Td>
-      <Td>
-        <Meter value={service.cpuPercent === null ? null : formatPercent(service.cpuPercent)} percent={service.cpuPercent ?? 0} />
-      </Td>
-      <Td>
-        <Meter value={service.memoryBytes === null ? null : formatBytes(service.memoryBytes)} percent={memoryShare(service, memoryOf)} />
-      </Td>
-      <Td>
-        <NodeChip service={service} />
-      </Td>
-      <Td last>
-        <LastDeploy service={service} />
-      </Td>
-    </tr>
+    <ServiceContextMenu service={service}>
+      <tr className="relative transition-colors duration-200 hover:bg-raised data-[state=open]:bg-raised">
+        <Td first>
+          <span className="flex items-center gap-2.5">
+            <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
+            <Link
+              to="/p/$projectId/s/$serviceId"
+              params={{ projectId: service.projectId, serviceId: service.id }}
+              className="cursor-pointer text-[13.5px] font-semibold text-foreground after:absolute after:inset-0 after:content-[''] hover:text-foreground"
+            >
+              {service.name}
+            </Link>
+          </span>
+        </Td>
+        <Td>
+          <ProjectName project={project} hidden={hidden} />
+        </Td>
+        <Td>
+          <StatusChip service={service} />
+        </Td>
+        <Td>
+          <Meter value={service.cpuPercent === null ? null : formatPercent(service.cpuPercent)} percent={service.cpuPercent ?? 0} />
+        </Td>
+        <Td>
+          <Meter value={service.memoryBytes === null ? null : formatBytes(service.memoryBytes)} percent={memoryShare(service, memoryOf)} />
+        </Td>
+        <Td>
+          <NodeChip service={service} />
+        </Td>
+        <Td last>
+          <LastDeploy service={service} />
+        </Td>
+      </tr>
+    </ServiceContextMenu>
   );
 }
 
@@ -291,39 +296,41 @@ function StackedRow({ row, hidden, memoryOf }: CellProps) {
   const tag = kindTag(service);
   return (
     <li className="border-t border-divider first:border-t-0">
-      <Link
-        to="/p/$projectId/s/$serviceId"
-        params={{ projectId: service.projectId, serviceId: service.id }}
-        className="flex cursor-pointer flex-col gap-3 px-[18px] py-3.5 text-foreground transition-colors duration-200 hover:bg-raised hover:text-foreground"
-      >
-        <span className="flex min-w-0 items-center gap-2.5">
-          <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
-          <span className="min-w-0 truncate text-[13.5px] font-semibold">{service.name}</span>
-          <span className="ml-auto shrink-0">
-            <StatusChip service={service} />
+      <ServiceContextMenu service={service}>
+        <Link
+          to="/p/$projectId/s/$serviceId"
+          params={{ projectId: service.projectId, serviceId: service.id }}
+          className="flex cursor-pointer flex-col gap-3 px-[18px] py-3.5 text-foreground transition-colors duration-200 hover:bg-raised hover:text-foreground data-[state=open]:bg-raised"
+        >
+          <span className="flex min-w-0 items-center gap-2.5">
+            <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
+            <span className="min-w-0 truncate text-[13.5px] font-semibold">{service.name}</span>
+            <span className="ml-auto shrink-0">
+              <StatusChip service={service} />
+            </span>
           </span>
-        </span>
-        <span className="grid grid-cols-2 gap-x-4 gap-y-3 @min-[620px]:grid-cols-5">
-          <Fact label={t("dashboard.table.project")}>
-            <ProjectName project={project} hidden={hidden} />
-          </Fact>
-          <Fact label={t("dashboard.table.node")}>
-            <NodeChip service={service} />
-          </Fact>
-          <Fact label={t("dashboard.table.cpu")}>
-            <Meter value={service.cpuPercent === null ? null : formatPercent(service.cpuPercent)} percent={service.cpuPercent ?? 0} />
-          </Fact>
-          <Fact label={t("dashboard.table.memory")}>
-            <Meter
-              value={service.memoryBytes === null ? null : formatBytes(service.memoryBytes)}
-              percent={memoryShare(service, memoryOf)}
-            />
-          </Fact>
-          <Fact label={t("dashboard.table.lastDeploy")}>
-            <LastDeploy service={service} />
-          </Fact>
-        </span>
-      </Link>
+          <span className="grid grid-cols-2 gap-x-4 gap-y-3 @min-[620px]:grid-cols-5">
+            <Fact label={t("dashboard.table.project")}>
+              <ProjectName project={project} hidden={hidden} />
+            </Fact>
+            <Fact label={t("dashboard.table.node")}>
+              <NodeChip service={service} />
+            </Fact>
+            <Fact label={t("dashboard.table.cpu")}>
+              <Meter value={service.cpuPercent === null ? null : formatPercent(service.cpuPercent)} percent={service.cpuPercent ?? 0} />
+            </Fact>
+            <Fact label={t("dashboard.table.memory")}>
+              <Meter
+                value={service.memoryBytes === null ? null : formatBytes(service.memoryBytes)}
+                percent={memoryShare(service, memoryOf)}
+              />
+            </Fact>
+            <Fact label={t("dashboard.table.lastDeploy")}>
+              <LastDeploy service={service} />
+            </Fact>
+          </span>
+        </Link>
+      </ServiceContextMenu>
     </li>
   );
 }

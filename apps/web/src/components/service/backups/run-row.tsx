@@ -5,17 +5,20 @@
 // has Restore, Download and Delete. Once its destination was deleted the
 // panel has no keys for that bucket: the row says so and only offers
 // Remove from list, which marks it deleted and leaves the file in the
-// bucket.
+// bucket. Its "..." and its right-click menu are one list
+// (menus/row-items.tsx backupRunMenuEntries).
 
 import { backups, type OpOutput } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconChevronUp, IconDots } from "@tabler/icons-react";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
+import { backupRunMenuEntries } from "../../menus/row-items";
+import { RowMenu } from "../../menus/row-menu";
 import { formatBytes, formatDateTime, formatDuration } from "../format";
 import { retryOp } from "../op-state";
 import { RowsSkeleton } from "../service-skeletons";
@@ -157,97 +160,85 @@ export function RunRow({
   const failed = r.status === "failed";
   const running = r.status === "running";
   const actions = runActions(r);
-  const menu = runMenu(r);
+  const menu = backupRunMenuEntries(runMenu(r), {
+    act: (action) => (action === "restore" ? onRestore() : action === "download" ? onDownload() : onDelete()),
+  });
   const took = r.finishedAt ? Date.parse(r.finishedAt) - Date.parse(r.startedAt) : null;
   const chips = runChips(r, service.kind);
   const isDb = r.target === "database";
   const expandable = (r.contents?.databases.length ?? 0) > 0 || r.warnings.length > 0;
   return (
-    <div className="border-t border-divider px-5 py-2.5 text-[13px]">
-      <div className="flex flex-wrap items-center gap-3">
-        <span
-          aria-hidden="true"
-          className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-full",
-            failed ? "bg-chip-red-bg" : running ? "bg-chip-amber-bg" : "bg-chip-green-bg",
-          )}
-        >
+    <RowMenu entries={menu} aria-label={t("serviceBackups.actions")}>
+      <div className="border-t border-divider px-5 py-2.5 text-[13px] transition-colors duration-200 data-[state=open]:bg-raised">
+        <div className="flex flex-wrap items-center gap-3">
           <span
-            className={cn("size-2 rounded-full", failed ? "bg-status-error" : running ? "animate-pulse bg-status-busy" : "bg-status-ok")}
-          />
-        </span>
-        <b className="font-medium">{formatDateTime(r.startedAt)}</b>
-        <span className="min-w-0 truncate text-ink-strong">{runLabel(r)}</span>
-        {r.kind === "restore" && <Chip tone="violet">{t("serviceBackups.restoreRun")}</Chip>}
-        {r.deletedAt && <Chip tone="gray">{t("serviceBackups.deleted")}</Chip>}
-        {actions === "destinationGone" && <Chip tone="gray">{t("serviceBackups.destinationDeleted")}</Chip>}
-        {r.error && <span className="min-w-0 flex-1 truncate text-[12.5px] text-chip-red-fg">{r.error}</span>}
-        {/* A restore's notes: the backup before it was skipped (nothing of it was left to keep). */}
-        {r.kind === "restore" && !r.error && r.warnings.length > 0 && (
-          <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={r.warnings.join(" ")}>
-            {r.warnings.join(" ")}
+            aria-hidden="true"
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full",
+              failed ? "bg-chip-red-bg" : running ? "bg-chip-amber-bg" : "bg-chip-green-bg",
+            )}
+          >
+            <span
+              className={cn("size-2 rounded-full", failed ? "bg-status-error" : running ? "animate-pulse bg-status-busy" : "bg-status-ok")}
+            />
           </span>
-        )}
-        <span className="ml-auto text-[12.5px] text-muted-foreground">
-          {[
-            r.sizeBytes != null ? (isDb ? t("serviceBackups.file", { size: formatBytes(r.sizeBytes) }) : formatBytes(r.sizeBytes)) : null,
-            took != null ? formatDuration(took) : running ? t("serviceBackups.running") : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-        {menu.length > 0 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
-                <IconDots size={15} />
+          <b className="font-medium">{formatDateTime(r.startedAt)}</b>
+          <span className="min-w-0 truncate text-ink-strong">{runLabel(r)}</span>
+          {r.kind === "restore" && <Chip tone="violet">{t("serviceBackups.restoreRun")}</Chip>}
+          {r.deletedAt && <Chip tone="gray">{t("serviceBackups.deleted")}</Chip>}
+          {actions === "destinationGone" && <Chip tone="gray">{t("serviceBackups.destinationDeleted")}</Chip>}
+          {r.error && <span className="min-w-0 flex-1 truncate text-[12.5px] text-chip-red-fg">{r.error}</span>}
+          {/* A restore's notes: the backup before it was skipped (nothing of it was left to keep). */}
+          {r.kind === "restore" && !r.error && r.warnings.length > 0 && (
+            <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={r.warnings.join(" ")}>
+              {r.warnings.join(" ")}
+            </span>
+          )}
+          <span className="ml-auto text-[12.5px] text-muted-foreground">
+            {[
+              r.sizeBytes != null ? (isDb ? t("serviceBackups.file", { size: formatBytes(r.sizeBytes) }) : formatBytes(r.sizeBytes)) : null,
+              took != null ? formatDuration(took) : running ? t("serviceBackups.running") : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          {menu.length > 0 ? (
+            <ActionsMenu
+              entries={menu}
+              trigger={
+                <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
+                  <IconDots size={15} />
+                </Button>
+              }
+            />
+          ) : (
+            // A row without actions keeps the menu's place, so sizes and times line up on the right.
+            <span aria-hidden="true" className="size-[30px] shrink-0" />
+          )}
+        </div>
+        {chips.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-11">
+            <RunChips chips={chips} label={t("serviceBackups.holds")} />
+            {expandable && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6"
+                aria-expanded={open}
+                aria-label={open ? t("serviceBackups.hideContents") : t("serviceBackups.showContents")}
+                onClick={() => setOpen((o) => !o)}
+              >
+                {open ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {menu.map((item) =>
-                item === "restore" ? (
-                  <DropdownMenuItem key={item} onSelect={onRestore}>
-                    {t("serviceBackups.restore")}
-                  </DropdownMenuItem>
-                ) : item === "download" ? (
-                  <DropdownMenuItem key={item} onSelect={onDownload}>
-                    {t("serviceBackups.download")}
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem key={item} destructive onSelect={onDelete}>
-                    {item === "remove" ? t("service.remove") : t("serviceBackups.forgetRun")}
-                  </DropdownMenuItem>
-                ),
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
-          // A row without actions keeps the menu's place, so sizes and times line up on the right.
-          <span aria-hidden="true" className="size-[30px] shrink-0" />
+            )}
+          </div>
+        )}
+        {open && (
+          <div className="mt-2 max-w-xl pl-11">
+            <RunContents service={service} run={r} />
+          </div>
         )}
       </div>
-      {chips.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-11">
-          <RunChips chips={chips} label={t("serviceBackups.holds")} />
-          {expandable && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-6"
-              aria-expanded={open}
-              aria-label={open ? t("serviceBackups.hideContents") : t("serviceBackups.showContents")}
-              onClick={() => setOpen((o) => !o)}
-            >
-              {open ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-            </Button>
-          )}
-        </div>
-      )}
-      {open && (
-        <div className="mt-2 max-w-xl pl-11">
-          <RunContents service={service} run={r} />
-        </div>
-      )}
-    </div>
+    </RowMenu>
   );
 }

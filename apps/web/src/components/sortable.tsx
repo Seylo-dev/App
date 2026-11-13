@@ -37,6 +37,43 @@ import { t } from "../i18n/t";
 let dragOn = false;
 let lastDragEnd = Number.NEGATIVE_INFINITY;
 
+/** Whether a drag is on now: no right-click menu opens meanwhile (menus/row-menu.tsx). */
+export function isDragging(): boolean {
+  return dragOn;
+}
+
+/** A drag lifted an item (SortableGroup's onDragStart). */
+export function noteDragStart(): void {
+  dragOn = true;
+}
+
+/**
+ * A pointer let go, or the browser took it over to scroll (pointercancel):
+ * whatever drag it carried is over. dnd-kit does not always say so: a
+ * touch swipe that moves past the 6 px and is cancelled for the scroll
+ * before the next render ends the drag without onDragCancel, which left
+ * the drag "on" for good, so every tap after it counted as the click a
+ * drop leaves behind and opened nothing.
+ */
+export function pointerReleased(now: number): void {
+  if (!dragOn) return;
+  dragOn = false;
+  lastDragEnd = now;
+}
+
+/**
+ * Drops a drag that waits for its first 6 px (the pointer is down on a row
+ * but has not moved yet). A context menu that opens then (a touch
+ * long-press, a Control-click on a Mac) calls this, so moving the finger
+ * or the mouse over the open menu does not lift the row under it. dnd-kit's
+ * pointer sensor listens for pointercancel on the document.
+ */
+export function cancelPendingDrag(target: EventTarget | undefined = typeof document === "undefined" ? undefined : document): void {
+  if (!target) return;
+  const Pointer = typeof PointerEvent === "undefined" ? Event : PointerEvent;
+  target.dispatchEvent(new Pointer("pointercancel", { bubbles: true }));
+}
+
 /** The click a drop leaves behind: a pointer's click (detail 1 or more) within 250 ms of the drag ending. */
 export function isDropClick(detail: number, now: number, dragEnd: number): boolean {
   return detail > 0 && now - dragEnd < 250;
@@ -45,18 +82,12 @@ export function isDropClick(detail: number, now: number, dragEnd: number): boole
 // After a drop dnd-kit stops the click from propagating, so React (and the
 // item's own handler) never sees it, but the browser would still follow the
 // link under the pointer. These run before dnd-kit's own listeners: the
-// pointerup that ends a drag is noted, and the click right after has its
-// default cancelled. Only a pointer's click (detail 1 or more): Enter in a
-// form fires a click on its submit button with detail 0, and that one must
-// still submit.
+// pointerup (or pointercancel) that ends a drag is noted, and the click
+// right after has its default cancelled. Only a pointer's click (detail 1
+// or more): Enter in a form fires a click on its submit button with detail
+// 0, and that one must still submit.
 if (typeof window !== "undefined") {
-  window.addEventListener(
-    "pointerup",
-    () => {
-      if (dragOn) lastDragEnd = performance.now();
-    },
-    true,
-  );
+  for (const type of ["pointerup", "pointercancel"] as const) window.addEventListener(type, () => pointerReleased(performance.now()), true);
   window.addEventListener(
     "click",
     (event) => {
@@ -145,9 +176,7 @@ export function SortableGroup<T extends { id: string }>({
         sensors={sensors}
         collisionDetection={closestCenter}
         modifiers={layout === "list" ? [verticalOnly] : undefined}
-        onDragStart={() => {
-          dragOn = true;
-        }}
+        onDragStart={noteDragStart}
         onDragEnd={onDragEnd}
         onDragCancel={() => {
           dragOn = false;
@@ -220,6 +249,8 @@ export function SortableGrip({
     <button
       type="button"
       {...grip}
+      // Shift+F10 or a right-click on the grip opens no menu: Tab on to the row's link for that.
+      data-no-context-menu=""
       aria-label={t("common.move", { name })}
       className={cn(
         "sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-1/2 focus-visible:left-0 focus-visible:z-10 focus-visible:flex focus-visible:size-6 focus-visible:-translate-y-1/2 focus-visible:cursor-grab focus-visible:items-center focus-visible:justify-center focus-visible:rounded-chip focus-visible:border-0 focus-visible:bg-card focus-visible:text-foreground focus-visible:shadow-card focus-visible:outline-2 focus-visible:outline-ring",

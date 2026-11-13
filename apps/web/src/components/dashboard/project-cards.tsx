@@ -8,7 +8,9 @@
 // are the same per-person preferences the sidebar uses, and hidden projects
 // come back with "Show hidden" without being unhidden. Until the projects
 // load, the placeholders take the shape the home page last had
-// (lib/projects-shape.ts).
+// (lib/projects-shape.ts). Right-clicking a project's header or a service
+// row opens the same menu as the project's "..." or the service's
+// (menus/), in every view.
 
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
@@ -30,8 +32,9 @@ import type { Project, ServiceSummary } from "../../lib/types";
 import type { ServicesByProject } from "../../lib/use-all-services";
 import { splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
 import { isCollapsedIn, useProjectPrefs } from "../../lib/use-project-prefs";
+import { ServiceContextMenu } from "../menus/service-menu";
 import { KindBadge } from "../new-service/kinds";
-import { ProjectMenu } from "../project-menu";
+import { ProjectContextMenu, ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { QueryError } from "../query-error";
 import { useShell } from "../shell/shell-context";
@@ -245,45 +248,51 @@ function ProjectCard({
       style={item.style}
       className={cn("group/card min-w-0 overflow-hidden rounded-card bg-card shadow-card", draggingClass(item.dragging))}
     >
-      <div {...item.handle} className="relative flex items-center gap-2.5 px-4 py-[15px]">
-        {item.enabled && <SortableGrip grip={item.grip} name={project.name} className="focus-visible:left-1" />}
-        <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} size="md" />
-        <Link
-          to="/p/$projectId"
-          params={{ projectId: project.id }}
-          className="flex min-w-0 flex-col gap-px text-foreground hover:text-foreground"
+      <ProjectContextMenu project={project} where="dashboard" hidden={hidden} onHiddenChange={onHiddenChange}>
+        <div
+          {...item.handle}
+          className="relative flex items-center gap-2.5 px-4 py-[15px] transition-colors duration-200 data-[state=open]:bg-raised"
         >
-          <span className="truncate text-sm font-semibold">{project.name}</span>
-          <span className="text-xs text-muted-foreground">
-            {t("sidebar.serviceCount", { count: project.serviceCount })}
-            {t("format.separator")}
-            {t("dashboard.nodeCount", { count: project.nodeCount })}
-          </span>
-        </Link>
-        {hidden && (
-          <Chip tone="track" className="shrink-0 px-[7px] py-0.5 text-[11.5px]">
-            {t("dashboard.hiddenChip")}
-          </Chip>
-        )}
-        <div className="ml-auto flex items-center gap-0.5">
-          {/* Shows on hover or focus, so a card looks the same until then; a touch screen always shows it. */}
-          <ProjectMenu
-            name={project.name}
-            hidden={hidden}
-            onHiddenChange={onHiddenChange}
-            className="opacity-0 transition-opacity hover:bg-muted group-hover/card:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
-          />
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={open}
-            aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
-            className="flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint hover:bg-muted"
+          {item.enabled && <SortableGrip grip={item.grip} name={project.name} className="focus-visible:left-1" />}
+          <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} size="md" />
+          <Link
+            to="/p/$projectId"
+            params={{ projectId: project.id }}
+            className="flex min-w-0 flex-col gap-px text-foreground hover:text-foreground"
           >
-            <IconChevronDown size={14} stroke={2} aria-hidden="true" className={cn("transition-transform", !open && "-rotate-90")} />
-          </button>
+            <span className="truncate text-sm font-semibold">{project.name}</span>
+            <span className="text-xs text-muted-foreground">
+              {t("sidebar.serviceCount", { count: project.serviceCount })}
+              {t("format.separator")}
+              {t("dashboard.nodeCount", { count: project.nodeCount })}
+            </span>
+          </Link>
+          {hidden && (
+            <Chip tone="track" className="shrink-0 px-[7px] py-0.5 text-[11.5px]">
+              {t("dashboard.hiddenChip")}
+            </Chip>
+          )}
+          <div className="ml-auto flex items-center gap-0.5">
+            {/* Shows on hover or focus, so a card looks the same until then; a touch screen always shows it. */}
+            <ProjectMenu
+              project={project}
+              where="dashboard"
+              hidden={hidden}
+              onHiddenChange={onHiddenChange}
+              className="opacity-0 transition-opacity hover:bg-muted group-hover/card:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
+            />
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={open}
+              aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
+              className="flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint hover:bg-muted"
+            >
+              <IconChevronDown size={14} stroke={2} aria-hidden="true" className={cn("transition-transform", !open && "-rotate-90")} />
+            </button>
+          </div>
         </div>
-      </div>
+      </ProjectContextMenu>
       {open && (
         <div className="flex flex-col px-2 pb-2">
           {project.serviceCount === 0 && (
@@ -363,23 +372,25 @@ function ServiceRow({ service }: { service: ServiceSummary }) {
   const detail = [service.source.label, service.source.branch, placementLine(service)].filter(Boolean).join(t("format.separator"));
   const usage = formatUsage(service.cpuPercent, service.memoryBytes);
   return (
-    <Link
-      to="/p/$projectId/s/$serviceId"
-      params={{ projectId: service.projectId, serviceId: service.id }}
-      className="flex items-center gap-2.5 border-t border-divider px-2 py-[9px] text-foreground hover:bg-raised hover:text-foreground"
-    >
-      <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
-      <span className="flex min-w-0 flex-col gap-px">
-        <span className="text-[13.5px] font-semibold">{service.name}</span>
-        <span className="truncate text-[11.5px] text-muted-foreground">{detail}</span>
-      </span>
-      <span className="ml-auto flex shrink-0 flex-col items-end gap-[3px]">
-        <Chip tone={status.tone} className="px-[7px] py-0.5 text-[11.5px]">
-          {status.label}
-        </Chip>
-        {usage && <span className="text-[11.5px] whitespace-nowrap text-muted-foreground">{usage}</span>}
-      </span>
-    </Link>
+    <ServiceContextMenu service={service}>
+      <Link
+        to="/p/$projectId/s/$serviceId"
+        params={{ projectId: service.projectId, serviceId: service.id }}
+        className="flex items-center gap-2.5 border-t border-divider px-2 py-[9px] text-foreground transition-colors duration-200 hover:bg-raised hover:text-foreground data-[state=open]:bg-raised"
+      >
+        <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
+        <span className="flex min-w-0 flex-col gap-px">
+          <span className="text-[13.5px] font-semibold">{service.name}</span>
+          <span className="truncate text-[11.5px] text-muted-foreground">{detail}</span>
+        </span>
+        <span className="ml-auto flex shrink-0 flex-col items-end gap-[3px]">
+          <Chip tone={status.tone} className="px-[7px] py-0.5 text-[11.5px]">
+            {status.label}
+          </Chip>
+          {usage && <span className="text-[11.5px] whitespace-nowrap text-muted-foreground">{usage}</span>}
+        </span>
+      </Link>
+    </ServiceContextMenu>
   );
 }
 

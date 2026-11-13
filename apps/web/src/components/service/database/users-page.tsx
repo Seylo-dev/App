@@ -16,15 +16,8 @@ import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@seylo/ui/components/dropdown-menu";
 import { Input } from "@seylo/ui/components/input";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
@@ -34,6 +27,8 @@ import { IconDots, IconPlus } from "@tabler/icons-react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
+import { databaseUserMenuEntries } from "../../menus/row-items";
+import { copyWithToast, RowMenu } from "../../menus/row-menu";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
@@ -209,88 +204,81 @@ function accessLabel(access: User["access"], database: string): string {
 function UserRow({ users, user, database, onOpen }: { users: Users; user: User; database: string; onOpen: (open: Open) => void }) {
   const offline = users.signIn !== "ok";
   const menuItems = !user.main && (user.can.passwordChange || user.can.rename || user.can.delete || user.can.makeMain);
+  const menu = menuItems
+    ? databaseUserMenuEntries(user, {
+        canSwitch: users.main.canSwitch,
+        act: (action) => {
+          if (action === "password") onOpen({ kind: "password", user });
+          else if (action === "rename") onOpen({ kind: "rename", user });
+          else if (action === "makeMain") onOpen({ kind: "switch", existing: user });
+          else if (action === "copyName") void copyWithToast(user.name);
+          else onOpen({ kind: "delete", user });
+        },
+      })
+    : [];
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control bg-field px-3 py-2.5 transition-colors duration-200">
-      <span className="flex min-w-0 flex-[1_1_220px] flex-col gap-1">
-        <span className="flex flex-wrap items-center gap-2">
-          <b className="font-mono text-[13px] font-medium [overflow-wrap:anywhere]">
-            {user.name}
-            {user.host !== null && <span className="text-muted-foreground">@{user.host}</span>}
-          </b>
-          {user.main && <Chip tone="blue">{t("serviceDatabaseUsers.main")}</Chip>}
-          {user.system && <Chip tone="gray">{t("serviceDatabaseUsers.system")}</Chip>}
-          {user.locked && <Chip tone="amber">{t("serviceDatabaseUsers.locked")}</Chip>}
-          {user.authDatabase !== null && user.authDatabase !== "admin" && (
-            <Chip tone="track" mono>
-              {t("serviceDatabaseUsers.authDatabase", { database: user.authDatabase })}
-            </Chip>
-          )}
+    <RowMenu entries={menu} aria-label={t("serviceDatabaseUsers.more", { name: user.name })}>
+      <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control bg-field px-3 py-2.5 transition-colors duration-200 data-[state=open]:bg-muted">
+        <span className="flex min-w-0 flex-[1_1_220px] flex-col gap-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <b className="font-mono text-[13px] font-medium [overflow-wrap:anywhere]">
+              {user.name}
+              {user.host !== null && <span className="text-muted-foreground">@{user.host}</span>}
+            </b>
+            {user.main && <Chip tone="blue">{t("serviceDatabaseUsers.main")}</Chip>}
+            {user.system && <Chip tone="gray">{t("serviceDatabaseUsers.system")}</Chip>}
+            {user.locked && <Chip tone="amber">{t("serviceDatabaseUsers.locked")}</Chip>}
+            {user.authDatabase !== null && user.authDatabase !== "admin" && (
+              <Chip tone="track" mono>
+                {t("serviceDatabaseUsers.authDatabase", { database: user.authDatabase })}
+              </Chip>
+            )}
+          </span>
+          <span className="text-xs leading-normal text-muted-foreground [overflow-wrap:anywhere]">
+            {user.main && <span className="text-ink-strong">{t("serviceDatabaseUsers.mainLine")} · </span>}
+            <span title={user.roles.join("\n") || undefined}>{accessLabel(user.access, database)}</span>
+            {user.ownsObjects ? ` · ${t("serviceDatabaseUsers.owns", { count: user.ownsObjects })}` : ""}
+            {user.definerObjects ? ` · ${t("serviceDatabaseUsers.definers", { count: user.definerObjects })}` : ""}
+            {user.roles.length > 0 && user.access === "custom" && ` · ${user.roles.slice(0, 3).join(", ")}`}
+          </span>
+          {!user.main && user.why && !menuItems && <span className="text-xs leading-normal text-muted-foreground">{user.why}</span>}
         </span>
-        <span className="text-xs leading-normal text-muted-foreground [overflow-wrap:anywhere]">
-          {user.main && <span className="text-ink-strong">{t("serviceDatabaseUsers.mainLine")} · </span>}
-          <span title={user.roles.join("\n") || undefined}>{accessLabel(user.access, database)}</span>
-          {user.ownsObjects ? ` · ${t("serviceDatabaseUsers.owns", { count: user.ownsObjects })}` : ""}
-          {user.definerObjects ? ` · ${t("serviceDatabaseUsers.definers", { count: user.definerObjects })}` : ""}
-          {user.roles.length > 0 && user.access === "custom" && ` · ${user.roles.slice(0, 3).join(", ")}`}
-        </span>
-        {!user.main && user.why && !menuItems && <span className="text-xs leading-normal text-muted-foreground">{user.why}</span>}
-      </span>
-      {user.main ? (
-        <span className="flex shrink-0 flex-wrap items-center gap-2">
-          {user.can.passwordChange && (
-            <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen(mainPasswordDialog(users))}>
-              {t("serviceDatabaseUsers.changePassword")}
-            </Button>
-          )}
-          {users.main.rename !== "none" && !offline && (
-            <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen(mainNameDialog(users))}>
-              {t("serviceDatabaseUsers.changeName")}
-            </Button>
-          )}
-          {offline && users.main.rename === "restart" && user.can.rename && (
-            <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen({ kind: "renameMain" })}>
-              {t("serviceDatabaseUsers.changeName")}
-            </Button>
-          )}
-        </span>
-      ) : (
-        menuItems && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon"
-                className="size-8 shrink-0 rounded-control bg-card shadow-none"
-                aria-label={t("serviceDatabaseUsers.more", { name: user.name })}
-              >
-                <IconDots size={15} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-w-[300px]">
-              <DropdownMenuItem disabled={!user.can.passwordChange} onSelect={() => onOpen({ kind: "password", user })}>
+        {user.main ? (
+          <span className="flex shrink-0 flex-wrap items-center gap-2">
+            {user.can.passwordChange && (
+              <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen(mainPasswordDialog(users))}>
                 {t("serviceDatabaseUsers.changePassword")}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={!user.can.rename} onSelect={() => onOpen({ kind: "rename", user })}>
-                {t("serviceDatabaseUsers.rename")}
-              </DropdownMenuItem>
-              {users.main.canSwitch && (
-                <DropdownMenuItem disabled={!user.can.makeMain} onSelect={() => onOpen({ kind: "switch", existing: user })}>
-                  {t("serviceDatabaseUsers.makeMain")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem destructive disabled={!user.can.delete} onSelect={() => onOpen({ kind: "delete", user })}>
-                {t("serviceDatabaseUsers.delete")}
-              </DropdownMenuItem>
-              {user.why && (
-                <DropdownMenuLabel className="text-xs leading-normal font-normal whitespace-normal text-muted-foreground">
-                  {user.why}
-                </DropdownMenuLabel>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )
-      )}
-    </li>
+              </Button>
+            )}
+            {users.main.rename !== "none" && !offline && (
+              <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen(mainNameDialog(users))}>
+                {t("serviceDatabaseUsers.changeName")}
+              </Button>
+            )}
+            {offline && users.main.rename === "restart" && user.can.rename && (
+              <Button size="sm" className="bg-card shadow-none" onClick={() => onOpen({ kind: "renameMain" })}>
+                {t("serviceDatabaseUsers.changeName")}
+              </Button>
+            )}
+          </span>
+        ) : (
+          menuItems && (
+            <ActionsMenu
+              entries={menu}
+              trigger={
+                <Button
+                  size="icon"
+                  className="size-8 shrink-0 rounded-control bg-card shadow-none"
+                  aria-label={t("serviceDatabaseUsers.more", { name: user.name })}
+                >
+                  <IconDots size={15} />
+                </Button>
+              }
+            />
+          )
+        )}
+      </li>
+    </RowMenu>
   );
 }
 

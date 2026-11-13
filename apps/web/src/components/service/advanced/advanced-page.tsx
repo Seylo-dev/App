@@ -24,6 +24,7 @@ import { MaintenanceCard } from "../domains/access-cards";
 import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
 import { volumesOf } from "../files/volumes";
 import { useInvalidate } from "../invalidate";
+import { moveCardId } from "../move-card-id";
 import { MutationError, retryOp } from "../op-state";
 import { servicePort } from "../service-port";
 import type { ServiceDetail } from "../use-service";
@@ -406,7 +407,7 @@ function MoveCard({ service }: { service: ServiceDetail }) {
   const target = options.find((n) => n.id === to);
   if (service.placements.length !== 1) return null;
   return (
-    <SectionCard title={t("serviceAdvanced.move.title")} description={t("serviceAdvanced.move.description")}>
+    <SectionCard id={moveCardId} title={t("serviceAdvanced.move.title")} description={t("serviceAdvanced.move.description")}>
       <div className="flex flex-wrap items-end gap-2">
         <Field label={t("serviceAdvanced.move.to")} className="w-60">
           <Select value={to ?? undefined} onValueChange={setTo} disabled={options.length === 0}>

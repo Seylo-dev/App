@@ -9,6 +9,8 @@
 // under a folded "Hidden (N)" row at the end, unless the person turned that
 // group off (Settings > Preferences): then only the hidden project whose
 // pages are open shows there, so the sidebar still marks where they are.
+// Right-clicking a project row or a service row opens the same menu as the
+// project's "..." (project-menu.tsx) or the service's (menus/service-menu.tsx).
 
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -26,8 +28,9 @@ import { isBusy, statusDisplay } from "../../lib/service-display";
 import type { Project } from "../../lib/types";
 import { hiddenInSidebar, splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
 import { isCollapsedIn, useProjectPrefs } from "../../lib/use-project-prefs";
+import { ServiceContextMenu } from "../menus/service-menu";
 import { NewServiceMenu } from "../new-service/new-service-menu";
-import { ProjectMenu } from "../project-menu";
+import { ProjectContextMenu, ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { draggingClass, SortableGrip, SortableGroup, useSortableItem } from "../sortable";
 import { useShell } from "./shell-context";
@@ -161,62 +164,65 @@ function ProjectRow({
 }) {
   const open = !isCollapsedIn(project, "sidebar");
   const Chevron = open ? IconChevronDown : IconChevronRight;
+  const setHidden = (hide: boolean) => onHiddenChange(project, hide);
   return (
     <>
-      {/* The row is the indicator's box: it covers the chevron too. */}
-      <div
-        {...sortable?.handle}
-        className="group/row relative isolate flex items-center rounded-control transition-interactive hover:bg-muted"
-      >
-        {sortable?.enabled && <SortableGrip grip={sortable.grip} name={project.name} />}
-        <button
-          type="button"
-          onClick={() => onToggle(project.id, open)}
-          aria-expanded={open}
-          aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
-          className="flex cursor-pointer border-0 bg-transparent py-[7px] pr-1 pl-2.5 text-ink-faint"
+      {/* The row is the indicator's box: it covers the chevron too. Right-click opens the "..." menu's list. */}
+      <ProjectContextMenu project={project} where="sidebar" hidden={hidden} onHiddenChange={setHidden}>
+        <div
+          {...sortable?.handle}
+          className="group/row relative isolate flex items-center rounded-control transition-interactive hover:bg-muted data-[state=open]:bg-muted"
         >
-          <Chevron size={14} stroke={2} aria-hidden="true" />
-        </button>
-        <Link
-          to="/p/$projectId"
-          params={{ projectId: project.id }}
-          activeOptions={{ exact: true, includeSearch: false }}
-          className="flex min-w-0 flex-1 items-center gap-[9px] py-[7px] pr-2.5 pl-1 text-[13.5px] font-medium text-foreground hover:text-foreground data-[status=active]:text-accent-foreground"
-        >
-          {({ isActive }) => (
-            <>
-              {/* The same sliding background as the main navigation and the service rows. It
+          {sortable?.enabled && <SortableGrip grip={sortable.grip} name={project.name} />}
+          <button
+            type="button"
+            onClick={() => onToggle(project.id, open)}
+            aria-expanded={open}
+            aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
+            className="flex cursor-pointer border-0 bg-transparent py-[7px] pr-1 pl-2.5 text-ink-faint"
+          >
+            <Chevron size={14} stroke={2} aria-hidden="true" />
+          </button>
+          <Link
+            to="/p/$projectId"
+            params={{ projectId: project.id }}
+            activeOptions={{ exact: true, includeSearch: false }}
+            className="flex min-w-0 flex-1 items-center gap-[9px] py-[7px] pr-2.5 pl-1 text-[13.5px] font-medium text-foreground hover:text-foreground data-[status=active]:text-accent-foreground"
+          >
+            {({ isActive }) => (
+              <>
+                {/* The same sliding background as the main navigation and the service rows. It
                   follows the link's own active state, so it moves in the same commit as theirs. */}
-              {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-              <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} />
-              <span className={cn("truncate", hidden && "text-muted-foreground")}>{project.name}</span>
-              <span className="ml-auto text-xs font-normal text-muted-foreground transition-opacity group-hover/row:opacity-0 group-has-[[data-project-menu]:focus-visible]/row:opacity-0 group-has-[[data-project-menu][data-state=open]]/row:opacity-0 pointer-coarse:opacity-100!">
-                {project.serviceCount}
-              </span>
-            </>
-          )}
-        </Link>
-        {/* New service (+) and More (...): shown on hover or keyboard focus, always on touch screens. */}
-        <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100">
-          {!project.protected && (
-            <NewServiceMenu
-              projectId={project.id}
-              trigger={
-                <button
-                  type="button"
-                  data-project-menu=""
-                  aria-label={t("sidebar.newServiceIn", { name: project.name })}
-                  className="flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint transition-interactive hover:text-foreground"
-                >
-                  <IconPlus size={15} stroke={2} aria-hidden="true" />
-                </button>
-              }
-            />
-          )}
-          <ProjectMenu name={project.name} hidden={hidden} onHiddenChange={(hide) => onHiddenChange(project, hide)} />
+                {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} />
+                <span className={cn("truncate", hidden && "text-muted-foreground")}>{project.name}</span>
+                <span className="ml-auto text-xs font-normal text-muted-foreground transition-opacity group-hover/row:opacity-0 group-has-[[data-project-menu]:focus-visible]/row:opacity-0 group-has-[[data-project-menu][data-state=open]]/row:opacity-0 pointer-coarse:opacity-100!">
+                  {project.serviceCount}
+                </span>
+              </>
+            )}
+          </Link>
+          {/* New service (+) and More (...): shown on hover or keyboard focus, always on touch screens. */}
+          <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100">
+            {!project.protected && (
+              <NewServiceMenu
+                projectId={project.id}
+                trigger={
+                  <button
+                    type="button"
+                    data-project-menu=""
+                    aria-label={t("sidebar.newServiceIn", { name: project.name })}
+                    className="flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint transition-interactive hover:text-foreground"
+                  >
+                    <IconPlus size={15} stroke={2} aria-hidden="true" />
+                  </button>
+                }
+              />
+            )}
+            <ProjectMenu project={project} where="sidebar" hidden={hidden} onHiddenChange={setHidden} />
+          </div>
         </div>
-      </div>
+      </ProjectContextMenu>
       {/* Room after an open project (with its services, or none yet), so the next one reads as its own group;
           collapsed projects sit close together. */}
       {open && (
@@ -250,29 +256,32 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
             const status = statusDisplay(service.status, service.buildWaiting);
             return (
               <SortableService key={service.id} id={service.id} name={service.name}>
-                <Link
-                  to="/p/$projectId/s/$serviceId"
-                  params={{ projectId, serviceId: service.id }}
-                  className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
-                >
-                  {({ isActive }) => (
-                    <>
-                      {/* The same sliding background as the main navigation (sidebar.tsx). */}
-                      {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-                      <StatusDot status={status.dot} />
-                      <span className="truncate">{service.name}</span>
-                      {isBusy(service.status) && (
-                        <span
-                          title={status.label}
-                          className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg"
-                        >
-                          {/* "waiting for a build slot" does not fit next to a name: the badge says "waiting". */}
-                          {service.status === "building" && service.buildWaiting ? t("project.waitingShort") : status.label.toLowerCase()}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </Link>
+                {/* The link is the menu's trigger, so the sortable item around it keeps its own handlers. */}
+                <ServiceContextMenu service={service}>
+                  <Link
+                    to="/p/$projectId/s/$serviceId"
+                    params={{ projectId, serviceId: service.id }}
+                    className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[status=active]:text-accent-foreground"
+                  >
+                    {({ isActive }) => (
+                      <>
+                        {/* The same sliding background as the main navigation (sidebar.tsx). */}
+                        {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                        <StatusDot status={status.dot} />
+                        <span className="truncate">{service.name}</span>
+                        {isBusy(service.status) && (
+                          <span
+                            title={status.label}
+                            className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg"
+                          >
+                            {/* "waiting for a build slot" does not fit next to a name: the badge says "waiting". */}
+                            {service.status === "building" && service.buildWaiting ? t("project.waitingShort") : status.label.toLowerCase()}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </Link>
+                </ServiceContextMenu>
               </SortableService>
             );
           })}

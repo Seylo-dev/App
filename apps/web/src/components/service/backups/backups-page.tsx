@@ -5,7 +5,8 @@
 // restore (type the name to confirm; the text says what is replaced),
 // download (straight from the bucket) and delete. A failed restore or
 // delete says why inside its dialog, which stays open; nothing is left on
-// the card after it closes.
+// the card after it closes. A row's "..." and its right-click menu are
+// one list (menus/row-items.tsx).
 
 import { backups, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -14,8 +15,8 @@ import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { ActionsMenu } from "@seylo/ui/components/menu-items";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
@@ -24,6 +25,8 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { backupPolicyMenuEntries } from "../../menus/row-items";
+import { RowMenu } from "../../menus/row-menu";
 import { describeCron } from "../cron-text";
 import { CheckLabel } from "../field";
 import { volumesOf } from "../files/volumes";
@@ -125,47 +128,50 @@ function PolicyRow({ service, policy: p, onEdit }: { service: ServiceDetail; pol
     },
   });
   const remove = useOpMutation(backups.deletePolicy, { onSuccess: () => invalidate(backups.listPolicies) });
+  const menu = backupPolicyMenuEntries({
+    act: (action) => {
+      if (action === "runNow") run.mutate({ serviceId: service.id, policyId: p.id });
+      else if (action === "edit") onEdit();
+      else setConfirm(true);
+    },
+  });
   return (
-    <div className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-3 text-[13px]">
-      <Switch
-        size="sm"
-        checked={p.enabled}
-        onCheckedChange={(enabled) => update.mutate({ serviceId: service.id, policyId: p.id, enabled })}
-        aria-label={t("serviceBackups.enabled")}
-      />
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <b className="font-semibold">{policyTitle(p, service.kind)}</b>
-        <span className="text-[12.5px] text-ink-strong">
-          {t("serviceBackups.policyLine", { schedule: describeCron(p.schedule), destination: p.destinationName, keep: p.keepLast })}
-        </span>
-      </span>
-      {p.stopService && <Chip tone="amber">{t("serviceBackups.stopsService")}</Chip>}
-      <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        {p.lastRun && (
-          <span className={cn(p.lastRun.status === "failed" && "text-chip-red-fg")}>
-            {t(`serviceBackups.last.${p.lastRun.status === "failed" ? "failed" : p.lastRun.status === "running" ? "running" : "ok"}`, {
-              when: p.lastRun.finishedAt ? formatRelative(p.lastRun.finishedAt) : "",
-            })}
+    <>
+      <RowMenu entries={menu} aria-label={t("serviceBackups.actions")}>
+        <div className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-3 text-[13px] transition-colors duration-200 data-[state=open]:bg-raised">
+          <Switch
+            size="sm"
+            checked={p.enabled}
+            onCheckedChange={(enabled) => update.mutate({ serviceId: service.id, policyId: p.id, enabled })}
+            aria-label={t("serviceBackups.enabled")}
+          />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <b className="font-semibold">{policyTitle(p, service.kind)}</b>
+            <span className="text-[12.5px] text-ink-strong">
+              {t("serviceBackups.policyLine", { schedule: describeCron(p.schedule), destination: p.destinationName, keep: p.keepLast })}
+            </span>
           </span>
-        )}
-        {p.enabled && p.nextRunAt && <span>{t("serviceBackups.next", { when: formatRelative(p.nextRunAt) })}</span>}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
-              <IconDots size={15} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => run.mutate({ serviceId: service.id, policyId: p.id })}>
-              {t("serviceBackups.backUpNow")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onEdit}>{t("service.edit")}</DropdownMenuItem>
-            <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-              {t("service.remove")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
+          {p.stopService && <Chip tone="amber">{t("serviceBackups.stopsService")}</Chip>}
+          <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {p.lastRun && (
+              <span className={cn(p.lastRun.status === "failed" && "text-chip-red-fg")}>
+                {t(`serviceBackups.last.${p.lastRun.status === "failed" ? "failed" : p.lastRun.status === "running" ? "running" : "ok"}`, {
+                  when: p.lastRun.finishedAt ? formatRelative(p.lastRun.finishedAt) : "",
+                })}
+              </span>
+            )}
+            {p.enabled && p.nextRunAt && <span>{t("serviceBackups.next", { when: formatRelative(p.nextRunAt) })}</span>}
+            <ActionsMenu
+              entries={menu}
+              trigger={
+                <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
+                  <IconDots size={15} />
+                </Button>
+              }
+            />
+          </span>
+        </div>
+      </RowMenu>
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -175,7 +181,7 @@ function PolicyRow({ service, policy: p, onEdit }: { service: ServiceDetail; pol
         destructive
         onConfirm={() => remove.mutateAsync({ serviceId: service.id, policyId: p.id }).then(() => undefined)}
       />
-    </div>
+    </>
   );
 }
 

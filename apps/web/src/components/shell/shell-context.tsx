@@ -1,8 +1,11 @@
 // Shell-wide actions any screen can trigger: the command palette, the New
 // project dialog and the New service forms. Kept in context so the sidebar,
 // the dashboard, the project page and the palette open the same dialogs.
+// The object menus' actions and dialogs (menus/object-actions.tsx) are
+// shell-wide too.
 
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { ObjectActionsProvider } from "../menus/object-actions";
 import { NewProjectDialog } from "../new-project-dialog";
 import type { CatalogKind, NewServiceKind } from "../new-service/kinds";
 import { NewServiceDialog } from "../new-service/new-service-dialog";
@@ -46,10 +49,12 @@ export function ShellProvider({ children }: { children: ReactNode }) {
 
   return (
     <ShellContext.Provider value={actions}>
-      {children}
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-      <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
-      <NewServiceDialog kind={newService?.kind ?? null} projectId={newService?.projectId} onClose={() => setNewService(null)} />
+      <ObjectActionsProvider>
+        {children}
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+        <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+        <NewServiceDialog kind={newService?.kind ?? null} projectId={newService?.projectId} onClose={() => setNewService(null)} />
+      </ObjectActionsProvider>
     </ShellContext.Provider>
   );
 }
