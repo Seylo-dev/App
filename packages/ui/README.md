@@ -69,6 +69,8 @@ i18n section. Without the provider each label shows its own key.
 | `copy-field` | `CopyField` copies on click (or Enter/Space), never on focus alone; keyboard focus rings the whole field; `secret` masks with an eye toggle; `copyText`, `useCopy` | works on plain HTTP too |
 | `code-block` | `CodeBlock` light or dark, title, copy, wraps long lines (`noWrap` scrolls sideways); `CopyCode` an inline code chip that wraps, with a copy button | no syntax colors (Monaco edits); every command shown gets one of the two |
 | `dropdown-menu` | `DropdownMenu*` items, checkbox/radio items, labels, separators, sub menus | `destructive` items |
+| `context-menu` | `ContextMenu*`: the same parts as the dropdown, opened by right-click, touch long-press, the context menu key or Shift+F10 | same classes as the dropdown (`lib/menu-styles.ts`); see "Menus" |
+| `menu-items` | `MenuEntry`, `MenuItems`, `RowContextMenu`, `ActionsMenu`, `tidyEntries`, `entryIds` | one entry list for a row's "..." and its right-click menu |
 | `popover`, `tooltip` | `Popover*`; `Tooltip*` and the `Tip` shorthand | |
 | `dialog`, `sheet` | `Dialog*`; `Sheet*` right, left or bottom with header, body, footer | |
 | `confirm-dialog` | `ConfirmDialog` with `destructive` and `confirmText` (type to confirm) | async `onConfirm`: busy while pending, stays open showing the error on reject |
@@ -80,6 +82,49 @@ i18n section. Without the provider each label shows its own key.
 | `sparkline` | `Sparkline` | tiny trend for tiles and cells |
 | `log-viewer` | `LogViewer`, `useLogBuffer`, `LogBuffer` | see below |
 | `labels` | `UiLabelsProvider`, `useUiLabels`, `UiLabels` | the kit's own words |
+
+## Menus
+
+An object's "..." menu and its right-click menu are one list of
+`MenuEntry` (item, checkbox, sub menu, label, separator), built once and
+handed to both:
+
+```tsx
+const entries: MenuEntry[] = [
+  { type: "item", id: "restart", label: "Restart", icon: <IconRefresh size={15} />, onSelect: restart },
+  { type: "item", id: "deploy", label: "Deploy", disabled: busy, disabledReason: "A deploy is in progress.", onSelect: deploy },
+  { type: "separator", id: "sep:delete" },
+  { type: "item", id: "delete", label: "Delete", destructive: true, onSelect: askToDelete },
+];
+<RowContextMenu entries={entries}>
+  <a href="..." className="... data-[state=open]:bg-muted">api</a>   {/* the row itself is the trigger */}
+</RowContextMenu>
+<ActionsMenu entries={entries} trigger={<Button size="icon" aria-label="More actions">...</Button>} />
+```
+
+`MenuItems` renders the entries for either menu from the same function
+(`menuElements`), so the two cannot differ; `tidyEntries` drops stray
+separators and empty sub menus, and a disabled item's `disabledReason`
+shows once as a note at the end of the menu (a disabled item takes no
+pointer, so its title never shows). `RowContextMenu` puts the trigger on
+the row's own element (`asChild`, no wrapper), which has
+`data-state="open"` while the menu is open for its selected look; with no
+entries it leaves the row alone. Give `items` instead of `entries` for a
+menu that builds its entries when it opens (hooks allowed), so a long list
+asks for nothing until one menu opens. Dialogs a menu opens are never
+inside the menu or the row.
+
+`ContextMenuTrigger` keeps the browser's own menu where it is the better
+one: text fields, `.monaco-editor`, `.xterm`, anything inside
+`[data-native-context-menu]`, a row with text selected in it (read on
+pointerdown, before macOS selects the word under the pointer), anything
+rendered into the row through a portal (a dialog), and Shift+right-click
+anywhere. Nothing opens on `[data-no-context-menu]` (a drag grip), inside
+an open menu, or while `blocked()` says so. The context menu key and
+Shift+F10 open the menu at the focused element in every browser (macOS
+has no such key). After a touch long-press opened it, the tap the lifted
+finger leaves on the row is swallowed. `contextMenuDecision` and
+`isMenuKey` are the pure rules (tested without a DOM).
 
 ## LogViewer
 
@@ -104,4 +149,5 @@ move what the reader is looking at.
 
 `bun test` covers the logic that has no DOM: smooth paths (they match
 `design/smoothpath.py`), ANSI parsing and highlight, the log ring and its
-once-per-frame notify, sorting, and the toast store.
+once-per-frame notify, sorting, the toast store, and the menus (the same
+items in both kinds, separators, the browser's menu or ours).

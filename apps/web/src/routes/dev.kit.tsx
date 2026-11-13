@@ -25,6 +25,7 @@ import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input, Label } from "@seylo/ui/components/input";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { LogViewer, useLogBuffer } from "@seylo/ui/components/log-viewer";
+import { ActionsMenu, type MenuEntry, RowContextMenu } from "@seylo/ui/components/menu-items";
 import { PageHeader } from "@seylo/ui/components/page-header";
 import { Popover, PopoverContent, PopoverTrigger } from "@seylo/ui/components/popover";
 import { Progress, usageTone } from "@seylo/ui/components/progress";
@@ -53,6 +54,32 @@ import { IconArrowBackUp, IconPlus, IconRefresh, IconRocket, IconServer, IconTra
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { t } from "../i18n/t";
+
+/** The context menu sample: the same entries in the "..." and on right-click. */
+const menuSample: MenuEntry[] = [
+  { type: "label", id: "name", label: "api" },
+  { type: "item", id: "restart", label: t("devkit.sample.restart"), icon: <IconRefresh size={15} />, shortcut: "R", onSelect: () => {} },
+  {
+    type: "item",
+    id: "redeploy",
+    label: t("devkit.sample.redeploy"),
+    icon: <IconRocket size={15} />,
+    disabled: true,
+    disabledReason: t("devkit.sample.redeployBusy"),
+    onSelect: () => {},
+  },
+  {
+    type: "sub",
+    id: "more",
+    label: t("devkit.sample.more"),
+    entries: [
+      { type: "item", id: "rollback", label: t("devkit.sample.rollback"), icon: <IconArrowBackUp size={15} />, onSelect: () => {} },
+      { type: "item", id: "logs", label: t("devkit.sample.viewLogs"), onSelect: () => {} },
+    ],
+  },
+  { type: "separator", id: "sep:delete" },
+  { type: "item", id: "delete", label: t("devkit.sample.delete"), icon: <IconTrash size={15} />, destructive: true, onSelect: () => {} },
+];
 
 export const Route = createFileRoute("/dev/kit")({
   component: KitPage,
@@ -398,6 +425,17 @@ function KitPage() {
             onConfirm={() => new Promise((resolve) => setTimeout(resolve, 600))}
           />
         </div>
+        {/* One list of entries, as the "..." menu and as the row's right-click (and long-press, Shift+F10) menu. */}
+        <RowContextMenu entries={menuSample}>
+          <div className="flex cursor-default items-center gap-3 rounded-control bg-field px-3 py-2.5 text-[13px] transition-colors duration-200 data-[state=open]:bg-muted">
+            <StatusDot status="ok" />
+            <span className="font-medium">api</span>
+            <span className="text-muted-foreground">{t("devkit.sample.contextMenuHint")}</span>
+            <span className="ml-auto">
+              <ActionsMenu entries={menuSample} label={t("devkit.sample.menu")} />
+            </span>
+          </div>
+        </RowContextMenu>
       </SectionCard>
 
       <SectionCard title={t("devkit.sections.feedback")}>

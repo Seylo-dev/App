@@ -171,6 +171,8 @@ export function LogViewer({
   return (
     <section
       data-slot="log-viewer"
+      // Log lines are copied with the browser's own menu.
+      data-native-context-menu=""
       aria-label={rest["aria-label"]}
       className={cn("relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-card bg-terminal text-terminal-foreground", className)}
       style={height !== undefined ? { height } : undefined}

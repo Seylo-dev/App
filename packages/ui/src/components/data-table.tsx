@@ -1,14 +1,16 @@
 // The panel's table: a white card with quiet column headers, divider rows,
-// click-to-sort columns, an empty state and a row-actions menu. Rows come
-// in already loaded (screens page with ops); sorting is client-side.
+// click-to-sort columns, an empty state and a row-actions menu, which is
+// also the row's right-click menu (the same entries, menu-items.tsx). Rows
+// come in already loaded (screens page with ops); sorting is client-side.
 
 import { IconArrowDown, IconArrowUp, IconDots, IconSelector } from "@tabler/icons-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { nextSort, type SortState, type SortValue, sortRows } from "../lib/sort";
 import { cn } from "../lib/utils";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "./dropdown-menu";
 import { EmptyState } from "./empty-state";
 import { useUiLabels } from "./labels";
+import { type MenuEntry, MenuItems, RowContextMenu } from "./menu-items";
 import { SkeletonText } from "./skeleton";
 
 export type { SortState } from "../lib/sort";
@@ -42,8 +44,27 @@ export interface RowAction {
   onSelect: () => void;
   destructive?: boolean;
   disabled?: boolean;
+  /** Why it is disabled, shown in the menu. */
+  disabledReason?: string;
   /** Draw a separator above this action. */
   separated?: boolean;
+}
+
+/** A row's actions as menu entries: the "..." menu and the right-click menu both show these. */
+export function rowActionEntries(actions: readonly RowAction[]): MenuEntry[] {
+  return actions.flatMap((action): MenuEntry[] => [
+    ...(action.separated ? [{ type: "separator", id: `${action.label}:separator` } as const] : []),
+    {
+      type: "item",
+      id: action.label,
+      label: action.label,
+      icon: action.icon,
+      onSelect: action.onSelect,
+      destructive: action.destructive,
+      disabled: action.disabled,
+      disabledReason: action.disabledReason,
+    },
+  ]);
 }
 
 export interface DataTableProps<T> {
@@ -57,7 +78,7 @@ export interface DataTableProps<T> {
   /** Controlled sort. */
   sort?: SortState | null;
   onSortChange?: (sort: SortState | null) => void;
-  /** Items for the "..." menu at the end of each row. */
+  /** Items for the "..." menu at the end of each row, and its right-click menu. */
   rowActions?: (row: T) => RowAction[];
   onRowClick?: (row: T) => void;
   /** Shown instead of rows when there are none (an EmptyState). */
@@ -203,50 +224,49 @@ export function DataTable<T>({
           )}
           {sorted.map((row) => {
             const actions = rowActions?.(row);
+            const entries = actions ? rowActionEntries(actions) : [];
             return (
-              <tr
-                key={getRowId(row)}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={cn("align-middle", onRowClick && "cursor-pointer transition-colors hover:bg-raised")}
-              >
-                {columns.map((col, i) => (
-                  <td
-                    key={col.id}
-                    className={cn(
-                      "border-t border-divider py-3.5",
-                      pad(i, i === colCount - 1),
-                      col.align === "right" && "text-right tabular-nums",
-                      col.hideOnMobile && "max-md:hidden",
-                      col.className,
-                    )}
-                  >
-                    {col.cell(row)}
-                  </td>
-                ))}
-                {actions && actions.length === 0 && <td className="border-t border-divider" />}
-                {actions && actions.length > 0 && (
-                  // biome-ignore lint/a11y/useKeyWithClickEvents: only stops the row click; the menu button handles keys.
-                  <td className="border-t border-divider py-2 pr-[18px] text-right" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        aria-label={labels.rowActions}
-                        className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
-                      >
-                        <IconDots size={16} />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent>
-                        {actions.map((a) => [
-                          a.separated ? <DropdownMenuSeparator key={`${a.label}-sep`} /> : null,
-                          <DropdownMenuItem key={a.label} destructive={a.destructive} disabled={a.disabled} onSelect={a.onSelect}>
-                            {a.icon}
-                            {a.label}
-                          </DropdownMenuItem>,
-                        ])}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                )}
-              </tr>
+              <RowContextMenu key={getRowId(row)} entries={entries} aria-label={labels.rowActions}>
+                <tr
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  className={cn(
+                    "align-middle transition-colors duration-200 data-[state=open]:bg-raised",
+                    onRowClick && "cursor-pointer hover:bg-raised",
+                  )}
+                >
+                  {columns.map((col, i) => (
+                    <td
+                      key={col.id}
+                      className={cn(
+                        "border-t border-divider py-3.5",
+                        pad(i, i === colCount - 1),
+                        col.align === "right" && "text-right tabular-nums",
+                        col.hideOnMobile && "max-md:hidden",
+                        col.className,
+                      )}
+                    >
+                      {col.cell(row)}
+                    </td>
+                  ))}
+                  {actions && actions.length === 0 && <td className="border-t border-divider" />}
+                  {actions && actions.length > 0 && (
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: only stops the row click; the menu button handles keys.
+                    <td className="border-t border-divider py-2 pr-[18px] text-right" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          aria-label={labels.rowActions}
+                          className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
+                        >
+                          <IconDots size={16} />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <MenuItems as="dropdown" entries={entries} />
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  )}
+                </tr>
+              </RowContextMenu>
             );
           })}
         </tbody>

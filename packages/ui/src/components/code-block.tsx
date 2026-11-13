@@ -63,6 +63,8 @@ export function CodeBlock({ code, title, tone = "light", noCopy = false, noWrap 
   return (
     <div
       data-slot="code-block"
+      // Code is copied with the browser's own menu, also inside a row that has a right-click menu.
+      data-native-context-menu=""
       className={cn(
         "relative flex min-w-0 flex-col overflow-hidden rounded-control",
         dark ? "bg-terminal text-terminal-foreground" : "bg-raised text-foreground",
@@ -112,6 +114,7 @@ export function CopyCode({ code, className, ...rest }: { code: string; "aria-lab
   return (
     <span
       data-slot="copy-code"
+      data-native-context-menu=""
       className={cn("inline-flex max-w-full min-w-0 items-start gap-1 rounded-chip bg-field py-0.5 pr-0.5 pl-2 align-middle", className)}
     >
       <code className="min-w-0 py-0.5 font-mono text-xs leading-4 whitespace-pre-wrap [overflow-wrap:anywhere]">{code}</code>

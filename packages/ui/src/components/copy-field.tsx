@@ -87,6 +87,8 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
     // biome-ignore lint/a11y/noStaticElementInteractions: same: the field only widens the value button's click area.
     <div
       data-slot="copy-field"
+      // A value to copy keeps the browser's own menu, also inside a row that has a right-click menu.
+      data-native-context-menu=""
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("[data-slot=copy-field-reveal]")) return;
         void copy(value);
