@@ -64,6 +64,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["packages/env-analyzer/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noTemplateCurlyInString": "off"
+          }
+        }
+      }
     }
   ]
 }

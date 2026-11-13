@@ -62,11 +62,12 @@ test-release: ## No write-token job runs npm (scripts/check-release-workflow.ts)
 	installer/test/release-sign.sh
 	installer/test/release-publish.sh
 
-lint: ## buf lint, gofmt, go vet, staticcheck, Biome, tsc
+lint: ## buf lint, gofmt, go vet, staticcheck, Biome (one config: scripts/check-biome-config.sh), tsc
 	buf lint
 	@unformatted="$$(gofmt -l go tools)"; if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 	@for d in $(GO_DIRS); do go -C $$d vet ./... || exit 1; done
 	go -C go tool staticcheck ./...
+	scripts/check-biome-config.sh
 	bun run lint
 	bun run typecheck
 

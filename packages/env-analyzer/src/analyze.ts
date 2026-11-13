@@ -108,7 +108,9 @@ function checkReference(
     const message =
       reference.target === sharedTarget ? "This project has no shared variables" : `No service named ${reference.target} in this project`;
     const names = context.targets.map((t) => t.name).filter((name) => name.toLowerCase() !== context.self.name.toLowerCase());
-    return [diag("unknown-service", "error", message, "", params, reference.targetRange, suggest(reference.target, names, reference.targetRange))];
+    return [
+      diag("unknown-service", "error", message, "", params, reference.targetRange, suggest(reference.target, names, reference.targetRange)),
+    ];
   }
   const variable = target.variables.find((v) => v.name === reference.variable);
   if (!variable) {
@@ -248,7 +250,9 @@ function checkLiteralAddresses(index: LineIndex, entry: EnvEntry, context: Analy
       const from = start + mention.from;
       const to = from + mention.host.length + mention.port.length;
       if (entry.references.some((r) => from < r.range.end && to > r.range.start)) continue;
-      out.push(crossNodeDiagnostic("address", target, missing, context, index.range(from, to), null, entry, `${mention.host}${mention.port}`));
+      out.push(
+        crossNodeDiagnostic("address", target, missing, context, index.range(from, to), null, entry, `${mention.host}${mention.port}`),
+      );
     }
   }
   return out;

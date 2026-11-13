@@ -186,7 +186,11 @@ function publicByName(entry: EnvEntry, options: ClassifyOptions): SecretVerdict 
  * secret), else its name, its value, a reference `referenceIsSecret` says
  * carries a secret, or its resolved value.
  */
-export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, entry: EnvEntry, options: ClassifyOptions = {}): SecretVerdict {
+export function classifySecret(
+  parsed: Pick<ParsedEnv, "comments" | "text">,
+  entry: EnvEntry,
+  options: ClassifyOptions = {},
+): SecretVerdict {
   const override = secretOverride(parsed, entry);
   // Name and value as written only: cheap, and what makes a public one look like a secret.
   const looked = () => secretName.test(entry.key) || looksSecret(entry.value);
@@ -194,7 +198,9 @@ export function classifySecret(parsed: Pick<ParsedEnv, "comments" | "text">, ent
   if (override === "public") return { secret: false, reason: "comment", overridesGuess: looked() };
   const prefix = publicPrefixOf(entry.key);
   if (prefix) {
-    return credentialUnderPrefix(entry, prefix, options) ?? { secret: false, reason: "publicPrefix", detail: prefix, overridesGuess: looked() };
+    return (
+      credentialUnderPrefix(entry, prefix, options) ?? { secret: false, reason: "publicPrefix", detail: prefix, overridesGuess: looked() }
+    );
   }
   if (isPublicName(entry.key)) return publicByName(entry, options);
   return guess(entry, options);
@@ -227,7 +233,7 @@ export function isSecretEntry(
  */
 function carriesCredential(context: AnalyzeContext, target: string, name: string, seen: Set<string>): boolean {
   const found = findVariable(context, target, name);
-  if (!found || found.target.kind !== "service") return false;
+  if (found?.target.kind !== "service") return false;
   const v = found.variable;
   if (v.dependsOn === undefined) return v.secret ?? v.sensitive;
   const id = `${found.target.name.toLowerCase()}.${v.name}`;

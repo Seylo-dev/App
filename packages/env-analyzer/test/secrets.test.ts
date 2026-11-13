@@ -300,7 +300,9 @@ describe("secret classification", () => {
           internalHost: "api",
           exposed: false,
           // Own variables are sensitive for the editor's masking; secret is the panel's decision.
-          variables: [{ name: "BUILD_ID", value: "Zx81kLq0Pw2mNv7Bc4Rt9Ys6", scope: "plain", sensitive: true, secret: false, description: "" }],
+          variables: [
+            { name: "BUILD_ID", value: "Zx81kLq0Pw2mNv7Bc4Rt9Ys6", scope: "plain", sensitive: true, secret: false, description: "" },
+          ],
         },
       ],
     };

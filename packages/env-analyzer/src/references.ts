@@ -14,7 +14,7 @@ export const sharedTarget = "project";
 const open = "${{";
 const close = "}}";
 /** target.VARIABLE and the rest of the braces (blanks, an index, or something wrong), split without backtracking. */
-const inner = /^(\s*)([A-Za-z0-9_][A-Za-z0-9_-]*)\.([A-Za-z_][A-Za-z0-9_]*)([^]*)$/;
+const inner = /^(\s*)([A-Za-z0-9_][A-Za-z0-9_-]*)\.([A-Za-z_][A-Za-z0-9_]*)([\s\S]*)$/;
 /** A rest that is meant as an index, well-formed or not: brackets (an unclosed one, one after a blank too) and nothing after. */
 const bracketShape = /^\s*\[[^\]]*\]?$/;
 /** A well-formed index: digits only. */

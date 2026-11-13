@@ -158,7 +158,9 @@ function unreachable(
     target.variables.some((v) => v.name === name && v.scope === "public"),
   );
   const publicReference = later ? formatReference(target.name, later) : "";
-  const then = publicReference ? `Give ${target.name} a public address, then use ${publicReference}.` : `Give ${target.name} a public address and use that instead.`;
+  const then = publicReference
+    ? `Give ${target.name} a public address, then use ${publicReference}.`
+    : `Give ${target.name} a public address and use that instead.`;
   return {
     code: "hardcoded-reference",
     severity: "info",
@@ -261,7 +263,7 @@ function hostMatch(raw: string, candidate: Candidate, key: string): number {
   return raw.toLowerCase() === host.toLowerCase() ? raw.length : -1;
 }
 
-const urlShape = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#\s]*)([^]*)$/i;
+const urlShape = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#\s]*)([\s\S]*)$/i;
 
 /**
  * How much of raw the URL covers: all of it, or its start when a path,

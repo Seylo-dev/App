@@ -231,7 +231,10 @@ describe("a service's own built-in values", () => {
   test("its internal address works from its own node, and a database's set resolves", () => {
     const app: AnalyzeContext = {
       ...context,
-      self: { ...context.self, builtins: appVariables.map((v) => ({ ...v, value: v.name === "INTERNAL_URL" ? "http://worker:3001" : `v-${v.name}` })) },
+      self: {
+        ...context.self,
+        builtins: appVariables.map((v) => ({ ...v, value: v.name === "INTERNAL_URL" ? "http://worker:3001" : `v-${v.name}` })),
+      },
     };
     const text = "SELF=${{worker.INTERNAL_URL}}\nLISTEN=${{worker.INTERNAL_HOST}}:${{worker.INTERNAL_PORT}}\n";
     expect(analyzeEnv(text, app).diagnostics).toEqual([]);

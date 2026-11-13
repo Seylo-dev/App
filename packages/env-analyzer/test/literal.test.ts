@@ -262,7 +262,13 @@ describe("bare-reference", () => {
   test("a backslash in double quotes is a backslash unless the parser reads an escape", () => {
     // The app gets C:\dir\api.URL: a backslash is no delimiter, the same as unquoted.
     const text = ['A="C:\\dir\\api.URL"', "B=C:\\dir\\api.URL", 'C="\\xdb.PASSWORD"', 'D="\\\\api.URL"', 'E="\\$api.URL"', ""].join("\n");
-    expect(parseEnv(text).entries.map((e) => e.value)).toEqual(["C:\\dir\\api.URL", "C:\\dir\\api.URL", "\\xdb.PASSWORD", "\\api.URL", "$api.URL"]);
+    expect(parseEnv(text).entries.map((e) => e.value)).toEqual([
+      "C:\\dir\\api.URL",
+      "C:\\dir\\api.URL",
+      "\\xdb.PASSWORD",
+      "\\api.URL",
+      "$api.URL",
+    ]);
     expect(found(text)).toEqual([]);
     // Escapes the parser reads stand in for what they become: line breaks and tabs are blanks, \" a quote.
     const escapes = ['A="x\\tapi.URL"', 'B="\\"api.URL\\""', 'C="\\r\\napi.URL\\n"', ""].join("\n");

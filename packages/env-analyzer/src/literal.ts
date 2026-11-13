@@ -186,7 +186,16 @@ function bareReference(
     severity: "warning",
     message,
     detail,
-    params: { key: entry.key, token, target: target?.name ?? name, variable, reference, wrapped, reason, suggestions: suggestions.join(", ") },
+    params: {
+      key: entry.key,
+      token,
+      target: target?.name ?? name,
+      variable,
+      reference,
+      wrapped,
+      reason,
+      suggestions: suggestions.join(", "),
+    },
     range,
     fixes: reference ? [use(reference)] : suggestions.map((s) => use(formatReference(s, variable, item))),
   };
@@ -204,5 +213,5 @@ function bareReference(
 function scannable(raw: string, quoted: boolean): string {
   const out = raw.replace(/\$\{\{.*?(?:\}\}|$)/gm, (text) => masked.repeat(text.length));
   if (!quoted) return out;
-  return out.replace(/\\[nrt"\\$]/g, (escape) => (escape === '\\"' ? '""' : /\\[nrt]/.test(escape) ? "  " : masked.repeat(2)));
+  return out.replace(/\\[nrt"\\$]/g, (seq) => (seq === '\\"' ? '""' : /\\[nrt]/.test(seq) ? "  " : masked.repeat(2)));
 }

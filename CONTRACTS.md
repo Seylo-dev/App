@@ -28,7 +28,7 @@ packages/zip/             streaming zip writer (store, deflate, data descriptors
 installer/                install.sh.tmpl + generated brand.env and install.sh (scripts/render-installer.sh)
 openapi.json              generated from the op registry (scripts/gen-openapi.ts)
 service-export.schema.json  JSON Schema of the service export file format, generated with openapi.json
-biome.json                TypeScript/CSS formatting and lint rules
+biome.json                TypeScript/CSS formatting and lint rules, the only Biome config (rules for one folder go in its overrides; scripts/check-biome-config.sh fails on a nested one)
 scripts/                  codegen helpers and the generated-code check
 deploy/panel.Dockerfile   panel image: Bun runtime + the built panel and web app (`make panel-image`)
 .goreleaser.yaml          release build (signs nothing, runs no npm: it packages `make build-ts`'s apps/*/dist); scripts/release-manifest.sh writes the update manifest and scripts/release-sign.sh signs it and checksums.txt
@@ -286,7 +286,7 @@ Toolchain: Go 1.27, Bun 1.4, buf 1.75. Go tools (`protoc-gen-go`,
 | `make test` | `go test -race` for `go/` and `tools/brandgen`, `bun test` in every workspace, `make test-installer`, `make test-release` |
 | `make test-installer` | `installer/test/run.sh`: install.sh in `--root` mode against a fake signed release (curl, docker, systemctl shims; minisign and OpenSSL 3 verifiers, dash), plus `scripts/release-preflight.sh`; skips without minisign |
 | `make test-release` | `installer/test/release-sign.sh` and `installer/test/release-publish.sh`: `scripts/release-sign.sh` and `scripts/release-publish.sh` against fake draft releases (gh shim) and a fake ghcr.io; skip without minisign or jq |
-| `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` for every workspace |
+| `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` for every workspace; fails on a nested `biome.json` (`scripts/check-biome-config.sh`: one that extends the root reads the root's `files.includes` from its own folder, so Biome checks none of its files) |
 | `make breaking` | `buf breaking` against `main` |
 
 Root `bun run` scripts: `build` (web then panel), `test`, `typecheck`,

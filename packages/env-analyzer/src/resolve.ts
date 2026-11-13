@@ -126,7 +126,7 @@ export function referenceCompletions(context: AnalyzeContext): ReferenceCompleti
       });
       const items = variable.list && variable.value !== null ? listItems(variable.value) : [];
       if (items.length < 2) continue;
-      items.forEach((item, index) =>
+      for (const [index, item] of items.entries()) {
         out.push({
           label: `${target.name}.${variable.name}[${index}]`,
           insertText: formatReference(target.name, variable.name, index),
@@ -135,8 +135,8 @@ export function referenceCompletions(context: AnalyzeContext): ReferenceCompleti
           index,
           value: item,
           reachable,
-        }),
-      );
+        });
+      }
     }
   }
   return out.sort((a, b) => Number(b.reachable) - Number(a.reachable));
