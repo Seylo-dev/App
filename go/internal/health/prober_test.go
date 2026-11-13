@@ -210,7 +210,9 @@ func TestWaitHealthyNotListening(t *testing.T) {
 
 	host, port := closedPort(t)
 	tg := Target{Address: host}
-	err := p.WaitHealthy(ctx(150*time.Millisecond), tg, nil, tcpPorts(port))
+	// Every try is refused at once, so the window only has to hold a few tries,
+	// also on a loaded machine (150ms was too short for the first dial there).
+	err := p.WaitHealthy(ctx(750*time.Millisecond), tg, nil, tcpPorts(port))
 	var nl *NotListeningError
 	if !errors.As(err, &nl) || nl.Port != port || !errors.Is(err, ErrNeverHealthy) ||
 		!strings.Contains(err.Error(), "health check never passed: tcp check on port "+strconv.Itoa(int(port))+": dial tcp") ||
@@ -219,7 +221,7 @@ func TestWaitHealthyNotListening(t *testing.T) {
 	}
 	// A health check that sets only timings keeps the default probe.
 	timings := &agentv1.HealthCheck{Timeout: durationpb.New(time.Second)}
-	if err := p.WaitHealthy(ctx(150*time.Millisecond), tg, timings, tcpPorts(port)); !errors.As(err, &nl) {
+	if err := p.WaitHealthy(ctx(750*time.Millisecond), tg, timings, tcpPorts(port)); !errors.As(err, &nl) {
 		t.Fatalf("default probe with timings: %v", err)
 	}
 
