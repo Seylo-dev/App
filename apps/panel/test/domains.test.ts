@@ -54,6 +54,8 @@ describe("dns classification", () => {
 describe("domains ops", () => {
   test("automatic domain from the node's wildcard becomes primary and is routed", async () => {
     const { service, node } = setup();
+    // addAuto looks up the wildcard's registrable domain (a warning when it has no name servers).
+    setDnsLookups(fakeDns({ ns: { "example.com": ["ns1.registrar.net"] } }));
     const listed = await callOp(panel, domainOps.list, { serviceId: service.id }, { cookie });
     expect(listed.body).toEqual({ domains: [], autoDomainSuggestion: "web.n1.example.com" });
 

@@ -14,7 +14,7 @@ import { checkOutput, TemplateError, type TemplateOutput, type TemplateService }
 import { runTemplate } from "../../template-runner/runner";
 import { create as createDatabase } from "../databases/ops";
 import { queueDeploy } from "../deployments/queue";
-import { addAuto, add as addDomain } from "../domains/ops";
+import { addAutoDomain, add as addDomain } from "../domains/ops";
 import { buildEnvGraph } from "../env/graph";
 import { checkEnvReferences } from "../env/ops";
 import { writeServiceEnv } from "../env/store";
@@ -290,7 +290,7 @@ export async function installTemplate(ctx: OpContext, input: InstallInput & { de
       for (const d of s.data.domains ?? []) {
         if (autoHosts.has(d.host ?? "")) {
           if (wildcard)
-            addAuto.run({ serviceId: id, targetPort: d.port, subdomain: autoSubdomain(ctx, s.data.serviceName, wildcard) }, ctx);
+            addAutoDomain({ serviceId: id, targetPort: d.port, subdomain: autoSubdomain(ctx, s.data.serviceName, wildcard) }, ctx);
         } else {
           await addDomain.run(
             { serviceId: id, host: d.host as string, targetPort: d.port, ...(d.path ? { pathPrefix: d.path } : {}) },

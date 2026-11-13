@@ -1,13 +1,15 @@
 // The DNS half of custom domains: what a host's records mean for the nodes
-// a service runs on, which zone the host belongs in, and whether Cloudflare
-// serves it. Lookups go through public resolvers (1.1.1.1, 8.8.8.8) so the
-// answer matches what visitors see, not a split-horizon view of the panel's
-// host. Ported from an earlier in-house implementation by the same authors,
-// plus IPv6, CNAMEs, the records to create and the Cloudflare DNS link.
+// a service runs on, which zone the host belongs in (zone.ts: never above
+// its registrable domain), and whether Cloudflare serves it. Lookups go
+// through public resolvers (1.1.1.1, 8.8.8.8) so the answer matches what
+// visitors see, not a split-horizon view of the panel's host. Ported from
+// an earlier in-house implementation by the same authors, plus IPv6,
+// CNAMEs, the records to create and the Cloudflare DNS link.
 
 import { Resolver } from "node:dns/promises";
 import { isIPv4, isIPv6 } from "node:net";
 import { isCloudflareAddress } from "../../http/cloudflare";
+import { findZone, registrableDomain, registrableMissingMessage } from "./zone";
 
 /** An address in Cloudflare's published proxy ranges (one list, http/cloudflare.ts): a record there means the orange cloud is on. */
 export function isCloudflareIp(ip: string): boolean {
@@ -36,16 +38,24 @@ export interface DnsLookups {
 }
 
 const notFound = new Set(["ENOTFOUND", "ENODATA", "NXDOMAIN", "ESERVFAIL", "ENONAME"]);
+/** NS lookups throw a SERVFAIL: the zone walk tells "no such domain" from "its servers do not answer" (zone.ts). */
+const nsNotFound = new Set([...notFound].filter((code) => code !== "ESERVFAIL"));
 
-/** Lookups through public resolvers; "no such record" answers are empty lists, real failures throw. */
-export function publicDns(): DnsLookups {
+type ResolverLookups = Pick<Resolver, "resolve4" | "resolve6" | "resolveCname" | "resolveNs">;
+
+function publicResolver(): ResolverLookups {
   const resolver = new Resolver({ timeout: 4000, tries: 2 });
   resolver.setServers(["1.1.1.1", "8.8.8.8"]);
-  const quiet = async (lookup: () => Promise<string[]>) => {
+  return resolver;
+}
+
+/** Lookups through public resolvers; "no such record" answers are empty lists, real failures throw. */
+export function publicDns(resolver: ResolverLookups = publicResolver()): DnsLookups {
+  const quiet = async (lookup: () => Promise<string[]>, empty = notFound) => {
     try {
       return await lookup();
     } catch (error) {
-      if (notFound.has((error as { code?: string }).code ?? "")) return [];
+      if (empty.has((error as { code?: string }).code ?? "")) return [];
       throw error;
     }
   };
@@ -53,7 +63,7 @@ export function publicDns(): DnsLookups {
     resolve4: (name) => quiet(() => resolver.resolve4(name)),
     resolve6: (name) => quiet(() => resolver.resolve6(name)),
     resolveCname: (name) => quiet(() => resolver.resolveCname(name)),
-    resolveNs: (name) => quiet(() => resolver.resolveNs(name)),
+    resolveNs: (name) => quiet(() => resolver.resolveNs(name), nsNotFound),
   };
 }
 
@@ -67,17 +77,6 @@ export function dnsLookups(): DnsLookups {
 
 export function setDnsLookups(next: DnsLookups | null): void {
   lookups = next;
-}
-
-/** The zone a host is in (closest name up the tree with NS records) and whether Cloudflare serves it. */
-export async function findZone(host: string, dns: DnsLookups): Promise<{ zone: string; cloudflare: boolean } | null> {
-  const labels = host.split(".");
-  for (let i = 0; i <= labels.length - 2; i++) {
-    const name = labels.slice(i).join(".");
-    const ns = await dns.resolveNs(name);
-    if (ns.length > 0) return { zone: name, cloudflare: ns.some((server) => server.toLowerCase().endsWith(".ns.cloudflare.com")) };
-  }
-  return null;
 }
 
 /** Record name as typed in a DNS panel: "admin" for admin.example.com in example.com, "@" for the apex. */
@@ -103,6 +102,10 @@ export interface DnsResult {
   expected: DnsRecord[];
   found: DnsRecord[];
   zone: string | null;
+  /** The host's registrable domain (example.co.il for shop.example.co.il); null for a public suffix. */
+  registrable: string | null;
+  /** The registrable domain has no name servers and nothing answers for the host: it does not exist (yet). */
+  zoneMissing: boolean;
   cloudflareManaged: boolean;
   cloudflareDnsUrl: string | null;
 }
@@ -146,8 +149,9 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
       dns.resolveCname(host),
       findZone(host, dns),
     ]);
-    const zone = zoneInfo?.zone ?? null;
-    const name = relativeName(host, zone);
+    const zone = zoneInfo.zone;
+    // Without a zone, relative to the registrable domain: right once the domain exists, never to a public suffix.
+    const name = relativeName(host, zone ?? zoneInfo.registrable);
     const expected: DnsRecord[] = [];
     for (const node of nodes.map(addressesOf)) {
       if (node.ipv4) expected.push({ type: "A", name, value: node.ipv4 });
@@ -159,14 +163,18 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
       ...v6.map((value) => ({ type: "AAAA" as const, name, value })),
     ];
     const status = nodeIps.size === 0 ? "unknown" : classifyRecords([...v4, ...v6], nodeIps);
+    // A record answering for the host proves the name exists, whatever its NS lookups said.
+    const zoneMissing = zoneInfo.registrableMissing && found.length === 0;
     return {
       status,
-      message: dnsMessage(status, host, expected),
+      message: zoneMissing && zoneInfo.registrable ? registrableMissingMessage(zoneInfo.registrable) : dnsMessage(status, host, expected),
       expected,
       found,
       zone,
-      cloudflareManaged: zoneInfo?.cloudflare ?? false,
-      cloudflareDnsUrl: zoneInfo?.cloudflare && zone ? cloudflareDnsUrl(zone) : null,
+      registrable: zoneInfo.registrable,
+      zoneMissing,
+      cloudflareManaged: zoneInfo.cloudflare,
+      cloudflareDnsUrl: zoneInfo.cloudflare && zone ? cloudflareDnsUrl(zone) : null,
     };
   } catch {
     return {
@@ -175,6 +183,8 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
       expected: [],
       found: [],
       zone: null,
+      registrable: registrableDomain(host)?.domain ?? null,
+      zoneMissing: false,
       cloudflareManaged: false,
       cloudflareDnsUrl: null,
     };

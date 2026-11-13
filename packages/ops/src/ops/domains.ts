@@ -152,6 +152,22 @@ export const DomainForward = Type.Object({
   keepPath: Type.Boolean(),
 });
 
+/**
+ * Something to know about a domain just added, which did not stop it.
+ * registrableMissing: its registrable domain (example.co.il for
+ * shop.example.co.il, from the Public Suffix List) has no name servers
+ * (NXDOMAIN, or no delegation): it is not registered, or not set up yet,
+ * often a typo. The domain is kept, so it works once the domain exists.
+ */
+export const DomainWarning = Type.Object({
+  reason: Type.Literal("registrableMissing"),
+  /** Plain sentence for the UI. */
+  message: Type.String(),
+  registrable: Hostname,
+  /** A registrable domain in the panel the caller may view, within 2 edits of it under the same public suffix (see DnsCheck.didYouMean). */
+  didYouMean: Type.Optional(Hostname),
+});
+
 export const Domain = Type.Object({
   id: Id,
   serviceId: Id,
@@ -201,6 +217,8 @@ export const Domain = Type.Object({
    * at once. Set by domains.list and domains.add.
    */
   noRoute: Type.Optional(NoRoute),
+  /** Set by domains.add and domains.addAuto only: see DomainWarning. */
+  warning: Type.Optional(DomainWarning),
   certificate: Type.Object({
     status: CertificateStatus,
     expiresAt: Type.Union([Timestamp, Type.Null()]),
@@ -247,8 +265,35 @@ export const DnsCheck = Type.Object({
   expected: Type.Array(DnsRecord),
   /** What public resolvers answered. */
   found: Type.Array(DnsRecord),
-  /** Registrable zone the record belongs in, for example example.com. Null when it could not be found. */
+  /**
+   * Zone the record belongs in, for example example.com: the closest name
+   * from the host up to its registrable domain with NS records (a delegated
+   * sub.example.com when it has its own), never a public suffix such as
+   * co.il. Null when none has NS records or the lookup failed.
+   */
   zone: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The host's registrable domain from the Public Suffix List's ICANN
+   * section (example.co.il for shop.example.co.il). Null when the host is
+   * itself a public suffix. Without a zone, expected names the record
+   * relative to it.
+   */
+  registrable: Type.Optional(Type.Union([Hostname, Type.Null()])),
+  /**
+   * True when the registrable domain has no name servers (NXDOMAIN, or no
+   * delegation) and nothing answers for the host: it is not registered, or
+   * not set up yet, often a typo. zone is null and message says so. A
+   * server failure of its name servers (a lame delegation) is not this.
+   */
+  zoneMissing: Type.Optional(Type.Boolean()),
+  /**
+   * With zoneMissing: another registrable domain under the same public
+   * suffix, within 2 edits (1 for names of 4 characters or fewer), from
+   * the domains of services the caller may view (domains.view) and the
+   * panel's own domain (settings.view); the closest, then the first in
+   * alphabetical order. Never from anything the caller cannot see.
+   */
+  didYouMean: Type.Optional(Hostname),
   /** The zone's name servers are Cloudflare's. */
   cloudflareManaged: Type.Boolean(),
   /**
@@ -295,7 +340,7 @@ export const addAuto = defineOp({
   kind: "mutation",
   summary: "Add an automatic domain",
   description:
-    "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set, and on a compose stack or a cron service (reason stackParent or cronService): a stack's domains go on its members.",
+    "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set, and on a compose stack or a cron service (reason stackParent or cronService): a stack's domains go on its members. When the wildcard's registrable domain has no name servers, the domain is still added and carries a warning (reason registrableMissing).",
   input: Type.Object({
     serviceId: Id,
     /** Left-most label; defaults to the service name. */
@@ -314,7 +359,7 @@ export const add = defineOp({
   kind: "mutation",
   summary: "Add a custom domain",
   description:
-    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService).",
+    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService). A host whose registrable domain does not exist (no name servers: not registered, or a typo) is still added, with domain.warning (reason registrableMissing, with didYouMean when a domain the caller can see is a likely spelling) and dns.zoneMissing.",
   input: Type.Object({
     serviceId: Id,
     host: Hostname,
@@ -338,7 +383,7 @@ export const checkDns = defineOp({
   kind: "query",
   summary: "Check a domain's DNS",
   description:
-    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
+    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. The zone is never above the host's registrable domain; when that domain has no name servers, zoneMissing says so instead of a zone (with didYouMean when a domain the caller can see is a likely spelling). For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
   input: Type.Object(DomainRef),
   output: DnsCheck,
   permission: byService("domains.view"),

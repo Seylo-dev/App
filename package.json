@@ -15,7 +15,8 @@
     "format": "biome check --write ."
   },
   "overrides": {
-    "dompurify": "3.4.17"
+    "dompurify": "3.4.17",
+    "tldts-core": "7.4.19"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.5",

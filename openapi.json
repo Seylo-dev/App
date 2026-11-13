@@ -31757,7 +31757,7 @@
       "post": {
         "operationId": "domains.add",
         "summary": "Add a custom domain",
-        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService).",
+        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService). A host whose registrable domain does not exist (no name servers: not registered, or a typo) is still added, with domain.warning (reason registrableMissing, with didYouMean when a domain the caller can see is a likely spelling) and dns.zoneMissing.",
         "tags": [
           "domains"
         ],
@@ -32203,6 +32203,37 @@
                             }
                           }
                         },
+                        "warning": {
+                          "type": "object",
+                          "required": [
+                            "reason",
+                            "message",
+                            "registrable"
+                          ],
+                          "properties": {
+                            "reason": {
+                              "const": "registrableMissing",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "registrable": {
+                              "minLength": 3,
+                              "maxLength": 253,
+                              "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                              "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                              "type": "string"
+                            },
+                            "didYouMean": {
+                              "minLength": 3,
+                              "maxLength": 253,
+                              "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                              "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                              "type": "string"
+                            }
+                          }
+                        },
                         "certificate": {
                           "type": "object",
                           "required": [
@@ -32426,6 +32457,30 @@
                             }
                           ]
                         },
+                        "registrable": {
+                          "anyOf": [
+                            {
+                              "minLength": 3,
+                              "maxLength": 253,
+                              "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                              "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "zoneMissing": {
+                          "type": "boolean"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
                         "cloudflareManaged": {
                           "type": "boolean"
                         },
@@ -32499,7 +32554,7 @@
       "post": {
         "operationId": "domains.addAuto",
         "summary": "Add an automatic domain",
-        "description": "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set, and on a compose stack or a cron service (reason stackParent or cronService): a stack's domains go on its members.",
+        "description": "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set, and on a compose stack or a cron service (reason stackParent or cronService): a stack's domains go on its members. When the wildcard's registrable domain has no name servers, the domain is still added and carries a warning (reason registrableMissing).",
         "tags": [
           "domains"
         ],
@@ -32885,6 +32940,37 @@
                         }
                       }
                     },
+                    "warning": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "registrable"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "const": "registrableMissing",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "registrable": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -32990,7 +33076,7 @@
       "get": {
         "operationId": "domains.checkDns",
         "summary": "Check a domain's DNS",
-        "description": "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
+        "description": "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. The zone is never above the host's registrable domain; when that domain has no name servers, zoneMissing says so instead of a zone (with didYouMean when a domain the caller can see is a likely spelling). For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
         "tags": [
           "domains"
         ],
@@ -33163,6 +33249,30 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "registrable": {
+                      "anyOf": [
+                        {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "zoneMissing": {
+                      "type": "boolean"
+                    },
+                    "didYouMean": {
+                      "minLength": 3,
+                      "maxLength": 253,
+                      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                      "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                      "type": "string"
                     },
                     "cloudflareManaged": {
                       "type": "boolean"
@@ -33606,6 +33716,37 @@
                                 "type": "string"
                               },
                               "error": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "warning": {
+                            "type": "object",
+                            "required": [
+                              "reason",
+                              "message",
+                              "registrable"
+                            ],
+                            "properties": {
+                              "reason": {
+                                "const": "registrableMissing",
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "registrable": {
+                                "minLength": 3,
+                                "maxLength": 253,
+                                "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                                "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                                "type": "string"
+                              },
+                              "didYouMean": {
+                                "minLength": 3,
+                                "maxLength": 253,
+                                "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                                "description": "Lower-case host name without scheme or port, for example shop.example.com.",
                                 "type": "string"
                               }
                             }
@@ -34176,6 +34317,37 @@
                         }
                       }
                     },
+                    "warning": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "registrable"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "const": "registrableMissing",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "registrable": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -34670,6 +34842,37 @@
                           "type": "string"
                         },
                         "error": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "registrable"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "const": "registrableMissing",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "registrable": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
                           "type": "string"
                         }
                       }
@@ -35268,6 +35471,37 @@
                         }
                       }
                     },
+                    "warning": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "registrable"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "const": "registrableMissing",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "registrable": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        }
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -35749,6 +35983,37 @@
                           "type": "string"
                         },
                         "error": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "registrable"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "const": "registrableMissing",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "registrable": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
                           "type": "string"
                         }
                       }
@@ -36298,6 +36563,37 @@
                           "type": "string"
                         },
                         "error": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "object",
+                      "required": [
+                        "reason",
+                        "message",
+                        "registrable"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "const": "registrableMissing",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "registrable": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                          "type": "string"
+                        },
+                        "didYouMean": {
+                          "minLength": 3,
+                          "maxLength": 253,
+                          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                          "description": "Lower-case host name without scheme or port, for example shop.example.com.",
                           "type": "string"
                         }
                       }

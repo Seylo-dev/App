@@ -2,7 +2,7 @@
 // state dirty (the agent rewrites its route file) and invalidates the
 // screens that show domains, IP:port access and env references.
 
-import { domains as domainOps, env as envOps, exposures as exposureOps, OpError } from "@seylo/ops";
+import { domains as domainOps, env as envOps, exposures as exposureOps, OpError, type OpInput } from "@seylo/ops";
 import { and, asc, eq, ne } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { type DomainMiddlewares, domains } from "../../db/schema";
@@ -13,6 +13,7 @@ import { releases } from "./acme-hold";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
 import { checkHost, dnsLookups, pointsTo } from "./dns";
 import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
+import { missingWarning, registrableWarning, withSuggestion } from "./missing-registrable";
 import { assertTakesDomains, noRoutes, unroutable } from "./no-route";
 import { enqueueOriginCheck, originApplies, originProvable } from "./origin";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
@@ -87,7 +88,12 @@ export const list = implement(domainOps.list, (input, ctx) => {
   };
 });
 
-export const addAuto = implement(domainOps.addAuto, (input, ctx) => {
+/**
+ * Adds the automatic domain (domains.addAuto without its DNS lookup): for
+ * services the panel creates with one (templates, Docker Hub, previews),
+ * which answer nobody about it.
+ */
+export function addAutoDomain(input: OpInput<typeof domainOps.addAuto>, ctx: OpContext) {
   const service = getService(ctx.db, input.serviceId);
   assertTakesDomains(service);
   const node = serviceNodes(ctx.db, service.id).find((n) => n.wildcardDomain);
@@ -116,6 +122,13 @@ export const addAuto = implement(domainOps.addAuto, (input, ctx) => {
   });
   afterChange(ctx, service.id);
   return toDomain(row);
+}
+
+export const addAuto = implement(domainOps.addAuto, async (input, ctx) => {
+  const domain = addAutoDomain(input, ctx);
+  // The wildcard's domain may not exist (yet): added anyway, with a warning.
+  const warning = await registrableWarning(ctx, domain.host);
+  return warning ? { ...domain, warning } : domain;
 });
 
 export const add = implement(domainOps.add, async (input, ctx) => {
@@ -129,7 +142,9 @@ export const add = implement(domainOps.add, async (input, ctx) => {
   }
   const targetPort = targetPortFor(ctx.db, service, input.targetPort);
   const nodes = serviceNodes(ctx.db, service.id);
-  const dns = await checkHost(input.host, nodes, dnsLookups());
+  // A registrable domain that does not exist is a warning, not a refusal: the owner may register it later.
+  const dns = withSuggestion(ctx, await checkHost(input.host, nodes, dnsLookups()));
+  const warning = missingWarning(dns);
   // DNS on the node already proves it; behind Cloudflare's proxy the origin check a few seconds from now may (acme-hold.ts).
   const answer = { dnsStatus: dns.status, origin: null, provable: originProvable(ctx, service.id) };
   const now = new Date();
@@ -157,7 +172,7 @@ export const add = implement(domainOps.add, async (input, ctx) => {
   const noRoute = unroutable(ctx.db, service);
   if (originApplies(row, dns.status) && !noRoute) enqueueOriginCheck(ctx, row.id);
   return {
-    domain: { ...toDomain(row), ...(noRoute ? { noRoute } : {}) },
+    domain: { ...toDomain(row), ...(noRoute ? { noRoute } : {}), ...(warning ? { warning } : {}) },
     dns: { domainId: row.id, host: row.host, checkedAt: new Date().toISOString(), ...dns },
   };
 });
@@ -170,7 +185,7 @@ export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
     domainId: row.id,
     host: row.host,
     checkedAt: checkedAt.toISOString(),
-    ...dns,
+    ...withSuggestion(ctx, dns),
     ...(origin ? { origin } : {}),
     ...(origin && reason ? { originReason: reason } : {}),
   };

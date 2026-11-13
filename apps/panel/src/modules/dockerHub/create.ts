@@ -10,7 +10,7 @@ import { userOf } from "../../auth/principal";
 import { nodes, services } from "../../db/schema";
 import type { OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
-import { addAuto } from "../domains/ops";
+import { addAutoDomain } from "../domains/ops";
 import { checkEnvReferences } from "../env/ops";
 import { writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
@@ -126,7 +126,7 @@ export async function createFromDockerHub(ctx: OpContext, input: CreateInput) {
     if (port && isPublic) {
       const wildcard = ctx.db.select({ w: nodes.wildcardDomain }).from(nodes).where(eq(nodes.id, input.nodeId)).get()?.w ?? null;
       // Like a template app: the node's automatic domain when it has one, else IP:port until a domain is added.
-      if (wildcard) addAuto.run({ serviceId: id, targetPort: port, subdomain: autoSubdomain(ctx, input.name, wildcard) }, ctx);
+      if (wildcard) addAutoDomain({ serviceId: id, targetPort: port, subdomain: autoSubdomain(ctx, input.name, wildcard) }, ctx);
       else openFirstRun(ctx.db, id);
     }
     if (input.deployNow ?? true) queueDeploy(ctx, { serviceId: id, trigger: "manual", actor: actorOf(ctx), triggeredBy: userId });

@@ -11,7 +11,7 @@ import type { Deps } from "../../deps";
 import { queueDeploy } from "../deployments/queue";
 import type { DeploymentRow } from "../deployments/store";
 import { appPort } from "../domains/lookup";
-import { addAuto, add as addDomain } from "../domains/ops";
+import { addAutoDomain, add as addDomain } from "../domains/ops";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { deleteServiceTree } from "../services/delete";
 import { insertService } from "../services/insert";
@@ -183,7 +183,7 @@ async function addPreviewDomain(
         .innerJoin(nodes, eq(nodes.id, servicePlacements.nodeId))
         .where(eq(servicePlacements.serviceId, serviceId))
         .get();
-      if (placed?.wildcard) await addAuto.run({ serviceId, subdomain: name, targetPort: port }, ctx);
+      if (placed?.wildcard) addAutoDomain({ serviceId, subdomain: name, targetPort: port }, ctx);
     }
   } catch (error) {
     deps.logger.warn({ err: error, serviceId }, "preview domain was not added");

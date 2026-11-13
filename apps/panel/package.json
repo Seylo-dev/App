@@ -36,6 +36,7 @@
     "pino": "10.4.0",
     "quickjs-emscripten-core": "0.32.0",
     "ssh2": "1.17.0",
+    "tldts-icann": "7.4.19",
     "yaml": "2.9.1"
   },
   "devDependencies": {
