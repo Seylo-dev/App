@@ -255,6 +255,18 @@ func TestListenersForAndSyncAll(t *testing.T) {
 	if l := byID["database"]; l.ContainerPort != 5432 {
 		t.Fatalf("database: %+v", l)
 	}
+	// A database's timed expose keeps idle pool connections as long as its exposed port, and relays it as it
+	// is: no TLS of the gate, no TLS check.
+	if l := byID["expose-t1"]; l.IdleTimeout != DatabaseIdleTimeout || l.TerminateTLS || l.RequireTLS != TLSCheckNone {
+		t.Fatalf("timed expose of a database: %+v", l)
+	}
+	if l := byID["database"]; l.IdleTimeout != DatabaseIdleTimeout {
+		t.Fatalf("database idle timeout: %v", l.IdleTimeout)
+	}
+	app := &agentv1.ServiceSpec{Id: "web1", DevAccess: spec.GetDevAccess()}
+	if ls, _ := ListenersFor(app); len(ls) != 1 || ls[0].IdleTimeout != 0 {
+		t.Fatalf("an app's timed expose: %+v", ls)
+	}
 
 	m := newManager(t, echoServer(t))
 	err := m.SyncAll(context.Background(), &agentv1.DesiredState{Services: []*agentv1.ServiceSpec{spec}})

@@ -61,8 +61,9 @@ type Config struct {
 	// of once per connection.
 	MaxConns          int
 	MaxConnsPerSource int
-	// IdleTimeout cuts a relayed connection with no bytes either way;
-	// database listeners use DatabaseIdleTimeout unless this is set.
+	// IdleTimeout cuts a relayed connection with no bytes either way, on
+	// every listener (tests); unset, each uses its Listener.IdleTimeout
+	// (a database's: DatabaseIdleTimeout), else DefaultIdleTimeout.
 	IdleTimeout time.Duration
 	ResolveTTL  time.Duration
 	// ConnectTimeout is how long an accepted connection may wait for its
@@ -141,6 +142,7 @@ type active struct {
 	svc, lid, redirect string
 	cport              uint32
 	check              TLSCheck
+	idle               time.Duration
 
 	// want is replaced on sync under Manager.mu.
 	want  Listener
@@ -238,6 +240,11 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			ID: "expose-" + e.GetId(), ServiceID: id, HostPort: e.GetHostPort(), ContainerPort: e.GetContainerPort(),
 			AllowedSourceCIDRs: e.GetAllowedSourceCidrs(), RequireAllowList: true, Timed: true,
 		}
+		if spec.GetDatabase() != nil {
+			// A database client's pool keeps connections idle between queries.
+			// The relay is plain TCP: the database's own TLS, if it has any.
+			l.IdleTimeout = DatabaseIdleTimeout
+		}
 		if e.GetExpiresAt() != nil {
 			l.ExpiresAt = e.GetExpiresAt().AsTime()
 		} else {
@@ -257,6 +264,7 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			TerminateTLS:       dbengine.TLSAtGate(db.GetEngine()), TLSHost: db.GetExposure().GetTlsHostname(),
 			AgentCertificate: dbengine.AgentCertificate(db.GetEngine()),
 			RequireTLS:       tlsCheckFor(db.GetEngine()),
+			IdleTimeout:      DatabaseIdleTimeout,
 		})
 	}
 	return out, errs
@@ -372,7 +380,7 @@ func (m *Manager) Sync(ctx context.Context, serviceID string, wanted []Listener)
 func (a *active) sameSocket(w Listener) bool {
 	return a.want.Mode == w.Mode && (w.HostPort == 0 || w.HostPort == a.port) && a.want.ContainerPort == w.ContainerPort &&
 		a.want.RedirectURL == w.RedirectURL && a.want.TerminateTLS == w.TerminateTLS && a.want.TLSHost == w.TLSHost &&
-		a.want.RequireTLS == w.RequireTLS
+		a.want.RequireTLS == w.RequireTLS && a.idle == w.IdleTimeout
 }
 
 func parseCIDRs(list []string) ([]netip.Prefix, error) {
@@ -417,7 +425,7 @@ func (m *Manager) start(w Listener, allowed []netip.Prefix) (*active, error) {
 	if w.TerminateTLS {
 		ln = tls.NewListener(ln, m.tlsConfig(w.ServiceID, w.TLSHost))
 	}
-	a := &active{svc: w.ServiceID, lid: w.ID, redirect: w.RedirectURL, cport: w.ContainerPort, check: w.RequireTLS,
+	a := &active{svc: w.ServiceID, lid: w.ID, redirect: w.RedirectURL, cport: w.ContainerPort, check: w.RequireTLS, idle: w.IdleTimeout,
 		want: w, port: bound, ln: ln, allowed: allowed, conns: map[net.Conn]struct{}{}, clients: map[net.Conn]struct{}{},
 		sources: map[netip.Addr]int{}}
 	if w.Mode == ModeRedirect {
@@ -835,8 +843,8 @@ func (m *Manager) idleTimeout(a *active) time.Duration {
 	switch {
 	case m.cfg.IdleTimeout > 0:
 		return m.cfg.IdleTimeout
-	case a.lid == "database":
-		return DatabaseIdleTimeout
+	case a.idle > 0:
+		return a.idle
 	}
 	return DefaultIdleTimeout
 }

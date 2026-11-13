@@ -181,6 +181,52 @@ func TestIdleConnectionsAreCut(t *testing.T) {
 	}
 }
 
+// Each listener cuts idle connections after its own IdleTimeout (a
+// database's: DatabaseIdleTimeout); Config.IdleTimeout, when set, is for
+// every listener.
+func TestListenerIdleTimeout(t *testing.T) {
+	m := newManager(t, echoServer(t))
+	ports, err := m.Sync(context.Background(), "svc1", []Listener{
+		{ID: "expose-short", ContainerPort: 1, IdleTimeout: 300 * time.Millisecond},
+		{ID: "expose-default", ContainerPort: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, err := dialEcho(t, ports["expose-short"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer short.Close()
+	other, err := dialEcho(t, ports["expose-default"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if !closedSoon(short, 900*time.Millisecond) {
+		t.Fatal("the listener's idle timeout did not cut an idle connection")
+	}
+	if closedSoon(other, 100*time.Millisecond) {
+		t.Fatal("a listener without its own idle timeout cut a connection after 1 s")
+	}
+	// A changed timeout reopens the listener on the same port.
+	again, err := m.Sync(context.Background(), "svc1", []Listener{
+		{ID: "expose-short", ContainerPort: 1, HostPort: ports["expose-short"], IdleTimeout: time.Hour},
+		{ID: "expose-default", ContainerPort: 1, HostPort: ports["expose-default"]},
+	})
+	if err != nil || again["expose-short"] != ports["expose-short"] {
+		t.Fatalf("%v %v", again, err)
+	}
+	c, err := dialEcho(t, ports["expose-short"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if closedSoon(c, 600*time.Millisecond) {
+		t.Fatal("the old idle timeout still applies")
+	}
+}
+
 func TestListening(t *testing.T) {
 	m := newManager(t, echoServer(t))
 	if got := m.Listening(); len(got) != 0 {

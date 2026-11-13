@@ -40,6 +40,11 @@ type Listener struct {
 	ExpiresAt time.Time
 	// Timed marks a timed expose (reported with its expiry).
 	Timed bool
+	// IdleTimeout cuts a relayed connection idle that long; zero is
+	// DefaultIdleTimeout (Config.IdleTimeout overrides both). A
+	// database's listeners, exposed and timed alike, use
+	// DatabaseIdleTimeout: connection pools keep idle connections open.
+	IdleTimeout time.Duration
 	// TerminateTLS makes the gate speak TLS to clients and relay plain TCP
 	// to the container (exposed Mongo and Redis, which use TLS from the
 	// first byte). TLSHost names the certificate (Config.Certificate).

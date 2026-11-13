@@ -5,7 +5,10 @@
 // TLS only with the database's own user (the gate terminates TLS for
 // Mongo, ClickHouse and the Redis-like engines; Postgres, MySQL and
 // MariaDB speak their own TLS through the relay, and the gate refuses
-// their clients that do not ask for it, RequireTLS). Once a domain is
+// their clients that do not ask for it, RequireTLS). A timed expose of a
+// database relays its port as it is, with no TLS of the gate and no check:
+// the database's own TLS when it has some, else plain TCP to the allowed
+// addresses until it ends. Once a domain is
 // live a public port becomes an HTTP redirector (308) to it, handing
 // cookies over through the edge, until its close_at. Expiries run on local
 // timers, so they hold while the panel is unreachable, and a listener past
@@ -13,7 +16,8 @@
 //
 // Anyone on the internet may reach a first-run port, so every listener
 // caps its connections (Config.MaxConns, MaxConnsPerSource), cuts
-// connections idle both ways (IdleTimeout; longer for databases), and
+// connections idle both ways (IdleTimeout; longer for a database's
+// listeners, timed exposes included), and
 // shares one Resolve (Docker lookups) per container port for ResolveTTL
 // instead of resolving per connection.
 //
