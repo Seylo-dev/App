@@ -1103,7 +1103,7 @@ export function finish(
   const back = portBack as PortMove | null;
   if (back) {
     appendLog(s.deps, d.serviceId, d.id, lastStep(d), [
-      back.applied
+      back.applied && back.domainIds.length > 0
         ? `The service's port and its domains are back on ${back.fromPort}, where the live version listens.`
         : `The service's port is back on ${back.fromPort}, where the live version listens.`,
     ]);

@@ -312,6 +312,21 @@ describe("Use port", () => {
     expect(routesOf(id)[0]).toBe(80);
   });
 
+  test("with a live version and no domain, a cancelled Use port deploy puts the port back too", async () => {
+    const id = await createApp("api");
+    const live = await deploy(id);
+    fleet.deployProgress(nodeA, id, live.generation, DeployStage.SUCCEEDED);
+    await fleet.settle();
+    const res = await callOp(panel, serviceOps.usePort, { serviceId: id, port: 6000, fromPort: 80 }, { cookie });
+    expect(res.body).toMatchObject({ domainIds: [], domainsMove: "now" });
+    await fleet.settle();
+    expect(row(res.body.deploymentId)?.portMove).toMatchObject({ fromPort: 80, toPort: 6000, domainIds: [], applied: true });
+    const cancelled = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId: res.body.deploymentId }, { cookie });
+    expect(cancelled.status).toBe(200);
+    expect(portsOf(id)).toEqual([{ containerPort: 80, protocol: "tcp" }]);
+    expect(logOf(res.body.deploymentId).at(-1)).toBe("ship: The service's port is back on 80, where the live version listens.");
+  });
+
   test("with a live version that goes live on the new port, the domains stay moved", async () => {
     const id = await createApp("api");
     addDomain(id, "api.example.com", 80);

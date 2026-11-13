@@ -68,8 +68,10 @@ export const usePort = implement(serviceOps.usePort, (input, ctx) => {
           .from(domains)
           .where(and(eq(domains.serviceId, svc.id), eq(domains.targetPort, from)))
           .all();
-  // The live version listens on the old port: its domains wait for the new containers.
-  const atRollout = moved.length > 0 && svc.liveDeploymentId !== null && !svc.stopped;
+  // A live version listens on the old port: its domains wait for the new containers, and the port and they
+  // go back if the new deployment does not go live (deployments.port_move, engine.ts restorePortMove).
+  const live = svc.liveDeploymentId !== null && !svc.stopped;
+  const atRollout = live && moved.length > 0;
   const ports = withFirstPort(spec.ports, input.port);
   updateSpec(ctx, svc.id, (s) => ({ ...s, ports }));
   if (moved.length > 0 && !atRollout) {
@@ -100,7 +102,9 @@ export const usePort = implement(serviceOps.usePort, (input, ctx) => {
     );
   }
   const portMove: PortMove | null =
-    atRollout && from !== null ? { fromPort: from, toPort: input.port, domainIds: moved.map((d) => d.id), applied: false } : null;
+    live && from !== null && from !== input.port
+      ? { fromPort: from, toPort: input.port, domainIds: moved.map((d) => d.id), applied: false }
+      : null;
   const row = queueDeploy(ctx, {
     serviceId: svc.id,
     trigger: triggerOf(ctx),

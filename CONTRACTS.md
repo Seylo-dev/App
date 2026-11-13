@@ -4645,7 +4645,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   so. A built app's PORT follows (`withPortEnv` reads the first port when
   the deploy seals its env). Without a live version that serves (none, or
   the service is stopped) the domains move at once. With one, its
-  containers listen on the old port: the move is stored on the new
+  containers listen on the old port: the move (also one with no domain to
+  move, for the port) is stored on the new
   deployment (`deployments.port_move`, migration 0021: `fromPort`,
   `toPort`, `domainIds`, `applied`) and `rollout()` applies it in the
   transaction that makes the deployment the target, so the routes reach
