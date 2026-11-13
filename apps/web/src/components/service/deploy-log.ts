@@ -8,7 +8,7 @@
 import { deployments, type LiveTopic } from "@seylo/ops";
 import { opQueryKey, useOpClient } from "@seylo/ops/react";
 import type { LogBuffer, LogLineInput } from "@seylo/ui/components/log-viewer";
-import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { type Query, type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { type LiveSignal, live } from "../../lib/live";
 import { isActiveDeployment } from "./status";
@@ -21,17 +21,31 @@ type ListOutput = { deployments: Deployment[] };
 /**
  * Puts a deployment from the live topic into every cached deployments.get
  * and deployments.list answer that holds it, so status and steps move
- * without a refetch.
+ * without a refetch. Only those answers are written, and each keeps its
+ * age and its "invalidated" mark: the event says nothing about the rest of
+ * a list. Before 0.2.16 every cached answer was written (setQueriesData
+ * stores even an unchanged one), which marked them all fresh: the
+ * Overview's list, left on the Deployments tab, lost the invalidation that
+ * said a new deploy went live and showed the old one on the way back.
  */
 export function applyDeployment(cache: QueryClient, deployment: Deployment): void {
-  cache.setQueriesData<GetOutput>({ queryKey: opQueryKey(deployments.get) }, (old) =>
-    old?.deployment.id === deployment.id ? { ...old, deployment } : old,
-  );
-  cache.setQueriesData<ListOutput>({ queryKey: opQueryKey(deployments.list) }, (old) =>
-    old?.deployments.some((d) => d.id === deployment.id)
-      ? { ...old, deployments: old.deployments.map((d) => (d.id === deployment.id ? deployment : d)) }
-      : old,
-  );
+  const queries = cache.getQueryCache();
+  for (const query of queries.findAll({ queryKey: opQueryKey(deployments.get) })) {
+    const old = query.state.data as GetOutput | undefined;
+    if (old?.deployment.id === deployment.id) keepAge(cache, query, { ...old, deployment });
+  }
+  for (const query of queries.findAll({ queryKey: opQueryKey(deployments.list) })) {
+    const old = query.state.data as ListOutput | undefined;
+    if (old?.deployments.some((d) => d.id === deployment.id))
+      keepAge(cache, query, { ...old, deployments: old.deployments.map((d) => (d.id === deployment.id ? deployment : d)) });
+  }
+}
+
+/** Writes a query's data without making it fresh: the same dataUpdatedAt, and still invalidated if it was. */
+function keepAge(cache: QueryClient, query: Query, data: unknown): void {
+  const { dataUpdatedAt, isInvalidated } = query.state;
+  cache.setQueryData(query.queryKey, data, { updatedAt: dataUpdatedAt });
+  if (isInvalidated) void cache.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "none" });
 }
 
 /** One deploy log line as the LogViewer shows it: the step as source, errors in red. */
