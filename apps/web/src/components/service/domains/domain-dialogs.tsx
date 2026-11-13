@@ -24,6 +24,7 @@ import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
 import { servicePort } from "../service-port";
 import type { ServiceDetail } from "../use-service";
+import { toastAdded } from "./added-toast";
 import { canRegenerate, LetsEncryptState } from "./certificate-state";
 import type { Domain } from "./domain-row";
 
@@ -213,13 +214,7 @@ export function AddDomainDialog({
   const add = useOpMutation(domains.add, {
     onSuccess: (res) => {
       invalidate(domains.list);
-      toast.success(
-        res.domain.noRoute?.reason === "notDeployed"
-          ? t("serviceDomains.addedNotDeployed", { name: service.name })
-          : res.dns.status === "ok"
-            ? t("serviceDomains.addedLive")
-            : t("serviceDomains.addedWaiting"),
-      );
+      toastAdded(res, service.name);
       onOpenChange(false);
       setHost("");
     },

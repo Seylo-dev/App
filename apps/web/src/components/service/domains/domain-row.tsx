@@ -1,7 +1,9 @@
 // One domain in the Domains card (Domains.dc.html): state tile, URL, chips,
 // where it routes, certificate or DNS state (Generating SSL certificate, or
 // the CA's reason and Regenerate certificate), a menu of actions, and for a
-// domain still waiting on DNS, the record to create with a Cloudflare link.
+// domain still waiting on DNS, the record to create with a Cloudflare link,
+// or that its registrable domain does not exist (no name servers), with
+// "Did you mean" when the panel knows a likely spelling.
 // A domain whose DNS works names the address it points at (DNS -> IP, or
 // the origin behind Cloudflare's proxy), like the panel domain card, and
 // what the panel's origin check found: that requests reach this node, or
@@ -507,7 +509,12 @@ function RowStatus({
 /**
  * The record to create, Open Cloudflare DNS, and Check now. While the
  * certificate waits for DNS it says so, and the check runs every minute
- * (poll), unless the domain has no route that could pass it.
+ * (poll), unless the domain has no route that could pass it. When the
+ * host's registrable domain has no name servers (zoneMissing), it says
+ * that domain does not exist instead of where to add the record, with
+ * "Did you mean" when the panel knows a likely spelling the viewer can
+ * see; the record, relative to the registrable domain, stays for once it
+ * exists.
  */
 function DnsHelp({ serviceId, domainId, held, poll }: { serviceId: string; domainId: string; held: boolean; poll: boolean }) {
   const check = useOp(
@@ -520,11 +527,32 @@ function DnsHelp({ serviceId, domainId, held, poll }: { serviceId: string; domai
   if (check.isError) return <OpErrorNote error={check.error} compact />;
   const data = check.data;
   const record = data?.expected[0];
+  const missing = data?.zoneMissing && data.registrable ? data.registrable : null;
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-[10px] bg-card px-3.5 py-3 shadow-control">
-      <span className="text-[12.5px] text-ink-strong">
-        {data?.zone ? t("serviceDomains.addRecordIn", { zone: data.zone }) : t("serviceDomains.addRecord")}
-      </span>
+    <div className="flex flex-wrap items-center gap-3 rounded-[10px] bg-card px-3.5 py-3 shadow-control" data-testid="dns-help">
+      {missing ? (
+        <>
+          <p className="m-0 flex w-full items-start gap-2 text-[12.5px] text-ink-strong" data-testid="zone-missing">
+            <IconAlertTriangle size={14} stroke={2.2} className="mt-px shrink-0 text-status-busy" aria-hidden="true" />
+            <span>
+              {t("serviceDomains.zoneMissing", { domain: missing })}
+              {data?.didYouMean && (
+                <>
+                  {" "}
+                  <span className="font-medium" data-testid="did-you-mean">
+                    {t("serviceDomains.didYouMean", { domain: data.didYouMean })}
+                  </span>
+                </>
+              )}
+            </span>
+          </p>
+          {record && <span className="text-xs text-muted-foreground">{t("serviceDomains.zoneMissingRecord")}</span>}
+        </>
+      ) : (
+        <span className="text-[12.5px] text-ink-strong">
+          {data?.zone ? t("serviceDomains.addRecordIn", { zone: data.zone }) : t("serviceDomains.addRecord")}
+        </span>
+      )}
       {record && (
         <>
           <span className="flex gap-1.5 font-mono text-[12.5px]">
@@ -542,7 +570,7 @@ function DnsHelp({ serviceId, domainId, held, poll }: { serviceId: string; domai
           </Button>
         </>
       )}
-      {data && data.status !== "missing" && <span className="w-full text-xs text-muted-foreground">{data.message}</span>}
+      {data && data.status !== "missing" && !missing && <span className="w-full text-xs text-muted-foreground">{data.message}</span>}
       {held && <span className="w-full text-xs text-muted-foreground">{t("serviceDomains.certWaitsDnsHint")}</span>}
       <span className="ml-auto flex flex-wrap gap-2">
         {data?.cloudflareDnsUrl && (

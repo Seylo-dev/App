@@ -9,7 +9,6 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { toast } from "@seylo/ui/components/toast";
 import { IconPlus, IconWorld } from "@tabler/icons-react";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
@@ -18,6 +17,7 @@ import { MutationError, OpErrorNote, retryOp } from "../op-state";
 import { RowsSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
 import { DevAccessCard, FirstRunCard, MaintenanceCard } from "./access-cards";
+import { toastAutoAdded } from "./added-toast";
 import { AccessRulesSheet, AddDomainDialog, CertificateDialog, RoutingDialog } from "./domain-dialogs";
 import { type DomainDialog, DomainRow } from "./domain-row";
 
@@ -27,9 +27,9 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
   const [editing, setEditing] = useState<{ id: string; dialog: DomainDialog } | null>(null);
   const invalidate = useInvalidate();
   const addAuto = useOpMutation(domains.addAuto, {
-    onSuccess: () => {
+    onSuccess: (domain) => {
       invalidate(domains.list);
-      toast.success(t("serviceDomains.autoAdded"));
+      toastAutoAdded(domain);
     },
   });
   const rows = list.data?.domains ?? [];

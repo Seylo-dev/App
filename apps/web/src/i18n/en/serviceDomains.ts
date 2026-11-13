@@ -95,6 +95,12 @@ export default {
     "{host} points at {ip}, but another server answers there, such as a router, port forward or proxy in front of the node. Ports 80 and 443 on {ip} must reach this node.",
   addRecord: "Add this record where the domain's DNS is managed:",
   addRecordIn: "Add this record where {zone}'s DNS is managed:",
+  // The host's registrable domain has no name servers (DnsCheck.zoneMissing, Domain.warning registrableMissing).
+  zoneMissing: "{domain} does not exist: it is not registered, or has no name servers yet. Check the spelling.",
+  zoneMissingHint: "It is not registered, or has no name servers yet. Check the spelling.",
+  didYouMean: "Did you mean {domain}?",
+  zoneMissingRecord: "The record to create once it exists:",
+  addedZoneMissing: "Domain added, but {domain} does not exist.",
   copyRecord: "Copy record",
   openCloudflare: "Open Cloudflare DNS",
   checkNow: "Check now",
