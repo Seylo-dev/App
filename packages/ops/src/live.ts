@@ -39,6 +39,16 @@ export const liveTopicPattern = "^(panel|(project|service|node|node-live|deploym
 export const LiveClientMessage = Type.Union([
   Type.Object({ type: Type.Literal("subscribe"), topic: Type.String({ pattern: liveTopicPattern }) }),
   Type.Object({ type: Type.Literal("unsubscribe"), topic: Type.String({ pattern: liveTopicPattern }) }),
+  /**
+   * "Still here" (added in 0.2.16): the panel answers with a heartbeat at
+   * once. The web app sends one when the socket opens, every heartbeat
+   * interval after that, and when its tab is shown or the network comes
+   * back, to find out whether the socket still carries anything. Once a
+   * socket has sent one, the panel closes it after liveSilentCloseMs
+   * without any message from it (a socket whose path died). Panels before
+   * 0.2.16 answer it with a BAD_REQUEST error without a topic.
+   */
+  Type.Object({ type: Type.Literal("ping") }),
 ]);
 export type LiveClientMessage = Static<typeof LiveClientMessage>;
 
@@ -74,7 +84,25 @@ export type LiveEvent = Static<typeof LiveEvent>;
 export type LiveServerMessage =
   | { type: "event"; topic: LiveTopic; event: LiveEvent }
   | { type: "subscribed"; topic: LiveTopic }
-  | { type: "error"; topic?: string; code: "FORBIDDEN" | "BAD_REQUEST"; message: string };
+  | { type: "error"; topic?: string; code: "FORBIDDEN" | "BAD_REQUEST"; message: string }
+  /**
+   * The panel is still there (added in 0.2.16): sent to every socket each
+   * intervalMs, and at once in answer to a ping. A socket that hears
+   * nothing for about two intervals has stopped carrying messages (a path
+   * that died without a close reaching the browser, for example after a
+   * laptop slept or changed networks) and is replaced.
+   */
+  | { type: "heartbeat"; intervalMs: number };
+
+/** How often the panel sends every live socket a heartbeat. */
+export const liveHeartbeatMs = 15_000;
+
+/**
+ * A socket that has pinged at least once and then sent nothing for this
+ * long is closed by the panel. Ten heartbeats: a hidden tab's timers can
+ * run as rarely as once a minute, and its pings with them.
+ */
+export const liveSilentCloseMs = 10 * liveHeartbeatMs;
 
 /** WebSocket close code the panel uses when the socket's session is not valid. */
 export const liveUnauthorizedCloseCode = 4401;

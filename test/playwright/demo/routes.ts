@@ -9,8 +9,9 @@
 // Sockets: the live socket accepts every subscription and streams a few
 // deployment log lines and the assistant's replies (assistant.ts, whose
 // handlers a test passes as overrides), and a test can send events on the
-// topics the page follows (onLiveSubscribe); log follow and the terminals
-// answer like an agent.
+// topics the page follows (onLiveSubscribe); like the panel it sends
+// heartbeats and answers pings, and silenceLive() plays a path that died
+// without a close. Log follow and the terminals answer like an agent.
 
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { followAssistantTopic, resetAssistantDemo } from "./assistant";
@@ -240,12 +241,32 @@ export const terminalAgent: { refuse: string | null; refuseNext: string[]; close
 
 /** The live sockets open now (one per page), for pushLive. */
 const liveSockets = new Set<WebSocketRoute>();
+/** Live sockets whose path "died" (silenceLive): open for the page, but nothing goes either way. */
+const silencedLive = new Set<WebSocketRoute>();
+let liveOpened = 0;
 
 /** Closes every open live socket from the panel's side, as a panel restart does; the page reconnects by itself. */
 export async function dropLive(): Promise<void> {
   const open = [...liveSockets];
   liveSockets.clear();
   await Promise.all(open.map((ws) => ws.close({ code: 1012, reason: "restarting" }).catch(() => {})));
+}
+
+/**
+ * Plays a path that dies without a close reaching the browser (a laptop
+ * that slept or changed networks, a proxy that lost the connection): the
+ * open live sockets stay open for the page, but from now on nothing the
+ * panel sends reaches it (events, heartbeats, answers) and nothing it sends
+ * is answered. A socket the page opens after this works as usual.
+ */
+export function silenceLive(): void {
+  for (const ws of liveSockets) silencedLive.add(ws);
+  liveSockets.clear();
+}
+
+/** How many live sockets pages opened since installDemo (a replaced socket counts again). */
+export function liveSocketsOpened(): number {
+  return liveOpened;
 }
 
 /**
@@ -272,6 +293,8 @@ function resetDemoState() {
   terminalAgent.refuseNext = [];
   terminalAgent.closeLateMs = 0;
   liveSockets.clear();
+  silencedLive.clear();
+  liveOpened = 0;
   resetGitDemo();
   resetAssistantDemo();
 }
@@ -340,6 +363,14 @@ export interface DemoOptions {
    * panel would: a test publishes an invalidation on one topic only.
    */
   onLiveSubscribe?: (topic: string, send: (event: object) => void) => void;
+  /**
+   * The live socket's heartbeat interval: like the panel (0.2.16), it sends
+   * a heartbeat this often and answers each ping with one at once. The
+   * panel's is 15 s; the demo's is 10 minutes unless set, so a spec that
+   * moves the page's clock on (page.clock) does not look like a laptop that
+   * slept: the page would replace its socket and refetch everything.
+   */
+  liveHeartbeatMs?: number;
 }
 
 export async function installDemo(page: Page, options: DemoOptions = {}): Promise<void> {
@@ -394,37 +425,55 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
       for (const timer of streams.values()) clearInterval(timer);
       streams.clear();
     };
+    // Nothing reaches the page once the test silenced this socket (silenceLive).
+    const send = (text: string) => {
+      if (!silencedLive.has(ws)) ws.send(text);
+    };
+    const heartbeatMs = options.liveHeartbeatMs ?? 10 * 60_000;
+    const heartbeat = JSON.stringify({ type: "heartbeat", intervalMs: heartbeatMs });
+    const beat = setInterval(() => {
+      try {
+        send(heartbeat);
+      } catch {
+        clearInterval(beat);
+      }
+    }, heartbeatMs);
+    liveOpened++;
     liveSockets.add(ws);
     ws.onClose(() => {
       liveSockets.delete(ws);
+      silencedLive.delete(ws);
+      clearInterval(beat);
       for (const stop of assistantTopics.values()) stop();
       stopAll();
     });
     ws.onMessage((raw) => {
+      if (silencedLive.has(ws)) return;
       const message = JSON.parse(String(raw)) as { type: string; topic: string };
+      if (message.type === "ping") return send(heartbeat);
       if (message.topic.startsWith("node-live:")) {
         clearInterval(streams.get(message.topic));
         streams.delete(message.topic);
         if (message.type !== "subscribe") return;
         const mode = options.nodeLive ?? "stream";
         if (mode === "refuse") {
-          ws.send(JSON.stringify({ type: "error", topic: message.topic, code: "FORBIDDEN", message: "You cannot follow this." }));
+          send(JSON.stringify({ type: "error", topic: message.topic, code: "FORBIDDEN", message: "You cannot follow this." }));
           return;
         }
-        ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+        send(JSON.stringify({ type: "subscribed", topic: message.topic }));
         if (mode === "silent") return;
         const nodeId = message.topic.slice("node-live:".length);
-        const send = () => {
+        const sample = () => {
           try {
-            ws.send(
+            send(
               JSON.stringify({ type: "event", topic: message.topic, event: { type: "nodeLive", nodeId, sample: world.liveUsage(nodeId, Date.now()) } }),
             );
           } catch {
             stopAll();
           }
         };
-        send();
-        streams.set(message.topic, setInterval(send, options.nodeLiveIntervalMs ?? 2000));
+        sample();
+        streams.set(message.topic, setInterval(sample, options.nodeLiveIntervalMs ?? 2000));
         return;
       }
       if (message.type === "unsubscribe") {
@@ -432,12 +481,12 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
         assistantTopics.delete(message.topic);
       }
       if (message.type !== "subscribe") return;
-      ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
-      options.onLiveSubscribe?.(message.topic, (event) => ws.send(JSON.stringify({ type: "event", topic: message.topic, event })));
+      send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+      options.onLiveSubscribe?.(message.topic, (event) => send(JSON.stringify({ type: "event", topic: message.topic, event })));
       if (message.topic.startsWith("ai:") && !assistantTopics.has(message.topic)) {
         assistantTopics.set(
           message.topic,
-          followAssistantTopic(message.topic, (text) => ws.send(text)),
+          followAssistantTopic(message.topic, (text) => send(text)),
         );
       }
       // A running deployment keeps printing build lines on its topic.
@@ -447,7 +496,7 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
           const line = { seq, ts: new Date().toISOString(), step: "build", text: `#${seq} exporting layer ${seq - 8}`, error: false };
           seq++;
           try {
-            ws.send(JSON.stringify({ type: "event", topic: message.topic, event: { type: "log", lines: [line] } }));
+            send(JSON.stringify({ type: "event", topic: message.topic, event: { type: "log", lines: [line] } }));
           } catch {
             clearInterval(timer);
           }

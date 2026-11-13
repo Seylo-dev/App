@@ -3,15 +3,17 @@ import {
   auth,
   grants as grantOps,
   type LiveServerMessage,
+  liveHeartbeatMs,
   livePath,
   liveSessionKeyParam,
   liveUnauthorizedCloseCode,
   projects,
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
+import { Elysia } from "elysia";
 import { authenticate } from "../src/auth/authenticate";
 import { aiConversations, sessions } from "../src/db/schema";
-import { liveFloodCloseCode, liveMessageRule, maxTopicsPerSocket } from "../src/live/endpoint";
+import { liveEndpoint, liveFloodCloseCode, liveMessageRule, maxTopicsPerSocket } from "../src/live/endpoint";
 import { createLiveHub } from "../src/live/hub";
 import { callOp, createUser, grant, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
 
@@ -25,15 +27,19 @@ afterEach(async () => {
   panel.close();
 });
 
-function openLive(cookie?: string) {
+function openLive(cookie?: string, port = panel.app.server!.port) {
   // The web app adds the session key it keeps in localStorage as a query parameter.
   const key = cookie ? sessionKeyOf(cookie) : undefined;
   const query = key ? `?${liveSessionKeyParam}=${key}` : "";
-  const ws = new WebSocket(`ws://127.0.0.1:${panel.app.server!.port}${livePath}${query}`, { headers: cookie ? { cookie } : {} } as never);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${livePath}${query}`, { headers: cookie ? { cookie } : {} } as never);
   const messages: LiveServerMessage[] = [];
+  // Every message, also the ones next() handed out.
+  const seen: LiveServerMessage[] = [];
   const waiters: (() => void)[] = [];
   ws.onmessage = (event) => {
-    messages.push(JSON.parse(event.data as string));
+    const message = JSON.parse(event.data as string);
+    messages.push(message);
+    seen.push(message);
     for (const wake of waiters.splice(0)) wake();
   };
   const closed = new Promise<number>((resolve) => (ws.onclose = (event) => resolve(event.code)));
@@ -42,7 +48,7 @@ function openLive(cookie?: string) {
     while (messages.length === 0) await new Promise<void>((wake) => waiters.push(wake));
     return messages.shift() as LiveServerMessage;
   };
-  return { ws, next, opened, closed };
+  return { ws, next, opened, closed, seen };
 }
 
 test("a signed-in tab subscribes and receives invalidations", async () => {
@@ -210,6 +216,82 @@ test("an open tab's socket checks do not slide its session; only requests do", a
   const slid = panel.deps.db.select().from(sessions).where(eq(sessions.userId, other.user.id)).get();
   expect(slid?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * day);
   live.ws.close();
+});
+
+test("a ping is answered with a heartbeat at once", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const live = openLive(cookie);
+  await live.opened;
+  // Panels before 0.2.16 answered it with a BAD_REQUEST error without a topic, which the web app ignores.
+  live.ws.send(JSON.stringify({ type: "ping" }));
+  expect(await live.next()).toEqual({ type: "heartbeat", intervalMs: liveHeartbeatMs });
+  live.ws.send(JSON.stringify({ type: "subscribe", topic: "panel" }));
+  expect(await live.next()).toEqual({ type: "subscribed", topic: "panel" });
+  live.ws.close();
+});
+
+/** A second live endpoint on the test panel's deps, with its own short heartbeat interval. */
+async function liveServer(options: { revalidateMs: number; silentCloseMs: number }) {
+  const app = new Elysia().use(liveEndpoint(panel.deps, options));
+  app.listen({ hostname: "127.0.0.1", port: 0 });
+  return { port: app.server!.port as number, stop: () => app.stop(true) };
+}
+
+test("every socket gets a heartbeat each interval; one that pinged and then went quiet is ended, an older tab's is not", async () => {
+  const server = await liveServer({ revalidateMs: 40, silentCloseMs: 300 });
+  try {
+    const { cookie } = await createUser(panel, "owner");
+    const heartbeats = (seen: LiveServerMessage[]) => seen.filter((m) => m.type === "heartbeat");
+    // Before: nothing came unless something changed, so a tab could not tell a quiet socket from a dead one.
+    const older = openLive(cookie, server.port);
+    await older.opened;
+    older.ws.send(JSON.stringify({ type: "subscribe", topic: "panel" }));
+    await Bun.sleep(200);
+    expect(older.seen).toContainEqual({ type: "subscribed", topic: "panel" });
+    expect(heartbeats(older.seen).length).toBeGreaterThanOrEqual(2);
+    expect(heartbeats(older.seen)[0]).toEqual({ type: "heartbeat", intervalMs: 40 });
+
+    // A tab from 0.2.16 pings; when it stops (its path died, so nothing it sends arrives), the panel ends the
+    // socket, which the heartbeats' own sends kept Bun's idle timeout from noticing.
+    const quiet = openLive(cookie, server.port);
+    await quiet.opened;
+    quiet.ws.send(JSON.stringify({ type: "subscribe", topic: "panel" }));
+    quiet.ws.send(JSON.stringify({ type: "ping" }));
+    const ended = await Promise.race([quiet.closed, Bun.sleep(3000).then(() => "still open")]);
+    expect(ended).toBe(1006);
+    expect(quiet.seen).toContainEqual({ type: "subscribed", topic: "panel" });
+    expect(panel.deps.live.subscribers("panel")).toBe(1);
+
+    // The tab that never pinged (a web app before 0.2.16) keeps its socket however quiet it is.
+    expect(older.ws.readyState).toBe(WebSocket.OPEN);
+    await Bun.sleep(400);
+    expect(older.ws.readyState).toBe(WebSocket.OPEN);
+    older.ws.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("a socket whose events Bun drops (past its backpressure limit) is ended, so the tab reconnects and refetches", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const live = openLive(cookie);
+  await live.opened;
+  live.ws.send(JSON.stringify({ type: "subscribe", topic: "panel" }));
+  expect(await live.next()).toEqual({ type: "subscribed", topic: "panel" });
+  // The tab stops reading (a stalled path): the kernel's buffers fill, then Bun's 16 MiB queue, then Bun drops.
+  (live.ws as unknown as { pause(): boolean }).pause();
+  const big = { type: "invalidate" as const, ops: ["x".repeat(64 << 10)] };
+  let sent = 0;
+  while (panel.deps.live.subscribers("panel") > 0 && sent < 2000) {
+    panel.deps.live.publish("panel", big);
+    sent++;
+    await Promise.resolve();
+  }
+  // Before: the socket stayed open and subscribed while every later event was dropped unseen.
+  expect(panel.deps.live.subscribers("panel")).toBe(0);
+  expect(sent).toBeLessThan(2000);
+  (live.ws as unknown as { resume(): boolean }).resume();
+  expect(await live.closed).toBe(1006);
 });
 
 test("the hub tells when a topic gets its first follower and loses its last, however they leave", () => {

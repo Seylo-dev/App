@@ -9,6 +9,18 @@
 // AI replies, the dashboard's live node samples in node-live.ts) are read
 // with listen(), which also says whether the panel accepted the
 // subscription, so a screen can fall back to polling when not.
+//
+// A socket can stop carrying messages without closing: a laptop that slept
+// or changed networks, a proxy that lost the connection. The browser keeps
+// it "open" and nothing told the screens, which then showed an old deploy
+// for good (0.2.15). Panels from 0.2.16 send a heartbeat every interval and
+// answer each ping with one; this client pings when a socket opens, every
+// interval, and when the tab is shown or the network comes back. Once the
+// panel has sent one heartbeat, a socket that hears nothing for about two
+// intervals, or leaves a ping on a wake unanswered for probeTimeoutMs, is
+// replaced at once: the new socket subscribes again and everything on
+// screen is refetched. A panel that sends no heartbeats (older) is never
+// expected to.
 
 import {
   type LiveEvent,
@@ -45,15 +57,69 @@ export interface LiveClient {
   disconnect(): void;
 }
 
-const maxBackoffMs = 15_000;
+/** The part of a WebSocket the client uses. */
+export interface LiveSocketLike {
+  readonly readyState: number;
+  onopen: ((event: Event) => void) | null;
+  onmessage: ((event: MessageEvent) => void) | null;
+  onclose: ((event: CloseEvent) => void) | null;
+  send(text: string): void;
+  close(code?: number, reason?: string): void;
+}
 
-export function createLiveClient(cache: QueryClient): LiveClient {
+/** What the client needs from the browser; tests pass a fake one. */
+export interface LiveEnvironment {
+  /** A new socket to the panel's live endpoint. */
+  openSocket(): LiveSocketLike;
+  now(): number;
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+  /** Calls fn when the tab is shown again and when the network comes back. */
+  onWake(fn: (why: "visible" | "online") => void): void;
+}
+
+const maxBackoffMs = 15_000;
+const socketOpen = 1;
+
+/** How long a socket may hear nothing once the panel sends heartbeats: two of them and some slack (40 s at 15 s). */
+export function silentLimitMs(heartbeatMs: number): number {
+  return 2 * heartbeatMs + 10_000;
+}
+/** How long the ping sent when the tab is shown or the network comes back may go unanswered. */
+export const probeTimeoutMs = 10_000;
+/** How often the client looks at its socket (and pings when an interval passed). */
+export const watchEveryMs = 5_000;
+
+function browserEnvironment(): LiveEnvironment {
+  return {
+    openSocket() {
+      const url = new URL(livePath, window.location.href);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      // Browsers cannot add headers to a WebSocket, so the session key goes in the query.
+      const key = readSessionKey();
+      if (key) url.searchParams.set(liveSessionKeyParam, key);
+      return new WebSocket(url);
+    },
+    now: () => Date.now(),
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+    onWake(fn) {
+      // A sleeping laptop runs no timers: its wake shows up as these.
+      if (typeof document !== "undefined")
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") fn("visible");
+        });
+      if (typeof window !== "undefined") window.addEventListener("online", () => fn("online"));
+    },
+  };
+}
+
+export function createLiveClient(cache: QueryClient, env: LiveEnvironment = browserEnvironment()): LiveClient {
   const invalidator = createInvalidator(cache);
-  if (typeof document !== "undefined") {
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") invalidator.visible();
-    });
-  }
   const counts = new Map<LiveTopic, number>();
   const listeners = new Map<LiveTopic, Set<(signal: LiveSignal) => void>>();
   // Topics the panel has acknowledged on the current socket.
@@ -70,28 +136,53 @@ export function createLiveClient(cache: QueryClient): LiveClient {
     else if (signal.type === "down") accepted.delete(topic);
     for (const listener of listeners.get(topic) ?? []) listener(signal);
   };
-  let socket: WebSocket | undefined;
+  let socket: LiveSocketLike | undefined;
   let attempt = 0;
   let reconnecting = false;
   let wanted = false;
-  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let onUnauthorized: () => void = () => {};
+  let retryTimer: unknown;
+  let watchTimer: unknown;
+
+  // Liveness. heartbeatMs: the panel's interval, once it sent a heartbeat (null: it sends none, or not yet).
+  let heartbeatMs: number | null = null;
+  // On the current socket: when it last brought anything, whether a heartbeat or anything at all came,
+  // when it was last pinged, and when a wake's ping went out that nothing has answered yet.
+  let heardAt = 0;
+  let heardHeartbeat = false;
+  let heardAny = false;
+  let pingedAt = 0;
+  let probeAt: number | null = null;
 
   const send = (message: object) => {
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    if (socket?.readyState === socketOpen) socket.send(JSON.stringify(message));
+  };
+  const ping = () => {
+    pingedAt = env.now();
+    send({ type: "ping" });
   };
 
-  const open = (onUnauthorized: () => void) => {
-    const url = new URL(livePath, window.location.href);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    // Browsers cannot add headers to a WebSocket, so the session key goes in the query.
-    const key = readSessionKey();
-    if (key) url.searchParams.set(liveSessionKeyParam, key);
-    const ws = new WebSocket(url);
+  /** The socket is gone: screens poll until a new one is up, and listeners hear "down". */
+  const down = () => {
+    setUp(false);
+    accepted.clear();
+    for (const topic of listeners.keys()) tell(topic, { type: "down" });
+  };
+
+  const open = () => {
+    const ws = env.openSocket();
     socket = ws;
+    heardAt = env.now();
+    heardHeartbeat = false;
+    heardAny = false;
+    probeAt = null;
     ws.onopen = () => {
       attempt = 0;
+      heardAt = env.now();
       setUp(true);
       for (const topic of counts.keys()) send({ type: "subscribe", topic });
+      // The answer tells whether this panel sends heartbeats, and how often.
+      ping();
       // Anything missed while the socket was down is refetched, once it is back.
       if (reconnecting) {
         reconnecting = false;
@@ -99,8 +190,14 @@ export function createLiveClient(cache: QueryClient): LiveClient {
       }
     };
     ws.onmessage = (event) => {
+      heardAt = env.now();
+      heardAny = true;
+      probeAt = null;
       const message = JSON.parse(String(event.data)) as LiveServerMessage;
-      if (message.type === "event") {
+      if (message.type === "heartbeat") {
+        heardHeartbeat = true;
+        if (Number.isFinite(message.intervalMs)) heartbeatMs = Math.max(1000, message.intervalMs);
+      } else if (message.type === "event") {
         if (message.event.type === "invalidate")
           invalidator.invalidate(message.event.ops, message.event.match ?? topicMatch(message.topic));
         else if (message.event.type === "nodeUsage") applyNodeUsage(cache, message.event);
@@ -109,11 +206,7 @@ export function createLiveClient(cache: QueryClient): LiveClient {
       else if (message.type === "error" && message.topic) tell(message.topic as LiveTopic, { type: "down" });
     };
     ws.onclose = (event) => {
-      if (socket === ws) {
-        setUp(false);
-        accepted.clear();
-        for (const topic of listeners.keys()) tell(topic, { type: "down" });
-      }
+      if (socket === ws) down();
       if (!wanted || socket !== ws) return;
       if (event.code === liveUnauthorizedCloseCode) return onUnauthorized();
       // Jittered exponential backoff: 0.5s, 1s, 2s ... up to 15s. Anything
@@ -122,9 +215,57 @@ export function createLiveClient(cache: QueryClient): LiveClient {
       // time a reconnect failed.
       const delay = Math.min(maxBackoffMs, 500 * 2 ** attempt++) * (0.75 + Math.random() / 2);
       reconnecting = true;
-      retryTimer = setTimeout(() => open(onUnauthorized), delay);
+      retryTimer = env.setTimeout(open, delay);
     };
   };
+
+  /** Drops a socket that stopped carrying messages without waiting for a close that may never come, and opens another. */
+  const replace = () => {
+    const dead = socket;
+    if (!dead) return;
+    dead.onopen = null;
+    dead.onmessage = null;
+    dead.onclose = null;
+    socket = undefined;
+    try {
+      dead.close();
+    } catch {
+      // Already closing.
+    }
+    down();
+    if (!wanted) return;
+    env.clearTimeout(retryTimer);
+    reconnecting = true;
+    open();
+  };
+
+  /** Replaces the socket when it went silent or left a wake's ping unanswered; pings once an interval passed. */
+  const check = () => {
+    if (!socket || socket.readyState !== socketOpen || heartbeatMs === null) return;
+    const now = env.now();
+    if (probeAt !== null && now - probeAt >= probeTimeoutMs) return replace();
+    if (now - heardAt > silentLimitMs(heartbeatMs)) {
+      // This socket brought messages but never a heartbeat: the panel answering now sends none
+      // (it went back to an older version), so the silence says nothing.
+      if (heardAny && !heardHeartbeat) {
+        heartbeatMs = null;
+        return;
+      }
+      return replace();
+    }
+    if (now - pingedAt >= heartbeatMs) ping();
+  };
+
+  env.onWake((why) => {
+    if (why === "visible") invalidator.visible();
+    if (!socket || socket.readyState !== socketOpen || heartbeatMs === null) return;
+    const before = socket;
+    check();
+    // Long silent (a laptop that slept): replaced by check. Otherwise ask, and give it probeTimeoutMs to answer.
+    if (socket !== before || probeAt !== null) return;
+    probeAt = env.now();
+    ping();
+  });
 
   return {
     subscribe(topic) {
@@ -159,15 +300,18 @@ export function createLiveClient(cache: QueryClient): LiveClient {
         if (set.size === 0) listeners.delete(topic);
       };
     },
-    connect(onUnauthorized) {
+    connect(unauthorized) {
       if (wanted) return;
       wanted = true;
-      open(onUnauthorized);
+      onUnauthorized = unauthorized;
+      watchTimer = env.setInterval(check, watchEveryMs);
+      open();
     },
     disconnect() {
       wanted = false;
       reconnecting = false;
-      clearTimeout(retryTimer);
+      env.clearTimeout(retryTimer);
+      env.clearInterval(watchTimer);
       socket?.close();
       socket = undefined;
       accepted.clear();

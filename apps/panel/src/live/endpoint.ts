@@ -13,13 +13,28 @@
 // Messages bypass the op pipeline, so they have their own limits: a token
 // bucket per person (each subscribe re-reads the session and maybe a row)
 // and a cap on topics per socket.
+//
+// Liveness (0.2.16): a browser cannot see WebSocket protocol pings, so a
+// socket whose path died without a close reaching the tab (a laptop that
+// slept or changed networks, a proxy that lost the connection) looked open
+// to it for good, and its screens heard of no change again. Every socket
+// now gets a heartbeat message each interval (the timer of the session
+// checks) and one in answer to each ping; the web app replaces a socket
+// that hears nothing for about two intervals. The other way round, a socket
+// that pinged once and then sent nothing for liveSilentCloseMs is ended
+// here: the heartbeats reset Bun's own idle timeout, so Bun would never
+// notice it. A send that Bun drops (the socket is past its backpressure
+// limit, so the tab already missed events) ends the socket too, so the tab
+// reconnects and refetches.
 
 import {
   LiveClientMessage,
   type LiveServerMessage,
   type LiveTopic,
+  liveHeartbeatMs,
   livePath,
   liveSessionKeyParam,
+  liveSilentCloseMs,
   liveUnauthorizedCloseCode,
 } from "@seylo/ops";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
@@ -35,8 +50,8 @@ import { maySubscribe } from "./topics";
 
 const clientMessage = TypeCompiler.Compile(LiveClientMessage);
 
-/** How often open sockets are checked against their session. */
-export const revalidateMs = 15_000;
+/** How often open sockets are checked against their session and get a heartbeat. */
+export const revalidateMs = liveHeartbeatMs;
 
 /**
  * The socket's own checks (open, revalidate, subscribe) only ask whether
@@ -63,14 +78,43 @@ interface Connection {
   access: Access;
   credentials: Credentials;
   close(reason: string, code?: number): void;
+  /** Ends the socket without a close handshake: its path is dead or stalled, so none would get through. */
+  terminate(): void;
+  /** When the socket last sent anything. */
+  heardAt: number;
+  /** It pings (web apps from 0.2.16), so its silence means a dead path; older tabs only subscribe. */
+  pings: boolean;
+}
+
+/**
+ * The LiveSocket of one connection. Bun answers ws.send() with the bytes
+ * sent, -1 when it queued the message behind a slow reader, or 0 when it
+ * dropped it (the socket is past its backpressure limit, 16 MiB queued):
+ * then the tab has missed an event and nothing would tell it, so
+ * `onDropped` runs once, after the publish under way, to end the socket.
+ * The tab reconnects and refetches what it shows.
+ */
+export function liveSocketFor(id: string, send: (text: string) => number, onDropped: () => void): LiveSocket {
+  let dropped = false;
+  return {
+    id,
+    send(message) {
+      if (dropped || send(JSON.stringify(message)) !== 0) return;
+      dropped = true;
+      queueMicrotask(onDropped);
+    },
+  };
 }
 
 export function liveEndpoint(
   deps: Pick<Deps, "db" | "live" | "logger" | "config" | "proxy">,
-  options: { revalidateMs?: number; limiter?: RateLimiter } = {},
+  options: { revalidateMs?: number; silentCloseMs?: number; limiter?: RateLimiter } = {},
 ) {
   const connections = new Map<string, Connection>();
   const limiter = options.limiter ?? createRateLimiter({ standard: liveMessageRule, strict: liveMessageRule });
+  const intervalMs = options.revalidateMs ?? revalidateMs;
+  const silentCloseMs = options.silentCloseMs ?? liveSilentCloseMs;
+  const heartbeat: LiveServerMessage = { type: "heartbeat", intervalMs };
 
   const drop = (id: string, reason: string, code = liveUnauthorizedCloseCode) => {
     const connection = connections.get(id);
@@ -78,6 +122,29 @@ export function liveEndpoint(
     connections.delete(id);
     deps.live.drop(connection.socket);
     connection.close(reason, code);
+  };
+
+  /** Ends a socket that stopped carrying messages; its tab reconnects once its path works again. */
+  const kill = (id: string, why: "silent" | "backpressure") => {
+    const connection = connections.get(id);
+    if (!connection) return;
+    connections.delete(id);
+    deps.live.drop(connection.socket);
+    deps.logger.info({ socket: id, why }, "ended a live socket that stopped carrying messages");
+    try {
+      connection.terminate();
+    } catch {
+      // It closed meanwhile.
+    }
+  };
+
+  /** A heartbeat to every socket, and the end of those that pinged before and went quiet since. */
+  const beat = () => {
+    const now = Date.now();
+    for (const [id, connection] of connections) {
+      if (connection.pings && now - connection.heardAt > silentCloseMs) kill(id, "silent");
+      else connection.socket.send(heartbeat);
+    }
   };
 
   /**
@@ -125,11 +192,12 @@ export function liveEndpoint(
       } catch (error) {
         deps.logger.error({ err: error }, "revalidating live sockets failed");
       }
+      beat();
       if (connections.size === 0) {
         clearInterval(timer);
         timer = undefined;
       }
-    }, options.revalidateMs ?? revalidateMs);
+    }, intervalMs);
     timer.unref?.();
   };
 
@@ -158,18 +226,27 @@ export function liveEndpoint(
         ws.close(liveUnauthorizedCloseCode, "sign in first");
         return;
       }
-      const socket: LiveSocket = { id: ws.id, send: (message: LiveServerMessage) => ws.send(JSON.stringify(message)) };
-      connections.set(ws.id, {
+      const id = ws.id;
+      const socket = liveSocketFor(
+        id,
+        (text) => ws.send(text),
+        () => kill(id, "backpressure"),
+      );
+      connections.set(id, {
         socket,
         access: createAccess(deps.db, principal),
         credentials,
         close: (reason, code = liveUnauthorizedCloseCode) => ws.close(code, reason),
+        terminate: () => ws.raw.terminate(),
+        heardAt: Date.now(),
+        pings: false,
       });
       ensureTimer();
     },
     message(ws, raw) {
       const connection = connections.get(ws.id);
       if (!connection) return;
+      connection.heardAt = Date.now();
       // Checked before any parsing or database work.
       const principal = connection.access.principal;
       const who = principal.type === "anonymous" ? `socket:${ws.id}` : `user:${principal.user.id}`;
@@ -180,6 +257,11 @@ export function liveEndpoint(
       const message = typeof raw === "string" ? safeParse(raw) : raw;
       if (!clientMessage.Check(message)) {
         connection.socket.send({ type: "error", code: "BAD_REQUEST", message: "Unknown message." });
+        return;
+      }
+      if (message.type === "ping") {
+        connection.pings = true;
+        connection.socket.send(heartbeat);
         return;
       }
       const topic = message.topic as LiveTopic;
