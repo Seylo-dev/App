@@ -1196,11 +1196,14 @@ local API, join and resume. The areas:
   compose file); when only on a loopback address, "The app listens only on
   127.0.0.1:6000; it must listen on 0.0.0.0 (all addresses), on port 80
   (or the service's port must be 6000)." (on the checked port itself:
-  "...for the health check and its domains to reach it."). Nothing
+  "...for the health check and its domains to reach it.", which wins over
+  any other port on all addresses, such as a Node inspector on 9229 or a
+  metrics port: those are no port to switch to). Nothing
   listening, or sockets that could not be read (`read` false: no /proc,
   not allowed, the container gone), keep the hint above. VM test:
-  reconcile's `TestITListensOnAnotherPort` (busybox `httpd -p 6000` and
-  `-p 127.0.0.1:6000` with port 80).
+  reconcile's `TestITListensOnAnotherPort` (busybox `httpd -p 6000`,
+  `-p 127.0.0.1:6000`, and `-p 127.0.0.1:80` beside `-p 9229`, with port
+  80).
 - A service moved to another project (`services.moveProject`) arrives as a
   spec whose `project_id` changed. When that is the only change
   (`SpecHash` with the old project equals the container's), reconcile
@@ -4630,8 +4633,24 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `Deployment.portHint` (`{ node, port, listening, loopbackOnly,
   canUsePort }`: the port checked, the other ports the app listens on on
   all addresses, those only on a loopback address, and whether
-  `services.usePort` applies: an app that is not a compose member; null
-  when the sockets were not read or nothing listened) carry them.
+  `services.usePort` applies: an app that is not a compose member, on the
+  service's newest deployment (the highest generation: once another
+  deploy started, went live or ran Use port, an older failure is
+  history), and not when `loopbackOnly` holds the checked port itself;
+  null when the sockets were not read or nothing listened) carry them.
+  On a first deploy (nothing live) the node's state delta with phase
+  FAILED can reach the panel before the FAILED DeployProgress, and
+  `resultsFromState` fails the deployment from the status message
+  ("deploy failed: " cut off, `failure.ts` `stateFailureReason`, so the
+  error reads as the event's); the event that comes after is merged into
+  that node's result of the failed deployment of its generation once,
+  when it has no `lastOutput` or `notListening` yet (`recordLateFailure`),
+  so the output block and Use port still show. A deployment stored before
+  0.2.16 keeps the output in its `error` ("<node>: <reason>\nlast
+  output:\n<lines> The previous version stayed live."): `toDeployments`
+  splits it as it is read (`legacyError`), so `error` is the reason and
+  the trailer and `lastOutput` has the lines on the failed node; the row
+  is not rewritten.
 - `services.usePort { serviceId, port, fromPort? }` (`services/use-port.ts`,
   since 0.2.16; permission `services.update`, and the handler also needs
   `services.deploy`; audited): the deploy dialog's "Use port 6000". It
@@ -4640,22 +4659,29 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and a first TCP port that is no longer `fromPort` (`portChanged`), all
   before it changes anything; then the service's first TCP port becomes
   `port` (`spec.ts` `withFirstPort`: replaced in place, or added first,
-  without a second entry of it), the domains whose `target_port` was the
-  old port move to `port`, and a deploy is queued with log lines that say
-  so. A built app's PORT follows (`withPortEnv` reads the first port when
-  the deploy seals its env). Without a live version that serves (none, or
-  the service is stopped) the domains move at once. With one, its
-  containers listen on the old port: the move (also one with no domain to
-  move, for the port) is stored on the new
-  deployment (`deployments.port_move`, migration 0021: `fromPort`,
-  `toPort`, `domainIds`, `applied`) and `rollout()` applies it in the
-  transaction that makes the deployment the target, so the routes reach
-  the agent with the new generation and switch with its containers; if
-  that deployment then fails or is cancelled, `finish` puts the service's
-  first port back on `fromPort` (when it is still `toPort`) and the moved
-  domains with it (when `applied`), and logs "The service's port and its
-  domains are back on <port>, where the live version listens." The
-  answer says which (`domainsMove`: `now` or `rollout`).
+  without a second entry of it), and what sent traffic to the old port
+  moves to `port`: the domains whose `target_port` was the old port, the
+  first-run IP:port port and open timed exposes on it (`port_exposures`
+  of kind `first_run` and `timed`; the first-run listener goes with the
+  PortSpec of its `target_port`, `domains/contributor.ts`, so without
+  this an app with no domain had no address after the switch) and the
+  Cloudflare tunnel on it (`cloudflare_tunnels.target_port`;
+  `services/port-move.ts`). A deploy is queued with log lines that say so.
+  A built app's PORT follows (`withPortEnv` reads the first port when the
+  deploy seals its env). Without a live version that serves (none, or the
+  service is stopped) they move at once. With one, its containers listen
+  on the old port: the move (also one with nothing to move, for the port)
+  is stored on the new deployment (`deployments.port_move`, migration
+  0021: `fromPort`, `toPort`, `domainIds`, `exposureIds`, `tunnel`,
+  `applied`) and `rollout()` applies it in the transaction that makes the
+  deployment the target, so the routes and listeners reach the agent with
+  the new generation and switch with its containers; if that deployment
+  then fails or is cancelled, `finish` puts the service's first port back
+  on `fromPort` (when it is still `toPort`) and what moved with it (when
+  `applied`), and logs "The service's port, its domains, its IP:port
+  access and its Cloudflare tunnel are back on <port>, where the live
+  version listens." (naming what moved). The answer says when the domains
+  move (`domainsMove`: `now` or `rollout`).
 - Build rows (since 0.2.15): a build is `queued` (`started_at` null) from
   the moment the runner dispatches it until its node's agent reports a
   stage after its slot of Builds at once (`BUILD_STAGE_FETCHING_SOURCE` or
@@ -5890,9 +5916,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - A failed deploy (0.2.16, `components/service/deploy-failure.tsx`): the
   deploy log dialog and the Deployments history row show `error` (the
   reason alone), "Use port <port>" for each of `portHint.listening` (up to
-  three, when `canUsePort` and the service's first TCP port is still
-  `portHint.port`, so a switched service is not offered it again;
-  `services.usePort` with `fromPort`, a toast
+  three, when `canUsePort`, so on the service's newest deployment only,
+  and the service's first TCP port is still `portHint.port`, so a switched
+  service is not offered it again; disabled with the busy hint as its
+  title while a deploy of the service runs, `useActiveDeploy`, like Roll
+  back; `services.usePort` with `fromPort`, a toast
   says whether the domains move now or with the rollout) and
   `lastOutput` in a collapsed `<details>` block of its own ("Last output
   of the new container", the node, the line count; monospace, dimmed, a
