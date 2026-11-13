@@ -1,6 +1,6 @@
 // A domain whose registrable domain does not exist. The panel used to walk
 // past it to the public suffix, so the row read "Add this record where
-// co.il's DNS is managed: A melaket-eg-preview.exampel ...". Now it says
+// co.il's DNS is managed: A app-preview.exampel ...". Now it says
 // the registrable domain does not exist, with "Did you mean" when the
 // panel names a likely spelling, and keeps the record (relative to the
 // registrable domain) for once it exists; a domain that exists reads as
@@ -20,7 +20,7 @@ const domainId = "dom0000000000001";
 const domain = (over: Partial<Domain> = {}): Domain => ({
   id: domainId,
   serviceId,
-  host: "melaket-eg-preview.exampel.co.il",
+  host: "app-preview.exampel.co.il",
   pathPrefix: "/",
   stripPrefix: false,
   targetPort: 3000,
@@ -35,7 +35,7 @@ const domain = (over: Partial<Domain> = {}): Domain => ({
   pointsTo: ["203.0.113.10"],
   certificate: { status: "pending", expiresAt: null, issuer: null, error: null, waitingForDns: true },
   liveAt: null,
-  url: "https://melaket-eg-preview.exampel.co.il",
+  url: "https://app-preview.exampel.co.il",
   createdAt: new Date(Date.now() - day).toISOString(),
   updatedAt: new Date(Date.now() - day).toISOString(),
   ...over,
@@ -45,10 +45,10 @@ type Check = OpOutput<typeof domains.checkDns>;
 
 const missingCheck = (over: Partial<Check> = {}): Check => ({
   domainId,
-  host: "melaket-eg-preview.exampel.co.il",
+  host: "app-preview.exampel.co.il",
   status: "missing",
   message: "exampel.co.il does not exist: it is not registered, or has no name servers yet. Check the spelling.",
-  expected: [{ type: "A", name: "melaket-eg-preview", value: "203.0.113.10" }],
+  expected: [{ type: "A", name: "app-preview", value: "203.0.113.10" }],
   found: [],
   zone: null,
   registrable: "exampel.co.il",
@@ -83,7 +83,7 @@ test("a registrable domain that does not exist: said plainly, no 'where its DNS 
   expect(html).not.toContain('data-testid="did-you-mean"');
   // The record, relative to the registrable domain, for once it exists.
   expect(shown).toContain("The record to create once it exists:");
-  expect(shown).toContain("A melaket-eg-preview 203.0.113.10");
+  expect(shown).toContain("A app-preview 203.0.113.10");
   expect(shown).toContain("Check now");
   // The panel's message is the same sentence: not twice.
   expect(shown.split("does not exist").length).toBe(2);

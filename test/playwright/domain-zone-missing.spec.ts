@@ -1,6 +1,6 @@
 // A domain whose registrable domain does not exist, on the demo data. The
 // panel used to walk past it to the public suffix, so the row read "Add
-// this record where co.il's DNS is managed: A melaket-eg-preview.exampel
+// this record where co.il's DNS is managed: A app-preview.exampel
 // <node ip>". Now the row says exampel.co.il does not exist (not
 // registered, or no name servers yet), with "Did you mean" when the panel
 // names a likely spelling, and keeps the record relative to the
@@ -26,8 +26,8 @@ const admin = base.find((d) => d.host === "admin.example.com") as Input;
 const typo = {
   ...admin,
   id: "m00000000000001a",
-  host: "melaket-eg-preview.exampel.co.il",
-  url: "https://melaket-eg-preview.exampel.co.il",
+  host: "app-preview.exampel.co.il",
+  url: "https://app-preview.exampel.co.il",
   pathPrefix: "/",
   primary: false,
   middlewares: { basicAuth: null, ipAllowList: [], rateLimit: null, redirects: [] },
@@ -38,7 +38,7 @@ const missingCheck = (input: Input, didYouMean?: string) => ({
   host: typo.host,
   status: "missing",
   message: `exampel.co.il does not exist: it is not registered, or has no name servers yet. Check the spelling.${didYouMean ? ` Did you mean ${didYouMean}?` : ""}`,
-  expected: [{ type: "A", name: "melaket-eg-preview", value: "203.0.113.10" }],
+  expected: [{ type: "A", name: "app-preview", value: "203.0.113.10" }],
   found: [],
   zone: null,
   registrable: "exampel.co.il",
@@ -71,8 +71,8 @@ test("a registrable domain that does not exist, with Did you mean; the card of a
   // Not where co.il's DNS is managed, and not the record name with the domain glued on.
   await expect(help.getByText(/DNS is managed/)).toHaveCount(0);
   await expect(help.getByText("The record to create once it exists:")).toBeVisible();
-  await expect(help.getByText("melaket-eg-preview", { exact: true })).toBeVisible();
-  await expect(help.getByText("melaket-eg-preview.exampel", { exact: true })).toHaveCount(0);
+  await expect(help.getByText("app-preview", { exact: true })).toBeVisible();
+  await expect(help.getByText("app-preview.exampel", { exact: true })).toHaveCount(0);
   await expect(help.getByRole("button", { name: "Check now" })).toBeVisible();
   // admin.example.com exists: its card reads as before.
   const adminHelp = page.locator('[data-domain="admin.example.com"]').getByTestId("dns-help");

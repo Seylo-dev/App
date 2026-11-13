@@ -1,8 +1,8 @@
 // The zone a domain's record belongs in stops at its registrable domain
 // (Public Suffix List, ICANN section). Before, a host under a domain that
-// does not exist (melaket-eg-preview.<typo>.co.il) walked on to the first
+// does not exist (app-preview.<typo>.co.il) walked on to the first
 // name with NS records, the public suffix: "Add this record where co.il's
-// DNS is managed: A melaket-eg-preview.<typo> <node ip>". Now the check
+// DNS is managed: A app-preview.<typo> <node ip>". Now the check
 // says the registrable domain does not exist (zoneMissing), names the
 // record relative to it, suggests a domain the caller can see that is a
 // likely spelling, and domains.add and addAuto add the domain with a
@@ -55,7 +55,7 @@ const node = { ipv4: "203.0.113.10", ipv6: null };
 
 describe("the registrable domain", () => {
   test("from the ICANN section of the Public Suffix List, never a public suffix itself", () => {
-    expect(registrableDomain("melaket-eg-preview.exampel.co.il")).toEqual({ domain: "exampel.co.il", suffix: "co.il" });
+    expect(registrableDomain("app-preview.exampel.co.il")).toEqual({ domain: "exampel.co.il", suffix: "co.il" });
     expect(registrableDomain("a.b.example.co.uk")).toEqual({ domain: "example.co.uk", suffix: "co.uk" });
     expect(registrableDomain("shop.example.com.au")).toEqual({ domain: "example.com.au", suffix: "com.au" });
     expect(registrableDomain("www.example.com")).toEqual({ domain: "example.com", suffix: "com" });
@@ -73,7 +73,7 @@ describe("the registrable domain", () => {
 describe("findZone", () => {
   test("a registrable domain with no name servers is missing under co.il, co.uk, com.au and .com: the walk never reaches the suffix", async () => {
     for (const [host, registrable] of [
-      ["melaket-eg-preview.exampel.co.il", "exampel.co.il"],
+      ["app-preview.exampel.co.il", "exampel.co.il"],
       ["shop.exampel.co.uk", "exampel.co.uk"],
       ["www.exampel.com.au", "exampel.com.au"],
       ["app.exampel.com", "exampel.com"],
@@ -248,7 +248,7 @@ describe("private names", () => {
 describe("checkHost", () => {
   test("a missing registrable domain: zoneMissing, no zone, and the record relative to the registrable domain", async () => {
     const { dns } = resolver(suffixes);
-    const checked = await checkHost("melaket-eg-preview.exampel.co.il", [node], dns);
+    const checked = await checkHost("app-preview.exampel.co.il", [node], dns);
     expect(checked).toMatchObject({
       status: "missing",
       zone: null,
@@ -256,7 +256,7 @@ describe("checkHost", () => {
       zoneMissing: true,
       cloudflareManaged: false,
       cloudflareDnsUrl: null,
-      expected: [{ type: "A", name: "melaket-eg-preview", value: "203.0.113.10" }],
+      expected: [{ type: "A", name: "app-preview", value: "203.0.113.10" }],
     });
     expect(checked.message).toBe("exampel.co.il does not exist: it is not registered, or has no name servers yet. Check the spelling.");
   });
@@ -314,14 +314,14 @@ describe("domains ops", () => {
 
   test("domains.add keeps a domain whose registrable domain does not exist, with a warning and Did you mean", async () => {
     const { web } = await setup();
-    const added = await callOp(panel, domainOps.add, { serviceId: web.id, host: "melaket-eg-preview.exampel.co.il" }, { cookie });
+    const added = await callOp(panel, domainOps.add, { serviceId: web.id, host: "app-preview.exampel.co.il" }, { cookie });
     expect(added.status).toBe(200);
     expect(added.body.dns).toMatchObject({
       zone: null,
       registrable: "exampel.co.il",
       zoneMissing: true,
       didYouMean: "example.co.il",
-      expected: [{ type: "A", name: "melaket-eg-preview", value: "203.0.113.10" }],
+      expected: [{ type: "A", name: "app-preview", value: "203.0.113.10" }],
     });
     expect(added.body.domain.warning).toEqual({
       reason: "registrableMissing",
@@ -332,7 +332,7 @@ describe("domains ops", () => {
     });
     // Not a refusal: the domain is there.
     const listed = await callOp(panel, domainOps.list, { serviceId: web.id }, { cookie });
-    expect(listed.body.domains.map((d: { host: string }) => d.host)).toEqual(["melaket-eg-preview.exampel.co.il"]);
+    expect(listed.body.domains.map((d: { host: string }) => d.host)).toEqual(["app-preview.exampel.co.il"]);
     // A domain that exists has no warning.
     const fine = await callOp(panel, domainOps.add, { serviceId: web.id, host: "api.example.co.il" }, { cookie });
     expect(fine.body.domain.warning).toBeUndefined();
