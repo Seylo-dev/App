@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -122,6 +123,9 @@ type Manager struct {
 	open   map[string]map[string]*active // service id -> listener id
 	picked map[string]uint32             // "<service>/<listener>" -> port
 	closed bool
+	// dbTLS says whether TLS is on inside an exposed Postgres or MySQL
+	// (SetDatabaseTLS); nil leaves OpenPort.database_tls unset.
+	dbTLS func(serviceID string) bool
 
 	resMu sync.Mutex
 	res   map[string]*resolved // "<service>/<container port>"
@@ -247,7 +251,7 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 	for _, e := range spec.GetDevAccess().GetTimedExposes() {
 		l := Listener{
 			ID: "expose-" + e.GetId(), ServiceID: id, HostPort: e.GetHostPort(), ContainerPort: e.GetContainerPort(),
-			AllowedSourceCIDRs: e.GetAllowedSourceCidrs(), RequireAllowList: true, Timed: true,
+			AllowedSourceCIDRs: e.GetAllowedSourceCidrs(), RequireAllowList: true, Timed: true, ExposeID: e.GetId(),
 		}
 		if spec.GetDatabase() != nil {
 			// A database client's pool keeps connections idle between queries.
@@ -1054,6 +1058,16 @@ func (m *Manager) Close() {
 	}
 }
 
+// SetDatabaseTLS sets what Ports reports in OpenPort.database_tls on the
+// exposed port of a Postgres or MySQL: whether dbtools.ExposedTLS has
+// turned TLS on inside the database (ExposedTLS.Applied). fn is called
+// with the manager's lock held, so it must not call the manager.
+func (m *Manager) SetDatabaseTLS(fn func(serviceID string) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dbTLS = fn
+}
+
 // Ports implements Gate.
 func (m *Manager) Ports(serviceID string) []*agentv1.OpenPort {
 	m.mu.Lock()
@@ -1061,12 +1075,20 @@ func (m *Manager) Ports(serviceID string) []*agentv1.OpenPort {
 	out := []*agentv1.OpenPort{}
 	for _, a := range m.open[serviceID] {
 		p := &agentv1.OpenPort{HostPort: a.port, ContainerPort: a.want.ContainerPort}
-		if a.want.Timed && !a.want.ExpiresAt.IsZero() {
-			p.ExpiresAt = timestamppb.New(a.want.ExpiresAt)
+		if a.want.Timed {
+			p.TimedExposeId = a.want.ExposeID
+			if !a.want.ExpiresAt.IsZero() {
+				p.ExpiresAt = timestamppb.New(a.want.ExpiresAt)
+			}
 		}
 		p.Tls = a.want.TerminateTLS
 		if a.want.TerminateTLS || a.want.AgentCertificate {
 			m.reportCertificate(p, a.svc, a.want.TLSHost)
+		}
+		// Postgres and MySQL: TLS inside the database is ExposedTLS's, which
+		// sets it up a few seconds after the port opens.
+		if a.want.AgentCertificate && !a.want.TerminateTLS && m.dbTLS != nil {
+			p.DatabaseTls = proto.Bool(m.dbTLS(a.svc))
 		}
 		out = append(out, p)
 	}

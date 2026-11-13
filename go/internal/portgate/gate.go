@@ -40,6 +40,9 @@ type Listener struct {
 	ExpiresAt time.Time
 	// Timed marks a timed expose (reported with its expiry).
 	Timed bool
+	// ExposeID is a timed expose's TimedExpose.id, reported in
+	// OpenPort.timed_expose_id.
+	ExposeID string
 	// IdleTimeout cuts a relayed connection idle that long; zero is
 	// DefaultIdleTimeout (Config.IdleTimeout overrides both). A
 	// database's listeners, exposed and timed alike, use

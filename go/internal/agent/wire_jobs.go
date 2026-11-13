@@ -238,6 +238,15 @@ func wireJobs(reg *Registry, d *Deps) error {
 	})
 	d.Components.Add("backups", p.backups.Run)
 	wireCleanupSchedule(d)
+	// The exposed port of a Postgres or MySQL says whether TLS is on inside
+	// the database yet (OpenPort.database_tls), and its status goes out
+	// again once it is.
+	if g, ok := d.Gate.(databaseTLSGate); ok {
+		g.SetDatabaseTLS(p.exposed.Applied)
+	}
+	if r, ok := d.Reconcile.(statusRefresher); ok {
+		p.exposed.OnApplied = r.Refresh
+	}
 	d.Components.Add("db-exposed-tls", p.exposed.Run)
 	d.Components.Add("cloudflared", func(ctx context.Context) error { return p.cf.Supervise(ctx, 15*time.Second) })
 	d.Components.Add("db-ui-idle", func(ctx context.Context) error {
@@ -384,4 +393,10 @@ func (r *toolRegistrations) closeAll() {
 type webUIStatus interface {
 	SetWebUIStatus(fn func(serviceID string) *agentv1.ToolStatus)
 	Refresh(serviceID string)
+}
+
+// databaseTLSGate is the part of the portgate that reports whether TLS is
+// on inside an exposed Postgres or MySQL (portgate.Manager).
+type databaseTLSGate interface {
+	SetDatabaseTLS(fn func(serviceID string) bool)
 }

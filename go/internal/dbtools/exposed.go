@@ -218,6 +218,14 @@ type ExposedTLS struct {
 	// retiredDir holds "<service id>.<user>" markers of retired users.
 	retiredDir string
 
+	// OnApplied, when set, is called on its own goroutine after TLS was
+	// turned on in a database for the first time in this run (the agent
+	// republishes its status: OpenPort.database_tls). Set it before Run.
+	OnApplied func(serviceID string)
+	// runJob runs a job in the database's container; nil is run (tests
+	// replace it).
+	runJob func(ctx context.Context, spec *agentv1.ServiceSpec, job exposedJob) error
+
 	mu      sync.Mutex
 	tls     map[string]*agentv1.ServiceSpec // exposed Postgres and MySQL
 	retire  map[string]*agentv1.ServiceSpec // with a user to retire
@@ -315,11 +323,20 @@ func (x *ExposedTLS) applyAll(ctx context.Context) {
 			x.log.Warn("exposed database TLS not set yet", "service_id", s.GetId(), "err", err)
 			continue
 		}
-		x.mu.Lock()
-		x.applied[s.GetId()] = m.fingerprint()
-		x.mu.Unlock()
 		x.log.Info("exposed database TLS set", "service_id", s.GetId(), "self_signed", m.selfSigned)
 	}
+}
+
+// Applied reports whether TLS was turned on inside the database in this
+// run (Apply or a pass succeeded for it, with any certificate): Postgres
+// serves TLS only from then on, and ALTER SYSTEM keeps it on, also once
+// the database is no longer exposed. A new agent run starts with none and
+// turns it on again on its first pass. The portgate reports it on the
+// exposed port (OpenPort.database_tls).
+func (x *ExposedTLS) Applied(serviceID string) bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.applied[serviceID] != ""
 }
 
 // material is the certificate to install.
@@ -340,12 +357,27 @@ func (x *ExposedTLS) Apply(ctx context.Context, spec *agentv1.ServiceSpec) error
 	return x.apply(ctx, spec, m)
 }
 
+// apply runs the TLS job and records the certificate it installed.
 func (x *ExposedTLS) apply(ctx context.Context, spec *agentv1.ServiceSpec, tls *tlsMaterial) error {
 	job, err := tlsJob(spec.GetDatabase(), tls)
 	if err != nil {
 		return err
 	}
-	return x.run(ctx, spec, job)
+	runJob := x.runJob
+	if runJob == nil {
+		runJob = x.run
+	}
+	if err := runJob(ctx, spec, job); err != nil {
+		return err
+	}
+	x.mu.Lock()
+	first := x.applied[spec.GetId()] == ""
+	x.applied[spec.GetId()] = tls.fingerprint()
+	x.mu.Unlock()
+	if first && x.OnApplied != nil {
+		go x.OnApplied(spec.GetId())
+	}
+	return nil
 }
 
 // marker is the file that records a retired user on this node.
