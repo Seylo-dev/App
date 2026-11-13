@@ -19,7 +19,7 @@ type LogDeps = Pick<Deps, "db" | "live">;
 const nextSeq = new WeakMap<object, Map<string, number>>();
 const pendingPublish = new WeakMap<object, Map<string, ReturnType<typeof setTimeout>>>();
 
-function seqFor(deps: LogDeps, deploymentId: string): number {
+function seqFor(deps: Pick<Deps, "db">, deploymentId: string): number {
   let map = nextSeq.get(deps.db);
   if (!map) {
     map = new Map();
@@ -53,8 +53,26 @@ export function appendLog(
   error = false,
 ): void {
   if (lines.length === 0) return;
+  publishLog(deps, serviceId, deploymentId, writeLog(deps, deploymentId, step, lines, error));
+}
+
+/** Lines stored by writeLog, for publishLog. */
+export type WrittenLines = { seq: number; ts: string; step: DeployStepKey; text: string; error: boolean }[];
+
+/**
+ * The storing half of appendLog, for a caller inside a transaction: it
+ * calls publishLog with the result once the transaction committed, so no
+ * tab is told of lines a rollback takes back.
+ */
+export function writeLog(
+  deps: Pick<Deps, "db">,
+  deploymentId: string,
+  step: DeployStepKey,
+  lines: readonly string[],
+  error = false,
+): WrittenLines {
   const ts = new Date();
-  const sent: { seq: number; ts: string; step: DeployStepKey; text: string; error: boolean }[] = [];
+  const sent: WrittenLines = [];
   for (const text of lines) {
     const seq = seqFor(deps, deploymentId);
     if (seq > maxLinesPerDeployment) continue;
@@ -65,6 +83,11 @@ export function appendLog(
     deps.db.insert(deploymentLogs).values({ deploymentId, seq, ts, step, text: line, error }).onConflictDoNothing().run();
     sent.push({ seq, ts: ts.toISOString(), step, text: line, error });
   }
+  return sent;
+}
+
+/** The publishing half of appendLog: the lines to the deployment's topic now, its state soon after. */
+export function publishLog(deps: LogDeps, serviceId: string, deploymentId: string, sent: WrittenLines): void {
   if (sent.length > 0) deps.live.publish(`deployment:${deploymentId}`, { type: "log", lines: sent });
   schedulePublish(deps, serviceId, deploymentId);
 }

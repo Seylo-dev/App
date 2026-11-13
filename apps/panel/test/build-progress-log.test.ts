@@ -10,6 +10,7 @@
 // same id, and those stages are logged again. Before 0.2.15 every one was
 // logged twice in a row.
 
+import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -292,4 +293,21 @@ test("the same message from another build or another stage is a new line, and a 
   await fleet.settle();
   const log = await logOf(web, deploymentId);
   expect(log.filter((l) => l.text === queuedLine).map((l) => l.step)).toEqual(["clone", "clone"]);
+});
+
+test("a progress line reaches the live topic only after its transaction committed", async () => {
+  const client = (panel.deps.db as unknown as { $client: Database }).$client;
+  const publish = panel.deps.live.publish.bind(panel.deps.live);
+  const inTransaction: string[] = [];
+  panel.deps.live.publish = (topic, event) => {
+    // Before: the line went out from inside the transaction that stored it, so a rollback left tabs with a line
+    // that was never kept.
+    if (client.inTransaction) inTransaction.push(`${topic} ${event.type}`);
+    publish(topic, event);
+  };
+  const web = await app("web");
+  const { deploymentId, buildId } = await deploy(web);
+  await startAndEnd(buildId);
+  expect(await progressIn(web, deploymentId)).toEqual(progressLines);
+  expect(inTransaction).toEqual([]);
 });

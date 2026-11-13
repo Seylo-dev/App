@@ -61,7 +61,7 @@ import { assertImageAllowed } from "../services/source-guard";
 import { needsBuild, readSpec, runSettingsOf, withFirstPort } from "../services/spec";
 import { reportedFailure, sentence, stateFailureReason } from "./failure";
 import { reportedHealth, reportedWaitMs } from "./image-health";
-import { appendLog, LineSplitter, maxLineLength } from "./logs";
+import { appendLog, LineSplitter, maxLineLength, publishLog, writeLog } from "./logs";
 import { registryGcJobType } from "./registry-gc";
 import { pickBuildNode, resolveBuild, sourceBranch } from "./source";
 import { closeSteps, type DeploymentRow, initialSteps, isFinal, publishBuildQueue, publishDeploymentChange, setStep } from "./store";
@@ -525,20 +525,21 @@ export function recordBuildProgress(s: Pick<EngineState, "deps">, nodeId: string
   const line = `${progress.stage}:${progress.message.slice(0, maxLineLength)}`;
   const key = progress.runId ? `${progress.runId.slice(0, maxRunIdLength)}:${line}` : line;
   if (progress.message && progress.stage !== BuildStage.SUCCEEDED && !build.progressLogged.includes(key)) {
-    db.transaction((tx) => {
+    // The line and the note that it was logged commit together; tabs hear of the line once both are in.
+    const written = db.transaction((tx) => {
       tx.update(builds)
         .set({ progressLogged: [...build.progressLogged, key].slice(-maxProgressLogged) })
         .where(eq(builds.id, build.id))
         .run();
-      appendLog(
+      return writeLog(
         s.deps,
-        d.serviceId,
         d.id,
         progress.stage === BuildStage.FETCHING_SOURCE || progress.stage === BuildStage.QUEUED ? "clone" : "build",
         [progress.message],
         progress.stage === BuildStage.FAILED,
       );
     });
+    publishLog(s.deps, d.serviceId, d.id, written);
   }
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   // The builds behind it on the node moved up (or one of them now has the free slot).
