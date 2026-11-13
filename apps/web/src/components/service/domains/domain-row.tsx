@@ -19,7 +19,12 @@
 // the certificate. A domain with no route on the service's node says why
 // instead (no-route.tsx: not deployed yet, a compose stack or cron service,
 // or the node's error writing the routes), and while the panel knows no
-// check could pass (routeless) nothing is checked again on its own. The
+// check could pass (routeless) nothing is checked again on its own. Behind
+// Cloudflare's proxy, while the panel is still checking whether requests
+// reach the node, the DNS chip's tooltip says so; once its checks have not
+// reached the node for 30 minutes the chip turns amber and a note says why
+// (Cloudflare's reason when it gave one) with Check again, as every row the
+// Domains tab counts does (needs-setup.ts). The
 // row's "..." and its right-click menu are one list (menus/row-items.tsx);
 // the notes under the row keep the browser's menu, for their records and links.
 
@@ -65,6 +70,7 @@ import {
   WaitingForDnsChip,
   waitsForDns,
 } from "./certificate-state";
+import { originChecking, originUnknownLong, originUnknownLongMs } from "./needs-setup";
 import { NoRouteChip, NoRouteNote, routeless } from "./no-route";
 
 export type Domain = OpOutput<typeof domains.list>["domains"][number];
@@ -237,6 +243,7 @@ export function DomainRow({
             {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} held={held} />}
             {rateLimited && <RateLimitNote />}
             {(generating || held) && !d.noRoute && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
+            {!(generating || held) && originUnknownLong(d) && <OriginUnknownNote serviceId={serviceId} d={d} />}
           </div>
         </div>
       </RowMenu>
@@ -260,8 +267,11 @@ export function DomainRow({
  * checked are the chip's title. Once the panel's origin check reached the
  * node the chip is green with a check and says so; when something else
  * answered it turns red ("..., not this node") and OriginHelp below the row
- * says what to fix. Nothing while DNS is not working yet: the waiting state
- * below the row names the record to create.
+ * says what to fix. Behind the proxy before that, its title says the panel
+ * is checking that requests reach the node, and after 30 minutes of checks
+ * that did not, the chip is amber and OriginUnknownNote says why. Nothing
+ * while DNS is not working yet: the waiting state below the row names the
+ * record to create.
  */
 function DnsChip({ d }: { d: Domain }) {
   const ips = d.pointsTo ?? [];
@@ -284,17 +294,57 @@ function DnsChip({ d }: { d: Domain }) {
     );
   }
   const reaches = d.origin === "node";
+  // Behind the proxy before the panel knows: still checking (gray), or not reached for 30 minutes (amber, and a note below).
+  const checking = originChecking(d);
+  const unknownLong = originUnknownLong(d);
   const hint = t(proxied ? "serviceDomains.dnsProxiedHint" : "serviceDomains.dnsOkHint", { host: d.host, ips: ips.join(", ") });
-  const title = hint + (reaches ? ` ${t("serviceDomains.originNodeHint")}` : "") + checked;
+  const lead = checking
+    ? `${t("serviceDomains.originChecking", { ip: first })} `
+    : unknownLong
+      ? `${t("serviceDomains.originUnknownTitle", { ip: first, minutes: originUnknownLongMs / 60_000 })} `
+      : "";
+  const title = lead + hint + (reaches ? ` ${t("serviceDomains.originNodeHint")}` : "") + checked;
   return (
-    <Chip tone={proxied && !reaches ? "gray" : "green"} title={title} data-testid="dns-chip" data-origin={reaches ? "node" : undefined}>
-      {proxied && !reaches ? (
+    <Chip
+      tone={proxied && !reaches ? (unknownLong ? "amber" : "gray") : "green"}
+      title={title}
+      data-testid="dns-chip"
+      data-origin={reaches ? "node" : checking ? "checking" : unknownLong ? "unknown" : undefined}
+    >
+      {unknownLong ? (
+        <IconAlertTriangle size={12} stroke={2.2} aria-hidden="true" />
+      ) : proxied && !reaches ? (
         <IconCloud size={12} stroke={2} aria-hidden="true" />
       ) : (
         <IconCheck size={12} stroke={2.2} aria-hidden="true" />
       )}
       <span>{t(proxied ? "serviceDomains.dnsProxiedTo" : "serviceDomains.dnsOkTo", { ip: shown })}</span>
     </Chip>
+  );
+}
+
+/**
+ * Below a domain behind Cloudflare's proxy whose origin the panel's checks
+ * have not reached for 30 minutes, when no certificate note says it
+ * already (its certificate is valid, or failed): why, in one line, with
+ * Check again. Cloudflare's own reason when its answer gave one. The Domains
+ * tab counts the domain (needs-setup.ts); before 0.2.16 such a row counted
+ * with nothing on it saying why.
+ */
+function OriginUnknownNote({ serviceId, d }: { serviceId: string; d: Domain }) {
+  const check = useOp(domains.checkDns, { serviceId, domainId: d.id }, { retry: retryOp, staleTime: 60_000 });
+  const ip = d.pointsTo?.[0];
+  if (!ip) return null;
+  const reason = originReason(d, check.data);
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="origin-unknown-note" data-reason={reason}>
+      <p className="m-0 min-w-0 flex-1 basis-64 text-xs text-muted-foreground">
+        {reason
+          ? t(`serviceDomains.originReason.${reason}`, { host: d.host, ip })
+          : t("serviceDomains.originUnknownHint", { host: d.host, ip, minutes: originUnknownLongMs / 60_000 })}
+      </p>
+      <CheckAgainButton check={check} />
+    </div>
   );
 }
 

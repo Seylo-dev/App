@@ -10,6 +10,7 @@
 import { expect, test } from "bun:test";
 import { renderStatic } from "../../../test/render";
 import { type Domain, DomainRow } from "./domain-row";
+import { domainNeedsSetup } from "./needs-setup";
 
 const day = 86_400_000;
 
@@ -228,4 +229,87 @@ test("a node that could not write the routes: the node and its error", async () 
   expect(shown).toContain("tries again every 10 seconds");
   expect(shown).not.toContain("Certificate waits for Cloudflare");
   expect(html).toContain('data-reason="routeWriteFailed"');
+});
+
+// The owner's www (0.2.15): proxied, live with a valid certificate, and no origin stored. The Domains tab
+// counted it and the row said nothing. Now, while the panel is still checking, the DNS chip's tooltip says so
+// and nothing counts; once its checks have not reached the node for 30 minutes the row says why.
+const live = {
+  host: "www.example.com",
+  url: "https://www.example.com",
+  pointsTo: ["203.0.113.10"],
+  primary: false,
+  certificate: {
+    status: "valid" as const,
+    expiresAt: new Date(Date.now() + 80 * day).toISOString(),
+    issuer: "Let's Encrypt (R11)",
+    error: null,
+  },
+  liveAt: new Date(Date.now() - day).toISOString(),
+};
+const unknownFor = (minutes: number) => ({
+  origin: "unknown" as const,
+  originCheckedAt: new Date(Date.now() - 60_000).toISOString(),
+  originUnknownSince: new Date(Date.now() - minutes * 60_000).toISOString(),
+});
+const chipTitle = (html: string) =>
+  (html.match(/<span[^>]*data-testid="dns-chip"[^>]*>/)?.[0].match(/title="([^"]*)"/)?.[1] ?? "").replace(/&#x27;/g, "'");
+
+test("a live domain behind Cloudflare whose origin is still being checked: the chip's tooltip says so, no note", async () => {
+  for (const d of [domain(live), domain({ ...live, ...unknownFor(5) })]) {
+    const html = await render(d);
+    expect(chipTitle(html)).toStartWith("Checking that requests reach 203.0.113.10...");
+    expect(html).toContain('data-origin="checking"');
+    expect(html).not.toContain('data-testid="origin-unknown-note"');
+    expect(text(html)).not.toContain("Check again");
+  }
+});
+
+test("not reached for 30 minutes: an amber chip, and why on the row with Check again", async () => {
+  let html = await render(domain({ ...live, ...unknownFor(45) }));
+  let shown = text(html);
+  expect(html).toContain('data-origin="unknown"');
+  expect(chipTitle(html)).toStartWith(
+    "Requests through Cloudflare have not reached 203.0.113.10 in the panel's checks for over 30 minutes.",
+  );
+  expect(html).toContain('data-testid="origin-unknown-note"');
+  expect(shown).toContain(
+    "Requests to www.example.com through Cloudflare have not reached 203.0.113.10 in the panel's checks for over 30 minutes",
+  );
+  expect(html).toMatch(/<button[^>]*>.*?Check again<\/button>/);
+
+  // Cloudflare's own reason, when its answer gave one.
+  html = await render(domain({ ...live, ...unknownFor(45), originReason: "cloudflareUnreachable" }));
+  shown = text(html);
+  expect(html).toContain('data-reason="cloudflareUnreachable"');
+  expect(shown).toContain("Cloudflare cannot reach the node on port 443/80. Its record for www.example.com must point at 203.0.113.10");
+  expect(shown).not.toContain("in the panel's checks for over 30 minutes");
+
+  // A certificate still waiting says it in its own note: one note, not two.
+  html = await render(domain({ ...live, ...unknownFor(45), liveAt: null, certificate: waitingCert }));
+  expect(html).not.toContain('data-testid="origin-unknown-note"');
+  expect(html).toContain('data-testid="pending-cert-note"');
+});
+
+test("every row the Domains tab counts says why on the row, with a way to check or try again", async () => {
+  const counted: [Domain, RegExp][] = [
+    [domain({ ...live, dnsStatus: "missing", certificate: waitingCert, liveAt: null }), /Add this record/],
+    [domain({ ...live, dnsStatus: "wrongTarget", certificate: waitingCert, liveAt: null }), /Add this record/],
+    [
+      domain({ ...live, origin: "elsewhere", originCheckedAt: new Date().toISOString() }),
+      /Requests through Cloudflare reach another server now/,
+    ],
+    [
+      domain({ ...live, certificate: { status: "failed", expiresAt: null, issuer: null, error: "acme: 403 unauthorized" }, liveAt: null }),
+      /acme: 403 unauthorized/,
+    ],
+    [domain({ ...live, ...unknownFor(45) }), /have not reached 203\.0\.113\.10 in the panel's checks/],
+    [domain({ ...live, noRoute: { reason: "stackParent" } }), /web is a compose stack/],
+  ];
+  for (const [d, why] of counted) {
+    expect(domainNeedsSetup(d)).toBe(true);
+    const shown = text(await render(d));
+    expect(shown).toMatch(why);
+    if (!d.noRoute) expect(shown).toMatch(/Check again|Check now|Regenerate certificate/);
+  }
 });

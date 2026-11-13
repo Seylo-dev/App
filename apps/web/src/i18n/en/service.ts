@@ -34,8 +34,8 @@ export default {
     composeFile: "Compose file",
     environment: "Environment",
     domains: "Domains",
-    // The red count on the Domains tab: custom domains whose DNS or certificate still needs the owner.
-    domainsToFix: { one: "{count} domain needs setup", other: "{count} domains need setup" },
+    // The red count on the Domains tab: custom domains whose DNS, origin or certificate still needs the owner, by name.
+    domainsToFix: { one: "{count} domain needs setup: {hosts}", other: "{count} domains need setup: {hosts}" },
     console: "Console",
     logs: "Logs",
     metrics: "Metrics",

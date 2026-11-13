@@ -42,6 +42,8 @@ function ServiceLayout() {
   const domainList = useOp(domains.list, { serviceId }, { enabled: strayKind || tabsFor(kind).some((tab) => tab.path === "domains") });
   const tabs = tabsFor(kind, { strayDomains: strayKind && (domainList.data?.domains.length ?? 0) > 0 });
   const domainsToFix = domainsNeedingSetup(domainList.data?.domains);
+  // The badge's tooltip names them, so the count says which rows to look at.
+  const fixLabel = t("service.tabs.domainsToFix", { count: domainsToFix.length, hosts: domainsToFix.map((d) => d.host).join(", ") });
   const tabMatch = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   const parent = service.data?.parentId;
 
@@ -92,13 +94,14 @@ function ServiceLayout() {
               <>
                 {isActive && <TabIndicator layoutId="service-tabs" />}
                 {t(tab.label)}
-                {tab.path === "domains" && domainsToFix > 0 && (
+                {tab.path === "domains" && domainsToFix.length > 0 && (
                   <span
-                    title={t("service.tabs.domainsToFix", { count: domainsToFix })}
+                    title={fixLabel}
+                    data-testid="domains-to-fix"
                     className="ml-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-chip-red-bg px-1 text-[11px] font-semibold text-chip-red-fg"
                   >
-                    <span aria-hidden="true">{domainsToFix}</span>
-                    <span className="sr-only">{t("service.tabs.domainsToFix", { count: domainsToFix })}</span>
+                    <span aria-hidden="true">{domainsToFix.length}</span>
+                    <span className="sr-only">{fixLabel}</span>
                   </span>
                 )}
               </>

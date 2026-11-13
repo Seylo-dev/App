@@ -58,6 +58,12 @@ export default {
   originElsewhereProxiedHint:
     "{host} is behind Cloudflare's proxy, and requests through it reach another server, not this node. Its record in Cloudflare must point at {ip}.",
   originElsewhereShort: "Not reaching this node",
+  // Behind Cloudflare's proxy before the panel knows whether requests reach the node (the DNS chip's tooltip).
+  originChecking: "Checking that requests reach {ip}...",
+  // The panel's checks through Cloudflare have not reached the node for a while: the chip's tooltip, and the note below the row.
+  originUnknownTitle: "Requests through Cloudflare have not reached {ip} in the panel's checks for over {minutes} minutes.",
+  originUnknownHint:
+    "Requests to {host} through Cloudflare have not reached {ip} in the panel's checks for over {minutes} minutes, so it cannot tell where the record in Cloudflare points. Point it at {ip}; if it already does, check Cloudflare's SSL/TLS mode and security rules, then Check again.",
   // Why the panel's check through Cloudflare's proxy did not reach the node, from Cloudflare's own answer.
   originReason: {
     cloudflareCertificate:
