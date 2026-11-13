@@ -303,7 +303,17 @@ export const runNow = implement(backupOps.runNow, async (input, ctx) => {
   getService(ctx.db, input.serviceId);
   let what: Parameters<typeof startBackup>[1];
   if (input.policyId) {
-    what = policyBackup(requirePolicy(ctx, input.serviceId, input.policyId));
+    const policy = requirePolicy(ctx, input.serviceId, input.policyId);
+    // Like backups.runAll and the scheduler: a schedule never runs twice at once. Read right before
+    // startBackup, which inserts its run with no await in between.
+    const running = runningBackup(ctx.db, policy.id);
+    if (running) {
+      throw new OpError("CONFLICT", "A backup of this schedule is still running. Wait for it to finish, then back up again.", {
+        reason: "running",
+        runId: running,
+      });
+    }
+    what = policyBackup(policy);
   } else {
     if (!input.target || !input.destinationId) {
       throw new OpError("BAD_REQUEST", "Pass policyId, or target and destinationId for a one-off backup.", { field: "policyId" });

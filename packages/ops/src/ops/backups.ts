@@ -263,7 +263,7 @@ export const runNow = defineOp({
   kind: "mutation",
   summary: "Back up now",
   description:
-    "Starts one backup right away: of one schedule (policyId; also a disabled one, counted toward its keepLast), or a one-off of the database or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
+    "Starts one backup right away: of one schedule (policyId; also a disabled one, counted toward its keepLast; refused with CONFLICT, reason running and the runId, while a backup of that schedule is still running), or a one-off of the database or a volume to a destination (kept until deleted). Returns the run; follow it with backups.listRuns or the live service topic. To back up every enabled schedule of a service at once, use backups.runAll.",
   input: Type.Object({
     serviceId: Id,
     policyId: Type.Optional(Id),

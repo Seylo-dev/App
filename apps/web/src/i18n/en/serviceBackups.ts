@@ -10,6 +10,7 @@ export default {
   alsoRunning: { one: "{count} was already running.", other: "{count} were already running." },
   notStarted: { one: "{count} could not start: {error}", other: "{count} could not start: {error}" },
   allRunning: "Every schedule that is on is already backing up.",
+  scheduleRunning: "This schedule is still backing up. Back it up again once that backup is done.",
   allOff: "Every schedule is off, so nothing was backed up. Turn one on, or start it from its own menu.",
   addSchedule: "Add schedule",
   editSchedule: "Change schedule",

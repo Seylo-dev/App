@@ -751,6 +751,33 @@ describe("Back up now for the whole service (runAll)", () => {
     agent.disconnect();
   });
 
+  test("Back up now on a schedule's menu is refused while that schedule's backup still runs (0.2.16)", async () => {
+    const { node, app, data, webVault } = await volumeSchedules();
+    const asked: string[] = [];
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void asked.push(req.backupId) }, [], [signed]);
+    const first = await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: data }, { cookie });
+    expect(first.body.status).toBe("running");
+    // Started again while it runs: refused, the node is not asked twice and no second run is stored.
+    const again = await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: data }, { cookie });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatchObject({
+      code: "CONFLICT",
+      message: "A backup of this schedule is still running. Wait for it to finish, then back up again.",
+      details: { reason: "running", runId: first.body.id },
+    });
+    expect(asked).toEqual([data]);
+    expect(panel.deps.db.select().from(backupRuns).where(eq(backupRuns.policyId, data)).all()).toHaveLength(1);
+    // Another schedule of the service, and one-offs, are not held up.
+    expect((await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: webVault }, { cookie })).status).toBe(200);
+    // Once it finished, it runs again.
+    backupResult(node.id, first.body.id, true, keyFor(first.body.id, ".tar.gz"));
+    await Bun.sleep(5);
+    const later = await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: data }, { cookie });
+    expect(later.status).toBe(200);
+    expect(asked).toEqual([data, webVault, data]);
+    agent.disconnect();
+  });
+
   test("the scheduler skips a schedule whose backup is still running, says so, and runs it at its next time", async () => {
     const { node, app, data, webVault } = await volumeSchedules();
     const asked: string[] = [];

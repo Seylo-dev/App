@@ -5,7 +5,8 @@
 // still gets a one-off dump to the first destination.
 
 import { expect, test } from "bun:test";
-import { backUpNowPlan, type RunAllResult, runAllToast } from "./back-up-now";
+import { OpError } from "@seylo/ops";
+import { backUpNowPlan, type RunAllResult, runAllToast, runNowRefusal } from "./back-up-now";
 
 type Run = RunAllResult["runs"][number];
 
@@ -90,4 +91,19 @@ test("the toast counts the backups it started and says why nothing started", () 
     tone: "warning",
     text: "1 could not start: That volume does not belong to this service.",
   });
+});
+
+// Back up now on a schedule's own menu while that schedule still backs up is refused since 0.2.16
+// (CONFLICT, reason running): the toast says so as news, not as a failure.
+test("a schedule still backing up is news, other refusals stay errors", () => {
+  const running = new OpError("CONFLICT", "A backup of this schedule is still running. Wait for it to finish, then back up again.", {
+    reason: "running",
+    runId: "r000000000000001",
+  });
+  expect(runNowRefusal(running)).toEqual({
+    tone: "info",
+    text: "This schedule is still backing up. Back it up again once that backup is done.",
+  });
+  const offline = new OpError("UNAVAILABLE", "The node is offline.");
+  expect(runNowRefusal(offline)).toEqual({ tone: "error", text: "The node is offline." });
 });

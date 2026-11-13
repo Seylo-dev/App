@@ -6,7 +6,7 @@
 // destination. A schedule's own menu still backs up just that one
 // (backups.runNow with its id).
 
-import { backups, type OpOutput } from "@seylo/ops";
+import { backups, OpError, type OpOutput } from "@seylo/ops";
 import { useOpMutation } from "@seylo/ops/react";
 import { toast } from "@seylo/ui/components/toast";
 import { t } from "../../../i18n/t";
@@ -50,6 +50,22 @@ export function backUpNowPlan(
   const first = choices[0];
   return first && isDatabaseKind(service.kind) ? { kind: "oneOff", destinationId: first.id } : null;
 }
+
+/**
+ * What Back up now on one schedule's menu says when the panel refuses it.
+ * Since 0.2.16 a schedule whose backup still runs is refused (CONFLICT,
+ * reason running), as Back up now for the whole service and the scheduler
+ * skip it: that is news, not a failure.
+ */
+export function runNowRefusal(error: unknown): { tone: "info" | "error"; text: string } {
+  if (error instanceof OpError && error.details?.reason === "running") return { tone: "info", text: t("serviceBackups.scheduleRunning") };
+  return { tone: "error", text: isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")) };
+}
+
+export const failRunNow = (error: unknown) => {
+  const shown = runNowRefusal(error);
+  toast[shown.tone](shown.text);
+};
 
 const fail = (error: unknown) =>
   toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));

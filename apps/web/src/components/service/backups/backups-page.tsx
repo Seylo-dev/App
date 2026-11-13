@@ -31,7 +31,7 @@ import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import { RowsSkeleton } from "../service-skeletons";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
-import { useBackUpNow } from "./back-up-now";
+import { failRunNow, useBackUpNow } from "./back-up-now";
 import { PolicyDialog } from "./policy-dialog";
 import { deleteRunCopy, fileKept, type Run, RunRow } from "./run-row";
 
@@ -115,7 +115,11 @@ function PolicyRow({ service, policy: p, onEdit }: { service: ServiceDetail; pol
       invalidate(backups.listRuns, backups.listPolicies);
       toast.success(t("serviceBackups.started"));
     },
-    onError: fail,
+    onError: (error) => {
+      // A refusal because the schedule is still backing up: its run shows in the list, so refresh that too.
+      invalidate(backups.listRuns, backups.listPolicies);
+      failRunNow(error);
+    },
   });
   const remove = useOpMutation(backups.deletePolicy, { onSuccess: () => invalidate(backups.listPolicies) });
   return (
