@@ -2,7 +2,8 @@
 // the new container's last output sits in a collapsed block of its own
 // (monospace, copyable, never in the step log or the red error), in the
 // deploy log dialog and under the deploy in the history, and "Use port
-// 6000" switches the service to the port its app listens on and deploys.
+// 6000" switches the service to the port its app listens on and deploys:
+// on the service's newest deployment only, and not while a deploy runs.
 // The Advanced tab waits for a running deploy before it changes the nodes
 // or moves the service. Screenshots go to $SHOTS_DIR/deploy-failure.
 
@@ -10,14 +11,20 @@ import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { failedDeployError, failedDeployOutput, ids as svc } from "./demo/service";
+import { failedDeployError, failedDeployId, failedDeployOutput, failedNewestList, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/deploy-failure`;
-/** The failed deploy (5a2c9d1) as the api's history lists it. */
-const failedId = "d000000000000013";
+/** The api's history with the failed deploy as its newest deployment, where the panel offers Use port. */
+const newestFailed = (running = false) => ({
+  "deployments.list": (input: Input) => failedNewestList(input, running),
+  "deployments.get": (input: Input) => ({
+    deployment: failedNewestList({ serviceId: input.serviceId }).deployments.find((d) => d.id === input.deploymentId),
+    logTopic: `deployment:${input.deploymentId}`,
+  }),
+});
 
 test.use({ storageState: stateFile });
 test.beforeAll(() => mkdirSync(shots, { recursive: true }));
@@ -37,6 +44,7 @@ test("the history shows the reason, Use port and the app's own output apart", as
   const calls = watchOps(page);
   await installDemo(page, {
     overrides: {
+      ...newestFailed(),
       "services.usePort": (input) => ({
         deploymentId: "d0000000000000a1",
         ports: [{ containerPort: input.port, protocol: "tcp" }],
@@ -63,9 +71,30 @@ test("the history shows the reason, Use port and the app's own output apart", as
   expect(calls("services.usePort")).toEqual([{ serviceId: svc.api, port: 6000, fromPort: 3000 }]);
 });
 
+test("an older failed deploy keeps its output but offers no Use port", async ({ page }) => {
+  // The demo's own history: newer deploys followed the failed one (canUsePort false).
+  await installDemo(page);
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/deployments`);
+  await expect(page.getByText(failedDeployError).first()).toBeVisible();
+  await expect(page.locator("details").filter({ hasText: "Last output of the new container" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use port 6000" })).toHaveCount(0);
+});
+
+test("Use port waits for a deploy in progress, like Roll back", async ({ page }) => {
+  // The newest deploy failed, and another one (started elsewhere) is queued.
+  const calls = watchOps(page);
+  await installDemo(page, { overrides: newestFailed(true) });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/deployments`);
+  const button = page.getByRole("button", { name: "Use port 6000" }).first();
+  await expect(button).toBeVisible();
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute("title", "A deploy is in progress. Wait for it, or cancel it, to deploy again.");
+  expect(calls("services.usePort")).toEqual([]);
+});
+
 test("the deploy log dialog: the error once, the output collapsed and copyable, not in the step log", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await installDemo(page);
+  await installDemo(page, { overrides: newestFailed() });
   await page.goto(`/p/${ids.acme}/s/${svc.api}/deployments`);
   const row = page
     .locator("div")
@@ -85,7 +114,7 @@ test("the deploy log dialog: the error once, the output collapsed and copyable, 
   // The deploy's own log never has the app's lines.
   await expect(dialog.getByRole("log").or(dialog.locator("[aria-label='Deploy log']")).first()).not.toContainText("Heartbeat");
   await page.screenshot({ path: `${shots}/dialog.png` });
-  expect(failedId).toBe("d000000000000013");
+  expect(failedDeployId).toBe("d000000000000013");
 });
 
 test("the Advanced tab waits for a running deploy to change the nodes or move the service", async ({ page }) => {

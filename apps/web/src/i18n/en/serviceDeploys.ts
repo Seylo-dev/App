@@ -119,7 +119,7 @@ export default {
   /** A failed deploy whose app listens on another port than the service's (Deployment.portHint). */
   usePort: {
     button: "Use port {port}",
-    title: "Set the service's port to {port}, move its domains on port {from} there, and deploy",
+    title: "Set the service's port to {port}, move its domains, IP:port access and tunnel on port {from} there, and deploy",
     started: "Port {port} set. Deploying.",
     startedLater: "Port {port} set. Deploying; the domains move to it when the new version rolls out.",
   },

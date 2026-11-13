@@ -235,14 +235,40 @@ const deployments = [
     canRollback: !live && !failed,
     rollbackOf: null,
     error: failed ? failedDeployError : null,
-    // The app listened on 6000 (agents from 0.2.16 read it): its own output and Use port 6000.
+    // The app listened on 6000 (agents from 0.2.16 read it): its own output. Newer deploys followed it, so
+    // the panel offers no Use port here (only the newest deployment does: failedNewestList).
     lastOutput: failed ? { node: us, lines: failedDeployOutput } : null,
-    portHint: failed ? { node: us, port: 3000, listening: [6000], loopbackOnly: [], canUsePort: true } : null,
+    portHint: failed ? { node: us, port: 3000, listening: [6000], loopbackOnly: [], canUsePort: false } : null,
     createdAt: ago(age),
     startedAt: ago(age),
     finishedAt: ago(age - 53_000),
   })),
 ];
+
+/** The failed deploy (5a2c9d1) in the demo history. */
+export const failedDeployId = "d000000000000013";
+
+/**
+ * A service's history whose newest deployment is the failed one: the app
+ * was pushed listening on 6000 after the live version, and the panel offers
+ * Use port on the newest deployment only (canUsePort). With running, a
+ * deploy started elsewhere is in progress (deployments.list active: true),
+ * which the history has not fetched yet: Use port waits for it.
+ */
+export function failedNewestList(input: Input, running = false) {
+  const failed = deployments.find((d) => d.id === failedDeployId) as (typeof deployments)[number];
+  const newest = {
+    ...failed,
+    serviceId: input.serviceId,
+    generation: 19,
+    portHint: failed.portHint && { ...failed.portHint, canUsePort: true },
+  };
+  const older = deployments.slice(1).filter((d) => d.id !== failedDeployId);
+  const all = [newest, ...older.map((d, i) => ({ ...d, serviceId: input.serviceId, status: i === 0 ? "live" : d.status }))];
+  const active = input.active === true || input.active === "true";
+  const queued = { ...deployments[0], id: "d0000000000000a0", serviceId: input.serviceId, generation: 20, status: "queued" };
+  return { deployments: active ? (running ? [queued] : []) : all, nextCursor: null, keptImages: 5 };
+}
 
 /**
  * private-api's only deploy: git could not fetch the private repository

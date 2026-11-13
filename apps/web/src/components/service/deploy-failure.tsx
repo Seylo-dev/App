@@ -14,6 +14,7 @@ import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronRight, IconPlugConnected } from "@tabler/icons-react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
+import { useActiveDeploy } from "./active-deploy";
 import type { Deployment } from "./deploy-steps";
 import { useInvalidate } from "./invalidate";
 import { isNotBuilt } from "./op-state";
@@ -25,7 +26,9 @@ const maxPortButtons = 3;
  * The ports Use port offers: the ones the app listens on, on all addresses,
  * when the service can switch and still has the port the deploy checked
  * (servicePort: its first TCP port now; undefined when the caller does not
- * know it). Once switched, the failed deploy offers it no more.
+ * know it). Once switched, the failed deploy offers it no more. The panel
+ * sets canUsePort only on the service's newest deployment, so an older
+ * failure in the history never offers it.
  */
 export function usePortChoices(d: Pick<Deployment, "status" | "portHint">, servicePort?: number | null): number[] {
   if (d.status !== "failed" || !d.portHint?.canUsePort) return [];
@@ -66,6 +69,8 @@ export function UsePortButtons({
 }) {
   const invalidate = useInvalidate();
   const choices = usePortChoices(d, servicePort);
+  // Use port deploys: it waits for a deploy in progress, like Roll back and Redeploy (the panel refuses it meanwhile).
+  const busy = useActiveDeploy(serviceId, choices.length > 0) !== null;
   const use = useOpMutation(services.usePort, {
     onSuccess: (result, input) => {
       invalidate(deployments.list, services.get);
@@ -87,8 +92,8 @@ export function UsePortButtons({
           size="sm"
           variant="primary"
           className="h-8"
-          disabled={use.isPending}
-          title={t("serviceDeploys.usePort.title", { port, from: hint.port })}
+          disabled={use.isPending || busy}
+          title={busy ? t("service.header.deployBusyHint") : t("serviceDeploys.usePort.title", { port, from: hint.port })}
           onClick={() => use.mutate({ serviceId, port, fromPort: hint.port })}
         >
           <IconPlugConnected size={14} stroke={2} />
