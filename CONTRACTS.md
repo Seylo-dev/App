@@ -6523,10 +6523,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   address, Copy ID, Delete; the header's and the old service menu's rules),
   `project-items.tsx` (Open, Open in new tab, New service sub menu, Rename,
   Collapse/Expand, Hide/Unhide project, Settings, Copy ID, Delete, disabled
-  while it has services), `node-items.tsx` (the node sheet's views, Run
-  health checks, Update now, the addresses and id to copy) and
-  `row-items.tsx` (deployments, domains, backup schedules and runs, cron
-  jobs, uptime checks, database users, assistant chats). No new
+  while it has services; Collapse/Expand is the flag of the view the menu
+  is in, the sidebar's or the home page's, `project-menu.tsx` `where`),
+  `node-items.tsx` (the node sheet's views, Run health checks, Update now,
+  the addresses and id to copy) and `row-items.tsx` (deployments, domains,
+  backup schedules and runs, cron jobs, uptime checks, database users,
+  assistant chats; a backup run's items are `run-row.tsx` `runMenu`'s:
+  Restore, Download, Remove, or only Remove from list once its
+  destination is gone). No new
   client-side permission rules: items are hidden or disabled as before,
   and the panel's refusal is toasted. Service menus build their entries
   when they open (`menus/service-menu.tsx` `ServiceMenuItems`), and the
