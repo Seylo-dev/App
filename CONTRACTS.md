@@ -5889,7 +5889,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - A failed deploy (0.2.16, `components/service/deploy-failure.tsx`): the
   deploy log dialog and the Deployments history row show `error` (the
   reason alone), "Use port <port>" for each of `portHint.listening` (up to
-  three, when `canUsePort`; `services.usePort` with `fromPort`, a toast
+  three, when `canUsePort` and the service's first TCP port is still
+  `portHint.port`, so a switched service is not offered it again;
+  `services.usePort` with `fromPort`, a toast
   says whether the domains move now or with the rollout) and
   `lastOutput` in a collapsed `<details>` block of its own ("Last output
   of the new container", the node, the line count; monospace, dimmed, a
