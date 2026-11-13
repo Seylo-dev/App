@@ -228,7 +228,7 @@ func (w *worker) reattach(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 		if cause := context.Cause(rollCtx); cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, errSuperseded) {
 			reason = cause.Error()
 		}
-		w.failDeploy(ctx, rollCtx, spec, hash, reason, nil)
+		w.failDeploy(ctx, rollCtx, spec, hash, reason, nil, nil)
 	}
 	if err := w.ensureNetwork(ctx, spec); err != nil {
 		fail(err.Error())

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -90,12 +92,12 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		}
 	}
 	if err != nil {
-		w.failDeploy(ctx, rollCtx, spec, hash, err.Error(), nil)
+		w.failDeploy(ctx, rollCtx, spec, hash, err.Error(), nil, nil)
 		return
 	}
 	w.rollImage = w.imageCheckOf(rollCtx, spec, image)
 	if _, _, err := prepareData(rollCtx, w.r.o.Docker, w.r.o.Layout, spec, w.r.o.Scope); err != nil {
-		w.failDeploy(ctx, rollCtx, spec, hash, "preparing volumes: "+err.Error(), nil)
+		w.failDeploy(ctx, rollCtx, spec, hash, "preparing volumes: "+err.Error(), nil, nil)
 		return
 	}
 
@@ -197,14 +199,14 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	}
 	if err != nil {
 		restore()
-		w.failDeploy(ctx, rollCtx, spec, hash, "creating containers: "+err.Error(), nil)
+		w.failDeploy(ctx, rollCtx, spec, hash, "creating containers: "+err.Error(), nil, nil)
 		return
 	}
 	for _, c := range created {
 		if err := w.r.o.Docker.StartContainer(rollCtx, c.ID); err != nil {
 			lines := dockerTail(ctx, w.r.o.Docker, c.ID, failureLines)
 			restore()
-			w.failDeploy(ctx, rollCtx, spec, hash, "starting "+c.Name+": "+err.Error(), lines)
+			w.failDeploy(ctx, rollCtx, spec, hash, "starting "+c.Name+": "+err.Error(), lines, nil)
 			return
 		}
 	}
@@ -228,25 +230,30 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 			if d, err := w.r.o.Docker.InspectContainer(ctx, c.ID); err == nil {
 				msg = fmt.Sprintf("%s exited right after starting (exit code %d)", c.Name, d.ExitCode)
 			}
-			w.failDeploy(ctx, rollCtx, spec, hash, msg, lines)
+			w.failDeploy(ctx, rollCtx, spec, hash, msg, lines, nil)
 			return
 		}
 		err := w.waitHealthy(hctx, inst, spec)
 		if err != nil {
 			reason := err.Error()
+			var listening *agentv1.NotListening
 			if cause := context.Cause(rollCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				reason = cause.Error()
 			} else if hctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 				reason = fmt.Sprintf("not healthy after %s: %s", timeout, err)
 				var nl *health.NotListeningError
 				if errors.As(err, &nl) {
-					reason += ". " + notListeningHint(spec, nl.Port)
+					// Read before restore() removes the container: what it
+					// listens on instead tells the port it wants.
+					var ports []health.ListenPort
+					listening, ports = w.listeningOf(ctx, c.ID, nl.Port)
+					reason += ". " + notListeningHint(spec, nl.Port, listening.GetRead(), ports)
 				}
 			}
 			hcancel()
 			lines := dockerTail(ctx, w.r.o.Docker, c.ID, failureLines)
 			restore()
-			w.failDeploy(ctx, rollCtx, spec, hash, reason, lines)
+			w.failDeploy(ctx, rollCtx, spec, hash, reason, lines, listening)
 			return
 		}
 	}
@@ -267,7 +274,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	if err := w.syncRoutes(rollCtx, spec, switchTo, true); err != nil {
 		w.revertRoutes(ctx, spec, oldRunning)
 		restore()
-		w.failDeploy(ctx, rollCtx, spec, hash, "switching the route: "+err.Error(), nil)
+		w.failDeploy(ctx, rollCtx, spec, hash, "switching the route: "+err.Error(), nil, nil)
 		return
 	}
 	w.setSwitched(true)
@@ -283,7 +290,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		default:
 			w.revertRoutes(ctx, spec, oldRunning)
 			restore()
-			w.failDeploy(ctx, rollCtx, spec, hash, "checking the new route through Traefik: "+err.Error(), nil)
+			w.failDeploy(ctx, rollCtx, spec, hash, "checking the new route through Traefik: "+err.Error(), nil, nil)
 			return
 		}
 	}
@@ -328,13 +335,25 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 // Advanced tab, a compose member's ports in the stack's compose file) or
 // where a check that fits goes. One whose domains send traffic to the
 // port must listen there.
-func notListeningHint(spec *agentv1.ServiceSpec, port uint32) string {
+//
+// Since 0.2.16 the container's listening sockets were read first (read,
+// ports: listeningOf): an app that listens on another port is told which
+// ("The app listens on port 6000, not 80."), and one bound only to a
+// loopback address that it must listen on 0.0.0.0. The general hint stays
+// for a container that listens on nothing, or whose sockets could not be
+// read.
+func notListeningHint(spec *agentv1.ServiceSpec, port uint32, read bool, ports []health.ListenPort) string {
 	// A route without a target port goes to the first port, the one checked.
 	routed := slices.ContainsFunc(spec.GetRouting().GetRoutes(), func(r *agentv1.Route) bool {
 		return r.GetTargetPort() == port || r.GetTargetPort() == 0
 	})
-	listen := fmt.Sprintf("it must listen on port %d on all addresses (0.0.0.0), not only on 127.0.0.1", port)
 	member := spec.GetKind() == agentv1.ServiceKind_SERVICE_KIND_COMPOSE_MEMBER
+	if read {
+		if hint := listeningHint(port, ports, member, routed); hint != "" {
+			return hint
+		}
+	}
+	listen := fmt.Sprintf("it must listen on port %d on all addresses (0.0.0.0), not only on 127.0.0.1", port)
 	switch {
 	case routed && member:
 		return fmt.Sprintf("Nothing in the container listens on port %d, where its domains send traffic: %s, or the stack's compose file (its Compose file tab) and the domains must name the port it does listen on.", port, listen)
@@ -344,6 +363,81 @@ func notListeningHint(spec *agentv1.ServiceSpec, port uint32) string {
 		return fmt.Sprintf("Nothing in the container listens on port %d. If this service does not serve on a port (a background worker), remove its ports and expose entries from the stack's compose file on the stack's Compose file tab (no domain uses them), or give it a healthcheck there that fits it. If it does serve, %s.", port, listen)
 	}
 	return fmt.Sprintf("Nothing in the container listens on port %d. If this service does not serve on a port (a background worker), remove the port under Ports in the Container section of the service's Advanced tab (no domain uses it), or set a check that fits it under Health check and deploys on the same tab. If it does serve, %s.", port, listen)
+}
+
+// listeningHint is the hint for a container that listens on other ports
+// than the one checked, or only on a loopback address; "" when it listens
+// on nothing (or, oddly, on the checked port itself).
+func listeningHint(port uint32, ports []health.ListenPort, member, routed bool) string {
+	var others []uint32
+	var loopback *health.ListenPort
+	for i, p := range ports {
+		switch {
+		case p.LoopbackOnly:
+			if loopback == nil || p.Port == port {
+				loopback = &ports[i]
+			}
+		case p.Port == port:
+			// It listens there after all (it started just now): the general hint.
+			return ""
+		default:
+			others = append(others, p.Port)
+		}
+	}
+	if len(others) > 0 {
+		names := make([]string, len(others))
+		for i, p := range others {
+			names[i] = strconv.FormatUint(uint64(p), 10)
+		}
+		listens := "port " + names[0]
+		if len(names) > 1 {
+			listens = "ports " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+		}
+		fix := fmt.Sprintf("Set the service's port to %d (Ports in the Container section of its Advanced tab)", others[0])
+		if member {
+			fix = fmt.Sprintf("Name port %d instead in the stack's compose file (its Compose file tab)", others[0])
+		}
+		if routed {
+			fix += " and point its domains there"
+		}
+		return fmt.Sprintf("The app listens on %s, not %d. %s, or make the app listen on port %d.", listens, port, fix, port)
+	}
+	if loopback == nil {
+		return ""
+	}
+	addr := netip.AddrPortFrom(loopback.Loopback, uint16(loopback.Port)).String()
+	if !loopback.Loopback.IsValid() {
+		addr = fmt.Sprintf("127.0.0.1:%d", loopback.Port)
+	}
+	if loopback.Port == port {
+		return fmt.Sprintf("The app listens only on %s; it must listen on 0.0.0.0 (all addresses) for the health check and its domains to reach it.", addr)
+	}
+	return fmt.Sprintf("The app listens only on %s; it must listen on 0.0.0.0 (all addresses), on port %d (or the service's port must be %d).", addr, port, loopback.Port)
+}
+
+// listeningOf reads what a new container whose default check (TCP on port)
+// was refused all along listens on, through its process's network
+// namespace (/proc/<pid>/net/tcp and tcp6, so nothing needs to be in the
+// image). read is false when the container or its sockets could not be
+// read (no /proc, not allowed, already gone).
+func (w *worker) listeningOf(ctx context.Context, containerID string, port uint32) (*agentv1.NotListening, []health.ListenPort) {
+	out := &agentv1.NotListening{Port: port}
+	ictx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	d, err := w.r.o.Docker.InspectContainer(ictx, containerID)
+	if err != nil || !d.Running || d.Pid <= 0 {
+		return out, nil
+	}
+	ports, err := health.ReadListening(w.r.o.ProcDir, d.Pid)
+	if err != nil {
+		w.log.Debug("reading the new container's listening ports", "err", err)
+		return out, nil
+	}
+	out.Read = true
+	for _, p := range ports {
+		out.Listening = append(out.Listening, &agentv1.ListeningPort{Port: p.Port, LoopbackOnly: p.LoopbackOnly})
+	}
+	return out, ports
 }
 
 // nextSuffix marks containers of a side-by-side deploy until they serve.
@@ -463,8 +557,12 @@ func (w *worker) revertRoutes(ctx context.Context, spec *agentv1.ServiceSpec, ol
 }
 
 // failDeploy reports a failed deploy. A rollout cancelled because a newer
-// spec arrived is not a failure: the next pass deploys that one.
-func (w *worker) failDeploy(ctx, rollCtx context.Context, spec *agentv1.ServiceSpec, hash, reason string, lines []string) {
+// spec arrived is not a failure: the next pass deploys that one. The new
+// container's last output (lines) goes in DeployProgress.last_output, not
+// in the message, so the panel shows the reason on its own and the app's
+// output apart from the deploy's steps; listening is what a container
+// whose default check was refused listened on instead (nil otherwise).
+func (w *worker) failDeploy(ctx, rollCtx context.Context, spec *agentv1.ServiceSpec, hash, reason string, lines []string, listening *agentv1.NotListening) {
 	if errors.Is(context.Cause(rollCtx), errSuperseded) {
 		w.log.Info("rollout superseded", "generation", spec.GetGeneration())
 		w.kick()
@@ -475,16 +573,15 @@ func (w *worker) failDeploy(ctx, rollCtx context.Context, spec *agentv1.ServiceS
 		return
 	}
 	lines = redactLines(lines, spec)
-	msg := reason
-	if len(lines) > 0 {
-		msg += "\nlast output:\n" + strings.Join(lines, "\n")
-	}
 	w.log.Warn("deploy failed", "generation", spec.GetGeneration(), "reason", reason)
 	w.rec.FailedGeneration, w.rec.FailedHash, w.rec.FailedMessage = spec.GetGeneration(), hash, "deploy failed: "+reason
 	w.saveRecord()
 	w.message = w.rec.FailedMessage
 	w.systemLine(spec.GetGeneration(), "deploy of generation %d failed: %s", spec.GetGeneration(), firstLine(reason))
-	w.reportDeploy(ctx, spec.GetGeneration(), agentv1.DeployStage_DEPLOY_STAGE_FAILED, msg)
+	w.reportResult(ctx, &agentv1.DeployProgress{
+		ServiceId: w.id, Generation: spec.GetGeneration(), Stage: agentv1.DeployStage_DEPLOY_STAGE_FAILED, Message: reason,
+		ImageHealthCheck: w.rollImage, LastOutput: lines, NotListening: listening,
+	})
 }
 
 // systemLine writes one of Seylo's own lines (deploy started, healthy,
@@ -534,14 +631,17 @@ func (w *worker) reportDeploy(ctx context.Context, gen uint64, stage agentv1.Dep
 
 // reportDeployImage is reportDeploy with the image check to report.
 func (w *worker) reportDeployImage(ctx context.Context, gen uint64, stage agentv1.DeployStage, msg string, img *agentv1.ImageHealthCheck) {
+	w.reportResult(ctx, &agentv1.DeployProgress{ServiceId: w.id, Generation: gen, Stage: stage, Message: msg, ImageHealthCheck: img})
+}
+
+// reportResult queues a final deploy result durably.
+func (w *worker) reportResult(ctx context.Context, p *agentv1.DeployProgress) {
 	if w.r.o.Reports == nil {
 		return
 	}
 	ev := &agentv1.Event{
-		Time: timestamppb.New(w.r.o.Now()),
-		Payload: &agentv1.Event_DeployProgress{DeployProgress: &agentv1.DeployProgress{
-			ServiceId: w.id, Generation: gen, Stage: stage, Message: msg, ImageHealthCheck: img,
-		}},
+		Time:    timestamppb.New(w.r.o.Now()),
+		Payload: &agentv1.Event_DeployProgress{DeployProgress: p},
 	}
 	if err := w.r.o.Reports.Event(context.WithoutCancel(ctx), ev); err != nil {
 		w.log.Error("queueing deploy result", "err", err)

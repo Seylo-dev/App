@@ -10,7 +10,11 @@
 // (Router.Verify), then stop the old generation. If N never becomes
 // healthy within DeployStrategy.health_timeout (or a new container exits
 // first) it is removed, the old generation keeps serving and a FAILED
-// DeployProgress with the last output lines goes out durably. The same
+// DeployProgress goes out durably: the reason in message, the new
+// container's last output lines in last_output (since 0.2.16; in the
+// message before), and, when the default check was refused all along, the
+// ports it listens on instead (not_listening, read from its
+// /proc/<pid>/net/tcp before it is removed). The same
 // failed generation is not retried until the panel sends another. A
 // rollback is an apply with an older image digest. DEPLOY_MODE_RECREATE
 // stops the old generation first and starts it again on failure.

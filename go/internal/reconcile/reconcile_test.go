@@ -143,8 +143,16 @@ func TestRolloutUnhealthyKeepsOld(t *testing.T) {
 	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
 		t.Fatalf("gen 2 should fail: %v", p)
 	}
-	if !strings.Contains(p.GetMessage(), "not healthy") || !strings.Contains(p.GetMessage(), "[redacted]") || strings.Contains(p.GetMessage(), "s3cret-token") {
+	// The reason alone in the message (since 0.2.16); the new container's
+	// output, redacted, in its own field.
+	if !strings.HasPrefix(p.GetMessage(), "not healthy") || strings.Contains(p.GetMessage(), "last output") || strings.Contains(p.GetMessage(), "\n") {
 		t.Fatalf("message = %q", p.GetMessage())
+	}
+	if got := p.GetLastOutput(); !slices.Equal(got, []string{"starting", "error: cannot connect with [redacted]", "exiting"}) {
+		t.Fatalf("last output = %q", got)
+	}
+	if p.GetNotListening() != nil {
+		t.Fatalf("not listening = %v", p.GetNotListening())
 	}
 	if got := h.names("svc"); !slices.Equal(got, []string{"seylo-svc-1"}) {
 		t.Fatalf("old must keep serving, containers = %v", got)

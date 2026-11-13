@@ -169,7 +169,11 @@ type Options struct {
 	// EtcDir holds the passwd and group files read for accounts that share
 	// the panel's uid or gid (default /etc).
 	EtcDir string
-	Now    func() time.Time
+	// ProcDir is where the listening sockets of a new container are read
+	// (<ProcDir>/<pid>/net/tcp and tcp6) when its default health check was
+	// refused all along (default /proc).
+	ProcDir string
+	Now     func() time.Time
 }
 
 // Runtime is the Engine implementation: one worker goroutine per service
@@ -266,6 +270,9 @@ func New(o Options) (*Runtime, error) {
 	}
 	if o.EtcDir == "" {
 		o.EtcDir = "/etc"
+	}
+	if o.ProcDir == "" {
+		o.ProcDir = "/proc"
 	}
 	if o.Now == nil {
 		o.Now = time.Now

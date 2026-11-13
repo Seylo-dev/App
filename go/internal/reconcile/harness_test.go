@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -98,6 +100,22 @@ type fakeProber struct {
 	// WaitHealthy then fails like the real one, with a
 	// *health.NotListeningError.
 	refused map[string]bool
+	// listens holds, per refused image, the /proc/<pid>/net/tcp its
+	// containers show once their check gives up (written under procDir).
+	listens map[string]string
+	procDir string
+}
+
+// setListening makes a refused image's containers show tcp (a
+// /proc/<pid>/net/tcp file) when their check gives up.
+func (p *fakeProber) setListening(image, tcp string) {
+	p.setRefused(image)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.listens == nil {
+		p.listens = map[string]string{}
+	}
+	p.listens[image] = tcp
 }
 
 func (p *fakeProber) setBad(image string, bad bool) {
@@ -143,7 +161,17 @@ func (p *fakeProber) WaitHealthy(ctx context.Context, t health.Target, c *agentv
 			p.mu.Lock()
 			eng, _ := p.eng.Get(t.ContainerID)
 			refused := p.refused[eng.Spec.Image]
+			tcp, listens := p.listens[eng.Spec.Image]
 			p.mu.Unlock()
+			if listens && eng.PID() > 0 {
+				dir := filepath.Join(p.procDir, strconv.Itoa(eng.PID()), "net")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join(dir, "tcp"), []byte(tcp), 0o644); err != nil {
+					return err
+				}
+			}
 			if port := health.FirstTCPPort(ports); refused && c.GetProbe() == nil && port > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return &health.NotListeningError{Port: port, Last: fmt.Sprintf("tcp check on port %d: dial tcp 172.29.0.9:%d: connect: connection refused", port, port)}
 			}
@@ -270,6 +298,8 @@ type harness struct {
 	drain time.Duration
 	// etc is Options.EtcDir (an empty folder unless a test writes to it).
 	etc string
+	// proc is Options.ProcDir (fakeProber.setListening writes into it).
+	proc string
 	// engine, when set, is the Docker the runtime gets instead of eng (a
 	// wrapper around it).
 	engine docker.Engine
@@ -305,7 +335,9 @@ func newHarnessEngine(t *testing.T, setup func(*dockertest.Fake), wrap func(*doc
 		layout:  datadir.New(t.TempDir()),
 		logs:    &memLogs{},
 		etc:     t.TempDir(),
+		proc:    t.TempDir(),
 	}
+	h.prober.procDir = h.proc
 	if wrap != nil {
 		h.engine = wrap(eng)
 	}
@@ -347,6 +379,7 @@ func (h *harness) start() {
 		ReattachDrain: drain,
 		Logs:          h.logs,
 		EtcDir:        h.etc,
+		ProcDir:       h.proc,
 	})
 	if err != nil {
 		h.t.Fatal(err)

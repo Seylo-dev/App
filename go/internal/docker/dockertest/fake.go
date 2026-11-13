@@ -246,6 +246,20 @@ func matches(have, want map[string]string) bool {
 	return true
 }
 
+// PID is the container's main process id as InspectContainer reports it:
+// made up from the container id while it runs (10000 + its number), 0
+// otherwise. Tests write files under a fake /proc/<PID>.
+func (c *Container) PID() int {
+	if !c.Running {
+		return 0
+	}
+	var n int
+	if _, err := fmt.Sscanf(c.ID, "c%d", &n); err != nil {
+		return 0
+	}
+	return 10000 + n
+}
+
 func (c *Container) state() agentv1.InstanceState {
 	switch {
 	case c.Running:
@@ -312,7 +326,7 @@ func (f *Fake) InspectContainer(ctx context.Context, id string) (docker.Containe
 		Labels: maps.Clone(c.Spec.Labels), State: c.state(), Running: c.Running,
 		ExitCode: c.ExitCode, OOMKilled: c.OOM, StartedAt: c.Started, FinishedAt: c.Finished,
 		RestartCount: c.Restarts, Tty: c.Spec.Tty, Networks: maps.Clone(c.Networks), Publish: publish,
-		Health: hc,
+		Health: hc, Pid: c.PID(),
 	}, nil
 }
 

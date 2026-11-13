@@ -12,6 +12,9 @@
 //     running instances. Probes (NewProber) is the implementation; its
 //     WaitHealthy returns a *NotListeningError when the default check was
 //     refused all along, which the deploy error follows with a hint.
+//   - ReadListening: the TCP ports a container listens on, from its
+//     process's /proc/<pid>/net/tcp and tcp6 (since 0.2.16), for that
+//     hint ("The app listens on port 6000, not 80.").
 //   - Watch: turns probe results of a running instance into a HealthState
 //     (start period, failure threshold).
 package health

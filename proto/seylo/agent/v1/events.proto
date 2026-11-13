@@ -114,6 +114,36 @@ message DeployProgress {
   // generation to become healthy (DeployStrategy.health_timeout, or longer
   // for the image's HEALTHCHECK). Unset from agents before 0.2.15.
   google.protobuf.Duration health_timeout = 6;
+  // With DEPLOY_STAGE_FAILED: the new container's last output lines
+  // (stdout and stderr, secrets redacted, oldest first), when it got as far
+  // as starting. message then holds only the reason. Since 0.2.16; older
+  // agents append the lines to message after "\nlast output:\n".
+  repeated string last_output = 7;
+  // With DEPLOY_STAGE_FAILED when the default health check (TCP on the
+  // first TCP port) was refused until the health timeout: what the new
+  // container listened on instead. Unset otherwise, and from agents before
+  // 0.2.16.
+  NotListening not_listening = 8;
+}
+
+// NotListening is what a container whose default health check was refused
+// all along listened on, read from its network namespace
+// (/proc/<pid>/net/tcp and tcp6) before it was removed.
+message NotListening {
+  // The port the check dialed: the service's first TCP port.
+  uint32 port = 1;
+  // False when the sockets could not be read (no process, no /proc, not
+  // allowed); listening is empty then.
+  bool read = 2;
+  // TCP ports in LISTEN state, ascending, one entry per port.
+  repeated ListeningPort listening = 3;
+}
+
+message ListeningPort {
+  uint32 port = 1;
+  // Every socket on the port is bound to a loopback address (127.0.0.0/8
+  // or ::1), so nothing outside the container reaches it.
+  bool loopback_only = 2;
 }
 
 enum DeployStage {

@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -332,8 +334,67 @@ func TestITWorkerNotListening(t *testing.T) {
 	t.Logf("%v: %s", p.GetStage(), p.GetMessage())
 	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED ||
 		!regexp.MustCompile(`^not healthy after 3s: health check never passed: tcp check on port 80: dial tcp [0-9.]+:80: connect: connection refused\. Nothing in the container listens on port 80\. If this service does not serve on a port \(a background worker\), remove the port under Ports in the Container section of the service's Advanced tab`).MatchString(p.GetMessage()) ||
-		!strings.Contains(p.GetMessage(), "working the queue") {
-		t.Fatalf("gen 1: %v %q", p.GetStage(), p.GetMessage())
+		strings.Contains(p.GetMessage(), "working the queue") || !slices.Contains(p.GetLastOutput(), "working the queue") {
+		t.Fatalf("gen 1: %v %q, last output %q", p.GetStage(), p.GetMessage(), p.GetLastOutput())
+	}
+	// Its sockets were read from its network namespace: it listens on none.
+	if nl := p.GetNotListening(); nl.GetPort() != 80 || !nl.GetRead() || len(nl.GetListening()) != 0 {
+		t.Fatalf("not listening = %v", nl)
+	}
+}
+
+// An app that listens on 6000 while the service's port is 80 (the
+// owner's CSSPanel API on 2026-11-13): the agent reads the new container's
+// listening sockets from /proc/<pid>/net/tcp and tcp6, without anything in
+// the image, and the error names the port ("The app listens on port 6000,
+// not 80."); the result carries it for the panel's "Use port 6000". Bound
+// only to 127.0.0.1, it is told to listen on 0.0.0.0.
+func TestITListensOnAnotherPort(t *testing.T) {
+	e := newIT(t)
+	for _, tc := range []struct {
+		name, listen, want string
+		listening          []*agentv1.ListeningPort
+	}{
+		{
+			name: "api", listen: "6000",
+			want:      "The app listens on port 6000, not 80. Set the service's port to 6000",
+			listening: []*agentv1.ListeningPort{{Port: 6000}},
+		},
+		{
+			name: "local", listen: "127.0.0.1:6000",
+			want:      "The app listens only on 127.0.0.1:6000; it must listen on 0.0.0.0 (all addresses), on port 80",
+			listening: []*agentv1.ListeningPort{{Port: 6000, LoopbackOnly: true}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := e.id(tc.name)
+			s := &agentv1.ServiceSpec{
+				Id: id, ProjectId: e.prefix + "p", Name: tc.name, Generation: 1,
+				Kind:  agentv1.ServiceKind_SERVICE_KIND_APP,
+				Image: &agentv1.ImageRef{Reference: itImage},
+				Container: &agentv1.ContainerConfig{
+					Command:         []string{"sh", "-c", "mkdir -p /www && echo Server is running on port 6000 && exec httpd -f -p " + tc.listen + " -h /www"},
+					StopGracePeriod: durationpb.New(time.Second),
+				},
+				Ports:   []*agentv1.PortSpec{{ContainerPort: 80, Protocol: agentv1.PortProtocol_PORT_PROTOCOL_TCP}},
+				Deploy:  &agentv1.DeployStrategy{HealthTimeout: durationpb.New(3 * time.Second)},
+				Routing: &agentv1.Routing{Routes: []*agentv1.Route{{Id: "r", Hosts: []string{tc.name + ".test"}, TargetPort: 80}}},
+			}
+			e.apply(1, s)
+			p := e.result(id, 1)
+			t.Logf("%v: %s", p.GetStage(), p.GetMessage())
+			if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED ||
+				!regexp.MustCompile(`^not healthy after 3s: health check never passed: tcp check on port 80: dial tcp [0-9.]+:80: connect: connection refused\. `+regexp.QuoteMeta(tc.want)).MatchString(p.GetMessage()) {
+				t.Fatalf("message = %q", p.GetMessage())
+			}
+			if !slices.Contains(p.GetLastOutput(), "Server is running on port 6000") || strings.Contains(p.GetMessage(), "Server is running") {
+				t.Fatalf("last output %q, message %q", p.GetLastOutput(), p.GetMessage())
+			}
+			want := &agentv1.NotListening{Port: 80, Read: true, Listening: tc.listening}
+			if !proto.Equal(p.GetNotListening(), want) {
+				t.Fatalf("not listening = %v, want %v", p.GetNotListening(), want)
+			}
+		})
 	}
 }
 
