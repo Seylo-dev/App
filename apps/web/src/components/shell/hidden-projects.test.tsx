@@ -20,7 +20,18 @@ import { ProjectsTree } from "./projects-tree";
 import { ShellProvider } from "./shell-context";
 
 const project = (id: string, name: string, extra: Partial<Project> = {}) =>
-  ({ id, name, protected: false, collapsed: true, serviceCount: 0, nodeCount: 0, guestCount: 0, position: null, ...extra }) as Project;
+  ({
+    id,
+    name,
+    protected: false,
+    collapsed: true,
+    dashboardCollapsed: true,
+    serviceCount: 0,
+    nodeCount: 0,
+    guestCount: 0,
+    position: null,
+    ...extra,
+  }) as Project;
 const panel = project("p1", "Panel", { protected: true });
 const shop = project("p2", "shop");
 const blog = project("p3", "blog");

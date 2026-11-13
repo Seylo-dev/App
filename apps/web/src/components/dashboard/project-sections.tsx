@@ -1,8 +1,9 @@
 // The dashboard's Cards view: each project is a section on the page ground,
 // a title row (tile, name, counts, open, settings, + and the "..." menu)
 // over a grid of compact service cards, the project page's cards made
-// smaller so four or five fit a row on a wide screen. Collapsed projects
-// show only their title row.
+// smaller so four or five fit a row on a wide screen. Projects collapsed on
+// the home page (their own flag, apart from the sidebar's) show only their
+// title row.
 
 import { Chip } from "@seylo/ui/components/chip";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
@@ -12,8 +13,9 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import { useLiveTopic } from "../../lib/live";
+import type { ShapeRow } from "../../lib/projects-shape";
 import type { Project, ServiceSummary } from "../../lib/types";
-import { useProjectPrefs } from "../../lib/use-project-prefs";
+import { isCollapsedIn, useProjectPrefs } from "../../lib/use-project-prefs";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ServiceCard, ServiceCardSkeleton, useMemoryTotals } from "../project/service-card";
 import { ProjectMenu } from "../project-menu";
@@ -87,7 +89,7 @@ function ProjectSection({
   onHiddenChange: (hidden: boolean) => void;
   onServiceOrder: (ids: string[]) => void;
 }) {
-  const open = !project.collapsed;
+  const open = !isCollapsedIn(project, "dashboard");
   const item = useSortableItem(project.id);
   // Service changes are published on the project topic.
   useLiveTopic(`project:${project.id}`);
@@ -219,23 +221,38 @@ function SectionBody({ project, loaded, children }: { project: Project; loaded: 
   return <div className={cardGrid}>{children}</div>;
 }
 
-/** The Cards view before the projects load: two title rows over a few placeholder cards. */
-export function ProjectSectionsSkeleton() {
+/** The placeholders before the home page has a shape of its own: two open projects. */
+const placeholderSections: ShapeRow[] = [4, 2].map((services) => ({ open: true, services }));
+
+/**
+ * The Cards view before the projects load: a title row per project over its
+ * placeholder cards, in the shape the home page last had (collapsed ones
+ * only their title row), else two open projects.
+ */
+export function ProjectSectionsSkeleton({ shape = null }: { shape?: readonly ShapeRow[] | null }) {
   return (
     <LoadingRegion label={t("common.loading")} className="@container flex flex-col gap-6">
-      {[4, 2].map((count) => (
-        <div key={count} aria-hidden="true" className="flex min-w-0 flex-col gap-3">
+      {(shape && shape.length > 0 ? shape : placeholderSections).map((row, index) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per project the home page last showed.
+          key={index}
+          aria-hidden="true"
+          data-placeholder-project={row.open ? "open" : "collapsed"}
+          className="flex min-w-0 flex-col gap-3"
+        >
           <div className="flex min-h-8 items-center gap-2.5">
             <Skeleton className="size-8 shrink-0 bg-track" />
             <SkeletonText ground className="w-24 text-sm" />
             <SkeletonText ground className="w-28 text-xs max-sm:hidden" />
           </div>
-          <div className={cardGrid}>
-            {Array.from({ length: count }, (_, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
-              <ServiceCardSkeleton key={i} compact />
-            ))}
-          </div>
+          {row.open && row.services > 0 && (
+            <div className={cardGrid}>
+              {Array.from({ length: row.services }, (_, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+                <ServiceCardSkeleton key={i} compact />
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </LoadingRegion>

@@ -4,6 +4,8 @@
 import type { compose, metrics, nodes, OpOutput, projects, services, templates, updates } from "@seylo/ops";
 
 export type Project = OpOutput<typeof projects.get>;
+/** Where a project is collapsed: the sidebar (Project.collapsed) or the home page (Project.dashboardCollapsed). */
+export type CollapseWhere = OpOutput<typeof projects.setCollapsed>["where"];
 export type ServiceSummary = OpOutput<typeof services.list>["services"][number];
 export type ServiceStatus = ServiceSummary["status"];
 export type ServiceKind = ServiceSummary["kind"];

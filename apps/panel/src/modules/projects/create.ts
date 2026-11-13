@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { projects } from "../../db/schema";
 import { implement } from "../../ops/implement";
-import { nameKey, toProject } from "./rows";
+import { nameKey, noPrefs, toProject } from "./rows";
 
 export const create = implement(projectOps.create, (input, ctx) => {
   const name = input.name.trim();
@@ -21,7 +21,7 @@ export const create = implement(projectOps.create, (input, ctx) => {
   return toProject({
     project: row,
     counts: { serviceCount: 0, nodeCount: 0, guestCount: 0 },
-    prefs: { collapsed: false, position: null },
+    prefs: noPrefs,
     imageHash: null,
   });
 });

@@ -34,7 +34,7 @@ export const users = sqliteTable(
     failedLogins: integer("failed_logins").notNull().default(0),
     /** Password sign-in refuses until then; passkeys and GitHub still work. */
     lockedUntil: timestamp("locked_until"),
-    /** Per-person UI choices that follow them across browsers (collapsed projects, color mode). */
+    /** Per-person UI choices that follow them across browsers (hidden projects, color mode). Collapsed projects are project_prefs. */
     preferences: json<Record<string, unknown>>("preferences").notNull().default(sql`'{}'`),
     /** A random face from the moment the account is created; null only on rows from before avatars, until the panel starts. */
     avatar: json<StoredAvatar>("avatar"),

@@ -1,5 +1,6 @@
 // Projects: create, list, read, rename, describe, set an image and delete,
-// plus each person's sidebar state (collapsed, order). Services inside a project are the
+// plus each person's state of them (collapsed in the sidebar and on the home
+// page, each on its own, and one order). Services inside a project are the
 // services module.
 
 import { defineModule } from "../module";

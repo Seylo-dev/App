@@ -341,7 +341,10 @@ again after a panel restart); for 0.2.15 `0018_parallel_builds_auto`
 existing ones so they keep their fixed builds at once),
 `0019_build_handed_over` (`builds.handed_over_at`, set to `created_at` on
 builds queued or running at the update) and `0020_build_progress_logged`
-(`builds.progress_logged`, default '[]')), which the panel applies at start, also
+(`builds.progress_logged`, default '[]'); for 0.2.16
+`0021_project_dashboard_collapsed` (`project_prefs.dashboard_collapsed`,
+default false, set to `collapsed` on existing rows, so nobody's home page
+changes on the update)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -4484,8 +4487,16 @@ members never hold them. Every op is `mcp: false`.
 
 `compose.preview` and `templates.preview` are POST mutations (bodies too
 large for a query string) that change nothing. Project collapse and order
-are per person (`project_prefs`). Hidden projects (0.2.1) are per person
-too, in `auth.preferences.hiddenProjectIds` (at most 200 distinct ids;
+are per person (`project_prefs`). Since 0.2.16 a project folds on its own
+in the sidebar (`project_prefs.collapsed`, `Project.collapsed`) and on the
+home page (`project_prefs.dashboard_collapsed`, `Project.dashboardCollapsed`):
+`projects.setCollapsed` takes `where: "sidebar" | "dashboard"` and changes
+only that flag; left out it is `"sidebar"`, the one flag callers before
+0.2.16 set and showed in both views, so an old client stays consistent
+with itself and `collapsed` keeps meaning the sidebar. The answer echoes
+the `where` it applied. Both flags need `projects.view` on the project, as
+before; the order (`position`) is one for both views. Hidden projects
+(0.2.1) are per person too, in `auth.preferences.hiddenProjectIds` (at most 200 distinct ids;
 `modules/auth/profile.ts` keeps only projects that exist and the caller
 holds `projects.view` on, on every read and write, so deleted projects and
 lost access drop out and the key is left out when nothing is hidden). The
@@ -6097,6 +6108,21 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   still reach hidden projects, and a hidden project whose pages are open
   shows alone at the end of the sidebar list until you leave it
   (`hiddenInSidebar`), so the sidebar still marks where you are.
+- Project collapse (0.2.16, `lib/use-project-prefs.ts` `isCollapsedIn`):
+  the sidebar's chevrons change only `Project.collapsed`, the home page's
+  chevrons and Expand all | Collapse all only `Project.dashboardCollapsed`
+  (saved with `where`), each patched into the cached `projects.list` at
+  once with the same cancel-then-resync as the order. Until
+  `projects.list` and the hidden projects answer, each view's
+  placeholders take the shape it last drew (`lib/projects-shape.ts`):
+  localStorage `<slug>.projectsShape.<sidebar|dashboard>.<userId>`, a JSON
+  array of `{ open, services }` per project on screen (hidden ones left
+  out, at most 50 projects and 24 services each), saved whenever the view
+  shows loaded projects, every access in try/catch. Nothing saved, junk,
+  another person's id or blocked storage draws the usual placeholders
+  (three folded sidebar rows; two open sections, or three List cards).
+  The panel's flags always win once loaded: the shape only draws
+  placeholders.
 - Dashboard projects views (`components/dashboard/`): a Cards | List |
   Table switch (kit `Segmented`) next to Expand all | Collapse all,
   remembered per browser (localStorage `<slug>.dashboardView`, every

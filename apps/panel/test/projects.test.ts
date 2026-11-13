@@ -90,6 +90,7 @@ describe("projects", () => {
       guestCount: 1,
       networkName: `seylo-p-${id}`,
       collapsed: false,
+      dashboardCollapsed: false,
       position: null,
     });
   });
@@ -117,7 +118,7 @@ describe("projects", () => {
     const { cookie: adminCookie } = await createUser(panel, "admin");
 
     const collapsed = await callOp(panel, projects.setCollapsed, { projectId: b, collapsed: true }, { cookie: ownerCookie });
-    expect(collapsed.body).toEqual({ projectId: b, collapsed: true });
+    expect(collapsed.body).toEqual({ projectId: b, collapsed: true, where: "sidebar" });
     const reordered = await callOp(panel, projects.reorder, { projectIds: [c, a] }, { cookie: ownerCookie });
     expect(reordered.body.projectIds).toEqual([c, a]);
 
@@ -133,6 +134,80 @@ describe("projects", () => {
     await callOp(panel, projects.reorder, { projectIds: [b] }, { cookie: ownerCookie });
     const again = (await callOp(panel, projects.list, {}, { cookie: ownerCookie })).body.projects;
     expect(again.map((p: { name: string }) => p.name)).toEqual(["b", "a", "c"]);
+  });
+
+  test("the sidebar and the home page collapse on their own; left out, where is the sidebar", async () => {
+    const { cookie } = await createUser(panel, "owner");
+    const a = (await callOp(panel, projects.create, { name: "a" }, { cookie })).body.id as string;
+    const b = (await callOp(panel, projects.create, { name: "b" }, { cookie })).body.id as string;
+    const { cookie: otherCookie } = await createUser(panel, "admin");
+    const flags = async (who = cookie) =>
+      Object.fromEntries(
+        (await callOp(panel, projects.list, {}, { cookie: who })).body.projects.map(
+          (p: { name: string; collapsed: boolean; dashboardCollapsed: boolean }) => [p.name, [p.collapsed, p.dashboardCollapsed]],
+        ),
+      );
+
+    // The home page folds a; the sidebar keeps it open.
+    const home = await callOp(panel, projects.setCollapsed, { projectId: a, collapsed: true, where: "dashboard" }, { cookie });
+    expect(home.body).toEqual({ projectId: a, collapsed: true, where: "dashboard" });
+    expect(await flags()).toEqual({ a: [false, true], b: [false, false] });
+
+    // The sidebar folds b (where left out, as callers before 0.2.16 send it); the home page keeps it open.
+    const side = await callOp(panel, projects.setCollapsed, { projectId: b, collapsed: true }, { cookie });
+    expect(side.body).toEqual({ projectId: b, collapsed: true, where: "sidebar" });
+    expect(await flags()).toEqual({ a: [false, true], b: [true, false] });
+
+    // Each flag changes only itself on a row that has both.
+    await callOp(panel, projects.setCollapsed, { projectId: a, collapsed: true, where: "sidebar" }, { cookie });
+    await callOp(panel, projects.setCollapsed, { projectId: a, collapsed: false, where: "dashboard" }, { cookie });
+    expect(await flags()).toEqual({ a: [true, false], b: [true, false] });
+    await callOp(panel, projects.setCollapsed, { projectId: b, collapsed: true, where: "dashboard" }, { cookie });
+    await callOp(panel, projects.setCollapsed, { projectId: b, collapsed: false, where: "sidebar" }, { cookie });
+    expect(await flags()).toEqual({ a: [true, false], b: [false, true] });
+    expect((await callOp(panel, projects.get, { projectId: b }, { cookie })).body).toMatchObject({
+      collapsed: false,
+      dashboardCollapsed: true,
+    });
+
+    // Per person: the other person's views did not change.
+    expect(await flags(otherCookie)).toEqual({ a: [false, false], b: [false, false] });
+
+    // Only the two views exist.
+    const wrong = await callOp(panel, projects.setCollapsed, { projectId: a, collapsed: true, where: "page" as never }, { cookie });
+    expect(wrong.body.error.code).toBe("BAD_REQUEST");
+    expect(await flags()).toEqual({ a: [true, false], b: [false, true] });
+  });
+
+  test("collapsing needs projects.view on the project, in either view", async () => {
+    const { cookie: ownerCookie } = await createUser(panel, "owner");
+    const seen = (await callOp(panel, projects.create, { name: "seen" }, { cookie: ownerCookie })).body.id as string;
+    const unseen = (await callOp(panel, projects.create, { name: "unseen" }, { cookie: ownerCookie })).body.id as string;
+    const { user, cookie } = await createUser(panel, "member");
+    grant(panel, user.id, "project", seen, ["projects.view"]);
+
+    for (const where of ["sidebar", "dashboard"] as const) {
+      const refused = await callOp(panel, projects.setCollapsed, { projectId: unseen, collapsed: true, where }, { cookie });
+      expect(refused.body.error).toMatchObject({ code: "FORBIDDEN", details: { action: "projects.view" } });
+      const allowed = await callOp(panel, projects.setCollapsed, { projectId: seen, collapsed: true, where }, { cookie });
+      expect(allowed.body).toEqual({ projectId: seen, collapsed: true, where });
+    }
+    const mine = (await callOp(panel, projects.list, {}, { cookie })).body.projects;
+    expect(mine).toMatchObject([{ id: seen, collapsed: true, dashboardCollapsed: true }]);
+    // The owner's own flags stayed open.
+    const owners = (await callOp(panel, projects.list, {}, { cookie: ownerCookie })).body.projects;
+    expect(owners.map((p: { collapsed: boolean; dashboardCollapsed: boolean }) => [p.collapsed, p.dashboardCollapsed])).toEqual([
+      [false, false],
+      [false, false],
+    ]);
+    // An unknown project is not found for someone who could see any project.
+    const missing = await callOp(
+      panel,
+      projects.setCollapsed,
+      { projectId: "0123456789abcdef", collapsed: true, where: "dashboard" },
+      { cookie: ownerCookie },
+    );
+    expect(missing.body.error.code).toBe("NOT_FOUND");
   });
 
   test("reorder skips projects the caller cannot see", async () => {

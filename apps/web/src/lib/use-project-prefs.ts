@@ -1,5 +1,6 @@
-// The signed-in person's project preferences (collapsed, the order of their
-// projects and of each project's services), shared by the sidebar, the
+// The signed-in person's project preferences (collapsed in the sidebar and
+// on the home page, each on its own, the order of their projects, one for
+// both, and of each project's services), shared by the sidebar, the
 // dashboard and the project page. Changes show at once (the cached
 // projects.list and services.list are patched) and are saved through
 // projects.setCollapsed, projects.reorder and services.reorder. A read of the
@@ -13,7 +14,7 @@ import { toast } from "@seylo/ui/components/toast";
 import type { Mutation, QueryKey } from "@tanstack/react-query";
 import { t } from "../i18n/t";
 import { errorMessage, queryClient } from "./api";
-import type { Project, ServiceSummary } from "./types";
+import type { CollapseWhere, Project, ServiceSummary } from "./types";
 
 type ProjectList = { projects: Project[] };
 type ServiceList = { services: ServiceSummary[] };
@@ -31,6 +32,16 @@ export function orderServices(list: readonly ServiceSummary[], ids: readonly str
 }
 
 const servicesKey = (projectId: string) => opQueryKey(services.list, { projectId });
+
+/** Whether `project` is collapsed in the sidebar or on the home page: two flags, set on their own. */
+export function isCollapsedIn(project: Pick<Project, "collapsed" | "dashboardCollapsed">, where: CollapseWhere): boolean {
+  return where === "dashboard" ? project.dashboardCollapsed : project.collapsed;
+}
+
+/** `project` with the flag of `where` set, the other left as it was. */
+function withCollapsed(project: Project, where: CollapseWhere, collapsed: boolean): Project {
+  return where === "dashboard" ? { ...project, dashboardCollapsed: collapsed } : { ...project, collapsed };
+}
 
 /**
  * Writes a change into a cached list. A read of the list still on its way
@@ -84,19 +95,20 @@ export function useProjectPrefs() {
   const reorderServices = useOpMutation(services.reorder, { onError: failed, onSettled: servicesSaved });
 
   return {
-    setCollapsed(projectId: string, collapsed: boolean) {
-      patch((list) => list.map((p) => (p.id === projectId ? { ...p, collapsed } : p)));
-      collapse.mutate({ projectId, collapsed });
+    /** Collapses or expands a project in the sidebar or on the home page; the other view keeps its own. */
+    setCollapsed(projectId: string, collapsed: boolean, where: CollapseWhere) {
+      patch((list) => list.map((p) => (p.id === projectId ? withCollapsed(p, where, collapsed) : p)));
+      collapse.mutate({ projectId, collapsed, where });
     },
-    /** Collapses or expands every project, or only `only` (the cards on screen, without the hidden ones). */
-    setAllCollapsed(collapsed: boolean, only?: readonly { id: string }[]) {
+    /** Collapses or expands every project in one view, or only `only` (the cards on screen, without the hidden ones). */
+    setAllCollapsed(collapsed: boolean, where: CollapseWhere, only?: readonly { id: string }[]) {
       const list = queryClient.getQueryData<ProjectList>(listKey)?.projects ?? [];
       const ids = only && new Set(only.map((project) => project.id));
       for (const project of list) {
         if (ids && !ids.has(project.id)) continue;
-        if (project.collapsed === collapsed) continue;
-        patch((current) => current.map((p) => (p.id === project.id ? { ...p, collapsed } : p)));
-        collapse.mutate({ projectId: project.id, collapsed });
+        if (isCollapsedIn(project, where) === collapsed) continue;
+        patch((current) => current.map((p) => (p.id === project.id ? withCollapsed(p, where, collapsed) : p)));
+        collapse.mutate({ projectId: project.id, collapsed, where });
       }
     },
     /**

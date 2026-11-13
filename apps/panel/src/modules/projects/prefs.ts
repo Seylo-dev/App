@@ -1,6 +1,7 @@
-// Per-person sidebar state: collapsed projects and the person's own order.
-// Only the caller's rows change, so nothing goes to shared live topics;
-// the caller's own tab refetches projects.list after the mutation.
+// Per-person project state: collapsed in the sidebar, collapsed on the home
+// page (two flags, each set on its own) and the person's own order (one for
+// both). Only the caller's rows change, so nothing goes to shared live
+// topics; the caller's own tab refetches projects.list after the mutation.
 
 import { OpError, projects as projectOps } from "@seylo/ops";
 import { and, eq, inArray, notInArray } from "drizzle-orm";
@@ -14,15 +15,18 @@ export const setCollapsed = implement(projectOps.setCollapsed, (input, ctx) => {
   if (!ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).get()) {
     throw new OpError("NOT_FOUND", "No project with this id.");
   }
+  // Left out = the sidebar: the one flag callers before 0.2.16 set (and saw on both views).
+  const where = input.where ?? "sidebar";
+  const flag = where === "dashboard" ? { dashboardCollapsed: input.collapsed } : { collapsed: input.collapsed };
   ctx.db
     .insert(projectPrefs)
-    .values({ userId: user.id, projectId: input.projectId, collapsed: input.collapsed })
+    .values({ userId: user.id, projectId: input.projectId, ...flag })
     .onConflictDoUpdate({
       target: [projectPrefs.userId, projectPrefs.projectId],
-      set: { collapsed: input.collapsed, updatedAt: new Date() },
+      set: { ...flag, updatedAt: new Date() },
     })
     .run();
-  return { projectId: input.projectId, collapsed: input.collapsed };
+  return { projectId: input.projectId, collapsed: input.collapsed, where };
 });
 
 export const reorder = implement(projectOps.reorder, (input, ctx) => {

@@ -2,9 +2,13 @@
 // this browser, lib/dashboard-view.ts): Cards (project-sections.tsx: each
 // project's services as a grid of compact service cards), List (one
 // collapsible card per project with its services as rows, below) or Table
-// (service-table.tsx: every service in one sortable table). Collapsing and
-// hiding are the same per-person preferences the sidebar uses; hidden
-// projects come back with "Show hidden" without being unhidden.
+// (service-table.tsx: every service in one sortable table). Collapsing is
+// the home page's own per-person flag (Project.dashboardCollapsed, saved
+// with where "dashboard"), apart from the sidebar's; the order and hiding
+// are the same per-person preferences the sidebar uses, and hidden projects
+// come back with "Show hidden" without being unhidden. Until the projects
+// load, the placeholders take the shape the home page last had
+// (lib/projects-shape.ts).
 
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
@@ -20,11 +24,12 @@ import { t } from "../../i18n/t";
 import { type DashboardView, dashboardViews, isDashboardView, useDashboardView } from "../../lib/dashboard-view";
 import { formatUsage } from "../../lib/format";
 import { useLiveTopic } from "../../lib/live";
+import { type ShapeRow, useProjectsShape, useRememberProjectsShape } from "../../lib/projects-shape";
 import { kindTag, placementLine, statusDisplay } from "../../lib/service-display";
 import type { Project, ServiceSummary } from "../../lib/types";
 import type { ServicesByProject } from "../../lib/use-all-services";
 import { splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
-import { useProjectPrefs } from "../../lib/use-project-prefs";
+import { isCollapsedIn, useProjectPrefs } from "../../lib/use-project-prefs";
 import { KindBadge } from "../new-service/kinds";
 import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
@@ -44,16 +49,19 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
   const [showHidden, setShowHidden] = useState(false);
   const { shown, hidden } = splitHidden(data.projects, hiding.hidden);
   const cards = showHidden ? data.projects : shown;
-  const allOpen = cards.every((project) => !project.collapsed);
-  const allClosed = cards.length > 0 && cards.every((project) => project.collapsed);
+  const allOpen = cards.every((project) => !isCollapsedIn(project, "dashboard"));
+  const allClosed = cards.length > 0 && cards.every((project) => isCollapsedIn(project, "dashboard"));
   // The grid waits for the hidden projects too, so none of them shows for a moment.
   const loading = data.projects.length === 0 ? data.pending : hiding.pending;
+  const shape = useProjectsShape("dashboard");
+  // Without the hidden ones: Show hidden starts off on the next visit.
+  useRememberProjectsShape("dashboard", loading ? undefined : shown);
   const setHidden = (project: Project, hide: boolean) => {
     // Unhiding the last one turns "Show hidden" off, so the next hidden project leaves the grid.
     if (!hide && hidden.length === 1) setShowHidden(false);
     hiding.setHidden(project, hide);
   };
-  const toggle = (project: Project) => prefs.setCollapsed(project.id, !project.collapsed);
+  const toggle = (project: Project) => prefs.setCollapsed(project.id, !isCollapsedIn(project, "dashboard"), "dashboard");
 
   return (
     <section aria-label={t("nav.projects")} className="flex flex-col gap-3">
@@ -73,10 +81,10 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
               aria-label={t("dashboard.expandCollapse")}
               className="m-0 inline-flex min-w-0 border-0 gap-0.5 rounded-control bg-track p-[3px]"
             >
-              <TrackButton active={allOpen} onClick={() => prefs.setAllCollapsed(false, cards)}>
+              <TrackButton active={allOpen} onClick={() => prefs.setAllCollapsed(false, "dashboard", cards)}>
                 {t("dashboard.expandAll")}
               </TrackButton>
-              <TrackButton active={allClosed} onClick={() => prefs.setAllCollapsed(true, cards)}>
+              <TrackButton active={allClosed} onClick={() => prefs.setAllCollapsed(true, "dashboard", cards)}>
                 {t("dashboard.collapseAll")}
               </TrackButton>
             </fieldset>
@@ -127,7 +135,7 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
         <EnterOnChange motionKey={view} subtle className="min-w-0">
           {view === "cards" &&
             (loading ? (
-              <ProjectSectionsSkeleton />
+              <ProjectSectionsSkeleton shape={shape} />
             ) : (
               <ProjectSections
                 projects={cards}
@@ -140,6 +148,7 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
           {view === "list" && (
             <ProjectList
               loading={loading}
+              shape={shape}
               projects={cards}
               services={data.services}
               hidden={hiding.hidden}
@@ -156,9 +165,13 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
   );
 }
 
+/** The List view's placeholders before the home page has a shape of its own. */
+const placeholderCards: ShapeRow[] = [3, 2, 0].map((services) => ({ open: true, services }));
+
 /** The List view: one card per project, three to a row on a wide screen. */
 function ProjectList({
   loading,
+  shape,
   projects,
   services,
   hidden,
@@ -166,6 +179,8 @@ function ProjectList({
   onHiddenChange,
 }: {
   loading: boolean;
+  /** The shape the home page last had, for the placeholders. */
+  shape: readonly ShapeRow[] | null;
   projects: readonly Project[];
   services: ReadonlyMap<string, ServiceSummary[]>;
   hidden: ReadonlySet<string>;
@@ -176,9 +191,10 @@ function ProjectList({
   if (loading)
     return (
       <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <ProjectCardSkeleton rows={3} />
-        <ProjectCardSkeleton rows={2} />
-        <ProjectCardSkeleton rows={0} />
+        {(shape && shape.length > 0 ? shape : placeholderCards).map((row, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per project the home page last showed.
+          <ProjectCardSkeleton key={i} rows={row.open ? row.services : 0} />
+        ))}
       </LoadingRegion>
     );
   return (
@@ -218,7 +234,7 @@ function ProjectCard({
   onHiddenChange: (hidden: boolean) => void;
   onServiceOrder: (ids: string[]) => void;
 }) {
-  const open = !project.collapsed;
+  const open = !isCollapsedIn(project, "dashboard");
   const item = useSortableItem(project.id);
   // Service changes are published on the project topic.
   useLiveTopic(`project:${project.id}`);

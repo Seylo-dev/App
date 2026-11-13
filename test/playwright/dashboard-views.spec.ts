@@ -18,20 +18,31 @@ const viewNames = { cards: "Cards", list: "List", table: "Table" } as const;
 
 test.use({ storageState: stateFile });
 
-/** projects.list and projects.setCollapsed over one copy of the demo projects, so Collapse all sticks. */
-function foldableProjects(): Record<string, Handler> {
+/**
+ * projects.list and projects.setCollapsed over one copy of the demo projects, so Collapse all sticks:
+ * each view's own flag, as the panel keeps them (where left out = the sidebar).
+ */
+function foldableProjects(saves: { projectId: string; collapsed: boolean; where?: string }[] = []): Record<string, Handler> {
   let list = projects.map((project) => ({ ...project }));
   return {
     "projects.list": () => ({ projects: list }),
     "projects.setCollapsed": (input) => {
-      list = list.map((project) => (project.id === input.projectId ? { ...project, collapsed: Boolean(input.collapsed) } : project));
-      return { projectId: input.projectId, collapsed: input.collapsed };
+      saves.push(input);
+      const where = input.where ?? "sidebar";
+      const flag = where === "dashboard" ? "dashboardCollapsed" : "collapsed";
+      list = list.map((project) => (project.id === input.projectId ? { ...project, [flag]: Boolean(input.collapsed) } : project));
+      return { projectId: input.projectId, collapsed: input.collapsed, where };
     },
   };
 }
 
-async function openDashboard(page: Page, preset?: Preset, mode?: "light" | "dark"): Promise<void> {
-  await installDemo(page, { preset, mode, overrides: foldableProjects() });
+async function openDashboard(
+  page: Page,
+  preset?: Preset,
+  mode?: "light" | "dark",
+  saves?: { projectId: string; collapsed: boolean; where?: string }[],
+): Promise<void> {
+  await installDemo(page, { preset, mode, overrides: foldableProjects(saves) });
   await page.goto("/");
   await expect(dashboardHeading(page)).toBeVisible();
 }
@@ -119,6 +130,52 @@ test.describe("dashboard views", () => {
     await expect(serviceCards(projectsRegion)).toHaveCount(5);
     await projectsRegion.getByRole("button", { name: "Expand all" }).click();
     await expect(serviceCards(projectsRegion)).toHaveCount(9);
+  });
+
+  test("the home page and the sidebar fold on their own: a chevron or Collapse all here leaves the sidebar as it was", async ({ page }) => {
+    const saves: { projectId: string; collapsed: boolean; where?: string }[] = [];
+    await openDashboard(page, undefined, undefined, saves);
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+    const sidebarChevron = (name: string) => sidebar.getByRole("button", { name: new RegExp(`^(Collapse|Expand) ${name}$`) });
+    const homeChevron = (name: string) => section(page, name).getByRole("button", { name: new RegExp(`^(Collapse|Expand) ${name}$`) });
+    await expect(sidebarChevron("acme-shop")).toHaveAttribute("aria-expanded", "true");
+    await expect(homeChevron("acme-shop")).toHaveAttribute("aria-expanded", "true");
+
+    // Folded on the home page only: the sidebar keeps acme-shop's services.
+    await homeChevron("acme-shop").click();
+    await expect(homeChevron("acme-shop")).toHaveAttribute("aria-expanded", "false");
+    await expect(serviceCards(section(page, "acme-shop"))).toHaveCount(0);
+    await expect(sidebarChevron("acme-shop")).toHaveAttribute("aria-expanded", "true");
+    await expect(sidebar.getByRole("link", { name: "web", exact: true })).toBeVisible();
+
+    // Folded in the sidebar only: the home page keeps personal's cards.
+    await sidebarChevron("personal").click();
+    await expect(sidebarChevron("personal")).toHaveAttribute("aria-expanded", "false");
+    await expect(homeChevron("personal")).toHaveAttribute("aria-expanded", "true");
+    await expect(serviceCards(section(page, "personal"))).toHaveCount(2);
+
+    // Expand all and Collapse all count and change the home page's flags only.
+    const projectsRegion = region(page);
+    await expect(projectsRegion.getByRole("button", { name: "Expand all" })).toHaveAttribute("aria-pressed", "false");
+    await projectsRegion.getByRole("button", { name: "Collapse all" }).click();
+    await expect(serviceCards(projectsRegion)).toHaveCount(0);
+    await expect(sidebarChevron("acme-shop")).toHaveAttribute("aria-expanded", "true");
+    await expect(sidebarChevron("personal")).toHaveAttribute("aria-expanded", "false");
+    await projectsRegion.getByRole("button", { name: "Expand all" }).click();
+    await expect(serviceCards(projectsRegion)).toHaveCount(9);
+    await expect(sidebarChevron("personal")).toHaveAttribute("aria-expanded", "false");
+    await expect(sidebarChevron("Panel")).toHaveAttribute("aria-expanded", "false");
+
+    // Every save named its view.
+    await expect.poll(() => saves.length).toBe(6);
+    expect(saves).toEqual([
+      { projectId: ids.acme, collapsed: true, where: "dashboard" },
+      { projectId: ids.personal, collapsed: true, where: "sidebar" },
+      { projectId: ids.personal, collapsed: true, where: "dashboard" },
+      { projectId: ids.acme, collapsed: false, where: "dashboard" },
+      { projectId: ids.personal, collapsed: false, where: "dashboard" },
+      { projectId: ids.panel, collapsed: false, where: "dashboard" },
+    ]);
   });
 
   test("Table lists every service and sorts by CPU with the mouse and the keyboard", async ({ page }) => {

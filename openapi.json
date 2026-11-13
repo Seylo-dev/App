@@ -61459,6 +61459,7 @@
                     "guestCount",
                     "networkName",
                     "collapsed",
+                    "dashboardCollapsed",
                     "position",
                     "imageUrl",
                     "createdAt",
@@ -61500,6 +61501,9 @@
                       "type": "string"
                     },
                     "collapsed": {
+                      "type": "boolean"
+                    },
+                    "dashboardCollapsed": {
                       "type": "boolean"
                     },
                     "position": {
@@ -61655,6 +61659,7 @@
                     "guestCount",
                     "networkName",
                     "collapsed",
+                    "dashboardCollapsed",
                     "position",
                     "imageUrl",
                     "createdAt",
@@ -61696,6 +61701,9 @@
                       "type": "string"
                     },
                     "collapsed": {
+                      "type": "boolean"
+                    },
+                    "dashboardCollapsed": {
                       "type": "boolean"
                     },
                     "position": {
@@ -61746,7 +61754,7 @@
       "get": {
         "operationId": "projects.list",
         "summary": "List projects",
-        "description": "Lists the projects the caller can see in the caller's sidebar order (then by name), with service, node and guest counts and whether each is collapsed.",
+        "description": "Lists the projects the caller can see in the caller's own order (then by name), with service, node and guest counts and whether each is collapsed in the caller's sidebar (collapsed) and on their home page (dashboardCollapsed).",
         "tags": [
           "projects"
         ],
@@ -61785,6 +61793,7 @@
                           "guestCount",
                           "networkName",
                           "collapsed",
+                          "dashboardCollapsed",
                           "position",
                           "imageUrl",
                           "createdAt",
@@ -61826,6 +61835,9 @@
                             "type": "string"
                           },
                           "collapsed": {
+                            "type": "boolean"
+                          },
+                          "dashboardCollapsed": {
                             "type": "boolean"
                           },
                           "position": {
@@ -61929,6 +61941,7 @@
                     "guestCount",
                     "networkName",
                     "collapsed",
+                    "dashboardCollapsed",
                     "position",
                     "imageUrl",
                     "createdAt",
@@ -61970,6 +61983,9 @@
                       "type": "string"
                     },
                     "collapsed": {
+                      "type": "boolean"
+                    },
+                    "dashboardCollapsed": {
                       "type": "boolean"
                     },
                     "position": {
@@ -62095,7 +62111,7 @@
       "post": {
         "operationId": "projects.setCollapsed",
         "summary": "Collapse or expand a project",
-        "description": "Collapses or expands a project in the caller's own sidebar. Other people's sidebars do not change.",
+        "description": "Collapses or expands a project in the caller's own sidebar or on their own home page (where; the sidebar when left out). The two are separate: collapsing in one leaves the other as it was. Other people's views do not change.",
         "tags": [
           "projects"
         ],
@@ -62126,6 +62142,19 @@
                   },
                   "collapsed": {
                     "type": "boolean"
+                  },
+                  "where": {
+                    "description": "Which of the caller's views: \"sidebar\" (the projects tree, Project.collapsed) or \"dashboard\" (the home page, Project.dashboardCollapsed). Left out: \"sidebar\", the one flag callers before 0.2.16 set.",
+                    "anyOf": [
+                      {
+                        "const": "sidebar",
+                        "type": "string"
+                      },
+                      {
+                        "const": "dashboard",
+                        "type": "string"
+                      }
+                    ]
                   }
                 }
               }
@@ -62141,7 +62170,8 @@
                   "type": "object",
                   "required": [
                     "projectId",
-                    "collapsed"
+                    "collapsed",
+                    "where"
                   ],
                   "properties": {
                     "projectId": {
@@ -62151,6 +62181,19 @@
                     },
                     "collapsed": {
                       "type": "boolean"
+                    },
+                    "where": {
+                      "description": "Which of the caller's views: \"sidebar\" (the projects tree, Project.collapsed) or \"dashboard\" (the home page, Project.dashboardCollapsed). Left out: \"sidebar\", the one flag callers before 0.2.16 set.",
+                      "anyOf": [
+                        {
+                          "const": "sidebar",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dashboard",
+                          "type": "string"
+                        }
+                      ]
                     }
                   }
                 }
@@ -62227,6 +62270,7 @@
                     "guestCount",
                     "networkName",
                     "collapsed",
+                    "dashboardCollapsed",
                     "position",
                     "imageUrl",
                     "createdAt",
@@ -62268,6 +62312,9 @@
                       "type": "string"
                     },
                     "collapsed": {
+                      "type": "boolean"
+                    },
+                    "dashboardCollapsed": {
                       "type": "boolean"
                     },
                     "position": {
@@ -62379,6 +62426,7 @@
                     "guestCount",
                     "networkName",
                     "collapsed",
+                    "dashboardCollapsed",
                     "position",
                     "imageUrl",
                     "createdAt",
@@ -62420,6 +62468,9 @@
                       "type": "string"
                     },
                     "collapsed": {
+                      "type": "boolean"
+                    },
+                    "dashboardCollapsed": {
                       "type": "boolean"
                     },
                     "position": {

@@ -8,7 +8,7 @@ import { ProjectSections } from "./project-sections";
 import { ServiceTable } from "./service-table";
 
 const project = (id: string, name: string, serviceCount: number, extra: Partial<Project> = {}) =>
-  ({ id, name, serviceCount, nodeCount: 1, collapsed: false, protected: false, ...extra }) as Project;
+  ({ id, name, serviceCount, nodeCount: 1, collapsed: false, dashboardCollapsed: false, protected: false, ...extra }) as Project;
 
 const service = (id: string, projectId: string, name: string, extra: Partial<ServiceSummary> = {}) =>
   ({
@@ -81,7 +81,7 @@ test("the cards view shows each project's services as compact cards with their s
     () => (
       <ShellProvider>
         <ProjectSections
-          projects={[shop, project("p3", "empty", 0), project("p4", "folded", 3, { collapsed: true })]}
+          projects={[shop, project("p3", "empty", 0), project("p4", "folded", 3, { dashboardCollapsed: true })]}
           services={services}
           hidden={new Set()}
           onToggle={() => {}}

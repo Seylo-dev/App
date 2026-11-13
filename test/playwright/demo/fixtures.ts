@@ -231,6 +231,7 @@ function project(id: string, name: string, serviceCount: number, nodeCount: numb
     guestCount: 0,
     networkName: `seylo-p-${id}`,
     collapsed: false,
+    dashboardCollapsed: false,
     position: null,
     imageUrl: null,
     createdAt: iso(30 * day),
@@ -242,7 +243,7 @@ function project(id: string, name: string, serviceCount: number, nodeCount: numb
 export const projects = [
   project(ids.acme, "acme-shop", 5, 2, { guestCount: 2, position: 0 }),
   project(ids.personal, "personal", 2, 1, { position: 1 }),
-  project(ids.panel, "Panel", 2, 1, { protected: true, position: 2, collapsed: true }),
+  project(ids.panel, "Panel", 2, 1, { protected: true, position: 2, collapsed: true, dashboardCollapsed: true }),
 ];
 
 type Kind = "app" | "postgres" | "redis";

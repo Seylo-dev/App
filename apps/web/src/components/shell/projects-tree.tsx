@@ -1,11 +1,14 @@
 // Projects in the sidebar (Sidebar.dc.html), each collapsible, with its
 // services under it. Collapsed state, order and hidden projects are per
 // person and stored by the panel (projects.setCollapsed, projects.reorder,
-// auth.preferences), so they follow the person across browsers. Drag a
-// project to move it; its "..." menu hides it. Hidden projects wait under
-// a folded "Hidden (N)" row at the end, unless the person turned that group
-// off (Settings > Preferences): then only the hidden project whose pages
-// are open shows there, so the sidebar still marks where they are.
+// auth.preferences), so they follow the person across browsers. The
+// sidebar's collapsed flag is its own (where "sidebar"): folding a project
+// here leaves it open on the home page. Until the projects load, the
+// placeholders take the shape the sidebar last had (lib/projects-shape.ts).
+// Drag a project to move it; its "..." menu hides it. Hidden projects wait
+// under a folded "Hidden (N)" row at the end, unless the person turned that
+// group off (Settings > Preferences): then only the hidden project whose
+// pages are open shows there, so the sidebar still marks where they are.
 
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -18,15 +21,19 @@ import { Link, useParams } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../i18n/t";
 import { useLiveTopic } from "../../lib/live";
+import { type ShapeRow, useProjectsShape, useRememberProjectsShape } from "../../lib/projects-shape";
 import { isBusy, statusDisplay } from "../../lib/service-display";
 import type { Project } from "../../lib/types";
 import { hiddenInSidebar, splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
-import { useProjectPrefs } from "../../lib/use-project-prefs";
+import { isCollapsedIn, useProjectPrefs } from "../../lib/use-project-prefs";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { draggingClass, SortableGrip, SortableGroup, useSortableItem } from "../sortable";
 import { useShell } from "./shell-context";
+
+/** The placeholder rows before the sidebar has a shape of its own: three folded projects. */
+const placeholderRows: ShapeRow[] = [0, 1, 2].map(() => ({ open: false, services: 0 }));
 
 export function ProjectsTree() {
   const shell = useShell();
@@ -41,6 +48,9 @@ export function ProjectsTree() {
   const list = loading ? undefined : data?.projects;
   const { shown, hidden } = splitHidden(list ?? [], hiding.hidden);
   const { group, current } = hiddenInSidebar(hidden, hiding.showInSidebar, currentProjectId);
+  const shape = useProjectsShape("sidebar");
+  useRememberProjectsShape("sidebar", list && shown);
+  const toggle = (projectId: string, collapsed: boolean) => prefs.setCollapsed(projectId, collapsed, "sidebar");
   const HiddenChevron = showHidden ? IconChevronDown : IconChevronRight;
   const setHidden = (project: Project, hide: boolean) => {
     // Unhiding the last one folds the row, so the next hidden project starts out of sight.
@@ -66,12 +76,21 @@ export function ProjectsTree() {
         {list?.length === 0 && <li className="px-2.5 py-1.5 text-[12.5px] text-ink-ghost">{t("sidebar.noProjects")}</li>}
         {loading && (
           <li>
+            {/* The shape the sidebar last had: folded rows, open ones with a row per service. */}
             <LoadingRegion label={t("common.loading")} className="flex flex-col gap-px">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="flex items-center py-[7px] pr-2.5 pl-2.5">
-                  <Skeleton className="mr-[9px] size-3.5 shrink-0 rounded-[4px]" />
-                  <Skeleton className="mr-[9px] size-5 shrink-0 rounded-chip" />
-                  <SkeletonText className="w-20 text-[13.5px]" />
+              {(shape && shape.length > 0 ? shape : placeholderRows).map((row, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per project the sidebar last showed.
+                <div key={i} data-placeholder-project={row.open ? "open" : "collapsed"} className="flex flex-col">
+                  <div className="flex items-center py-[7px] pr-2.5 pl-2.5">
+                    <Skeleton className="mr-[9px] size-3.5 shrink-0 rounded-[4px]" />
+                    <Skeleton className="mr-[9px] size-5 shrink-0 rounded-chip" />
+                    <SkeletonText className="w-20 text-[13.5px]" />
+                  </div>
+                  {row.open && (
+                    <div className="flex flex-col gap-px pb-2">
+                      <ServiceRowPlaceholders count={row.services} />
+                    </div>
+                  )}
                 </div>
               ))}
             </LoadingRegion>
@@ -81,9 +100,7 @@ export function ProjectsTree() {
           {(ordered) =>
             ordered.map((project) => (
               <SortableProject key={project.id} id={project.id}>
-                {(item) => (
-                  <ProjectRow project={project} hidden={false} onToggle={prefs.setCollapsed} onHiddenChange={setHidden} sortable={item} />
-                )}
+                {(item) => <ProjectRow project={project} hidden={false} onToggle={toggle} onHiddenChange={setHidden} sortable={item} />}
               </SortableProject>
             ))
           }
@@ -104,7 +121,7 @@ export function ProjectsTree() {
               <ul aria-label={t("sidebar.hidden", { count: group.length })} className="m-0 flex list-none flex-col gap-px p-0">
                 {group.map((project) => (
                   <li key={project.id} className="flex flex-col rounded-control">
-                    <ProjectRow project={project} hidden onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
+                    <ProjectRow project={project} hidden onToggle={toggle} onHiddenChange={setHidden} />
                   </li>
                 ))}
               </ul>
@@ -114,7 +131,7 @@ export function ProjectsTree() {
         {/* Without the group, the hidden project that is open still shows while its pages are. */}
         {current && (
           <li className="flex flex-col rounded-control">
-            <ProjectRow project={current} hidden onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
+            <ProjectRow project={current} hidden onToggle={toggle} onHiddenChange={setHidden} />
           </li>
         )}
       </ul>
@@ -142,7 +159,7 @@ function ProjectRow({
   /** Drag to reorder (the row, not the services under it). Hidden projects have none. */
   sortable?: SortableItem;
 }) {
-  const open = !project.collapsed;
+  const open = !isCollapsedIn(project, "sidebar");
   const Chevron = open ? IconChevronDown : IconChevronRight;
   return (
     <>
@@ -220,13 +237,7 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
   if (list.isPending)
     return (
       <LoadingRegion label={t("common.loading")} className="flex flex-col gap-px">
-        {Array.from({ length: count }, (_, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per service the project has.
-          <div key={i} className="flex items-center gap-[9px] py-1.5 pr-2.5 pl-[43px]">
-            <Skeleton className="size-1.5 shrink-0 rounded-full" />
-            <SkeletonText className="w-16 text-[13px]" />
-          </div>
-        ))}
+        <ServiceRowPlaceholders count={count} />
       </LoadingRegion>
     );
   // Compose members are reached through their stack, so only top-level services are listed.
@@ -269,6 +280,17 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
       )}
     </SortableGroup>
   );
+}
+
+/** A placeholder row per service: a status dot and a name. */
+function ServiceRowPlaceholders({ count }: { count: number }) {
+  return Array.from({ length: count }, (_, i) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per service the project has.
+    <div key={i} className="flex items-center gap-[9px] py-1.5 pr-2.5 pl-[43px]">
+      <Skeleton className="size-1.5 shrink-0 rounded-full" />
+      <SkeletonText className="w-16 text-[13px]" />
+    </div>
+  ));
 }
 
 type SortableItem = ReturnType<typeof useSortableItem>;

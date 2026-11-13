@@ -1,5 +1,5 @@
-// Reads projects with their counts and the caller's sidebar prefs, and maps
-// rows to the op shape.
+// Reads projects with their counts and the caller's prefs (collapsed in the
+// sidebar and on the home page, position), and maps rows to the op shape.
 
 import { slug } from "@seylo/brand";
 import { projectImagePath } from "@seylo/ops";
@@ -16,7 +16,10 @@ export interface ProjectCounts {
 }
 
 export interface ProjectPrefs {
+  /** In the sidebar. */
   collapsed: boolean;
+  /** On the home page. */
+  dashboardCollapsed: boolean;
   position: number | null;
 }
 
@@ -28,7 +31,7 @@ export interface ProjectView {
   imageHash: string | null;
 }
 
-const noPrefs: ProjectPrefs = { collapsed: false, position: null };
+export const noPrefs: ProjectPrefs = { collapsed: false, dashboardCollapsed: false, position: null };
 
 /** Docker network of a project on every node; matches docker.ProjectNetwork in Go. */
 export function projectNetwork(projectId: string): string {
@@ -44,6 +47,7 @@ export function toProject({ project, counts, prefs, imageHash }: ProjectView) {
     ...counts,
     networkName: projectNetwork(project.id),
     collapsed: prefs.collapsed,
+    dashboardCollapsed: prefs.dashboardCollapsed,
     position: prefs.position,
     imageUrl: imageHash === null ? null : projectImagePath(project.id, imageHash),
     createdAt: project.createdAt.toISOString(),
@@ -95,7 +99,8 @@ export function selectProjects(db: PanelDb, userId: string | null, projectId?: s
       .from(projectPrefs)
       .where(and(eq(projectPrefs.userId, userId), inArray(projectPrefs.projectId, ids)))
       .all();
-    for (const p of rowsForUser) prefs.set(p.projectId, { collapsed: p.collapsed, position: p.position });
+    for (const p of rowsForUser)
+      prefs.set(p.projectId, { collapsed: p.collapsed, dashboardCollapsed: p.dashboardCollapsed, position: p.position });
   }
 
   const views = rows.map((project) => ({

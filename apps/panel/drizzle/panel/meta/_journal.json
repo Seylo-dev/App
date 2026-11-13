@@ -148,6 +148,13 @@
       "when": 1794527889148,
       "tag": "0020_build_progress_logged",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1794533586227,
+      "tag": "0021_project_dashboard_collapsed",
+      "breakpoints": true
     }
   ]
 }

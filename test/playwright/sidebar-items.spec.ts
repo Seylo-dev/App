@@ -154,6 +154,7 @@ test.describe("sidebar items", () => {
       name: `project-${i + 1}`,
       position: i,
       collapsed: true,
+      dashboardCollapsed: true,
     }));
     await page.setViewportSize({ width: 1440, height: 800 });
     await installDemo(page, { overrides: { "projects.list": () => ({ projects: many }) } });

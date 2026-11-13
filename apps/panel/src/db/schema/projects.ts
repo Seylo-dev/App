@@ -26,7 +26,11 @@ export const projects = sqliteTable(
   (t) => [uniqueIndex("projects_name_key_unique").on(t.nameKey)],
 );
 
-/** Per-person sidebar state of a project: collapsed and position in their own order. */
+/**
+ * Per-person state of a project: collapsed in the sidebar, collapsed on the
+ * home page (each on its own since 0.2.16) and position in their own order
+ * (one order for both).
+ */
 export const projectPrefs = sqliteTable(
   "project_prefs",
   {
@@ -36,7 +40,14 @@ export const projectPrefs = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    /** Collapsed in the person's sidebar (projects.setCollapsed where "sidebar"). */
     collapsed: integer("collapsed", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Collapsed on the person's home page (projects.setCollapsed where
+     * "dashboard"). The project_dashboard_collapsed migration copied
+     * `collapsed` into it, since one flag served both before.
+     */
+    dashboardCollapsed: integer("dashboard_collapsed", { mode: "boolean" }).notNull().default(false),
     /** null = not ordered; sorted by name after the ordered ones. */
     position: integer("position"),
     /**
