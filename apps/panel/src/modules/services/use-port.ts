@@ -13,25 +13,16 @@
 // deploy, a stopped service) nothing serves on the old port and they move
 // at once.
 
-import {
-  domains as domainOps,
-  env as envOps,
-  exposures as exposureOps,
-  OpError,
-  services as serviceOps,
-  tunnels as tunnelOps,
-} from "@seylo/ops";
+import { OpError, services as serviceOps } from "@seylo/ops";
 import { and, eq, inArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains, type PortMove } from "../../db/schema";
-import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
 import { assertNoActiveDeploy, queueDeploy } from "../deployments/queue";
-import { invalidateService } from "../domains/lookup";
 import { panelServiceId } from "../nodes/panel-service";
 import { assertNoActiveCopy } from "./copies";
 import { actorOf, updateSpec } from "./ops";
-import { accessOn, accessText, moveAccess } from "./port-move";
+import { accessOn, accessText, afterDomainsMoved, moveAccess } from "./port-move";
 import { loadService } from "./rows";
 import { readSpec, withFirstPort } from "./spec";
 
@@ -155,10 +146,4 @@ export const usePort = implement(serviceOps.usePort, (input, ctx) => {
 
 function triggerOf(ctx: Parameters<typeof actorOf>[0]): "manual" | "api" {
   return ctx.principal.type === "apiKey" ? "api" : "manual";
-}
-
-/** Domains changed outside the domains module: the routes go out and the Domains tab refreshes (domains/ops.ts afterChange). */
-export function afterDomainsMoved(deps: Pick<Deps, "agents" | "live">, serviceId: string): void {
-  deps.agents.desired.markDirty({ serviceId });
-  invalidateService(deps, serviceId, [domainOps.list.id, exposureOps.get.id, envOps.references.id, serviceOps.get.id, tunnelOps.get.id]);
 }

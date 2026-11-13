@@ -104,6 +104,27 @@ export interface PortMove {
   tunnel?: boolean;
   /** Set once rollout() moved the domains. */
   applied: boolean;
+  /**
+   * The main port was changed by hand (services.update, 0.2.16), not by
+   * Use port: rollout() found the live version on fromPort and this
+   * deployment on toPort and moved what pointed at fromPort. A failed
+   * deploy puts that back but leaves the service's port as it was set.
+   */
+  keepPort?: boolean;
+  /**
+   * Use port on a service whose port was also changed by hand since the
+   * live version (0.2.16): what pointed at the live version's port
+   * (fromPort here) moved to toPort at rollout too, and goes back to it.
+   */
+  follow?: PortFollow;
+}
+
+/** What rollout() moved from the live version's port besides a PortMove of Use port (PortMove.follow). */
+export interface PortFollow {
+  fromPort: number;
+  domainIds: string[];
+  exposureIds: string[];
+  tunnel: boolean;
 }
 
 /** A release of a service. Rollback deploys an older row's image digest again. */
@@ -168,7 +189,10 @@ export const deployments = sqliteTable(
      * back (services/move-project.ts).
      */
     projectMove: json<ProjectMove>("project_move"),
-    /** services.usePort with a live version serving: the domains this deployment moves to its port (PortMove). */
+    /**
+     * services.usePort with a live version serving, or a main port changed by hand (found at rollout): the
+     * domains, IP:port access and tunnel this deployment moves to its port (PortMove).
+     */
     portMove: json<PortMove>("port_move"),
     /** Deployments (of other services) that must finish before this one starts, for example a template's database. */
     waitFor: json<string[]>("wait_for").notNull().default(sql`'[]'`),

@@ -41,8 +41,8 @@ import {
   type DeployNodeResult,
   type DeployStep,
   deployments,
-  domains,
   nodes,
+  type PortFollow,
   type PortMove,
   servicePlacements,
   services,
@@ -53,12 +53,13 @@ import type { RefusedSpec } from "../../desired";
 import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
 import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-sha";
+import { panelServiceId } from "../nodes/panel-service";
 import { dataVolumes, writeSpec } from "../services/insert";
-import { accessText, moveAccess } from "../services/port-move";
+import { accessText, livePortsOf, mainPortChange, movePointed, pointedAt, pointsAny } from "../services/port-move";
 import { restoreProjectMove } from "../services/project-move-restore";
-import { loadService } from "../services/rows";
+import { loadService, type ServiceRow } from "../services/rows";
 import { assertImageAllowed } from "../services/source-guard";
-import { needsBuild, readSpec, runSettingsOf, withFirstPort } from "../services/spec";
+import { needsBuild, readRunSettings, readSpec, runSettingsOf, withFirstPort } from "../services/spec";
 import { reportedFailure, sentence, stateFailureReason } from "./failure";
 import { reportedHealth, reportedWaitMs } from "./image-health";
 import { appendLog, LineSplitter, maxLineLength, publishLog, writeLog } from "./logs";
@@ -710,20 +711,22 @@ async function rollout(s: EngineState, d: DeploymentRow): Promise<void> {
   const names = d.targetNodeIds.map((id) => nodeName(s, id));
   const steps = setStep(d.steps, "ship", "running", { nodeId: d.targetNodeIds[0] ?? null, detail: `Shipping to ${names.join(", ")}` });
   let movedDomains = 0;
+  let applied: PortMove | null = null;
   const current = db.transaction((tx) => {
     tx.update(services).set({ targetDeploymentId: d.id, generation: d.generation, stopped: false }).where(eq(services.id, svc.id)).run();
     // services.usePort: the domains, the IP:port access and the tunnel go to the new port with the new
     // containers, in the same desired state.
-    const move = d.portMove;
-    if (move && !move.applied && move.domainIds.length > 0) {
-      movedDomains = tx
-        .update(domains)
-        .set({ targetPort: move.toPort })
-        .where(and(eq(domains.serviceId, svc.id), inArray(domains.id, move.domainIds), eq(domains.targetPort, move.fromPort)))
-        .returning({ id: domains.id })
-        .all().length;
-    }
-    if (move && !move.applied) moveAccess(tx, svc.id, move);
+    const usePort = d.portMove && !d.portMove.applied ? d.portMove : null;
+    if (usePort) movedDomains += movePointed(tx, svc.id, usePort);
+    // A main port changed by hand since the live version (services.update): what still points at the
+    // live version's port follows this deployment's (once: a move already applied is not redone).
+    const follow = d.portMove?.applied ? null : followLivePort(tx, svc, d);
+    if (follow) movedDomains += movePointed(tx, svc.id, follow);
+    applied = usePort
+      ? { ...usePort, applied: true, ...(follow ? { follow: followOf(follow) } : {}) }
+      : follow
+        ? { ...follow, applied: true, keepPort: true }
+        : null;
     return tx
       .update(deployments)
       .set({
@@ -731,24 +734,33 @@ async function rollout(s: EngineState, d: DeploymentRow): Promise<void> {
         phaseStartedAt: now,
         nodeResults: results,
         steps,
-        ...(move && !move.applied ? { portMove: { ...move, applied: true } } : {}),
+        ...(applied ? { portMove: applied } : {}),
       })
       .where(eq(deployments.id, d.id))
       .returning()
       .get();
   });
   log(s, current, "ship", `Rolling out generation ${d.generation} on ${names.join(", ")}.`);
-  const access = d.portMove && !d.portMove.applied ? accessText(d.portMove) : "";
-  if ((movedDomains > 0 || access) && d.portMove) {
+  const move = applied as PortMove | null;
+  if (move?.keepPort) {
+    log(s, current, "ship", `The service's port is ${move.toPort} now; the live version listens on ${move.fromPort}.`);
+  }
+  const access = move
+    ? accessText({
+        exposureIds: [...(move.exposureIds ?? []), ...(move.follow?.exposureIds ?? [])],
+        tunnel: move.tunnel || move.follow?.tunnel,
+      })
+    : "";
+  if ((movedDomains > 0 || access) && move) {
     if (movedDomains > 0) {
       log(
         s,
         current,
         "ship",
-        `${movedDomains === 1 ? "Its domain moves" : `${movedDomains} domains move`} to port ${d.portMove.toPort} with it.`,
+        `${movedDomains === 1 ? "Its domain moves" : `${movedDomains} domains move`} to port ${move.toPort} with it.`,
       );
     }
-    if (access) log(s, current, "ship", `${access} move${access.includes(" and ") ? "" : "s"} to port ${d.portMove.toPort} with it.`);
+    if (access) log(s, current, "ship", `${access} move${access.includes(" and ") ? "" : "s"} to port ${move.toPort} with it.`);
     s.deps.live.publish(`service:${svc.id}`, {
       type: "invalidate",
       ops: ["domains.list", "exposures.get", "env.references", "tunnels.get"],
@@ -1159,20 +1171,8 @@ export function finish(
   const back = portBack as PortMove | null;
   if (back) {
     // What moved with the port goes back with it: "The service's port, its domains and its IP:port access are back on 80".
-    const parts = [
-      "The service's port",
-      ...(back.applied
-        ? [
-            back.domainIds.length > 0 ? "its domains" : "",
-            (back.exposureIds?.length ?? 0) > 0 ? "its IP:port access" : "",
-            back.tunnel ? "its Cloudflare tunnel" : "",
-          ].filter(Boolean)
-        : []),
-    ];
-    const what = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
-    appendLog(s.deps, d.serviceId, d.id, lastStep(d), [
-      `${what} ${parts.length === 1 ? "is" : "are"} back on ${back.fromPort}, where the live version listens.`,
-    ]);
+    const lines = portBackLines(back);
+    if (lines.length > 0) appendLog(s.deps, d.serviceId, d.id, lastStep(d), lines);
     publishService(s.deps, d.serviceId);
   }
   if (d.projectMove) {
@@ -1228,23 +1228,70 @@ export function finish(
  * A services.usePort deployment that did not go live: the service's first
  * port goes back to the old one (unless changed since) and, once rollout()
  * moved them, so do its domains, so the live version keeps serving where it
- * listens and the next deploy finds the settings it runs with.
+ * listens and the next deploy finds the settings it runs with. A port
+ * changed by hand (keepPort) stays as it was set: only what moved goes
+ * back, and the next deploy's rollout moves it again.
  */
 function restorePortMove(tx: Pick<Deps["db"], "select" | "insert" | "update" | "delete">, serviceId: string, move: PortMove): void {
   const svc = tx.select({ spec: services.spec }).from(services).where(eq(services.id, serviceId)).get();
-  if (svc) {
+  if (svc && !move.keepPort) {
     const spec = readSpec(svc.spec);
     if (spec.ports.find((p) => p.protocol !== "udp")?.containerPort === move.toPort) {
       writeSpec(tx, serviceId, { ...spec, ports: withFirstPort(spec.ports, move.fromPort) });
     }
   }
-  if (move.applied && move.domainIds.length > 0) {
-    tx.update(domains)
-      .set({ targetPort: move.fromPort })
-      .where(and(eq(domains.serviceId, serviceId), inArray(domains.id, move.domainIds), eq(domains.targetPort, move.toPort)))
-      .run();
-  }
-  if (move.applied) moveAccess(tx, serviceId, { ...move, fromPort: move.toPort, toPort: move.fromPort });
+  if (move.applied) movePointed(tx, serviceId, { ...move, fromPort: move.toPort, toPort: move.fromPort });
+  if (move.applied && move.follow) movePointed(tx, serviceId, { ...move.follow, fromPort: move.toPort, toPort: move.follow.fromPort });
+}
+
+/**
+ * What still points at the live version's port when this deployment
+ * listens on another one because the service's main port was changed by
+ * hand since (services.update; Use port records its own PortMove): it
+ * moves with the new containers. Null when nothing does.
+ */
+function followLivePort(
+  tx: Pick<Deps["db"], "select">,
+  svc: ServiceRow,
+  d: DeploymentRow,
+): { fromPort: number; toPort: number; domainIds: string[]; exposureIds: string[]; tunnel: boolean } | null {
+  if (svc.kind !== "app" || svc.parentId !== null || svc.id === panelServiceId || svc.liveDeploymentId === d.id) return null;
+  const live = livePortsOf(tx, svc);
+  if (!live) return null;
+  const change = mainPortChange(live, readRunSettings(d.runSettings, readSpec(svc.spec)).ports);
+  if (!change) return null;
+  const pointed = pointedAt(tx, svc.id, change.fromPort);
+  return pointsAny(pointed) ? { ...change, ...pointed } : null;
+}
+
+function followOf(f: { fromPort: number; domainIds: string[]; exposureIds: string[]; tunnel: boolean }): PortFollow {
+  return { fromPort: f.fromPort, domainIds: f.domainIds, exposureIds: f.exposureIds, tunnel: f.tunnel };
+}
+
+/**
+ * What a failed deploy's PortMove put back, for its log: "The service's
+ * port, its domains and its IP:port access are back on 80, where the live
+ * version listens." A port set by hand stays, so it is not named.
+ */
+export function portBackLines(back: PortMove): string[] {
+  const moved = (m: { domainIds: string[]; exposureIds?: string[]; tunnel?: boolean }) =>
+    [
+      m.domainIds.length > 0 ? "its domains" : "",
+      (m.exposureIds?.length ?? 0) > 0 ? "its IP:port access" : "",
+      m.tunnel ? "its Cloudflare tunnel" : "",
+    ].filter(Boolean);
+  const sentence = (parts: string[], port: number, live: boolean) => {
+    const what = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+    const text = `${what} ${parts.length === 1 && parts[0] !== "its domains" ? "is" : "are"} back on ${port}${live ? ", where the live version listens" : ""}.`;
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  };
+  const follow = back.applied && back.follow ? moved(back.follow) : [];
+  const own = [...(back.keepPort ? [] : ["The service's port"]), ...(back.applied ? moved(back) : [])];
+  // Use port and a port set by hand before it, both from the live version's port: one line.
+  if (back.follow && back.follow.fromPort === back.fromPort) own.push(...follow.filter((p) => !own.includes(p)));
+  const lines = own.length > 0 ? [sentence(own, back.fromPort, !back.follow || back.follow.fromPort === back.fromPort)] : [];
+  if (back.follow && back.follow.fromPort !== back.fromPort && follow.length > 0) lines.push(sentence(follow, back.follow.fromPort, true));
+  return lines;
 }
 
 /** The service and its Domains tab changed (a port move went back): open screens refetch. */

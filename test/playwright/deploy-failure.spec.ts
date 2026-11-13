@@ -5,13 +5,16 @@
 // 6000" switches the service to the port its app listens on and deploys:
 // on the service's newest deployment only, and not while a deploy runs.
 // The Advanced tab waits for a running deploy before it changes the nodes
-// or moves the service. Screenshots go to $SHOTS_DIR/deploy-failure.
+// or moves the service, and its Ports say that the domains, IP:port access
+// and tunnel on the old main port follow a port typed in (with the next
+// deploy when a version is live, else on save). Screenshots go to
+// $SHOTS_DIR/deploy-failure.
 
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { failedDeployError, failedDeployId, failedDeployOutput, failedNewestList, ids as svc } from "./demo/service";
+import { failedDeployError, failedDeployId, failedDeployOutput, failedNewestList, servicesById, ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
@@ -140,4 +143,49 @@ test("the Advanced tab waits for a running deploy to change the nodes or move th
   await expect(moveButton).toHaveAttribute("title", "A deploy is in progress. Wait for it, or cancel it, to change the nodes.");
   expect(calls("services.setPlacements")).toEqual([]);
   expect(calls("services.move")).toEqual([]);
+});
+
+const savedPorts = {
+  "services.update": (input: Input) => ({ ...(servicesById[input.serviceId] as object), ports: input.ports }),
+};
+
+test("a main port typed in on the Advanced tab: what points at the old one follows with the next deploy", async ({ page }) => {
+  const calls = watchOps(page);
+  await installDemo(page, { overrides: savedPorts });
+  // The api is live on port 3000.
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/advanced`);
+  const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Container" }) });
+  await expect(
+    card.getByText("The first TCP port is the main one: change it and the domains, IP:port access and Cloudflare tunnel on the old one follow it."),
+  ).toBeVisible();
+  const note = card.getByRole("status");
+  await expect(note).toHaveCount(0);
+  const port = card.getByRole("textbox", { name: "Container port" }).first();
+  await expect(port).toHaveValue("3000");
+  await port.fill("6000");
+  await expect(note).toHaveText(
+    "The domains, IP:port access and Cloudflare tunnel on port 3000 move to 6000 when the next deploy rolls out, with the new containers. A domain on another port stays.",
+  );
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${shots}/main-port-rollout.png` });
+  // Back to 3000, or 3000 kept as another port: nothing follows.
+  await port.fill("3000");
+  await expect(note).toHaveCount(0);
+  await port.fill("6000");
+  await card.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Saved").first()).toBeVisible();
+  expect(calls("services.update").at(-1)?.ports).toEqual([{ containerPort: 6000, protocol: "tcp" }]);
+});
+
+test("a main port typed in for an app with nothing live: what points at the old one follows on save", async ({ page }) => {
+  await installDemo(page, { overrides: savedPorts });
+  // private-api never went live.
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}/advanced`);
+  const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Container" }) });
+  await card.getByRole("textbox", { name: "Container port" }).first().fill("8080");
+  await expect(card.getByRole("status")).toHaveText(
+    "The domains, IP:port access and Cloudflare tunnel on port 3000 move to 8080 when you save. A domain on another port stays.",
+  );
+  await card.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${shots}/main-port-now.png` });
 });

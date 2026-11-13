@@ -30,6 +30,7 @@ import { servicePort } from "../service-port";
 import type { ServiceDetail } from "../use-service";
 import { joinArgs, splitArgs } from "./args";
 import { defaultCheckText } from "./default-check";
+import { mainPortNote } from "./main-port";
 
 type HealthCheck = NonNullable<ServiceDetail["healthCheck"]>;
 type ProbeType = "default" | HealthCheck["probe"]["type"];
@@ -528,6 +529,8 @@ function ContainerCard({ service }: { service: ServiceDetail }) {
     },
     ports: ports.filter((p) => p.containerPort > 0),
   };
+  // What points at the main port follows it (services.update): an app's own ports, not the panel's.
+  const mainPort = service.kind === "app" && !service.parentId && !isPanelService(service) ? mainPortNote(service, ports) : null;
   return (
     <SectionCard
       title={t("serviceAdvanced.container.title")}
@@ -618,6 +621,11 @@ function ContainerCard({ service }: { service: ServiceDetail }) {
             </Button>
           </div>
         ))}
+        {mainPort && (
+          <p className="text-xs text-ink-strong" role="status">
+            {mainPort}
+          </p>
+        )}
         <Button size="sm" className="self-start" onClick={() => setPorts([...ports, { containerPort: 0, protocol: "tcp" }])}>
           <IconPlus size={14} />
           {t("serviceAdvanced.container.addPort")}

@@ -110,7 +110,12 @@ export default {
       off: "The app is PID 1 and handles signals and child processes itself.",
     },
     ports: "Ports",
-    portsHint: "Ports the app listens on inside the container. Domains and IP:port access route to these.",
+    portsHint:
+      "Ports the app listens on inside the container. Domains and IP:port access route to these. The first TCP port is the main one: change it and the domains, IP:port access and Cloudflare tunnel on the old one follow it.",
+    mainPortRollout:
+      "The domains, IP:port access and Cloudflare tunnel on port {from} move to {to} when the next deploy rolls out, with the new containers. A domain on another port stays.",
+    mainPortNow:
+      "The domains, IP:port access and Cloudflare tunnel on port {from} move to {to} when you save. A domain on another port stays.",
     protocol: "Protocol",
     addPort: "Add port",
   },

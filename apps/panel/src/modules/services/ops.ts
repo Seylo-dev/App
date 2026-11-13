@@ -17,6 +17,7 @@ import { panelServiceId } from "../nodes/panel-service";
 import { assertNoActiveCopy, assertNoMoveCopy, assertNoTransfer } from "./copies";
 import { assertCreateRights } from "./create-rights";
 import { assertNameFree, assertNode, insertService, writeSpec } from "./insert";
+import { followMainPort, mainPortChange } from "./port-move";
 import { entryNodeOf, loadService, nameKey, projectServiceRows, type ServiceRow, toDetail, toSummaries, volumesOf } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
 import { defaultBuild, readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
@@ -183,7 +184,7 @@ const update = implement(serviceOps.update, (input, ctx) => {
       .run();
   }
   if (input.ports !== undefined || input.container !== undefined) forbidMemberEdit(row, "ports and command");
-  const hadPorts = readSpec(row.spec).ports.length > 0;
+  const before = readSpec(row.spec).ports;
   const next = updateSpec(ctx, row.id, (spec) => ({
     ...spec,
     container: input.container ? { ...spec.container, ...input.container } : spec.container,
@@ -191,9 +192,15 @@ const update = implement(serviceOps.update, (input, ctx) => {
     cron: cron ?? spec.cron,
   }));
   // An app created without a port (set later, after the source) gets its first-run IP:port now, unless it has a domain.
-  if (row.kind === "app" && !hadPorts && (input.ports?.length ?? 0) > 0) {
+  if (row.kind === "app" && before.length === 0 && (input.ports?.length ?? 0) > 0) {
     const hasDomain = ctx.db.select({ id: domains.id }).from(domains).where(eq(domains.serviceId, row.id)).get() !== undefined;
     if (!hasDomain && openFirstRun(ctx.db, row.id)) ctx.agents.desired.markDirty({ serviceId: row.id });
+  }
+  // Its main port changed: what pointed at the old one follows, as with Use port (port-move.ts).
+  const change = row.kind === "app" && row.id !== panelServiceId && input.ports ? mainPortChange(before, input.ports) : null;
+  if (change) {
+    const followed = followMainPort(ctx, row, change);
+    ctx.auditDetails?.({ mainPort: { ...change, ...followed } });
   }
   return toDetail(ctx.db, ctx.agents, next);
 });

@@ -4738,6 +4738,39 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   access and its Cloudflare tunnel are back on <port>, where the live
   version listens." (naming what moved). The answer says when the domains
   move (`domainsMove`: `now` or `rollout`).
+- A main port changed by hand (`services.update` with `ports`, the
+  Advanced tab's Ports or the API; since 0.2.16, `services/port-move.ts`):
+  when an app's first TCP port goes from one port to another and the old
+  one is no longer among its TCP ports (`mainPortChange`: a reorder that
+  keeps it, the same port, no TCP port before or after, and compose
+  members, other kinds and the panel's own service move nothing), the
+  same things as with Use port follow it: the domains whose `target_port`
+  was the old port (a domain on another port stays), the first-run and
+  timed `port_exposures` on it and the Cloudflare tunnel on it. When they
+  move follows what runs: without a live version, or when the live
+  version's run settings (`deployments.run_settings` of
+  `live_deployment_id`) listen on another main port, nothing listens on
+  the old port and they move at once (`followMainPort`); when the live
+  version listens there (stopped or not: `services.start` runs it again as
+  deployed) they wait. Every deploy's `rollout()` compares the live
+  version's main port with its own run settings' and moves what still
+  points at the live one in the transaction that makes it the target,
+  stored as the deployment's `port_move` with `keepPort: true` and
+  `applied: true` (logged "The service's port is 6000 now; the live
+  version listens on 80." and "Its domain moves to port 6000 with it.");
+  a failed or cancelled deploy puts that back on the live
+  version's port and leaves the service's port as set ("Its domains, its
+  IP:port access and its Cloudflare tunnel are back on 80, where the live
+  version listens."), so the next deploy moves it again. A Use port
+  deployment whose live version listens on yet another port (a port set
+  by hand before it) moves what is on the live port too and keeps it in
+  `port_move.follow` (`fromPort`, `domainIds`, `exposureIds`, `tunnel`),
+  which goes back there on failure. The audit row of `services.update`
+  carries `mainPort { fromPort, toPort, moves: now | rollout, domainIds,
+  exposureIds, tunnel }` (what pointed at the old port). The Advanced
+  tab's Ports say so, and while the form's main port differs it says the
+  domains, IP:port access and tunnel on the old port move with the next
+  deploy (a live version) or on save (`advanced/main-port.ts`).
 - Build rows (since 0.2.15): a build is `queued` (`started_at` null) from
   the moment the runner dispatches it until its node's agent reports a
   stage after its slot of Builds at once (`BUILD_STAGE_FETCHING_SOURCE` or
