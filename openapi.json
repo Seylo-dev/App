@@ -25417,7 +25417,7 @@
       "post": {
         "operationId": "deployments.cancel",
         "summary": "Cancel a deployment",
-        "description": "Cancels a queued, building or deploying deployment. A new version that was already started is removed; the live version keeps serving. Finished deployments cannot be cancelled.",
+        "description": "Cancels a queued, building or deploying deployment. A new version that was already started is removed; the live version keeps serving. Finished deployments cannot be cancelled. A move to another node (Deployment.move) with volumes can be cancelled only while it copies them: the copy stops first, then the service starts again on the old node with its data and the new node's partial copy is removed. Once the copy is done and the new node starts it, a cancel could lose what it wrote there, so it is refused (CONFLICT, reason moveStarting): the move ends on its own, live on the new node or back on the old one if it fails. Deployment.move.canCancel says whether a cancel is taken now.",
         "tags": [
           "deployments"
         ],
@@ -25485,6 +25485,7 @@
                     "error",
                     "lastOutput",
                     "portHint",
+                    "move",
                     "createdAt",
                     "startedAt",
                     "finishedAt"
@@ -26033,6 +26034,64 @@
                         }
                       ]
                     },
+                    "move": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "from",
+                            "to",
+                            "copying",
+                            "canCancel"
+                          ],
+                          "properties": {
+                            "from": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "to": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "copying": {
+                              "type": "boolean"
+                            },
+                            "canCancel": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -26146,6 +26205,7 @@
                     "error",
                     "lastOutput",
                     "portHint",
+                    "move",
                     "createdAt",
                     "startedAt",
                     "finishedAt"
@@ -26685,6 +26745,64 @@
                               }
                             },
                             "canUsePort": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "move": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "from",
+                            "to",
+                            "copying",
+                            "canCancel"
+                          ],
+                          "properties": {
+                            "from": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "to": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "copying": {
+                              "type": "boolean"
+                            },
+                            "canCancel": {
                               "type": "boolean"
                             }
                           }
@@ -26809,6 +26927,7 @@
                         "error",
                         "lastOutput",
                         "portHint",
+                        "move",
                         "createdAt",
                         "startedAt",
                         "finishedAt"
@@ -27357,6 +27476,64 @@
                             }
                           ]
                         },
+                        "move": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "from",
+                                "to",
+                                "copying",
+                                "canCancel"
+                              ],
+                              "properties": {
+                                "from": {
+                                  "type": "object",
+                                  "required": [
+                                    "id",
+                                    "name"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "to": {
+                                  "type": "object",
+                                  "required": [
+                                    "id",
+                                    "name"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "copying": {
+                                  "type": "boolean"
+                                },
+                                "canCancel": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "createdAt": {
                           "format": "date-time",
                           "type": "string"
@@ -27498,6 +27675,7 @@
                           "error",
                           "lastOutput",
                           "portHint",
+                          "move",
                           "createdAt",
                           "startedAt",
                           "finishedAt"
@@ -28046,6 +28224,64 @@
                               }
                             ]
                           },
+                          "move": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "from",
+                                  "to",
+                                  "copying",
+                                  "canCancel"
+                                ],
+                                "properties": {
+                                  "from": {
+                                    "type": "object",
+                                    "required": [
+                                      "id",
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "to": {
+                                    "type": "object",
+                                    "required": [
+                                      "id",
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "copying": {
+                                    "type": "boolean"
+                                  },
+                                  "canCancel": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "createdAt": {
                             "format": "date-time",
                             "type": "string"
@@ -28322,6 +28558,7 @@
                           "error",
                           "lastOutput",
                           "portHint",
+                          "move",
                           "createdAt",
                           "startedAt",
                           "finishedAt",
@@ -28872,6 +29109,64 @@
                               }
                             ]
                           },
+                          "move": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "from",
+                                  "to",
+                                  "copying",
+                                  "canCancel"
+                                ],
+                                "properties": {
+                                  "from": {
+                                    "type": "object",
+                                    "required": [
+                                      "id",
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "to": {
+                                    "type": "object",
+                                    "required": [
+                                      "id",
+                                      "name"
+                                    ],
+                                    "properties": {
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "copying": {
+                                    "type": "boolean"
+                                  },
+                                  "canCancel": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "createdAt": {
                             "format": "date-time",
                             "type": "string"
@@ -28995,6 +29290,7 @@
                     "error",
                     "lastOutput",
                     "portHint",
+                    "move",
                     "createdAt",
                     "startedAt",
                     "finishedAt"
@@ -29534,6 +29830,64 @@
                               }
                             },
                             "canUsePort": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "move": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "from",
+                            "to",
+                            "copying",
+                            "canCancel"
+                          ],
+                          "properties": {
+                            "from": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "to": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "copying": {
+                              "type": "boolean"
+                            },
+                            "canCancel": {
                               "type": "boolean"
                             }
                           }

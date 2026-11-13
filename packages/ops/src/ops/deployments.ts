@@ -150,6 +150,21 @@ export const Deployment = Type.Object({
     }),
     Type.Null(),
   ]),
+  /**
+   * A move to another node (services.move): the node it leaves (from) and
+   * the one it goes to (to). copying: a move with volumes that has not
+   * finished its copy yet (queued, stopping the old copy or copying the
+   * volumes; the old copy is stopped and the new node holds a stopped
+   * placement meanwhile). canCancel: deployments.cancel stops it now
+   * without losing data: a move without volumes until it ends (the old
+   * copy keeps serving), a move with volumes only while it copies (the
+   * copy stops, the old copy starts again with its data and the new
+   * node's partial copy goes). Once a move with volumes starts on the new
+   * node it is false, and it ends on its own: live there, or back on the
+   * old node if it fails. null for other deployments and for moves to
+   * another project. Added in 0.2.17.
+   */
+  move: Type.Union([Type.Object({ from: NodeRef, to: NodeRef, copying: Type.Boolean(), canCancel: Type.Boolean() }), Type.Null()]),
   createdAt: Timestamp,
   startedAt: Type.Union([Timestamp, Type.Null()]),
   finishedAt: Type.Union([Timestamp, Type.Null()]),
@@ -250,7 +265,7 @@ export const cancel = defineOp({
   kind: "mutation",
   summary: "Cancel a deployment",
   description:
-    "Cancels a queued, building or deploying deployment. A new version that was already started is removed; the live version keeps serving. Finished deployments cannot be cancelled.",
+    "Cancels a queued, building or deploying deployment. A new version that was already started is removed; the live version keeps serving. Finished deployments cannot be cancelled. A move to another node (Deployment.move) with volumes can be cancelled only while it copies them: the copy stops first, then the service starts again on the old node with its data and the new node's partial copy is removed. Once the copy is done and the new node starts it, a cancel could lose what it wrote there, so it is refused (CONFLICT, reason moveStarting): the move ends on its own, live on the new node or back on the old one if it fails. Deployment.move.canCancel says whether a cancel is taken now.",
   input: Type.Object(DeploymentRef),
   output: Deployment,
   permission: permission.service("services.deploy", serviceScope),

@@ -272,6 +272,55 @@ describe("moving a database", () => {
     ]);
   });
 
+  test("a cancel while its data is copied stops the copy, starts the old copy with its data, port and logins, and removes the new one (0.2.17)", async () => {
+    const id = await liveDb();
+    timedExpose(id, nodeA);
+    fleet.volumes.set(nodeA, new Map([[`${id}/data`, new TextEncoder().encode("pgdata with the rows and the roles")]]));
+    fleet.reportRunning(nodeA, id, generationOf(id), "", ServicePhase.STOPPED);
+    // A big volume: the export hands out its bytes, then the copy waits for the rest.
+    fleet.volumeScript = () => ({ hang: true });
+    const res = await callOp(panel, serviceOps.move, { serviceId: id, toNodeId: nodeB }, { cookie });
+    const deploymentId = res.body.deploymentId as string;
+    const job = panel.runner.runDue(panel.deps);
+    for (let i = 0; i < 1000 && !fleet.calls.some((c) => c.nodeId === nodeB && c.method === "importVolume"); i++) await Bun.sleep(2);
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.stopped).toBe(true);
+    const view = (await callOp(panel, deploymentOps.get, { serviceId: id, deploymentId }, { cookie })).body.deployment;
+    expect(view.move).toMatchObject({ to: { id: nodeB, name: "node-b" }, copying: true, canCancel: true });
+
+    const cancelled = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId }, { cookie });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.status).toBe("cancelled");
+    expect([...fleet.cancelled].sort()).toEqual([`exportVolume ${id}/data`, `importVolume ${id}/data`]);
+    await job;
+    expect(placed(id)).toEqual([nodeA]);
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.stopped).toBe(false);
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeB)).toBeNull();
+    expect(new TextDecoder().decode(fleet.volumes.get(nodeA)?.get(`${id}/data`))).toBe("pgdata with the rows and the roles");
+    expect(databaseRuntime(panel.deps, id, nodeA)?.database.credentials).toEqual({
+      adminUser: "app",
+      adminPassword: password,
+      database: "shop",
+    });
+    // Its IP:port access never left the old node.
+    expect(rowsOf(id).map((r) => [r.kind, r.nodeId, r.listenPort])).toEqual([
+      ["database", nodeA, 41000],
+      ["timed", nodeA, 42000],
+    ]);
+    expect((await callOp(panel, dbOps.connection, { serviceId: id }, { cookie })).body.exposed).toMatchObject({
+      host: "203.0.113.10",
+      port: 41000,
+    });
+  });
+
+  test("once its data is copied and it starts on the new node, a cancel is refused (0.2.17)", async () => {
+    const id = await liveDb({ exposed: false });
+    const deploymentId = await moveLive(id);
+    const refused = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId }, { cookie });
+    expect(refused.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "moveStarting" } });
+    expect(placed(id)).toEqual([nodeA, nodeB].sort());
+    await finishMove(id, deploymentId);
+  });
+
   test("refused while a backup or restore of it runs, to a node that cannot keep its exposure, or offline", async () => {
     const id = await liveDb();
     const destinationId = destination();

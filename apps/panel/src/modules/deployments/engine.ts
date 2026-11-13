@@ -56,6 +56,7 @@ import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-s
 import { panelServiceId } from "../nodes/panel-service";
 import { moveAccessToNode } from "../services/access-move";
 import { dataVolumes, writeSpec } from "../services/insert";
+import { assertMoveCancellable, cancelMoveRun, isNodeMove } from "../services/move-runs";
 import { accessText, livePortsOf, mainPortChange, movePointed, pointedAt, pointsAny } from "../services/port-move";
 import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService, type ServiceRow } from "../services/rows";
@@ -1353,9 +1354,21 @@ function kickNext(s: EngineState, serviceId: string): void {
   if (next) kick(s, next.id);
 }
 
-/** Stops a deployment that has not finished. */
+/**
+ * Stops a deployment that has not finished. A move to another node that
+ * copies its volumes is stopped by its job when one runs it here
+ * (services/move-runs.ts): the job closes the copy first and then ends it
+ * as cancelled; a move with volumes whose copy is done and that starts on
+ * the new node is refused (CONFLICT, reason moveStarting).
+ */
 export async function cancelDeployment(deps: Deps, d: DeploymentRow, actor: string | null): Promise<void> {
   const engine = engines.get(deps.db);
+  const message = actor ? `Cancelled by ${actor}.` : "Cancelled.";
+  if (isNodeMove(d)) {
+    assertMoveCancellable(deps.db, d);
+    const stopping = d.moveCopying ? cancelMoveRun(deps.db, d.id, message) : null;
+    if (stopping) return stopping;
+  }
   if (d.status === "building") {
     const build = deps.db
       .select()
@@ -1367,7 +1380,7 @@ export async function cancelDeployment(deps: Deps, d: DeploymentRow, actor: stri
     }
     if (build) engine?.streams.get(build.id)?.cancel();
   }
-  finish(engine ?? { deps }, d, "cancelled", actor ? `Cancelled by ${actor}.` : "Cancelled.");
+  finish(engine ?? { deps }, d, "cancelled", message);
 }
 
 /** Next generation for a service: above everything it ever ran or tried. */

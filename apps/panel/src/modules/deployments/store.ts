@@ -25,6 +25,7 @@ import {
 import type { Deps } from "../../deps";
 import { waitingBuilds, waitingDetail } from "../builds/slots";
 import { databaseKinds } from "../domains/lookup";
+import { moveCancellable, moveTarget } from "../services/move-runs";
 import { nodeNames } from "../services/rows";
 import { lastOutputOf, legacyError, maxLastOutputLines, portHintOf } from "./failure";
 
@@ -163,6 +164,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
     for (const id of r.targetNodeIds) nodeIds.add(id);
     for (const s of r.steps) if (s.nodeId) nodeIds.add(s.nodeId);
     for (const id of Object.keys(r.nodeResults)) nodeIds.add(id);
+    if (r.movedFromNodeId) nodeIds.add(r.movedFromNodeId);
   }
   // Whether services.usePort applies to a failed deploy's service: an app of its own, not a compose member.
   const failedServices = [...new Set(rows.filter((r) => r.status === "failed").map((r) => r.serviceId))];
@@ -291,11 +293,26 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
             canUsePort: hint.switchable && ownApps.has(r.serviceId) && newest.get(r.serviceId) === r.generation,
           }
         : null,
+      move: moveOf(db, r, ref),
       createdAt: r.createdAt.toISOString(),
       startedAt: r.startedAt?.toISOString() ?? null,
       finishedAt: r.finishedAt?.toISOString() ?? null,
     };
   });
+}
+
+/** Deployment.move: where a move to another node goes, whether it still copies, and whether a cancel is taken now (services/move-runs.ts). */
+function moveOf(db: PanelDb, r: DeploymentRow, ref: (id: string | null) => { id: string; name: string } | null): Deployment["move"] {
+  const from = r.movedFromNodeId;
+  const to = moveTarget(r);
+  if (!from || !to) return null;
+  const unfinished = !isFinal(r.status);
+  return {
+    from: ref(from) as { id: string; name: string },
+    to: ref(to) as { id: string; name: string },
+    copying: unfinished && r.moveCopying,
+    canCancel: unfinished && moveCancellable(db, r),
+  };
 }
 
 /**

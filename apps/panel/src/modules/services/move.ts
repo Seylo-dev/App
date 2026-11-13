@@ -8,7 +8,9 @@
 // is a deployment with trigger "move"; on failure the service stays on (or
 // goes back to) the old node. With volumes, the old node keeps its stopped
 // copy and its data until the new node is live, so a failed move loses
-// nothing (services/desired.ts keeps it stopped there meanwhile). Once the
+// nothing (services/desired.ts keeps it stopped there meanwhile). A cancel
+// while it copies stops the copy first, then ends the move the same way
+// (move-runs.ts); once the new node starts it, it cannot be cancelled. Once the
 // new node is live its IP:port access follows (access-move.ts). The checks
 // are exported for services.moveImpact (move-impact.ts), which lists them
 // per node before anyone moves.
@@ -27,9 +29,10 @@ import { findDatabase, loadDatabase } from "../databases/info";
 import { engineFor, finish, nextGeneration } from "../deployments/engine";
 import { appendLog } from "../deployments/logs";
 import { assertNoDeployForPlacement } from "../deployments/queue";
-import { type DeploymentRow, initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
+import { type DeploymentRow, initialSteps, isFinal, publishDeploymentChange, setStep } from "../deployments/store";
 import { assertNoActiveCopy } from "./copies";
 import { assertNode, dataVolumes } from "./insert";
+import { startMoveRun } from "./move-runs";
 import { actorOf, publishService } from "./ops";
 import { loadService, nodeNames, type ServiceRow } from "./rows";
 import { pipeIntoVolume, readVolume } from "./volume-pipe";
@@ -180,15 +183,29 @@ export const move = implement(serviceOps.move, (input, ctx) => {
   return { deploymentId: row.id };
 });
 
-/** Waits until the node reports no running container of the service. */
-export async function waitStopped(deps: Deps, serviceId: string, nodeId: string): Promise<boolean> {
+/** Waits until the node reports no running container of the service; false after stopWaitMs, or at once once `signal` aborts. */
+export async function waitStopped(deps: Deps, serviceId: string, nodeId: string, signal?: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + stopWaitMs;
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !signal?.aborted) {
     const status = deps.agents.state.serviceStatuses(serviceId).find((s) => s.nodeId === nodeId)?.status;
     if (!status || status.instances.every((i) => i.state !== InstanceState.RUNNING && i.state !== InstanceState.RESTARTING)) return true;
-    await Bun.sleep(1000);
+    await pause(1000, signal);
   }
   return false;
+}
+
+/** Bun.sleep that ends early once `signal` aborts. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return Bun.sleep(ms);
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 /**
@@ -196,10 +213,11 @@ export async function waitStopped(deps: Deps, serviceId: string, nodeId: string)
  * (volume-pipe.ts). `toServiceId` (a clone) receives it instead of the same
  * service. Returns the file bytes written on `to`, which are never fewer
  * than `from` archived (a file that shrank while it was read is padded).
+ * `signal` (a cancelled move) cancels both streams at once and throws.
  */
 export async function relayVolume(
   deps: Deps,
-  input: { serviceId: string; volume: string; from: string; to: string; toServiceId?: string },
+  input: { serviceId: string; volume: string; from: string; to: string; toServiceId?: string; signal?: AbortSignal },
 ): Promise<number> {
   const exported = readVolume(deps, { nodeId: input.from, serviceId: input.serviceId, volume: input.volume });
   try {
@@ -208,12 +226,13 @@ export async function relayVolume(
       serviceId: input.toServiceId ?? input.serviceId,
       volume: input.volume,
       chunks: exported.body,
+      signal: input.signal,
     });
     const archived = Number((await exported.response).sizeBytes);
     if (written < archived) throw new Error(`${input.volume}: ${archived} bytes were read but only ${written} written.`);
     return written;
   } catch (error) {
-    exported.cancel("move failed");
+    exported.cancel(input.signal?.aborted ? "the move was cancelled" : "move failed");
     throw error;
   }
 }
@@ -226,13 +245,29 @@ export const moveJob = defineJob<{ deploymentId: string; toNodeId: string }>({
   async run(payload, deps) {
     let d = deps.db.select().from(deployments).where(eq(deployments.id, payload.deploymentId)).get();
     if (d?.status !== "queued" || !d.moveCopying || !d.movedFromNodeId) return;
+    // From here a cancel stops this run instead of ending the move (move-runs.ts): the run ends it
+    // once its streams are closed. Before any await, so a cancel either ended it before (the check
+    // above) or finds this run.
+    const run = startMoveRun(deps.db, d.id);
     const from = d.movedFromNodeId;
     const svc = loadService(deps.db, d.serviceId);
     const names = nodeNames(deps.db, [from, payload.toNodeId]);
     const log = (text: string, error = false) => appendLog(deps, svc.id, (d as typeof d & object).id, "ship", [text], error);
-    const fail = (message: string) => {
+    // Never over a move that ended meanwhile: a late failure must not undo what came after it.
+    const end = (outcome: "failed" | "cancelled", message: string) => {
       const current = deps.db.select().from(deployments).where(eq(deployments.id, payload.deploymentId)).get();
-      if (current) finish(engineFor(deps), current, "failed", message);
+      if (current && !isFinal(current.status)) finish(engineFor(deps), current, outcome, message);
+    };
+    const fail = (message: string) => end("failed", message);
+    // A cancel asked: the copy is stopped, so the service goes back to the old node (restoreMove) and starts there.
+    const cancelled = () => {
+      const message = run.cancelled();
+      if (message === null) return false;
+      log(
+        `Stopped the copy to ${names.get(payload.toNodeId)}. ${svc.name} starts again on ${names.get(from)} with its data, and ${names.get(payload.toNodeId)} removes what was copied.`,
+      );
+      end("cancelled", message);
+      return true;
     };
     try {
       deps.db
@@ -252,12 +287,15 @@ export const moveJob = defineJob<{ deploymentId: string; toNodeId: string }>({
       publishDeploymentChange(deps, svc.id, d.id);
       log(`Stopping ${svc.name} on ${names.get(from)} so the copy is consistent.`);
       await deps.agents.desired.settled();
-      if (!(await waitStopped(deps, svc.id, from)))
-        return fail(`${svc.name} did not stop on ${names.get(from)} within ${stopWaitMs / 1000}s.`);
+      if (cancelled()) return;
+      const stopped = await waitStopped(deps, svc.id, from, run.signal);
+      if (cancelled()) return;
+      if (!stopped) return fail(`${svc.name} did not stop on ${names.get(from)} within ${stopWaitMs / 1000}s.`);
 
       for (const volume of dataVolumes(deps.db, svc.id)) {
         log(`Copying volume ${volume.name}.`);
-        const bytes = await relayVolume(deps, { serviceId: svc.id, volume: volume.name, from, to: payload.toNodeId });
+        const bytes = await relayVolume(deps, { serviceId: svc.id, volume: volume.name, from, to: payload.toNodeId, signal: run.signal });
+        if (cancelled()) return;
         log(`Copied ${volume.name} (${(bytes / 1024 / 1024).toFixed(1)} MB).`);
       }
 
@@ -279,7 +317,10 @@ export const moveJob = defineJob<{ deploymentId: string; toNodeId: string }>({
       publishService(deps, svc);
       engineFor(deps).kick(payload.deploymentId);
     } catch (error) {
+      if (cancelled()) return;
       fail(`Copying the data failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      run.end();
     }
   },
 });
