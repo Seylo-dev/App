@@ -7,7 +7,8 @@
 //   Open (not on its own page), Open in new tab
 //   Deploy (apps and cron, not the panel; waits while a deploy runs),
 //   Cancel deploy while one runs, else Restart, Stop or Start (a Box:
-//   Stop and Open editor)
+//   Stop and Open editor); while it moves to another node (any kind)
+//   only Cancel move, and that only while the panel takes a cancel
 //   Logs, Console (the kinds whose page has those tabs; Console only with
 //   a terminal mode the viewer may open)
 //   Clone, Move to project, Move to another node (not the panel, protected
@@ -53,6 +54,7 @@ export type ServiceAction =
   | "openNewTab"
   | "deploy"
   | "cancelDeploy"
+  | "cancelMove"
   | "restart"
   | "stop"
   | "start"
@@ -73,6 +75,12 @@ export interface ServiceMenuContext {
   here: boolean;
   /** A deploy of it is queued or running. */
   busy: boolean;
+  /**
+   * The deploy in progress is a move to another node (Deployment.move), any
+   * kind: Cancel move while the panel takes a cancel, and no Cancel deploy,
+   * Restart, Stop or Start meanwhile.
+   */
+  moving?: { canCancel: boolean } | null;
   /**
    * Its desired run state from a live services.get (its own page is open);
    * without it, status "stopped" says so (the panel reports "stopped" for a
@@ -100,6 +108,7 @@ export function serviceMenuEntries(service: ServiceMenuSubject, ctx: ServiceMenu
   // The panel's own service updates through Settings > Updates, never by a deploy or a stop.
   const deploys = (service.kind === "app" || service.kind === "cron") && !panel;
   const busy = deploys && ctx.busy;
+  const moving = ctx.moving ?? null;
   const entries: MenuEntry[] = [];
 
   if (!ctx.here) entries.push(item("open", t("menus.open"), IconArrowUpRight));
@@ -114,10 +123,16 @@ export function serviceMenuEntries(service: ServiceMenuSubject, ctx: ServiceMenu
           "deploy",
           t("service.header.deploy"),
           IconRocket,
-          busy ? { disabled: true, disabledReason: t("service.header.deployBusyHint") } : {},
+          moving
+            ? { disabled: true, disabledReason: t("service.header.deployMoveHint") }
+            : busy
+              ? { disabled: true, disabledReason: t("service.header.deployBusyHint") }
+              : {},
         ),
       );
-    if (busy) entries.push(item("cancelDeploy", t("service.header.cancelDeploy"), IconX));
+    if (moving) {
+      if (moving.canCancel) entries.push(item("cancelMove", t("service.header.cancelMove"), IconX));
+    } else if (busy) entries.push(item("cancelDeploy", t("service.header.cancelDeploy"), IconX));
     else {
       if (!stopped && service.status !== "idle") entries.push(item("restart", t("service.header.restart"), IconRefresh));
       if (stopped) entries.push(item("start", t("service.header.start"), IconPlayerPlay));

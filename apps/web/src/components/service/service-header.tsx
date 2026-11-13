@@ -1,5 +1,7 @@
 // The title row of every service screen (Service.dc.html): kind tile, name,
-// live status, nodes, main address, and the run actions for the kind. The
+// live status, nodes, main address, and the run actions for the kind (while
+// it moves to another node, "Moving to <node>..." and Cancel move when the
+// panel takes one, cancel-move-dialog.tsx). The
 // buttons run through the same actions as the service's menus
 // (menus/service-actions.ts, menus/object-actions.tsx), and its "..." is
 // the service's whole menu, the one its rows show on right-click.
@@ -8,7 +10,7 @@ import { databases } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
-import { IconArrowUpRight, IconPlayerPlay, IconPlayerStop, IconRefresh, IconServer2 } from "@tabler/icons-react";
+import { IconArrowUpRight, IconLoader2, IconPlayerPlay, IconPlayerStop, IconRefresh, IconServer2 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
 import { isPanelService } from "../../lib/service-display";
@@ -16,6 +18,7 @@ import { useObjectActions } from "../menus/object-actions";
 import { useServiceActions } from "../menus/service-actions";
 import { ServiceActionsMenu } from "../menus/service-menu";
 import { useActiveDeploy } from "./active-deploy";
+import { type MovingDeployment, movingOf } from "./cancel-move-dialog";
 import { customVersion, versionCardId } from "./database/version-card";
 import { KindBadge } from "./kind-badge";
 import { retryOp } from "./op-state";
@@ -94,7 +97,13 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
   const panel = isPanelService(service);
   const deploys = (service.kind === "app" || service.kind === "cron") && !panel;
   // The deploy in progress (the oldest queued or running one): Cancel deploy stops it, and Deploy waits for it.
-  const active = useActiveDeploy(service.id, deploys);
+  // A database deploys too (a version change, a move to another node), but its header shows only a move.
+  const database = isDatabaseKind(service.kind);
+  const active = useActiveDeploy(service.id, deploys || database);
+  // A move to another node says where it goes, and offers Cancel move only while the panel takes it.
+  const moving = movingOf(active);
+  // Any other deploy in progress: Cancel deploy instead of the run buttons (never a database's).
+  const holding = database ? null : active;
   const { restart, start, deploy, cancel, openBox, stopBox } = actions;
 
   if (service.kind === "box") {
@@ -113,8 +122,10 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
 
   return (
     <>
-      {active ? (
-        <Button onClick={() => void actions.cancelDeploy(service.id, active.id)} disabled={cancel.isPending}>
+      {moving ? (
+        <MoveStatus moving={moving} onCancel={() => objects.openDialog({ kind: "move-cancel", service, deployment: moving })} />
+      ) : holding ? (
+        <Button onClick={() => void actions.cancelDeploy(service.id, holding.id)} disabled={cancel.isPending}>
           {t("service.header.cancelDeploy")}
         </Button>
       ) : (
@@ -146,11 +157,36 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
           variant="primary"
           onClick={() => actions.startDeploy(service)}
           disabled={deploy.isPending || active !== null}
-          title={active ? t("service.header.deployBusyHint") : undefined}
+          title={moving ? t("service.header.deployMoveHint") : active ? t("service.header.deployBusyHint") : undefined}
         >
-          {t(active ? "service.header.deployBusy" : "service.header.deploy")}
+          {t(active && !moving ? "service.header.deployBusy" : "service.header.deploy")}
         </Button>
       )}
+    </>
+  );
+}
+
+/**
+ * "Moving to <node>..." while a move to another node runs, with what it
+ * does now on hover, and Cancel move only while the panel takes a cancel
+ * (move.canCancel): never once a move with volumes starts on the new node.
+ */
+function MoveStatus({ moving, onCancel }: { moving: MovingDeployment; onCancel: () => void }) {
+  const { from, to, copying, canCancel } = moving.move;
+  const words = { node: to.name, from: from.name };
+  const hint = copying
+    ? t("service.header.movingCopying", words)
+    : canCancel
+      ? t("service.header.movingRolling", words)
+      : t("service.header.movingStarting", words);
+  return (
+    <>
+      <span role="status" title={hint} className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground">
+        <IconLoader2 size={15} stroke={2} aria-hidden="true" className="shrink-0 animate-spin text-status-busy" />
+        {t("service.header.movingTo", { node: to.name })}
+        <span className="sr-only">{hint}</span>
+      </span>
+      {canCancel && <Button onClick={onCancel}>{t("service.header.cancelMove")}</Button>}
     </>
   );
 }

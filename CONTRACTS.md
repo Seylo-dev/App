@@ -4272,6 +4272,46 @@ move deletes the old node's data once the new node serves.
 `ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
+Cancelling a move to another node (0.2.17, `deployments.cancel`,
+`deployments/engine.ts` `cancelDeployment`, `services/move-runs.ts`). A
+move without volumes is cancelled like any deploy until it ends: the old
+copy kept serving, the new node's placement goes. A move with volumes is
+cancelled only while it copies (`moveCopying`: queued, stopping the old
+copy, copying the volumes). When the `services.move` job runs it in this
+panel, the cancel does not end it itself: it aborts the job's run
+(`cancelMoveRun`, an in-process registry by deployment id that the job
+joins before its first await), the job cancels both streams
+(ExportVolume on the old node, ImportVolume on the new one, `relayVolume`
+`signal`) or ends its wait for the old copy to stop (`waitStopped`
+`signal`), logs "Stopped the copy to <node>. <name> starts again on
+<node> with its data, and <node> removes what was copied.", and only then
+ends the move as cancelled ("Cancelled by <actor>."), so `restoreMove`
+puts the service back on the old node, unstopped, and the new node's
+placement goes (its desired state removes the service with its data,
+the node's cleanup keeping a folder an import wrote within
+`volumes.IncomingGrace`); the op waits up to 20 s for that and returns
+the deployment as it is then. When no job runs it here (not started yet,
+or the panel restarted since), the cancel ends it at once and the job
+returns when it finds it ended. A job never ends a move that ended
+meanwhile (its late failure used to turn a cancelled move into a failed
+one and run `restoreMove` again). Once the copy is done and the new node
+starts the service with the copied data, `deployments.cancel` refuses
+(CONFLICT `reason: moveStarting`, `assertMoveCancellable`): a cancel then
+could lose what the new copy wrote; the move ends on its own, live there
+or back on the old node when it fails. `Deployment.move` (`{ from, to,
+copying, canCancel }`, null for other deployments and project moves; the
+new node is the target that is not the old one, or before the rollout
+the ship step's node, `move-runs.ts` `moveTarget`) says so. The web
+(`service-header.tsx` `MoveStatus`, `cancel-move-dialog.tsx`) shows
+"Moving to <node>..." in the header of an app or a database while one
+runs (the header now reads the active deploy of a database too, and shows
+only its moves), with what it does now on hover, and Cancel move only
+when `canCancel`, after a confirm ("Cancel moving <name> to <node>?",
+Keep moving); never Cancel deploy, Restart, Stop or Start meanwhile, and
+Deploy waits ("It is moving to another node. Deploy once the move
+ends."). The service menus and a Deployments row offer the same Cancel
+move with the same dialog (`object-actions.tsx` `move-cancel`).
+
 Moving a database (0.2.16) is the same move: its data volume is copied
 while it is stopped (the downtime grows with its size), and it starts on
 the new node with its data, users and passwords, so the panel's stored
@@ -4954,7 +4994,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   that lost it but keeps building others), with `cancelBuild` sent every
   time.
   `deployments.cancel` of a queued build sends `cancelBuild` too, which
-  takes it out of the agent's queue.
+  takes it out of the agent's queue. Of a move to another node: see
+  "Cancelling a move to another node" (a move with volumes only while it
+  copies, CONFLICT `reason: moveStarting` after).
 - `services/desired.ts` `serviceSpecFor(db, secrets, serviceId, nodeId)`:
   the services part of the desired state (the compiler calls it).
 - `services/delete.ts` `deleteServiceTree(deps, row)`: a service with its
@@ -6913,7 +6955,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `data-state="open"` for its selected look, `ActionsMenu` for the "...").
   Every object has one entry list for its "..." and its right-click menu,
   in `apps/web/src/components/menus/`: `service-items.tsx` (Open, Open in
-  new tab, Deploy, Cancel deploy or Restart/Stop/Start, a Box's Stop and
+  new tab, Deploy, Cancel deploy or Restart/Stop/Start, while it moves to
+  another node only Cancel move when `Deployment.move.canCancel` (any
+  kind, since 0.2.17), a Box's Stop and
   Open editor, Logs, Console, Clone, Move to project, Move to another node
   (the Advanced tab's Move card, `#move`; databases too since 0.2.16), Copy address or internal
   address, Copy ID, Delete; the header's and the old service menu's rules),
@@ -6991,7 +7035,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   keeping Move off and the panel's refusal in the dialog; the move sent to
   the node picked, then the card with the move and its log while both
   nodes are placed; Move to another node in the database's menu; Save and
-  restart saving the limits, then deploying, after a confirm), and since 0.2.1
+  restart saving the limits, then deploying, after a confirm; since 0.2.17
+  the header while it moves: "Moving to us-ash-1..." with what it does on
+  hover, no Cancel deploy, Restart, Stop or Start in the header or the
+  menu, Cancel move while it copies with its dialog, Keep moving sending
+  nothing and the confirm sending `deployments.cancel`, and no Cancel move
+  once it starts on the new node), `service-header.spec.ts` (the run
+  buttons' icons; since 0.2.17 an app moving without volumes: "Moving to
+  us-ash-1...", Deploy waiting with why, Cancel move after a confirm), and since 0.2.1
   `nodes-build-default.spec.ts` (Add node's Build images on this node:
   ticked by default, the request carries the choice, Change),
   `panel-access.spec.ts` (the Panel domain card's switches in every state,

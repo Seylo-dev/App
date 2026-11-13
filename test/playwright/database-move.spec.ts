@@ -8,7 +8,11 @@
 // Move to another node. demo/service.ts moveImpactOf stands in for the
 // panel; the move itself is answered here. While it moves, db has both
 // nodes' placements (the move job adds the new one first) and the card
-// shows the move with its log.
+// shows the move with its log. Since 0.2.17 the header says "Moving to
+// <node>..." on every tab, with Cancel move after a confirm while the
+// panel takes a cancel (Deployment.move.canCancel: while it copies) and
+// none once it starts on the new node, and never Cancel deploy, Restart,
+// Stop or Start meanwhile.
 //
 // Screenshots: $SHOTS_DIR/database-move/*.png.
 
@@ -163,6 +167,105 @@ test.describe("database move", () => {
     await page.screenshot({ path: `${shots}/moving.png`, fullPage: true });
     await move.getByRole("button", { name: "View log" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("while it moves the header says where, Cancel move asks first while it copies, and none once it starts there", async ({ page }) => {
+    const worker = serviceHandlers["deployments.list"]?.({ serviceId: svc.worker }) as { deployments: Record<string, unknown>[] };
+    const de = { id: ids.de, name: "de-fsn-1" };
+    const us = { id: ids.us, name: "us-ash-1" };
+    let move: Record<string, unknown> | null = {
+      ...worker.deployments[0],
+      id: "d000000000000097",
+      serviceId: svc.db,
+      status: "queued",
+      trigger: "move",
+      actor: "you@example.com",
+      commit: null,
+      source: null,
+      builder: null,
+      builtOn: null,
+      move: { from: de, to: us, copying: true, canCancel: true },
+    };
+    const cancels: Record<string, unknown>[] = [];
+    await installDemo(page, {
+      overrides: {
+        // As the move job leaves it while it copies: on both nodes, stopped.
+        "services.get": (input) => {
+          const base = serviceHandlers["services.get"]?.(input) as { placements: unknown[] };
+          if (!move || input.serviceId !== svc.db) return base;
+          return {
+            ...base,
+            status: "stopped",
+            stopped: true,
+            placements: [...base.placements, { nodeId: ids.us, nodeName: "us-ash-1", replicas: 1 }],
+          };
+        },
+        "deployments.list": (input) =>
+          input.serviceId === svc.db && String(input.active) === "true"
+            ? { deployments: move ? [move] : [], nextCursor: null, keptImages: 0 }
+            : serviceHandlers["deployments.list"]?.(input),
+        "deployments.cancel": (input) => {
+          cancels.push(input);
+          const done = { ...move, status: "cancelled", move: { from: de, to: us, copying: false, canCancel: false } };
+          move = null;
+          return done;
+        },
+      },
+    });
+    await page.goto(`/p/${ids.acme}/s/${svc.db}/connection`);
+    const header = page.locator("main header").first();
+    await expect(header.getByRole("status")).toContainText("Moving to us-ash-1...");
+    await expect(header.getByRole("status")).toHaveAttribute(
+      "title",
+      "It stops on de-fsn-1 while its data is copied to us-ash-1. Until the copy is done, Cancel move starts it again on de-fsn-1.",
+    );
+    // Nothing that would start, stop or cancel it some other way.
+    for (const name of ["Cancel deploy", "Restart", "Stop", "Start"]) {
+      await expect(header.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
+    await page.screenshot({ path: `${shots}/header-copying.png`, clip: (await header.boundingBox()) ?? undefined });
+    // The menu has the same rule.
+    await header.getByRole("button", { name: "More actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Cancel move" })).toBeVisible();
+    for (const name of ["Cancel deploy", "Restart", "Start"]) await expect(page.getByRole("menuitem", { name, exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    // Cancel move says what happens; keeping it sends nothing.
+    await header.getByRole("button", { name: "Cancel move", exact: true }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByRole("heading", { name: "Cancel moving db to us-ash-1?" })).toBeVisible();
+    await expect(dialog).toContainText("The copy stops. db starts again on de-fsn-1 with its data, and us-ash-1 removes what was copied so far.");
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/cancel-move-dialog.png` });
+    await dialog.getByRole("button", { name: "Keep moving" }).click();
+    await expect(dialog).toBeHidden();
+    expect(cancels).toEqual([]);
+
+    await header.getByRole("button", { name: "Cancel move", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel move", exact: true }).click();
+    await expect(page.getByText("Move cancelled. db runs on de-fsn-1.")).toBeVisible();
+    expect(cancels).toEqual([{ serviceId: svc.db, deploymentId: "d000000000000097" }]);
+    await expect(header.getByRole("status")).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restart", exact: true })).toBeVisible();
+
+    // Copied and starting on the new node: a cancel could lose what it writes there, so none is offered.
+    move = {
+      ...(worker.deployments[0] as object),
+      id: "d000000000000096",
+      serviceId: svc.db,
+      status: "deploying",
+      trigger: "move",
+      move: { from: de, to: us, copying: false, canCancel: false },
+    };
+    await page.goto(`/p/${ids.acme}/s/${svc.db}/advanced`);
+    await expect(header.getByRole("status")).toContainText("Moving to us-ash-1...");
+    await expect(header.getByRole("status")).toHaveAttribute("title", /The move ends on its own: on us-ash-1 once it is healthy, or back on de-fsn-1 if it fails\.$/);
+    await expect(header.getByRole("button", { name: "Cancel move", exact: true })).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Cancel deploy", exact: true })).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/header-starting.png`, clip: (await header.boundingBox()) ?? undefined });
+    await header.getByRole("button", { name: "More actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Open in new tab" })).toBeVisible();
+    for (const name of ["Cancel move", "Cancel deploy"]) await expect(page.getByRole("menuitem", { name, exact: true })).toHaveCount(0);
   });
 
   test("a move that cannot start now says why, and the panel's refusal shows in the dialog", async ({ page }) => {

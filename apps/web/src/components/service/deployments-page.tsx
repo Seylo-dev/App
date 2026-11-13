@@ -32,10 +32,12 @@ import { errorMessage } from "../../lib/api";
 import { useLiveUp } from "../../lib/live";
 import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
+import { useObjectActions } from "../menus/object-actions";
 import { type DeploymentAction, deploymentMenuEntries } from "../menus/row-items";
 import { copyWithToast, RowMenu } from "../menus/row-menu";
 import { useActiveDeploy } from "./active-deploy";
 import { buildNodeText } from "./build-node";
+import { movingOf } from "./cancel-move-dialog";
 import { firstTcpPort, LastOutput, UsePortButtons } from "./deploy-failure";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
@@ -208,6 +210,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
   const now = useServerNow(isActiveDeployment(d.status) ? 1000 : 30_000);
   const clock = runningClockMs(d, now);
   const invalidate = useInvalidate();
+  const objects = useObjectActions();
   const [confirmRollback, setConfirmRollback] = useState(false);
   const fail = (error: unknown) =>
     toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));
@@ -244,13 +247,20 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
         return setConfirmRollback(true);
       case "cancel":
         return cancel.mutate({ serviceId: service.id, deploymentId: d.id });
+      case "cancelMove": {
+        const moving = movingOf(d);
+        return moving ? objects.openDialog({ kind: "move-cancel", service, deployment: moving }) : undefined;
+      }
       case "copyCommit":
         return void copyWithToast(d.commit?.sha ?? "");
       case "copyId":
         return void copyWithToast(d.id);
     }
   };
-  const menu = deploymentMenuEntries({ id: d.id, commit: d.commit, canRollback: d.canRollback, running }, { busy, act });
+  const menu = deploymentMenuEntries(
+    { id: d.id, commit: d.commit, canRollback: d.canRollback, running, move: d.move && { canCancel: d.move.canCancel } },
+    { busy, act },
+  );
 
   return (
     <>

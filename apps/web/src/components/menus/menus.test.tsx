@@ -145,6 +145,17 @@ describe("deployment row", () => {
     const list = entryIds(deploymentMenuEntries({ ...d, commit: null, canRollback: false, running: true }, { busy: true, act }));
     expect(list).toEqual(["viewLog", "redeployNoCache", "cancel", "copyId"]);
   });
+  test("a running move to another node: Cancel move while the panel takes one, else nothing to cancel (0.2.17)", () => {
+    const move = { ...d, commit: null, canRollback: false, running: true };
+    const entries = deploymentMenuEntries({ ...move, move: { canCancel: true } }, { busy: true, act });
+    expect(entryIds(entries)).toEqual(["viewLog", "redeployNoCache", "cancelMove", "copyId"]);
+    expect(find(entries, "cancelMove")?.label).toBe(t("service.header.cancelMove"));
+    expect(entryIds(deploymentMenuEntries({ ...move, move: { canCancel: false } }, { busy: true, act }))).toEqual([
+      "viewLog",
+      "redeployNoCache",
+      "copyId",
+    ]);
+  });
   test("while a deploy runs, Redeploy and Roll back wait with the header's reason; the labels are the row's", () => {
     const entries = deploymentMenuEntries(d, { busy: true, act });
     for (const id of ["redeployCommit", "redeployNoCache", "rollback"]) {

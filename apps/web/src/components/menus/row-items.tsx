@@ -34,7 +34,15 @@ function itemOf<A extends string>(act: (action: A) => void) {
 
 // Deployments tab: one row of the history.
 
-export type DeploymentAction = "viewLog" | "redeployCommit" | "redeployNoCache" | "rollback" | "cancel" | "copyCommit" | "copyId";
+export type DeploymentAction =
+  | "viewLog"
+  | "redeployCommit"
+  | "redeployNoCache"
+  | "rollback"
+  | "cancel"
+  | "cancelMove"
+  | "copyCommit"
+  | "copyId";
 
 export interface DeploymentMenuSubject {
   id: string;
@@ -42,6 +50,8 @@ export interface DeploymentMenuSubject {
   canRollback: boolean;
   /** Queued or running. */
   running: boolean;
+  /** A move to another node (Deployment.move): Cancel move, after a confirm, only while the panel takes a cancel. */
+  move?: { canCancel: boolean } | null;
 }
 
 /** One deploy at a time: while one is in progress Redeploy and Roll back wait for it, with why. */
@@ -52,7 +62,9 @@ export function deploymentMenuEntries(d: DeploymentMenuSubject, ctx: { busy: boo
   if (d.commit) entries.push(item("redeployCommit", t("serviceDeploys.redeployCommit"), IconRefresh, wait));
   entries.push(item("redeployNoCache", t("serviceDeploys.redeployNoCache"), IconRefresh, wait));
   if (d.canRollback) entries.push(item("rollback", t("serviceDeploys.rollback"), IconArrowBackUp, wait));
-  if (d.running) entries.push(item("cancel", t("service.header.cancelDeploy"), IconX, { destructive: true }));
+  if (d.running && d.move) {
+    if (d.move.canCancel) entries.push(item("cancelMove", t("service.header.cancelMove"), IconX, { destructive: true }));
+  } else if (d.running) entries.push(item("cancel", t("service.header.cancelDeploy"), IconX, { destructive: true }));
   entries.push({ type: "separator", id: "sep:copy" });
   if (d.commit) entries.push(item("copyCommit", t("menus.copyCommit"), IconGitCommit));
   entries.push(item("copyId", t("menus.copyId"), IconHash));

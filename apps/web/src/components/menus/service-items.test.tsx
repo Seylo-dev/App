@@ -91,6 +91,31 @@ test("while a deploy runs: Cancel deploy, and Deploy waits with the header's rea
   expect(item(entries, "deploy")?.disabledReason).toBe(t("service.header.deployBusyHint"));
 });
 
+describe("while it moves to another node (0.2.17)", () => {
+  test("an app: Cancel move while the panel takes one, never Cancel deploy, and Deploy waits for the move", () => {
+    const entries = serviceMenuEntries({ ...base, status: "deploying" }, { ...ctx, busy: true, moving: { canCancel: true } });
+    const list = entryIds(entries);
+    expect(list).toContain("cancelMove");
+    for (const id of ["cancelDeploy", "restart", "stop", "start"]) expect(list).not.toContain(id);
+    expect(item(entries, "cancelMove")?.label).toBe(t("service.header.cancelMove"));
+    expect(item(entries, "deploy")?.disabledReason).toBe(t("service.header.deployMoveHint"));
+  });
+
+  test("once it starts on the new node with its copied data: nothing to cancel", () => {
+    const list = ids({ status: "deploying" }, { busy: true, moving: { canCancel: false } });
+    for (const id of ["cancelMove", "cancelDeploy", "restart", "stop", "start"]) expect(list).not.toContain(id);
+  });
+
+  test("a database: Cancel move too, and no Restart, Stop or Start meanwhile", () => {
+    const db = { kind: "postgres" as const, status: "stopped" as const, stopped: true };
+    expect(ids(db, { busy: true, moving: { canCancel: true } })).toContain("cancelMove");
+    const starting = ids(db, { busy: true, moving: { canCancel: false } });
+    for (const id of ["cancelMove", "cancelDeploy", "restart", "stop", "start"]) expect(starting).not.toContain(id);
+    // Without a move a database's menu is as before: its other deploys never offer Cancel deploy.
+    expect(ids(db, { busy: true })).toContain("start");
+  });
+});
+
 test("the panel's own service: no Deploy, Stop, Clone, Move or Delete", () => {
   const list = ids({ id: panelServiceId, protected: true });
   for (const id of ["deploy", "stop", "clone", "moveProject", "moveNode", "delete", "cancelDeploy"]) expect(list).not.toContain(id);

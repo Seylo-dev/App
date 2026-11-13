@@ -14,6 +14,8 @@ import type { ReactElement } from "react";
 import { t } from "../../i18n/t";
 import { isPanelService } from "../../lib/service-display";
 import { useActiveDeploy } from "../service/active-deploy";
+import { movingOf } from "../service/cancel-move-dialog";
+import { isDatabaseKind } from "../service/status";
 import { useTerminalModes } from "../service/terminal/access";
 import { useObjectActions } from "./object-actions";
 import { RowMenu } from "./row-menu";
@@ -23,8 +25,9 @@ export function useServiceMenu(service: ServiceMenuSubject): MenuEntry[] {
   const objects = useObjectActions();
   const here = useParams({ strict: false, select: (params) => params.serviceId === service.id });
   const deploys = (service.kind === "app" || service.kind === "cron") && !isPanelService(service);
-  // The same query the header's Deploy waits on: the deploy in progress, if any.
-  const active = useActiveDeploy(service.id, deploys);
+  // The same query the header's Deploy waits on: the deploy in progress, if any. A database's too, for its moves.
+  const active = useActiveDeploy(service.id, deploys || isDatabaseKind(service.kind));
+  const moving = movingOf(active);
   // A row has only the summary. On the service's own page its services.get
   // is live (the page reads it and follows service:<id>), so it says whether
   // the service is stopped; anywhere else a cached copy is whatever the page
@@ -35,9 +38,10 @@ export function useServiceMenu(service: ServiceMenuSubject): MenuEntry[] {
   return serviceMenuEntries(service, {
     here,
     busy: active !== null || service.status === "building" || service.status === "deploying",
+    moving: moving && { canCancel: moving.move.canCancel },
     stopped: here ? detail.data?.stopped : undefined,
     terminalModes,
-    act: (action) => objects.serviceAction(service, action, active?.id),
+    act: (action) => objects.serviceAction(service, action, active),
   });
 }
 

@@ -10,8 +10,10 @@ import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n/t";
 import { DeleteProjectDialog, RenameProjectDialog } from "../project/project-dialogs";
+import { CancelMoveDialog, type MovingDeployment, movingOf } from "../service/cancel-move-dialog";
 import { CloneDialog } from "../service/copy/clone-dialog";
 import { MoveProjectDialog } from "../service/copy/move-project-dialog";
+import type { Deployment } from "../service/deploy-steps";
 import { moveCardId } from "../service/move-card-id";
 import { DeleteServiceDialog } from "../service/settings/delete-service-dialog";
 import { copyWithToast } from "./row-menu";
@@ -20,11 +22,12 @@ import type { ServiceAction, ServiceMenuSubject } from "./service-items";
 
 export type ObjectDialog =
   | { kind: "service-clone" | "service-move" | "service-stop" | "service-delete"; service: ServiceMenuSubject }
+  | { kind: "move-cancel"; service: { id: string; name: string }; deployment: MovingDeployment }
   | { kind: "project-rename" | "project-delete"; project: { id: string; name: string } };
 
 interface ObjectActions {
-  /** Runs a service menu's item; `deploymentId` is the deploy in progress when the menu knows it. */
-  serviceAction(service: ServiceMenuSubject, action: ServiceAction, deploymentId?: string): void;
+  /** Runs a service menu's item; `active` is the deploy in progress when the menu knows it. */
+  serviceAction(service: ServiceMenuSubject, action: ServiceAction, active?: Pick<Deployment, "id" | "move"> | null): void;
   openDialog(dialog: ObjectDialog): void;
 }
 
@@ -36,7 +39,7 @@ export function ObjectActionsProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const router = useRouter();
 
-  const serviceAction = (service: ServiceMenuSubject, action: ServiceAction, deploymentId?: string) => {
+  const serviceAction = (service: ServiceMenuSubject, action: ServiceAction, active?: Pick<Deployment, "id" | "move"> | null) => {
     const params = { projectId: service.projectId, serviceId: service.id };
     switch (action) {
       case "open":
@@ -49,8 +52,13 @@ export function ObjectActionsProvider({ children }: { children: ReactNode }) {
         actions.startDeploy(service);
         return;
       case "cancelDeploy":
-        void actions.cancelDeploy(service.id, deploymentId);
+        void actions.cancelDeploy(service.id, active?.id);
         return;
+      case "cancelMove": {
+        const moving = movingOf(active);
+        if (moving) setDialog({ kind: "move-cancel", service, deployment: moving });
+        return;
+      }
       case "restart":
         actions.restart.mutate({ serviceId: service.id });
         return;
@@ -131,6 +139,8 @@ function ObjectDialogs({
       return <CloneDialog service={dialog.service} open onOpenChange={onOpenChange} />;
     case "service-move":
       return <MoveProjectDialog service={dialog.service} open onOpenChange={onOpenChange} />;
+    case "move-cancel":
+      return <CancelMoveDialog service={dialog.service} deployment={dialog.deployment} open onOpenChange={onOpenChange} />;
     case "service-stop":
       return (
         <ConfirmDialog

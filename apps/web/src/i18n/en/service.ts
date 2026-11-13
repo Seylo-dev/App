@@ -101,6 +101,21 @@ export default {
     openBox: "Open editor",
     stopTitle: "Stop {name}?",
     stopBody: "Every replica stops. Volumes, domains and history stay, and domains show the down page until you start it again.",
+    // A move to another node in progress (Deployment.move): what the header says instead of its run buttons.
+    movingTo: "Moving to {node}...",
+    movingCopying: "It stops on {from} while its data is copied to {node}. Until the copy is done, Cancel move starts it again on {from}.",
+    movingStarting:
+      "Its data is copied and it is starting on {node}. The move ends on its own: on {node} once it is healthy, or back on {from} if it fails.",
+    movingRolling: "It keeps running on {from} until it runs on {node}.",
+    deployMoveHint: "It is moving to another node. Deploy once the move ends.",
+    cancelMove: "Cancel move",
+  },
+  moveCancel: {
+    title: "Cancel moving {name} to {node}?",
+    copying: "The copy stops. {name} starts again on {from} with its data, and {node} removes what was copied so far.",
+    rolling: "{name} keeps running on {from}, and its new copy on {node} is removed.",
+    keep: "Keep moving",
+    done: "Move cancelled. {name} runs on {from}.",
   },
   usage: {
     cpu: "CPU",
