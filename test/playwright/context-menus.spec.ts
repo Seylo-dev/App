@@ -380,6 +380,12 @@ test("the browser's own menu stays on the editors, the logs, selected text and S
   await page.waitForTimeout(200);
   await expect(contextMenu(page)).toHaveCount(0);
   expect(await seen()).toEqual([false, false]);
+  // Shift+F10 asks for ours even with the text still selected (the keyboard has no browser menu to keep).
+  await sidebarService(page, "web").focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(contextMenu(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(contextMenu(page)).toBeHidden();
 
   // The environment editor (Monaco) and the logs.
   await page.goto(`/p/${ids.acme}/s/${ids.api}/environment`);

@@ -144,7 +144,9 @@ export function ContextMenuTrigger({
         const trigger = event.currentTarget;
         const recent = note.current && performance.now() - note.current.at < 1000 ? note.current : null;
         note.current = null;
-        const hadSelection = recent ? recent.had : selectionIn(trigger);
+        // Ours from the key below (not the browser's): a page's own event shows no browser menu, so a selection does not count.
+        const fromKey = !event.nativeEvent.isTrusted;
+        const hadSelection = fromKey ? false : recent ? recent.had : selectionIn(trigger);
         const decision = contextMenuDecision({
           button: event.button,
           shiftKey: event.shiftKey,
