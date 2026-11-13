@@ -5976,6 +5976,48 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   version chip links to it (`#version`).
 - DNS checks use public resolvers (1.1.1.1, 8.8.8.8);
   `domains/dns.ts` `setDnsLookups` swaps them in tests.
+- Zones stop at the registrable domain (0.2.16, `modules/domains/zone.ts`).
+  `registrableDomain` comes from the ICANN section of the Public Suffix
+  List through the pinned `tldts-icann` (7.4.19, MIT; the list is MPL-2.0,
+  see NOTICE), whose `tldts-core` is pinned by the root `overrides`; the
+  list ships in the package, so nothing is fetched at run time, and a
+  newer list comes with a dependency bump. Private entries (github.io)
+  are not public suffixes here. `findZone` asks for the NS records of every
+  name from the host (a wildcard's `*.` left off, punycode as stored) up
+  to its registrable domain at once and takes the closest with NS records,
+  so a delegated `sub.example.co.il` is still found first; it never asks
+  a public suffix, and a host that is one has no zone. Before, the walk
+  went on to the first name with NS records, the public suffix for a
+  domain that does not exist ("Add this record where co.il's DNS is
+  managed"). NS answers are kept 60 s per `DnsLookups` (`nsCacheMs`, at
+  most 1000 names); a lookup that throws is not kept. `publicDns` throws
+  a SERVFAIL for NS lookups only (A, AAAA and CNAME still read it as no
+  records): at the registrable domain it means its name servers do not
+  answer (a lame delegation), which is not a missing domain; a timeout
+  still fails the whole check (`unknown`). `DnsCheck` (additive):
+  `registrable` (null for a public suffix), `zoneMissing` (no NS records
+  up to the registrable domain, its own answer NXDOMAIN or no records, and
+  no A, AAAA or CNAME answer for the host; `zone` is null and `message`
+  says "<registrable> does not exist: it is not registered, or has no name
+  servers yet. Check the spelling."), and `didYouMean`
+  (`modules/domains/did-you-mean.ts`, from `domains.checkDns` and
+  `domains.add` only: the closest other registrable domain under the same
+  public suffix within 2 edits, 1 for names of 4 characters or fewer,
+  adjacent swaps counting as one, ties alphabetical, among the domains of
+  services the caller holds `domains.view` on and the panel's own domain
+  with `settings.view`; never from anything else, and `message` ends with
+  "Did you mean <it>?"). Without a zone, `expected` names the record
+  relative to the registrable domain. `domains.add` and `domains.addAuto`
+  keep such a domain and answer `Domain.warning` (`DomainWarning`, reason
+  `registrableMissing`, `message`, `registrable`, `didYouMean`); addAuto
+  looks the NS records up after the insert (`missing-registrable.ts`
+  `registrableWarning`, a failed lookup gives no warning), and the panel's
+  own automatic domains (templates, Docker Hub, previews) use
+  `addAutoDomain`, the same insert without the lookup. The web's Domains
+  row says the registrable domain does not exist with "Did you mean" in
+  place of "Add this record where ...'s DNS is managed" and keeps the
+  record for once it exists; the add and the automatic add show the
+  warning as a toast (`added-toast.ts`).
 - Origin check (`modules/domains/origin.ts`): for a custom domain (not
   automatic, not redirect-only) whose DNS is ok or proxied, the panel
   fetches `http://<host>/.well-known/<slug>-origin/<challenge>` (24 random

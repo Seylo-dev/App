@@ -85,3 +85,15 @@ Dedicated to the public domain under CC0 1.0
     https://www.figma.com/community/file/1198754108850888330
   Thumbs: "Thumbs" by DiceBear
     https://www.dicebear.com
+
+-------------------------------------------------------------------------------
+tldts-icann and tldts-core (https://github.com/remusao/tldts), MIT License,
+Copyright (c) 2017 Thomas Parisot, 2018 Rémi Berson (the license text is the
+same as above), with the Public Suffix List (https://publicsuffix.org/),
+Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/)
+
+The panel finds the registrable domain of a custom domain's host with
+tldts-icann (apps/panel/src/modules/domains/zone.ts), which carries the
+ICANN section of the Public Suffix List as published, unmodified. Both
+packages are pinned to one exact version (apps/panel/package.json and the
+root package.json overrides); a newer list comes with a newer version.
