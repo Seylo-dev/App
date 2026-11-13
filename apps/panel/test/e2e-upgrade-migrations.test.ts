@@ -7,12 +7,13 @@
 //
 // The update from 0.2.15: its panel.db has the migrations up to
 // 0020_build_progress_logged, and 0.2.16 adds 0021_project_dashboard_collapsed,
-// 0022_deployment_port_move and 0023_backup_contents. The panel opens such a
-// file the way it does at start (openDatabases) and must apply all three,
-// in order, keeping every row. Drizzle's migrator skips a migration whose
-// journal "when" is not later than the last one it applied, so the three
-// were cut on separate branches and renumbered for 0.2.16 with times after
-// 0020's: the test would see a skipped one as a missing column.
+// 0022_deployment_port_move, 0023_backup_contents and
+// 0024_exposure_allow_plain. The panel opens such a file the way it does at
+// start (openDatabases) and must apply all four, in order, keeping every
+// row. Drizzle's migrator skips a migration whose journal "when" is not
+// later than the last one it applied, so the four were cut on separate
+// branches and renumbered for 0.2.16 with times after 0020's: the test
+// would see a skipped one as a missing column.
 
 import { expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -53,7 +54,7 @@ test("check 38 expects as many migrations as the panel records, read from the jo
 type Journal = { entries: { idx: number; tag: string; when: number }[] };
 const journalOf = (folder: string) => JSON.parse(readFileSync(join(folder, "meta/_journal.json"), "utf8")) as Journal;
 
-test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", () => {
+test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", () => {
   const migrations = loadConfig({}, join(import.meta.dir, "..")).migrationsDir;
   const journal = journalOf(join(migrations, "panel"));
   expect(journal.entries.map((e) => e.tag).slice(20)).toEqual([
@@ -61,6 +62,7 @@ test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", 
     "0021_project_dashboard_collapsed",
     "0022_deployment_port_move",
     "0023_backup_contents",
+    "0024_exposure_allow_plain",
   ]);
   const dir = mkdtempSync(join(tmpdir(), "seylo-upgrade-0215-"));
   try {
@@ -81,6 +83,7 @@ test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", 
     expect(columns(v0215.db, "project_prefs")).not.toContain("dashboard_collapsed");
     expect(columns(v0215.db, "deployments")).not.toContain("port_move");
     expect(columns(v0215.db, "backup_runs")).not.toContain("contents");
+    expect(columns(v0215.db, "port_exposures")).not.toContain("allow_plain");
     const at = 1_762_000_000_000;
     for (const statement of [
       `insert into users (id, email, created_at, updated_at) values ('usr000000000001', 'owner@example.test', ${at}, ${at}), ('usr000000000002', 'dev@example.test', ${at}, ${at})`,
@@ -89,6 +92,9 @@ test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", 
       // The sidebar's one flag: the owner folded acme and left tools open, the other person left acme open.
       `insert into project_prefs (user_id, project_id, collapsed, position, updated_at) values ('usr000000000001', 'prj000000000001', 1, 0, ${at}), ('usr000000000001', 'prj000000000002', 0, 1, ${at}), ('usr000000000002', 'prj000000000001', 0, null, ${at})`,
       `insert into deployments (id, service_id, generation, status, trigger, image_ref, commit_sha, no_cache, move_copying, error, started_at, finished_at, created_at) values ('dep000000000001', 'svc000000000001', 4, 'live', 'push', 'registry.example.test/acme/api:4', 'a1c9e2f', 0, 0, null, ${at}, ${at + 42_000}, ${at}), ('dep000000000002', 'svc000000000001', 5, 'failed', 'manual', null, null, 1, 0, 'The new containers never became healthy.', ${at + 60_000}, ${at + 90_000}, ${at + 60_000})`,
+      `insert into nodes (id, name, public_key, agent_version, created_at, updated_at) values ('nod000000000001', 'de-fsn-1', 'example-public-key', '0.2.15', ${at}, ${at})`,
+      // The database's TLS exposure, open to one network, and a timed expose of it for one IP.
+      `insert into port_exposures (id, service_id, node_id, kind, listen_port, target_port, allowed_cidrs, tls, created_by, created_at) values ('pex000000000001', 'svc000000000002', 'nod000000000001', 'database', 15432, 5432, '["203.0.113.0/24"]', 1, 'usr000000000001', ${at}), ('pex000000000002', 'svc000000000002', 'nod000000000001', 'timed', 25432, 5432, '["198.51.100.7/32"]', 0, 'usr000000000002', ${at + 1_000})`,
       `insert into backup_destinations (id, name, endpoint, bucket, access_key_id, secret_access_key_sealed, created_at, updated_at) values ('dst000000000001', 'acme-backups', 'https://r2.example.test', 'acme-backups', 'example-access-key', 'sealed:example', ${at}, ${at})`,
       `insert into backup_policies (id, service_id, destination_id, target, schedule, keep_last, stop_service, created_at, updated_at) values ('bpl000000000001', 'svc000000000002', 'dst000000000001', 'database', '0 3 * * *', 14, 0, ${at}, ${at})`,
       `insert into backup_runs (id, kind, target, policy_id, service_id, destination_id, status, object_key, size_bytes, started_at, finished_at) values ('brn000000000001', 'backup', 'database', 'bpl000000000001', 'svc000000000002', 'dst000000000001', 'succeeded', 'seylo/svc000000000002/bpl000000000001/20251101T030000Z-brn000000000001.dump', 18400000, ${at}, ${at + 12_000}), ('brn000000000002', 'restore', 'database', 'bpl000000000001', 'svc000000000002', 'dst000000000001', 'running', null, null, ${at + 100_000}, null)`,
@@ -100,6 +106,8 @@ test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", 
       "services",
       "project_prefs",
       "deployments",
+      "nodes",
+      "port_exposures",
       "backup_destinations",
       "backup_policies",
       "backup_runs",
@@ -119,6 +127,8 @@ test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", 
         deployments: () => ({ port_move: null }),
         backup_policies: () => ({ selection: null }),
         backup_runs: () => ({ selection: null, contents: null, warnings: null }),
+        // An exposure from before takes TLS clients only, as it did.
+        port_exposures: () => ({ allow_plain: 0 }),
       };
       for (const table of tables) {
         const want = (before[table] ?? []).map((row) => ({ ...row, ...(added[table]?.(row) ?? {}) }));
@@ -161,6 +171,16 @@ test("a 0.2.15 panel.db updates through 0021-0023 at start and keeps its rows", 
       ).toEqual([
         { id: "brn000000000001", selection: null, contents: null, warnings: null },
         { id: "brn000000000002", selection: null, contents: null, warnings: null },
+      ]);
+      expect(
+        v0216.db
+          .select({ id: schema.portExposures.id, kind: schema.portExposures.kind, allowPlain: schema.portExposures.allowPlain })
+          .from(schema.portExposures)
+          .orderBy(asc(schema.portExposures.id))
+          .all(),
+      ).toEqual([
+        { id: "pex000000000001", kind: "database", allowPlain: false },
+        { id: "pex000000000002", kind: "timed", allowPlain: false },
       ]);
       expect(v0216.db.all(sql`pragma foreign_key_check`)).toEqual([]);
     } finally {

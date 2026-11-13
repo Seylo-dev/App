@@ -5435,7 +5435,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (`capability.ts` `watchExposureCapabilities`).
 - Connections without TLS on an exposed database (0.2.16): an opt-in per
   database, off by default, stored on its exposure row
-  (`port_exposures.allow_plain`, migration `0021_exposure_allow_plain`),
+  (`port_exposures.allow_plain`, migration `0024_exposure_allow_plain`),
   so turning exposure off resets it and a service import starts TLS
   only. `databases.setExposure allowPlain` (optional, left out keeps it)
   needs exposure on (BAD_REQUEST, field `allowPlain`) and, to turn it on,
