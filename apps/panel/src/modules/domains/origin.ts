@@ -300,13 +300,14 @@ export function lastOriginReason(domainId: string): OriginReason | undefined {
  * Stores an origin (null clears it) and the check's reason; tells open
  * screens when either changed. Returns whether the origin did.
  *
- * `startedAt` is when the check began. Checks of one domain overlap (the
- * check a few seconds after domains.add, the Domains tab's, the re-check,
- * Regenerate certificate), and one that began before the stored answer was
- * taken is older news: it stores nothing. Before, the last to finish won,
- * so a slow answer from before the node served the route ("elsewhere":
- * Traefik's 404 through Cloudflare) could replace the proof that had
- * released the certificate.
+ * `startedAt` is when the check's origin request went out, after any DNS
+ * lookup of the check, which can take seconds. Checks of one domain overlap
+ * (the check a few seconds after domains.add, the Domains tab's, the
+ * re-check, Regenerate certificate), and one whose request went out before
+ * the stored answer was taken is older news: it stores nothing. Before, the
+ * last to finish won, so a slow answer from before the node served the
+ * route ("elsewhere": Traefik's 404 through Cloudflare) could replace the
+ * proof that had released the certificate.
  *
  * An unknown origin keeps originUnknownSince from the run's first unknown
  * answer; any other answer, or none, clears it.

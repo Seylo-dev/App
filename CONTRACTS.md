@@ -6072,8 +6072,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `elsewhere` is cleared when an ACME route turns ACTIVE (Let's Encrypt
   reached a node), which enqueues the `domains.checkOrigin` job for it
   (0.2.16; before, nothing checked such a domain again). A check stores
-  its answer only when no answer taken after it began is stored
-  (`saveOrigin`'s `startedAt`, 0.2.16; before, the last to finish won, so a
+  its answer only when no answer taken after its origin request went out
+  is stored (`saveOrigin`'s `startedAt`, taken after the check's DNS
+  lookup, 0.2.16; before, the last to finish won, so a
   slow "elsewhere" from before the node served the route could replace the
   proof that had released the certificate). While the answer is
   `unknown`, `domains.origin_unknown_since` (migration

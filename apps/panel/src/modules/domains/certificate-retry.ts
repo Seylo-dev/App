@@ -109,7 +109,6 @@ export const retryCertificate = implement(domainOps.retryCertificate, async (inp
 async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): Promise<OpOutput<typeof domainOps.retryCertificate>> {
   const nodes = serviceNodes(ctx.db, row.serviceId);
   if (nodes.length === 0) throw new OpError("CONFLICT", "The service is not on a node yet. Deploy it first.", { reason: "notPlaced" });
-  const startedAt = new Date();
   const dns = await checkHost(row.host, nodes, dnsLookups());
   if (keepsLastAnswer(row, dns.status)) {
     // A failed lookup says nothing about the record: the domain keeps waiting on its last answer (acme-hold.ts).
@@ -122,6 +121,8 @@ async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): P
     invalidateService(ctx, row.serviceId, [domainOps.list.id]);
   }
   // Behind Cloudflare's proxy the DNS answer hides where the record points; the origin check sees through it (origin.ts).
+  // Taken after the DNS lookup: saveOrigin compares when the origin requests went out.
+  const startedAt = new Date();
   const check = originApplies(row, dns.status) ? await checkOrigin(ctx, row) : null;
   if (check) saveOrigin(ctx, row, check.origin, new Date(), check.reason, startedAt);
   const hold = settleHold(ctx, row, {

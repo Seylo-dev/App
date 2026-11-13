@@ -229,6 +229,83 @@ describe("what left www without an origin", () => {
   });
 });
 
+/**
+ * Cloudflare's DNS, with the lookup of www held until `release`: a slow
+ * resolver. `asked` turns true once the held lookup has started.
+ */
+function slowWwwDns() {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const state = { asked: false, release: () => release() };
+  setDnsLookups({
+    resolve4: async (name) => {
+      if (name === "www.example.com") {
+        state.asked = true;
+        await held;
+      }
+      return name === "example.com" || name === "www.example.com" ? ["104.16.1.1"] : [];
+    },
+    resolve6: async () => [],
+    resolveCname: async () => [],
+    resolveNs: async (name) => (name === "example.com" ? ["ada.ns.cloudflare.com"] : []),
+  });
+  return state;
+}
+
+describe("a check whose DNS lookup is slow", () => {
+  /**
+   * www is added at t0 and a check starts with a DNS lookup that takes two
+   * seconds. Meanwhile, at t0 + 1 s, the check a few seconds after
+   * domains.add goes out while Traefik does not serve www's route yet:
+   * its 404 through Cloudflare stores "elsewhere". At t0 + 2 s the lookup
+   * answers and the check's own request goes out; the node proves itself.
+   */
+  async function overlap(s: ReturnType<typeof setup>, check: (domainId: string) => Promise<unknown>) {
+    const t0 = Date.now();
+    setSystemTime(new Date(t0));
+    const www = await s.add("www.example.com");
+    const dns = slowWwwDns();
+    const pending = check(www);
+    while (!dns.asked) await Bun.sleep(1);
+
+    setSystemTime(new Date(t0 + 1000));
+    s.answer = () => viaCloudflare(404, "404 page not found\n");
+    await s.due();
+    expect(s.row(www)).toMatchObject({ originStatus: "elsewhere" });
+
+    setSystemTime(new Date(t0 + 2000));
+    s.answer = s.proof;
+    dns.release();
+    return { www, result: await pending };
+  }
+
+  test("domains.checkDns stores the proof its request got after the other check's answer", async () => {
+    const s = setup();
+    const { www, result } = await overlap(s, s.checkDns);
+    expect(result).toMatchObject({ status: "proxied", origin: "node" });
+    // Before, the check's start was taken before its DNS lookup, so the proof looked older than the
+    // 404 and was not stored: the certificate started while the row kept "elsewhere".
+    expect(s.row(www)).toMatchObject({ originStatus: "node" });
+    expect(s.row(www)?.acmeReleasedAt).not.toBeNull();
+    expect(await s.listed(www)).toMatchObject({ origin: "node" });
+  });
+
+  test("Regenerate certificate stores the proof its request got after the other check's answer", async () => {
+    const s = setup();
+    const { www, result } = await overlap(s, async (domainId) => {
+      const retried = await callOp(panel, domainOps.retryCertificate, { serviceId: s.service.id, domainId }, { cookie });
+      expect(retried.status).toBe(200);
+      return retried.body;
+    });
+    // The proof released the certificate: the node asks Let's Encrypt with the desired state on its way.
+    expect(result).toMatchObject({ id: www, certificate: { status: "pending" } });
+    expect(s.row(www)).toMatchObject({ originStatus: "node" });
+    expect(s.row(www)?.acmeReleasedAt).not.toBeNull();
+  });
+});
+
 describe("the re-check of origins that are not known", () => {
   test("every 2 minutes in the first hour of unknown answers, 15 minutes in the first day, then 6 hours, until it is known", async () => {
     const s = setup();

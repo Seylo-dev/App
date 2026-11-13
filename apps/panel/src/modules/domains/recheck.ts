@@ -45,7 +45,6 @@ export async function checkDomain(
   deps: Pick<Deps, "db" | "agents" | "live">,
   row: DomainRow,
 ): Promise<{ dns: DnsResult; origin: OriginStatus | null; reason?: OriginReason; checkedAt: Date }> {
-  const startedAt = new Date();
   const dns = await checkHost(row.host, serviceNodes(deps.db, row.serviceId), dnsLookups());
   if (keepsLastAnswer(row, dns.status)) {
     // The lookup failed: the last answer stands, and only the time moves on, for the re-check's pacing.
@@ -54,7 +53,10 @@ export async function checkDomain(
     return { dns, origin: null, checkedAt };
   }
   // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node; with no
-  // route on the service's nodes (not deployed yet) nothing there could answer it.
+  // route on the service's nodes (not deployed yet) nothing there could answer it. Taken after the DNS lookup,
+  // which can take seconds: saveOrigin compares when the origin requests went out, so a check that started
+  // meanwhile and stored its answer does not make this newer one look older.
+  const startedAt = new Date();
   const check = originApplies(row, dns.status) && !unroutableDomain(deps.db, row) ? await checkOrigin(deps, row) : null;
   const origin = check?.origin ?? null;
   const checkedAt = new Date();
