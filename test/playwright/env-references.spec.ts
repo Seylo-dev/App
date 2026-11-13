@@ -44,7 +44,7 @@ const billing = {
   ],
 };
 
-/** The demo references with api's own variables (34 chips with its 3 built-ins) and billing, before the shared variables. */
+/** The demo references with api's own variables (35 chips with its 4 built-ins) and billing, before the shared variables. */
 const manyReferences = {
   ...envReferences,
   targets: envReferences.targets.flatMap((target) => {
@@ -121,7 +121,7 @@ test.describe("environment references", () => {
       .filter({ has: page.getByRole("button", { name: "INTERNAL_HOST", exact: true }) })
       .last();
     await expect(self.getByText("APP", { exact: true })).toBeVisible();
-    // No domain and no port yet: URL, DOMAIN, INTERNAL_URL and INTERNAL_PORT are empty and get no chip.
+    // No domain and no port yet: URL, DOMAIN, DOMAINS, INTERNAL_URL and INTERNAL_PORT are empty and get no chip.
     // (The other button is the group's header row.)
     const chips = self.locator("button:not([aria-expanded])");
     await expect(chips).toHaveText(["INTERNAL_HOST"]);
@@ -156,9 +156,9 @@ test.describe("environment references", () => {
     const { panel, editor, header, list } = await environment(page);
     const chip = (name: string) => panel.getByRole("button", { name, exact: true });
 
-    // api (34 chips) and billing (24) start collapsed with their counts, the short groups expanded.
+    // api (35 chips) and billing (24) start collapsed with their counts, the short groups expanded.
     await expect(header("api")).toHaveAttribute("aria-expanded", "false");
-    await expect(header("api")).toContainText("34 variables");
+    await expect(header("api")).toContainText("35 variables");
     await expect(header("billing")).toHaveAttribute("aria-expanded", "false");
     await expect(header("billing")).toContainText("24 variables");
     for (const name of ["worker", "db", "redis", "Project"]) await expect(header(name)).toHaveAttribute("aria-expanded", "true");
@@ -256,7 +256,7 @@ test.describe("environment references", () => {
     await header("api").focus();
     await page.keyboard.press("Enter");
     await expect(header("api")).toHaveAttribute("aria-expanded", "false");
-    await expect(header("api")).toContainText("3 variables");
+    await expect(header("api")).toContainText("4 variables");
     await expect(chip("DOMAIN")).toHaveCount(0);
     await header("Project").focus();
     await page.keyboard.press("Space");

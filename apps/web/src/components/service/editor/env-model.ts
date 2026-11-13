@@ -1,6 +1,7 @@
 // Turns @seylo/env-analyzer results into what the Monaco env editor draws:
-// translated problem messages, marker data, reference pills, problem-line
-// backgrounds, the ranges of secret values and the Secret / Public chips.
+// translated problem messages, marker data, reference pills, the hover
+// over a reference and the ${{ completions, problem-line backgrounds, the
+// ranges of secret values and the Secret / Public chips.
 // Pure, so it is tested without Monaco; env-editor.tsx hands these to the
 // editor.
 
@@ -8,9 +9,12 @@ import {
   type AnalyzeContext,
   classifyEntries,
   type Diagnostic,
+  listItems,
   type ParsedEnv,
   publicPrefixOf,
   type QuickFix,
+  type ReferenceHover,
+  referenceCompletions,
   type SecretVerdict,
   type SourceRange,
   secretOverride,
@@ -38,6 +42,8 @@ const messageKeys: Record<string, MessageKey> = {
   "internal-address-other-node": "serviceEnv.problem.otherNode",
   "service-not-exposed": "serviceEnv.problem.notExposed",
   "empty-reference": "serviceEnv.problem.emptyReference",
+  "not-a-list": "serviceEnv.problem.notAList",
+  "index-out-of-range": "serviceEnv.problem.indexOutOfRange",
   "hardcoded-reference": "serviceEnv.problem.hardcodedReference",
   "single-quoted-reference": "serviceEnv.problem.singleQuotedReference",
   "bare-reference": "serviceEnv.problem.bareReference",
@@ -68,6 +74,15 @@ export function problemMessage(d: Pick<Diagnostic, "code" | "params" | "message"
   const key = messageKeys[d.code];
   if (!key) return d.message;
   if (d.code === "unknown-service" && d.params.target === "project") return t("serviceEnv.problem.noShared");
+  // DOMAINS[x]: the index, not the reference, is what is wrong.
+  if (d.code === "malformed-reference" && d.params.variable) return t("serviceEnv.problem.malformedIndex", d.params);
+  if (d.code === "index-out-of-range") {
+    // The catalog says "domains"; a list of anything else keeps the analyzer's words.
+    if (d.params.item !== "domain") return d.message;
+    const count = Number(d.params.count ?? 0);
+    if (count === 0) return t("serviceEnv.problem.indexOutOfRangeNone", d.params);
+    return t("serviceEnv.problem.indexOutOfRange", { ...d.params, count, indexes: indexNames(d.params.variable ?? "", count) });
+  }
   // No public address to switch to: the internal reference would not work in a browser either.
   if (d.code === "hardcoded-reference" && d.params.reason === "noPublic")
     return t("serviceEnv.problem.hardcodedReferenceUnreachable", d.params);
@@ -76,9 +91,22 @@ export function problemMessage(d: Pick<Diagnostic, "code" | "params" | "message"
   return t(key, d.params);
 }
 
+/** "DOMAINS[0]", "DOMAINS[0] and DOMAINS[1]", "DOMAINS[0] to DOMAINS[2]": the indexes a list of count items has. */
+export function indexNames(variable: string, count: number): string {
+  if (count <= 1) return t("serviceEnv.problem.indexesOne", { variable });
+  if (count === 2) return t("serviceEnv.problem.indexesTwo", { variable });
+  return t("serviceEnv.problem.indexesMany", { variable, last: count - 1 });
+}
+
 export function problemDetail(d: Pick<Diagnostic, "code" | "params" | "detail">, selfName: string): string {
   // What the service can reference of itself instead (its DOMAIN, URL, ...), when the panel sent them.
   if (d.code === "self-reference") return d.params.builtins ? t("serviceEnv.problem.selfReferenceDetail", d.params) : "";
+  if (d.code === "malformed-reference") return d.params.variable ? t("serviceEnv.problem.malformedIndexDetail", d.params) : "";
+  if (d.code === "not-a-list") return t("serviceEnv.problem.notAListDetail", d.params);
+  if (d.code === "index-out-of-range") {
+    if (d.params.item !== "domain") return d.detail;
+    return t("serviceEnv.problem.indexOutOfRangeDetail", { ...d.params, count: Number(d.params.index ?? 0) + 1 });
+  }
   if (d.code === "hardcoded-reference") return hardcodedDetail(d.params);
   if (d.code === "single-quoted-reference") return t("serviceEnv.problem.singleQuotedReferenceDetail", d.params);
   if (d.code === "bare-reference") {
@@ -193,6 +221,79 @@ export function toLineRange(range: SourceRange): LineRange {
 /** Every ${{...}} reference, for the violet pill decoration. */
 export function referenceRanges(parsed: ParsedEnv): LineRange[] {
   return parsed.entries.flatMap((e) => e.references.map((r) => toLineRange(r.range)));
+}
+
+/**
+ * Markdown paragraphs of the hover over a reference: the target and what
+ * the variable is, what it becomes (hidden while a secret is masked), and
+ * whether it works from here. ${{api.DOMAINS[1]}} shows that item and
+ * where it sits in the list; an index on a variable that is no list says so.
+ */
+export function referenceHover(info: ReferenceHover, reveal: boolean): string[] {
+  const { reference, target, variable } = info;
+  const index = reference.index;
+  const written = `${reference.variable}${index === undefined ? "" : `[${index}]`}`;
+  if (!target || !variable) return [`**${reference.target}.${written}**`];
+  if (index !== undefined && !variable.list) {
+    return [`**${target.name} · ${written}**`, t("serviceEnv.problem.notAList", { variable: variable.name, index })];
+  }
+  const where =
+    index !== undefined ? written : target.kind === "shared" ? t("serviceEnv.refs.shared") : variable.description || variable.name;
+  const out = [`**${target.name} · ${where}**`];
+  const value =
+    info.value == null
+      ? t("serviceEnv.hover.unknown")
+      : variable.sensitive && !reveal
+        ? t("serviceEnv.hover.hidden")
+        : info.value || t("serviceEnv.hover.empty");
+  out.push(`${t("serviceEnv.hover.becomes")}\n\n\`\`\`text\n${value}\n\`\`\``);
+  if (index !== undefined && variable.value != null) {
+    const count = listItems(variable.value).length;
+    out.push(
+      index < count
+        ? t("serviceEnv.hover.listItem", { position: index + 1, count, variable: variable.name })
+        : t("serviceEnv.hover.listPast", { count, variable: variable.name }),
+    );
+  }
+  if (!info.reachable) out.push(t("serviceEnv.hover.unreachable", { nodes: target.nodes.map((n) => n.name).join(", ") }));
+  else if (variable.scope === "public") out.push(`_${t("serviceEnv.hover.followsDomain", { target: target.name })}_`);
+  return out;
+}
+
+/** One completion after "${{": what Monaco shows and inserts. */
+export interface ReferenceSuggestion {
+  label: string;
+  /** The variable's description; an item of a list shows its value (api.DOMAINS[1] -> api.example.org). */
+  detail: string;
+  insertText: string;
+  filterText: string;
+  sortText: string;
+  reachable: boolean;
+}
+
+/**
+ * Completions for the service's context (env-analyzer referenceCompletions):
+ * every target's variables, reachable ones first, and each item of a list
+ * that has two or more (DOMAINS[0], DOMAINS[1], ...) with its value.
+ */
+export function referenceSuggestions(context: AnalyzeContext): ReferenceSuggestion[] {
+  return referenceCompletions(context).map((c, i) => ({
+    label: c.label,
+    detail: !c.reachable
+      ? t("serviceEnv.refs.unreachable", { nodes: c.target.nodes.map((n) => n.name).join(", ") })
+      : c.index !== undefined && c.value && !c.variable.sensitive
+        ? c.value
+        : c.variable.description,
+    insertText: c.insertText,
+    filterText: `\${{${c.label}`,
+    sortText: String(i).padStart(4, "0"),
+    reachable: c.reachable,
+  }));
+}
+
+/** How much of the text after the cursor a completion replaces: the rest of the name, an index and the closing }}. */
+export function completionTail(after: string): number {
+  return after.match(/^[\w.[\]-]*\s*\}\}/)?.[0].length ?? after.match(/^[\w.[\]-]*/)?.[0].length ?? 0;
 }
 
 /** Lines that hold an error, for the light red line background and red line number. */

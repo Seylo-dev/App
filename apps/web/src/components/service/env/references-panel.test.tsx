@@ -34,6 +34,7 @@ const api = {
     ...builtins({
       URL: "https://api.example.com",
       DOMAIN: "api.example.com",
+      DOMAINS: "api.example.com,api.example.org",
       INTERNAL_URL: "http://api:3000",
       INTERNAL_HOST: "api",
       INTERNAL_PORT: "3000",
@@ -122,10 +123,10 @@ test("the service itself comes first, with its built-ins and none of its own var
   // Its APP badge, then the same chips as any other group.
   expect(out.slice(0, self)).toContain(">APP<");
   expect(groups(out)).toEqual(["web", "api"]);
-  // web has no domain yet: its URL and DOMAIN have no chip.
+  // web has no domain yet: its URL, DOMAIN and DOMAINS have no chip.
   expect(chipsOf(out, "web")).toEqual(["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT"]);
   // api keeps its own variable; the edited service never lists one (the lines of its file).
-  expect(chipsOf(out, "api")).toEqual(["URL", "DOMAIN", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "PUBLIC_NAME"]);
+  expect(chipsOf(out, "api")).toEqual(["URL", "DOMAIN", "DOMAINS", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "PUBLIC_NAME"]);
   // Its internal address works from where it runs: nothing is struck through.
   expect(out).not.toContain('aria-disabled="true"');
 });
@@ -169,7 +170,7 @@ test("a built-in that is empty right now gets no chip, the service's own and ano
   expect(chipsOf(out, "web")).toEqual(["INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT"]);
   expect(chipsOf(out, "worker")).toEqual(["INTERNAL_HOST"]);
   // The same names with a value keep their chips.
-  expect(chipsOf(out, "api")).toEqual(["URL", "DOMAIN", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "PUBLIC_NAME"]);
+  expect(chipsOf(out, "api")).toEqual(["URL", "DOMAIN", "DOMAINS", "INTERNAL_URL", "INTERNAL_HOST", "INTERNAL_PORT", "PUBLIC_NAME"]);
   // A database not exposed yet: no EXPOSED_* chips.
   const db = service(
     "db",
@@ -358,7 +359,7 @@ test("a group with many chips starts collapsed with its count, the service itsel
   // One group is collapsed: the header offers to expand them all.
   expect(out).toContain(`>${t("serviceEnv.refs.expandAll")}</button>`);
   expect(out).not.toContain(t("serviceEnv.refs.collapseAll"));
-  // As many chips as a database's whole set stay expanded (api's 6 here).
+  // As many chips as a database's whole set stay expanded (api's 7 here).
   expect(expandedOf(await render(context()), "api")).toBe(true);
 });
 

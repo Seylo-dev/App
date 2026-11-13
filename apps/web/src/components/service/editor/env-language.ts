@@ -1,5 +1,6 @@
 // The "env" language for Monaco: a Monarch tokenizer for .env files with
-// ${{service.VARIABLE}} references. Colors match Environment.dc.html: keys
+// ${{service.VARIABLE}} references (one token with an index too,
+// ${{api.DOMAINS[1]}}). Colors match Environment.dc.html: keys
 // blue, "=" muted, comments grey italic, references violet. The violet
 // pill behind a reference and the red squiggles come from decorations and
 // markers built from @seylo/env-analyzer (env-model.ts), not from here.

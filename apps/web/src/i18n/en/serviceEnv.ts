@@ -46,6 +46,9 @@ export default {
     empty: "Empty for now",
     unreachable: "Internal address: only works for services on {nodes}.",
     followsDomain: "Updates on its own if {target}'s domain changes.",
+    // ${{api.DOMAINS[1]}}: one item of a list. {position} counts from 1, the index from 0.
+    listItem: "Item {position} of {count} in {variable}. Indexes start at 0.",
+    listPast: { one: "{variable} has 1 item right now.", other: "{variable} has {count} items right now." },
   },
   // The Secret / Public chip after a variable and its hover. {mount}, {arg} and {comment} are code.
   secret: {
@@ -83,6 +86,22 @@ export default {
     unterminatedReference: "This reference has no closing }}",
     // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{service.VARIABLE}} is the reference syntax, not a template
     malformedReference: "A reference looks like ${{service.VARIABLE}}",
+    // {written} is the brackets as typed: [], [-1], [ 1 ], an unclosed [1.
+    malformedIndex: "The index in {variable}{written} must be a whole number",
+    malformedIndexDetail:
+      "Write it in [ ] right after the name, with no spaces or sign: {variable}[0] is the first item, {variable}[1] the second.",
+    notAList: "{variable} is not a list, so it takes no [{index}]",
+    notAListDetail: "Only list variables such as DOMAINS take an index. Write {reference} for the whole value.",
+    // DOMAINS[n] past the service's domains. {indexes} is indexesOne, indexesTwo or indexesMany.
+    indexOutOfRange: { one: "{target} has 1 domain: {indexes}", other: "{target} has {count} domains: {indexes}" },
+    indexOutOfRangeNone: "{target} has no domains yet",
+    indexOutOfRangeDetail: {
+      one: "{variable}[{index}] is empty until {target} has 1 domain. Indexes start at 0: {variable}[0] is the first.",
+      other: "{variable}[{index}] is empty until {target} has {count} domains. Indexes start at 0: {variable}[0] is the first.",
+    },
+    indexesOne: "{variable}[0]",
+    indexesTwo: "{variable}[0] and {variable}[1]",
+    indexesMany: "{variable}[0] to {variable}[{last}]",
     duplicateKey: "{key} is set twice",
     duplicateKeyDetail: "It is also set on line {line}; the last value wins.",
     unknownService: "No service named {target} in this project",

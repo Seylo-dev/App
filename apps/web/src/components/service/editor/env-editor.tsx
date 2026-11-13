@@ -7,21 +7,25 @@
 // treat as a secret (Public after one that only looks like one), with a
 // hover that says why and what it changes.
 
-import {
-  type AnalyzeContext,
-  type AnalyzeResult,
-  describeReference,
-  LineIndex,
-  referenceAt,
-  referenceCompletions,
-} from "@seylo/env-analyzer";
+import { type AnalyzeContext, type AnalyzeResult, describeReference, LineIndex, referenceAt } from "@seylo/env-analyzer";
 import type * as MonacoApi from "monaco-editor/editor/editor.api";
 import { useEffect, useRef } from "react";
 import { t } from "../../../i18n/t";
 import { CodeEditor, type CodeEditorInstance } from "./code-editor";
 import "./env-editor.css";
 import { envLanguageId } from "./env-language";
-import { errorLines, problemMessage, quickFixActions, referenceRanges, secretChips, secretRanges, toMarkers } from "./env-model";
+import {
+  completionTail,
+  errorLines,
+  problemMessage,
+  quickFixActions,
+  referenceHover,
+  referenceRanges,
+  referenceSuggestions,
+  secretChips,
+  secretRanges,
+  toMarkers,
+} from "./env-model";
 import type { Monaco } from "./monaco";
 
 export interface EnvEditorHandle {
@@ -175,31 +179,14 @@ export function EnvEditor({
             return { range: r, contents: chip.hover.map((value) => ({ value })) };
           }
           if (!ctx) return null;
-          const info = describeReference(hit.reference, ctx);
           const r = hit.reference.range;
-          const contents: MonacoApi.IMarkdownString[] = [];
-          if (!info.target || !info.variable) {
-            contents.push({ value: `**${hit.reference.target}.${hit.reference.variable}**` });
-          } else {
-            const where = info.target.kind === "shared" ? t("serviceEnv.refs.shared") : info.variable.description || info.variable.name;
-            contents.push({ value: `**${info.target.name} · ${where}**` });
-            const value =
-              info.variable.value == null
-                ? t("serviceEnv.hover.unknown")
-                : info.variable.sensitive && !show
-                  ? t("serviceEnv.hover.hidden")
-                  : info.variable.value || t("serviceEnv.hover.empty");
-            contents.push({ value: `${t("serviceEnv.hover.becomes")}\n\n\`\`\`text\n${value}\n\`\`\`` });
-            if (!info.reachable)
-              contents.push({ value: t("serviceEnv.hover.unreachable", { nodes: info.target.nodes.map((n) => n.name).join(", ") }) });
-            else if (info.variable.scope === "public")
-              contents.push({ value: `_${t("serviceEnv.hover.followsDomain", { target: info.target.name })}_` });
-          }
+          const contents = referenceHover(describeReference(hit.reference, ctx), show).map((value) => ({ value }));
           return { range: new monaco.Range(r.startLine, r.startColumn, r.endLine, r.endColumn), contents };
         },
       }),
       monaco.languages.registerCompletionItemProvider(envLanguageId, {
-        triggerCharacters: ["{", "."],
+        // "[" too: ${{api.DOMAINS[ lists the items of the list.
+        triggerCharacters: ["{", ".", "["],
         provideCompletionItems(model, position) {
           if (model !== editor.getModel()) return { suggestions: [] };
           const ctx = state.current.context;
@@ -208,21 +195,18 @@ export function EnvEditor({
           const before = line.slice(0, position.column - 1);
           const open = before.lastIndexOf("${{");
           if (open === -1 || before.slice(open).includes("}}")) return { suggestions: [] };
-          const after = line.slice(position.column - 1);
-          const closing = after.match(/^[\w.-]*\s*\}\}/)?.[0].length ?? after.match(/^[\w.-]*/)?.[0].length ?? 0;
+          const closing = completionTail(line.slice(position.column - 1));
           const range = new monaco.Range(position.lineNumber, open + 1, position.lineNumber, position.column + closing);
           return {
-            suggestions: referenceCompletions(ctx).map((c, i) => ({
-              label: c.label,
+            suggestions: referenceSuggestions(ctx).map((s) => ({
+              label: s.label,
               kind: monaco.languages.CompletionItemKind.Variable,
-              detail: c.reachable
-                ? c.variable.description
-                : t("serviceEnv.refs.unreachable", { nodes: c.target.nodes.map((n) => n.name).join(", ") }),
-              insertText: c.insertText,
-              filterText: `\${{${c.label}`,
-              sortText: String(i).padStart(4, "0"),
+              detail: s.detail,
+              insertText: s.insertText,
+              filterText: s.filterText,
+              sortText: s.sortText,
               range,
-              tags: c.reachable ? [] : [monaco.languages.CompletionItemTag.Deprecated],
+              tags: s.reachable ? [] : [monaco.languages.CompletionItemTag.Deprecated],
             })),
           };
         },

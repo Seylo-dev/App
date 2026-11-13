@@ -334,6 +334,7 @@ export const envReferences = {
     builtins: [
       { name: "URL", value: "", scope: "public", sensitive: false, description: "public URL of the primary domain" },
       { name: "DOMAIN", value: "", scope: "public", sensitive: false, description: "host of the primary domain" },
+      { name: "DOMAINS", value: "", scope: "public", sensitive: false, description: "all domain hosts, primary first, comma separated", list: true },
       { name: "INTERNAL_URL", value: "", scope: "internal", sensitive: false, description: "http://<service>:<port> on the project network" },
       { name: "INTERNAL_HOST", value: "worker", scope: "internal", sensitive: false, description: "host name on the project network" },
       { name: "INTERNAL_PORT", value: "", scope: "plain", sensitive: false, description: "main container port" },
@@ -376,6 +377,15 @@ export const envReferences = {
       variables: [
         { name: "URL", value: "https://api.de1.example.com", scope: "public", sensitive: false, description: "public URL" },
         { name: "DOMAIN", value: "api.de1.example.com", scope: "public", sensitive: false, description: "domain" },
+        // Two domains, primary first: ${{api.DOMAINS[1]}} is api.example.com (env-domains.spec.ts).
+        {
+          name: "DOMAINS",
+          value: "api.de1.example.com,api.example.com",
+          scope: "public",
+          sensitive: false,
+          description: "all domain hosts, primary first, comma separated",
+          list: true,
+        },
         { name: "INTERNAL_URL", value: "http://api:3000", scope: "internal", sensitive: false, description: "internal URL" },
       ],
     },
