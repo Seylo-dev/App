@@ -4,7 +4,7 @@
 
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LastOutput, usePortChoices } from "./deploy-failure";
+import { firstTcpPort, LastOutput, usePortChoices } from "./deploy-failure";
 import type { Deployment } from "./deploy-steps";
 
 const node = { id: "n000000000000001", name: "il-ra" };
@@ -17,6 +17,22 @@ test("Use port: the ports the app listens on, for a failed deploy of a service t
   expect(usePortChoices({ status: "live", portHint: hint })).toEqual([]);
   expect(usePortChoices({ status: "failed", portHint: null })).toEqual([]);
   expect(usePortChoices({ status: "failed", portHint: { ...hint, listening: [3000, 4000, 5000, 6000] } })).toEqual([3000, 4000, 5000]);
+  // Once the service's port is no longer the one the deploy checked (Use port ran), it is not offered again.
+  expect(usePortChoices({ status: "failed", portHint: hint }, 80)).toEqual([6000]);
+  expect(usePortChoices({ status: "failed", portHint: hint }, 6000)).toEqual([]);
+  expect(usePortChoices({ status: "failed", portHint: hint }, null)).toEqual([]);
+});
+
+test("firstTcpPort", () => {
+  expect(
+    firstTcpPort({
+      ports: [
+        { containerPort: 53, protocol: "udp" },
+        { containerPort: 80, protocol: "tcp" },
+      ],
+    }),
+  ).toBe(80);
+  expect(firstTcpPort({ ports: [] })).toBeNull();
 });
 
 test("the last output is a collapsed block apart from the error, with every line and the node", () => {

@@ -21,10 +21,21 @@ import { isNotBuilt } from "./op-state";
 /** At most this many Use port buttons (an app rarely listens on more than one other port). */
 const maxPortButtons = 3;
 
-/** The ports Use port offers: the ones the app listens on, on all addresses, when the service can switch. */
-export function usePortChoices(d: Pick<Deployment, "status" | "portHint">): number[] {
+/**
+ * The ports Use port offers: the ones the app listens on, on all addresses,
+ * when the service can switch and still has the port the deploy checked
+ * (servicePort: its first TCP port now; undefined when the caller does not
+ * know it). Once switched, the failed deploy offers it no more.
+ */
+export function usePortChoices(d: Pick<Deployment, "status" | "portHint">, servicePort?: number | null): number[] {
   if (d.status !== "failed" || !d.portHint?.canUsePort) return [];
+  if (servicePort !== undefined && servicePort !== d.portHint.port) return [];
   return d.portHint.listening.slice(0, maxPortButtons);
+}
+
+/** The service's first TCP port, the one its default health check dials; null without one. */
+export function firstTcpPort(service: { ports: readonly { containerPort: number; protocol: string }[] }): number | null {
+  return service.ports.find((p) => p.protocol !== "udp")?.containerPort ?? null;
 }
 
 export function LastOutput({ d, className }: { d: Pick<Deployment, "lastOutput">; className?: string }) {
@@ -43,9 +54,18 @@ export function LastOutput({ d, className }: { d: Pick<Deployment, "lastOutput">
   );
 }
 
-export function UsePortButtons({ serviceId, d }: { serviceId: string; d: Pick<Deployment, "status" | "portHint"> }) {
+export function UsePortButtons({
+  serviceId,
+  d,
+  servicePort,
+}: {
+  serviceId: string;
+  d: Pick<Deployment, "status" | "portHint">;
+  /** The service's first TCP port now, when known. */
+  servicePort?: number | null;
+}) {
   const invalidate = useInvalidate();
-  const choices = usePortChoices(d);
+  const choices = usePortChoices(d, servicePort);
   const use = useOpMutation(services.usePort, {
     onSuccess: (result, input) => {
       invalidate(deployments.list, services.get);

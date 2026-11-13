@@ -33,7 +33,7 @@ import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
 import { useActiveDeploy } from "./active-deploy";
 import { buildNodeText } from "./build-node";
-import { LastOutput, UsePortButtons } from "./deploy-failure";
+import { firstTcpPort, LastOutput, UsePortButtons } from "./deploy-failure";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
 import { type Deployment, StepChips } from "./deploy-steps";
@@ -114,7 +114,13 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
         {side && <SideLog service={service} d={side} />}
         {first.isPending && <Skeleton className="min-w-0 flex-[1_1_440px] self-stretch rounded-card bg-terminal" />}
       </div>
-      <DeployLogModal serviceId={service.id} source={service.source} deployment={open} onClose={() => setOpen(null)} />
+      <DeployLogModal
+        serviceId={service.id}
+        source={service.source}
+        servicePort={firstTcpPort(service)}
+        deployment={open}
+        onClose={() => setOpen(null)}
+      />
     </>
   );
 }
@@ -258,7 +264,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
           </span>
         </div>
         {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
-        {failed && <UsePortButtons serviceId={service.id} d={d} />}
+        {failed && <UsePortButtons serviceId={service.id} d={d} servicePort={firstTcpPort(service)} />}
         {failed && <LastOutput d={d} />}
         <PrivateRepoHint service={service} d={d} />
         {failed && <DeployHostAction service={service} error={d.error} />}

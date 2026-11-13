@@ -28,25 +28,38 @@ import { useNow } from "./use-now";
 export function DeployLogModal({
   serviceId,
   source,
+  servicePort,
   deployment,
   onClose,
 }: {
   serviceId: string;
   /** The service's source, for the title of a deploy without a commit (deploymentTitle: only an inline Dockerfile's label names one). */
   source?: TitleSource;
+  /** The service's first TCP port now: Use port is offered only while it is still the one the deploy checked. */
+  servicePort?: number | null;
   deployment: Deployment | null;
   onClose: () => void;
 }) {
   return (
     <Dialog open={deployment !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="top-[84px] flex max-h-[calc(100dvh-108px)] max-w-[min(1280px,calc(100vw-32px))] flex-col overflow-hidden p-0">
-        {deployment && <ModalBody serviceId={serviceId} source={source} initial={deployment} />}
+        {deployment && <ModalBody serviceId={serviceId} source={source} servicePort={servicePort} initial={deployment} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ModalBody({ serviceId, source, initial }: { serviceId: string; source?: TitleSource; initial: Deployment }) {
+function ModalBody({
+  serviceId,
+  source,
+  servicePort,
+  initial,
+}: {
+  serviceId: string;
+  source?: TitleSource;
+  servicePort?: number | null;
+  initial: Deployment;
+}) {
   const now = useNow(isActiveDeployment(initial.status) ? 1000 : 0);
   // deployment:<id> and service:<id> invalidate this while it runs; poll fast only while the socket is down.
   const liveUp = useLiveUp();
@@ -124,9 +137,9 @@ function ModalBody({ serviceId, source, initial }: { serviceId: string; source?:
           <StepCards steps={d.steps} buildWait={d.buildWait} />
         </div>
         {d.error && <p className="m-0 px-5 pb-3 text-[12.5px] leading-[1.45] text-chip-red-fg">{d.error}</p>}
-        {usePortChoices(d).length > 0 && (
+        {usePortChoices(d, servicePort).length > 0 && (
           <div className="px-5 pb-3">
-            <UsePortButtons serviceId={serviceId} d={d} />
+            <UsePortButtons serviceId={serviceId} d={d} servicePort={servicePort} />
           </div>
         )}
         {d.lastOutput && <LastOutput d={d} className="mx-5 mb-3" />}

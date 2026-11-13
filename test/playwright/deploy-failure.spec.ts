@@ -60,7 +60,7 @@ test("the history shows the reason, Use port and the app's own output apart", as
 
   await history.first().getByRole("button", { name: "Use port 6000" }).click();
   await expect(page.getByText("Port 6000 set. Deploying; the domains move to it when the new version rolls out.")).toBeVisible();
-  expect(calls("services.usePort")).toEqual([{ serviceId: svc.api, port: 6000, fromPort: 3001 }]);
+  expect(calls("services.usePort")).toEqual([{ serviceId: svc.api, port: 6000, fromPort: 3000 }]);
 });
 
 test("the deploy log dialog: the error once, the output collapsed and copyable, not in the step log", async ({ page, context }) => {

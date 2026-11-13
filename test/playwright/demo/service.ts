@@ -166,9 +166,9 @@ export const servicesById = {
 
 const step = (key: string, status: string, node: unknown, detail: string, durationMs: number | null) => ({ key, status, node, detail, durationMs });
 
-/** The failed deploy (5a2c9d1): the app listened on 6000, the service's port is 3001 (agents from 0.2.16 say so). */
+/** The failed deploy (5a2c9d1): the app listened on 6000, the service's port is 3000 (agents from 0.2.16 say so). */
 export const failedDeployError =
-  "us-ash-1: not healthy after 1m0s: health check never passed: tcp check on port 3001: dial tcp 10.0.3.4:3001: connect: connection refused. The app listens on port 6000, not 3001. Set the service's port to 6000 (Ports in the Container section of its Advanced tab) and point its domains there, or make the app listen on port 3001. The previous version stayed live.";
+  "us-ash-1: not healthy after 1m0s: health check never passed: tcp check on port 3000: dial tcp 10.0.3.4:3000: connect: connection refused. The app listens on port 6000, not 3000. Set the service's port to 6000 (Ports in the Container section of its Advanced tab) and point its domains there, or make the app listen on port 3000. The previous version stayed live.";
 /** Its new container's last output (Deployment.lastOutput), never in the deploy log. */
 export const failedDeployOutput = ["[Cloudflare R2] Connected", "Server is running on port 6000", "Heartbeat 1", "Heartbeat 2"];
 
@@ -228,7 +228,7 @@ const deployments = [
       step("clone", "ok", null, `main at ${sha}`, 2000),
       step("build", "ok", de, "Railpack, 121 MB image", 41_000),
       step("ship", "ok", us, `${mb} MB`, 6000),
-      failed ? step("health", "failed", null, "No answer on port 3001 in 60s", 60_000) : step("health", "ok", null, "GET /health 200 in 3s", 3000),
+      failed ? step("health", "failed", null, "No answer on port 3000 in 60s", 60_000) : step("health", "ok", null, "GET /health 200 in 3s", 3000),
       failed ? step("switch", "skipped", null, "Skipped, previous version kept", null) : step("switch", "ok", null, "Old container stopped", 1000),
     ],
     durationMs: failed ? 110_000 : 53_000,
@@ -237,7 +237,7 @@ const deployments = [
     error: failed ? failedDeployError : null,
     // The app listened on 6000 (agents from 0.2.16 read it): its own output and Use port 6000.
     lastOutput: failed ? { node: us, lines: failedDeployOutput } : null,
-    portHint: failed ? { node: us, port: 3001, listening: [6000], loopbackOnly: [], canUsePort: true } : null,
+    portHint: failed ? { node: us, port: 3000, listening: [6000], loopbackOnly: [], canUsePort: true } : null,
     createdAt: ago(age),
     startedAt: ago(age),
     finishedAt: ago(age - 53_000),
@@ -305,7 +305,7 @@ const logLines = (deploymentId: string) => {
     ["ship", "pushing to the panel registry …"],
     ["ship", "us-ash-1 will pull 38 MB, then start generation 18"],
   ];
-  if (d.status === "failed") raw.push(["health", "\u001b[31mno answer on port 3001 after 60s, giving up\u001b[0m"], ["switch", "skipped, the previous version stays live"]);
+  if (d.status === "failed") raw.push(["health", "\u001b[31mno answer on port 3000 after 60s, giving up\u001b[0m"], ["switch", "skipped, the previous version stays live"]);
   else if (d.status !== "building") raw.push(["health", "200 OK in 3s"], ["switch", "traffic moved, previous container drained"]);
   return raw.map(([s, text], i) => ({ seq: i, ts: new Date(t0 + i * 3000).toISOString(), step: s, text, error: text.includes("giving up") }));
 };
