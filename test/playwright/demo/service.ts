@@ -3,7 +3,7 @@
 // Shaped like the op contracts; Playwright transpiles this file without type
 // checks, so the data is loosely typed.
 
-import { ids as world } from "./fixtures";
+import { nodes as worldNodes, ids as world } from "./fixtures";
 
 type Input = Record<string, any>;
 
@@ -766,6 +766,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "databases.connection": (input: Input) => connectionOf(String(input.serviceId)),
   "databases.versionChoices": (input: Input) => versionChoicesOf(String(input.serviceId)),
   "databases.users": (input: Input) => usersOf(String(input.serviceId)),
+  "services.moveImpact": (input: Input) => moveImpactOf(String(input.serviceId)),
   "previews.getSettings": () => ({ settings: { enabled: true, domainPattern: "", maxPreviews: 5 }, available: true, unavailableReason: null }),
   "previews.list": () => ({
     previews: [
@@ -974,6 +975,49 @@ export function databaseOf(serviceId: string) {
     version: "17.6",
     internal: { host: "db", port: 5432, database: "shop", user: "postgres", httpPort: null },
     shellClient: "psql",
+  };
+}
+
+const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"]);
+
+/**
+ * services.moveImpact (0.2.16): every other node; il-tlv-1's agent is too
+ * old for a database's exposed port. The Postgres database is exposed on
+ * 15432 with one timed expose, measured at its last backup, its internal
+ * URL read by api (on de-fsn-1, where it runs) and its exposed URL by
+ * worker (on us-ash-1).
+ */
+export function moveImpactOf(serviceId: string) {
+  const service = (servicesById as Record<string, Input>)[serviceId] ?? servicesById[ids.api];
+  const here = service.placements[0]?.nodeId;
+  const database = databaseKinds.has(service.kind);
+  const targets = worldNodes
+    .filter((n) => n.id !== here)
+    .map((n) => ({
+      id: n.id,
+      name: n.name,
+      online: n.status === "online",
+      address: n.publicIpv4 ?? null,
+      refusal:
+        database && n.name === "il-tlv-1"
+          ? {
+              reason: "agentTooOld",
+              message: "The agent on il-tlv-1 cannot keep PostgreSQL's exposed port TLS only yet, so the port would close there. Update the node first, or turn exposure off.",
+            }
+          : null,
+    }));
+  const db = serviceId === ids.db;
+  return {
+    blocker: null,
+    targets,
+    volumes: (service.volumes ?? []).filter((v: Input) => v.kind === "volume").map((v: Input) => ({ name: v.name, mountPath: v.mountPath })),
+    dataSize: db ? { bytes: 1_840_000_000, measuredAt: ago(15 * hour) } : null,
+    lastBackupAt: db ? ago(15 * hour) : null,
+    backupSchedules: db ? 2 : 0,
+    exposure: { database: db ? { port: 15432, tlsHostname: null, allowPlain: false } : null, timed: db ? 1 : 0, firstRun: false },
+    exposedReferrers: db ? [{ serviceId: ids.worker, name: "worker", keys: ["PG_PUBLIC_URL"], nodeIds: [us.id] }] : [],
+    internalReferrers: db ? [{ serviceId: ids.api, name: "api", keys: ["DATABASE_URL"], nodeIds: [de.id] }] : [],
+    hiddenReferrers: 0,
   };
 }
 

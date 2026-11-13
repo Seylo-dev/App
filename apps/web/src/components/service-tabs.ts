@@ -77,6 +77,7 @@ export const composeTabs: readonly ServiceTab[] = [
   tab("settings", "service.tabs.settings"),
 ];
 
+/** Advanced on a database: moving it to another node, resource limits and the crash policy (the engine manages the rest). */
 export const databaseTabs: readonly ServiceTab[] = [
   tab("connection", "service.tabs.connection"),
   tab("users", "service.tabs.users"),
@@ -85,6 +86,7 @@ export const databaseTabs: readonly ServiceTab[] = [
   tab("metrics", "service.tabs.metrics"),
   tab("storage", "service.tabs.storage"),
   tab("alerts", "service.tabs.alerts"),
+  tab("advanced", "service.tabs.advanced"),
   tab("notes", "service.tabs.notes"),
   tab("settings", "service.tabs.settings"),
 ];

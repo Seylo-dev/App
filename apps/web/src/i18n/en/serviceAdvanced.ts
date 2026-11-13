@@ -80,7 +80,60 @@ export default {
     noOther: "No other node",
     button: "Move",
     confirmTitle: "Move {name} to {node}?",
-    confirmBody: "The service is stopped while its volumes are copied. Follow the move on the Deployments tab.",
+    databaseDescription:
+      "Copies its data to another node while it is stopped, then starts it there with the same users and passwords. On failure it starts again where it is.",
+    confirmFollow: "Follow the move on the Deployments tab.",
+    confirmFollowDatabase: "This card shows the move while it runs, with its log.",
+    cannotGo: "Cannot move to:",
+    whatHappens: "What happens when it moves to {node}",
+    offline: "offline",
+    refused: "cannot take it",
+    started: "Moving {name} to {node}",
+    inProgress: "{name} is moving to another node.",
+    notes: {
+      downtimeDatabase:
+        "{name} stops while its data is copied to {node}, and is offline until it starts there: the bigger the data, the longer that takes.",
+      downtime: {
+        one: "{name} stops while its volume is copied to {node}, and is offline until it starts there: the bigger the data, the longer that takes.",
+        other:
+          "{name} stops while its {count} volumes are copied to {node}, and is offline until it starts there: the bigger the data, the longer that takes.",
+      },
+      size: "About {size} at its last full backup, {when}.",
+      sizeUnknown: "The panel does not know its size yet: a backup measures it.",
+      noDowntime: "Both nodes run it until it is healthy on {node}: no downtime.",
+      internal: "Its internal address stays {address}: services on {node} reach it there and reconnect by themselves once it is up.",
+      leftBehind:
+        "There is no private network between nodes, so these services lose it from where they run. Move them to {node} too, or use its exposed connection:",
+      exposed: "Its exposed port moves to {address}, with TLS and the same allowed IPs.",
+      exposedPlain: "Its exposed port moves to {address}, with TLS, the same allowed IPs, and connections without TLS allowed as now.",
+      portTaken: "The port stays the same unless another service has it on {node}; then {node} picks one.",
+      tlsHostname: "Clients connect by {host}: point its DNS at {address}, then its certificate renews there.",
+      timed: {
+        one: "Its open timed expose moves to {address}, with its end and allowed IP.",
+        other: "Its {count} open timed exposes move to {address}, with their end and allowed IP.",
+      },
+      firstRun: "Its IP:port access moves to {address}.",
+      exposedReferrers:
+        "These services read its EXPOSED_URL, EXPOSED_HOST or EXPOSED_PORT and get the new address on their next deploy. Deploy them after the move:",
+      exposedReferrersHostname: "These services read its exposed address, which stays {host} once its DNS points at {node}:",
+      hiddenReferrers: {
+        one: "1 service you cannot see uses its address too.",
+        other: "{count} services you cannot see use its address too.",
+      },
+      schedules: {
+        one: "Its backup schedule keeps its times and runs on {node}; one due during the move runs once it ends.",
+        other: "Its {count} backup schedules keep their times and run on {node}; one due during the move runs once it ends.",
+      },
+      lastBackup: "Its last backup was {when}. Back it up first: a fresh backup is the way back if anything goes wrong.",
+      lastBackupFresh: "Its last backup was {when}.",
+      noBackup: "It has no backup yet. Back it up first: a fresh backup is the way back if anything goes wrong.",
+      backUpNow: "Back up now",
+      setUpBackups: "Set up backups",
+      oldCopy: "{from} keeps its stopped copy until it runs on {node}, then deletes it. If the move fails, it starts again on {from}.",
+      staysOnFailure: "If the move fails, it stays on {from}.",
+      referrer: "{name} on {nodes}",
+      keys: "{name} on {nodes}: {keys}",
+    },
   },
   resources: {
     title: "Resource limits",
@@ -91,6 +144,12 @@ export default {
     cpuWeightHint: "Default 100; higher gets more CPU when the node is busy.",
     pids: "Process limit",
     emptyOff: "Empty is off.",
+    saveAndRestart: "Save and restart",
+    restartHint: "The database restarts with them, offline for a few seconds. Its data stays.",
+    restartTitle: "Restart {name} with these limits?",
+    restartBody:
+      "It is recreated with the new limits and offline for a few seconds; its data stays. A memory limit below what it uses stops it: leave room for its caches.",
+    restarted: "{name} restarts with the new limits",
   },
   container: {
     title: "Container",

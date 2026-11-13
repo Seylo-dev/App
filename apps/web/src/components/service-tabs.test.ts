@@ -13,3 +13,11 @@ test("compose stacks and cron services show the Domains tab only for domains the
   // Apps always have it, once.
   expect(paths("app", true).filter((p) => p === "domains")).toHaveLength(1);
 });
+
+// A database moves to another node from its Advanced tab (0.2.16), like apps and cron services.
+test("every database engine has an Advanced tab, before Notes", () => {
+  for (const kind of ["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"] as const) {
+    const paths = tabsFor(kind).map((t) => t.path);
+    expect(paths.slice(-3)).toEqual(["advanced", "notes", "settings"]);
+  }
+});

@@ -1,9 +1,11 @@
 // The Advanced tab: health check and deploy strategy, crash policy (with
 // the fixed 5 second wait), replicas per node and sticky sessions, moving
-// to another node, resource limits (all off by default), container
-// settings and ports, a cron service's schedule, and the maintenance page.
+// to another node (move-card.tsx), resource limits (all off by default),
+// container settings and ports, a cron service's schedule, and the
+// maintenance page. A database's has only the move, its limits (saved
+// with a restart) and its crash policy: its engine sets the rest.
 
-import { builds, type OpInput, services } from "@seylo/ops";
+import { builds, deployments, type OpInput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -14,7 +16,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
-import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { isPanelService } from "../../../lib/service-display";
@@ -24,13 +25,14 @@ import { MaintenanceCard } from "../domains/access-cards";
 import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
 import { volumesOf } from "../files/volumes";
 import { useInvalidate } from "../invalidate";
-import { moveCardId } from "../move-card-id";
 import { MutationError, retryOp } from "../op-state";
 import { servicePort } from "../service-port";
+import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
 import { joinArgs, splitArgs } from "./args";
 import { defaultCheckText } from "./default-check";
 import { mainPortNote } from "./main-port";
+import { MoveCard } from "./move-card";
 
 type HealthCheck = NonNullable<ServiceDetail["healthCheck"]>;
 type ProbeType = "default" | HealthCheck["probe"]["type"];
@@ -46,6 +48,16 @@ function useSaved(...ops: { id: string }[]) {
 
 export function AdvancedPage({ service }: { service: ServiceDetail }) {
   const runs = service.kind === "app" || service.kind === "cron";
+  // A database's engine sets its health check, ports, command and data volume: what fits is moving it, its limits and its crash policy.
+  if (isDatabaseKind(service.kind)) {
+    return (
+      <div className="flex flex-col gap-4">
+        <MoveCard service={service} />
+        <ResourcesCard service={service} />
+        <CrashCard service={service} />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-4">
       {service.kind === "cron" && <CronScheduleCard service={service} />}
@@ -391,71 +403,40 @@ function PlacementCard({ service }: { service: ServiceDetail }) {
   );
 }
 
-function MoveCard({ service }: { service: ServiceDetail }) {
-  const nodes = useOp(builds.getSettings, { serviceId: service.id }, { retry: retryOp });
-  const navigate = useNavigate();
-  const [to, setTo] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState(false);
-  const busy = useActiveDeploy(service.id) !== null;
-  const move = useOpMutation(services.move, {
-    onSuccess: () => {
-      toast.success(t("serviceEnv.moveStarted"));
-      void navigate({ to: "/p/$projectId/s/$serviceId/deployments", params: { projectId: service.projectId, serviceId: service.id } });
-    },
-  });
-  const here = new Set(service.placements.map((p) => p.nodeId));
-  const options = (nodes.data?.nodes ?? []).filter((n) => !here.has(n.id));
-  const target = options.find((n) => n.id === to);
-  if (service.placements.length !== 1) return null;
-  return (
-    <SectionCard id={moveCardId} title={t("serviceAdvanced.move.title")} description={t("serviceAdvanced.move.description")}>
-      <div className="flex flex-wrap items-end gap-2">
-        <Field label={t("serviceAdvanced.move.to")} className="w-60">
-          <Select value={to ?? undefined} onValueChange={setTo} disabled={options.length === 0}>
-            <SelectTrigger aria-label={t("serviceAdvanced.move.to")}>
-              <SelectValue placeholder={options.length ? t("serviceAdvanced.move.pick") : t("serviceAdvanced.move.noOther")} />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((n) => (
-                <SelectItem key={n.id} value={n.id} disabled={!n.online}>
-                  {n.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Button
-          onClick={() => setConfirm(true)}
-          disabled={!target || move.isPending || busy}
-          title={busy ? t("serviceAdvanced.placement.deployBusy") : undefined}
-        >
-          {t("serviceAdvanced.move.button")}
-        </Button>
-        <MutationError error={move.error} />
-      </div>
-      <ConfirmDialog
-        open={confirm}
-        onOpenChange={setConfirm}
-        title={t("serviceAdvanced.move.confirmTitle", { name: service.name, node: target?.name ?? "" })}
-        description={t("serviceAdvanced.move.confirmBody")}
-        confirmLabel={t("serviceAdvanced.move.button")}
-        onConfirm={() => (target ? move.mutateAsync({ serviceId: service.id, toNodeId: target.id }).then(() => undefined) : undefined)}
-      />
-    </SectionCard>
-  );
-}
-
+/**
+ * Resource limits apply on the next deploy. A database has no Deploy
+ * button, so its card saves and restarts it in one go (a recreate deploy of
+ * the image it runs: offline for a few seconds, the data stays).
+ */
 function ResourcesCard({ service }: { service: ServiceDetail }) {
+  const database = isDatabaseKind(service.kind);
   const r = service.resources;
   const toMb = (v: number | null) => (v == null ? "" : String(Math.round(v / mb)));
   const [memory, setMemory] = useState(toMb(r.memoryLimitBytes));
   const [reservation, setReservation] = useState(toMb(r.memoryReservationBytes));
   const [weight, setWeight] = useState(r.cpuWeight == null ? "" : String(r.cpuWeight));
   const [pids, setPids] = useState(r.pidsLimit == null ? "" : String(r.pidsLimit));
-  const save = useOpMutation(services.setResources, { onSuccess: useSaved() });
+  const [confirm, setConfirm] = useState(false);
+  const saved = useSaved();
+  const invalidate = useInvalidate();
+  const save = useOpMutation(services.setResources, { onSuccess: database ? undefined : saved });
+  const deploy = useOpMutation(deployments.deploy);
   const bytes = (s: string) => {
     const n = parseIntOrNull(s);
     return n == null ? null : n * mb;
+  };
+  const input = {
+    serviceId: service.id,
+    memoryLimitBytes: bytes(memory),
+    memoryReservationBytes: bytes(reservation),
+    cpuWeight: parseIntOrNull(weight),
+    pidsLimit: parseIntOrNull(pids),
+  };
+  const restart = async () => {
+    await save.mutateAsync(input);
+    await deploy.mutateAsync({ serviceId: service.id });
+    invalidate(services.get, deployments.list);
+    toast.success(t("serviceAdvanced.resources.restarted", { name: service.name }));
   };
   return (
     <SectionCard
@@ -466,21 +447,23 @@ function ResourcesCard({ service }: { service: ServiceDetail }) {
           <Button
             size="sm"
             variant="primary"
-            disabled={save.isPending}
-            onClick={() =>
-              save.mutate({
-                serviceId: service.id,
-                memoryLimitBytes: bytes(memory),
-                memoryReservationBytes: bytes(reservation),
-                cpuWeight: parseIntOrNull(weight),
-                pidsLimit: parseIntOrNull(pids),
-              })
-            }
+            disabled={save.isPending || deploy.isPending}
+            onClick={() => (database ? setConfirm(true) : save.mutate(input))}
           >
-            {t("service.save")}
+            {database ? t("serviceAdvanced.resources.saveAndRestart") : t("service.save")}
           </Button>
-          <span>{t("serviceAdvanced.nextDeploy")}</span>
-          <MutationError error={save.error} />
+          <span>{database ? t("serviceAdvanced.resources.restartHint") : t("serviceAdvanced.nextDeploy")}</span>
+          <MutationError error={save.error ?? deploy.error} />
+          {database && (
+            <ConfirmDialog
+              open={confirm}
+              onOpenChange={setConfirm}
+              title={t("serviceAdvanced.resources.restartTitle", { name: service.name })}
+              description={t("serviceAdvanced.resources.restartBody")}
+              confirmLabel={t("serviceAdvanced.resources.saveAndRestart")}
+              onConfirm={restart}
+            />
+          )}
         </>
       }
     >

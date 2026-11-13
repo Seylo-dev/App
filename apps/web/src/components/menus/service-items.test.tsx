@@ -118,11 +118,15 @@ test("a compose member moves with its stack and is deleted with it", () => {
   expect(list).not.toContain("delete");
 });
 
-test("a database: Logs but no Deploy or Console, and no Move to another node (no Advanced tab)", () => {
+test("a database: Logs and Move to another node (its Advanced tab's Move card), no Deploy or Console", () => {
   const list = ids({ kind: "postgres", address: "db:5432", name: "db" });
   expect(list).toContain("logs");
-  for (const id of ["deploy", "console", "moveNode", "copyAddress"]) expect(list).not.toContain(id);
+  expect(list).toContain("moveNode");
+  for (const id of ["deploy", "console", "copyAddress"]) expect(list).not.toContain(id);
   expect(list).toContain("copyInternalAddress");
+  // Every engine.
+  for (const kind of ["mysql", "mongo", "redis", "clickhouse"] as const)
+    expect(ids({ kind, address: "db:1", name: "db" })).toContain("moveNode");
 });
 
 test("a Box: Stop and Open editor, as its header", () => {
