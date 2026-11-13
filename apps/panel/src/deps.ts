@@ -12,12 +12,18 @@ import type { LiveHub } from "./live/hub";
 import type { Logger } from "./logger";
 import type { AlertSink } from "./modules/alerts/sink";
 import type { Notifier } from "./modules/notifications/email";
-import type { ExecuteOp } from "./ops/pipeline";
+import type { AuthorizeOp, ExecuteOp } from "./ops/pipeline";
 import type { SecretBox } from "./security/secret-box";
 
 /** The op pipeline, for code that runs ops on someone's behalf (MCP, AI assistant, approvals). */
 export interface OpRunner {
   execute: ExecuteOp;
+  /**
+   * The pipeline's permission check alone (op.permission and the handler's
+   * guard), for a principal that is not the one running the call: the
+   * requester of an approval. Throws OpError; returns the target.
+   */
+  authorize: AuthorizeOp;
 }
 
 export interface Deps {

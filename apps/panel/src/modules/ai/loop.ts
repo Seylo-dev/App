@@ -14,7 +14,7 @@ import { displayName } from "@seylo/brand";
 import { type AnyOpContract, ai as aiOps, allOps, OpError, redact } from "@seylo/ops";
 import { buildAiTools } from "@seylo/ops/generators";
 import { eq } from "drizzle-orm";
-import { createAccess, type Target, targetOf } from "../../auth/access";
+import { type Target, targetOf } from "../../auth/access";
 import type { PrincipalUser } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { aiConversations, aiMessages, projects, services, users } from "../../db/schema";
@@ -192,7 +192,8 @@ async function runTool(deps: Deps, run: RunInput, use: Anthropic.ToolUseBlock, r
   const principal = { type: "session" as const, user: run.user, sessionId: "assistant" };
   try {
     const input = parseInput(op.input, use.input, false);
-    const target = createAccess(deps.db, principal).require(op.permission, op.kind, input);
+    // The person's own rights, the handler's guard included (approve() checks them again).
+    const target = deps.ops.authorize(op, principal, input);
     const approval = requestApproval(deps, { op, input, principal, via: "ai", requestedVia: run.conversationId, reason, target });
     return { part: { ...base, ...where, input: shownInput, status: "needs_approval", approvalId: approval.id } };
   } catch (error) {

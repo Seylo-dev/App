@@ -9,7 +9,7 @@
 
 import { type AnyOpContract, actionAllowed, allOps, OpError, redact } from "@seylo/ops";
 import { buildMcpTools, type McpTool, mcpToolName } from "@seylo/ops/generators";
-import { createAccess, isNarrowedKey } from "../../auth/access";
+import { isNarrowedKey } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
 import type { Deps } from "../../deps";
 import { parseInput } from "../../ops/validate";
@@ -100,10 +100,11 @@ export async function callTool(
 /** The pipeline refused for lack of an approval, after validation and the permission check passed: queue it. */
 function askApproval(deps: Deps, op: AnyOpContract, args: unknown, principal: Extract<Principal, { type: "apiKey" }>): ToolResult {
   let input: unknown;
-  let target: ReturnType<ReturnType<typeof createAccess>["require"]>;
+  let target: ReturnType<Deps["ops"]["authorize"]>;
   try {
     input = parseInput(op.input, args, false);
-    target = createAccess(deps.db, principal).require(op.permission, op.kind, input);
+    // The token's own rights, guard included (approve() checks them again).
+    target = deps.ops.authorize(op, principal, input);
   } catch (error) {
     const message = error instanceof OpError ? `${error.code}: ${error.message}` : "INTERNAL: the request could not be queued.";
     return text(message, true);

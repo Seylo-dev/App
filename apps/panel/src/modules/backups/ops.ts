@@ -6,6 +6,8 @@
 import { backups as backupOps, OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
+import type { Access } from "../../auth/access";
+import type { PanelDb } from "../../db/client";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { findDatabase } from "../databases/info";
@@ -319,6 +321,25 @@ export const runNow = implement(backupOps.runNow, async (input, ctx) => {
   return toRun(ctx.db, await startBackup(ctx, what));
 });
 
+type RunAllSkipped = Static<typeof backupOps.runAll.output>["skipped"][number];
+
+function backupRunning(ctx: OpContext, policyId: string): boolean {
+  return (
+    ctx.db
+      .select({ id: backupRuns.id })
+      .from(backupRuns)
+      .where(and(eq(backupRuns.policyId, policyId), eq(backupRuns.kind, "backup"), eq(backupRuns.status, "running")))
+      .get() !== undefined
+  );
+}
+
+/** What a schedule's failed start tells the caller: the panel's own message, never an internal error's. */
+function startError(ctx: OpContext, error: unknown, policyId: string): string {
+  if (error instanceof OpError) return error.message;
+  ctx.logger.error({ err: error, policyId }, "starting a scheduled backup failed");
+  return "The backup could not start. The panel log has the details.";
+}
+
 /**
  * Back up now for the whole service: every enabled schedule, each as its
  * own scheduled run would (its destination, its keepLast). A schedule
@@ -337,37 +358,25 @@ export const runAll = implement(backupOps.runAll, async (input, ctx) => {
       reason: "noSchedules",
     });
   }
-  const running = new Set(
-    ctx.db
-      .select({ policyId: backupRuns.policyId })
-      .from(backupRuns)
-      .where(
-        and(
-          eq(backupRuns.serviceId, input.serviceId),
-          eq(backupRuns.kind, "backup"),
-          eq(backupRuns.status, "running"),
-          inArray(
-            backupRuns.policyId,
-            policies.map((p) => p.id),
-          ),
-        ),
-      )
-      .all()
-      .map((r) => r.policyId),
-  );
   const started: RunRow[] = [];
-  const skipped: { policyId: string; reason: "disabled" | "running" }[] = [];
+  const skipped: RunAllSkipped[] = [];
   let firstError: unknown;
   for (const policy of policies) {
     if (!policy.enabled) skipped.push({ policyId: policy.id, reason: "disabled" });
-    else if (running.has(policy.id)) skipped.push({ policyId: policy.id, reason: "running" });
+    // Read here, right before startBackup inserts its run with no await
+    // between: a second Back up now, or the scheduler, that started this
+    // schedule while this loop waited on the node is seen.
+    else if (backupRunning(ctx, policy.id)) skipped.push({ policyId: policy.id, reason: "running" });
     else {
       try {
         started.push(await startBackup(ctx, policyBackup(policy)));
       } catch (error) {
-        // startBackup stored the run as failed and hands it over with the error.
+        // startBackup stored the run as failed and hands it over with the
+        // error; one refused before its run was stored (its volume gone,
+        // the service off its node) is named in skipped, with why.
         const failed = (error as { run?: RunRow }).run;
         if (failed) started.push(failed);
+        else skipped.push({ policyId: policy.id, reason: "error", error: startError(ctx, error, policy.id) });
         firstError ??= error;
       }
     }
@@ -501,51 +510,65 @@ export function backupFileName(service: string, what: string, startedAt: Date, e
 }
 
 /**
- * A short link to download one backup straight from its bucket: a GET
- * presigned for that run's own object (ownObjectKey), so it reaches
- * nothing else in the bucket, and saved under a readable name. The browser
- * navigates to it; the bytes never pass through the panel.
+ * Who may have a backup's link besides backups.restore: like a clone or an
+ * export of its data, a database's dump holds its logins, so a database
+ * service needs databases.credentials too. The op's guard, so the pipeline
+ * checks every caller and approvals check the requester as well, not only
+ * the approver the call then runs as.
  */
-export const downloadUrl = implement(backupOps.downloadUrl, (input, ctx) => {
-  const service = getService(ctx.db, input.serviceId);
-  // Like a clone or an export of its data: a database's dump holds its logins.
-  if (findDatabase(ctx.db, service.id) && !ctx.access.can("databases.credentials", { type: "service", id: service.id })) {
+export function downloadAllowed(db: PanelDb, access: Access, serviceId: string): void {
+  if (findDatabase(db, serviceId) && !access.can("databases.credentials", { type: "service", id: serviceId })) {
     throw new OpError(
       "FORBIDDEN",
       "A database backup holds the database's logins, so downloading one needs the databases.credentials permission.",
       { action: "databases.credentials" },
     );
   }
-  const run = requireRun(ctx, input.serviceId, input.runId);
-  if (run.kind !== "backup" || run.status !== "succeeded" || !run.objectKey) {
-    throw new OpError("BAD_REQUEST", "Only a successful backup can be downloaded.", { field: "runId" });
-  }
-  if (run.deletedAt) throw new OpError("BAD_REQUEST", "That backup was deleted and can no longer be downloaded.", { field: "runId" });
-  const ext = objectExtension(run.objectKey);
-  // Rows recorded before the panel checked keys may name another service's object.
-  if (!ext || !ownObjectKey(run, run.objectKey)) {
-    throw new OpError("BAD_REQUEST", "That backup's file is outside its own folder, so the panel does not hand it out.", {
-      field: "runId",
+}
+
+/**
+ * A short link to download one backup straight from its bucket: a GET
+ * presigned for that run's own object (ownObjectKey), so it reaches
+ * nothing else in the bucket, and saved under a readable name. The browser
+ * navigates to it; the bytes never pass through the panel.
+ */
+export const downloadUrl = implement(
+  backupOps.downloadUrl,
+  (input, ctx) => {
+    const service = getService(ctx.db, input.serviceId);
+    const run = requireRun(ctx, input.serviceId, input.runId);
+    if (run.kind !== "backup" || run.status !== "succeeded" || !run.objectKey) {
+      throw new OpError("BAD_REQUEST", "Only a successful backup can be downloaded.", { field: "runId" });
+    }
+    if (run.deletedAt) throw new OpError("BAD_REQUEST", "That backup was deleted and can no longer be downloaded.", { field: "runId" });
+    const ext = objectExtension(run.objectKey);
+    // Rows recorded before the panel checked keys may name another service's object.
+    if (!ext || !ownObjectKey(run, run.objectKey)) {
+      throw new OpError("BAD_REQUEST", "That backup's file is outside its own folder, so the panel does not hand it out.", {
+        field: "runId",
+      });
+    }
+    const destination = destinationOf(ctx, run);
+    if (!destination) {
+      throw new OpError("CONFLICT", "The backup's destination was deleted, so the panel has no keys to download it.", {
+        reason: "noDestination",
+      });
+    }
+    const volumeName = run.volumeId
+      ? ctx.db.select({ name: volumes.name }).from(volumes).where(eq(volumes.id, run.volumeId)).get()?.name
+      : undefined;
+    const fileName = backupFileName(service.name, run.target === "database" ? "database" : (volumeName ?? "volume"), run.startedAt, ext);
+    const now = new Date();
+    const url = presign(storageConfig(ctx.secrets, destination), {
+      method: "GET",
+      key: run.objectKey,
+      query: { "response-content-disposition": `attachment; filename="${fileName}"` },
+      expiresIn: backupOps.downloadUrlSeconds,
+      now,
     });
-  }
-  const destination = destinationOf(ctx, run);
-  if (!destination) {
-    throw new OpError("CONFLICT", "The backup's destination was deleted, so the panel has no keys to download it.", {
-      reason: "noDestination",
-    });
-  }
-  const volumeName = run.volumeId
-    ? ctx.db.select({ name: volumes.name }).from(volumes).where(eq(volumes.id, run.volumeId)).get()?.name
-    : undefined;
-  const fileName = backupFileName(service.name, run.target === "database" ? "database" : (volumeName ?? "volume"), run.startedAt, ext);
-  const now = new Date();
-  const url = presign(storageConfig(ctx.secrets, destination), {
-    method: "GET",
-    key: run.objectKey,
-    query: { "response-content-disposition": `attachment; filename="${fileName}"` },
-    expiresIn: backupOps.downloadUrlSeconds,
-    now,
-  });
-  ctx.auditDetails?.({ fileName, destinationId: destination.id });
-  return { url, fileName, expiresAt: new Date(now.getTime() + backupOps.downloadUrlSeconds * 1000).toISOString() };
-});
+    ctx.auditDetails?.({ fileName, destinationId: destination.id });
+    return { url, fileName, expiresAt: new Date(now.getTime() + backupOps.downloadUrlSeconds * 1000).toISOString() };
+  },
+  // Checked by the pipeline before a model's call waits for approval, and for the requester again on approve.
+  { guard: (input, { db, access }) => downloadAllowed(db, access, input.serviceId) },
+);

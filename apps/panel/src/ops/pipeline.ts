@@ -1,8 +1,9 @@
 // Runs one op call through the fixed pipeline every transport shares
 // (HTTP today; MCP and the AI assistant call the same function):
 //
-//   authenticate -> validate input -> check permission -> approval
-//     -> rate limit -> run -> check output -> audit
+//   authenticate -> validate input -> check permission (and the
+//     handler's guard) -> approval -> rate limit -> run -> check output
+//     -> audit
 //
 // Calls a model made (MCP and AI transports, or any MCP token) only reach
 // ops marked mcp: true, and destructive ones (and modelApproval ones, which
@@ -18,6 +19,7 @@ import { type AnyOpContract, OpError } from "@seylo/ops";
 import { type Access, createAccess, type Target, targetOf } from "../auth/access";
 import { authenticate, type Credentials, signedOutError } from "../auth/authenticate";
 import { describePrincipal, type Principal, type PrincipalUser } from "../auth/principal";
+import type { PanelDb } from "../db/client";
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
 import { readMcpSafety } from "../modules/mcp/keys";
@@ -117,7 +119,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       // their target too; the name is read only once the caller may see it.
       target = targetOf(op.permission, input);
       if (target && op.audit) projectId = targetProject(deps.db, target);
-      access.require(op.permission, op.kind, input);
+      authorize(deps.db, handlers, op, access, input);
       // Read the name now: after a delete it would be gone.
       if (target && op.audit) label = targetLabel(deps.db, target);
       // While the panel moves it only reads: a change now would be missing from the copy (modules/panelMove/pause.ts).
@@ -156,6 +158,30 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       written?.();
     }
   };
+}
+
+/** Whether a principal may run an op on an input; throws OpError, returns the permission's target. */
+export type AuthorizeOp = (op: AnyOpContract, principal: Principal, input: unknown) => Target | undefined;
+
+/**
+ * The check the approvals module repeats for the requester when it queues
+ * a model's call and when a person approves it, the same the pipeline
+ * makes for every caller: op.permission, then the handler's guard.
+ */
+export function createAuthorizer(db: PanelDb, handlers: ReadonlyMap<string, OpHandler>): AuthorizeOp {
+  return (op, principal, input) => authorize(db, handlers, op, createAccess(db, principal), input);
+}
+
+function authorize(
+  db: PanelDb,
+  handlers: ReadonlyMap<string, OpHandler>,
+  op: AnyOpContract,
+  access: Access,
+  input: unknown,
+): Target | undefined {
+  const target = access.require(op.permission, op.kind, input);
+  handlers.get(op.id)?.guard?.(input as never, { db, access });
+  return target;
 }
 
 /** Ops a model's call waits on a person for: destructive ones, and modelApproval ones (data leaving the panel). */

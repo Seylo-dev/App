@@ -1,9 +1,10 @@
 // "Back up now" at the top of a service's Backups tab and on a database's
 // Connection tab: every enabled schedule at once (backups.runAll), each
 // counted toward its own Keep newest; schedules that are off, or still
-// backing up, are skipped. A database with no schedule gets a one-off dump
-// to the first destination. A schedule's own menu still backs up just that
-// one (backups.runNow with its id).
+// backing up, are skipped, and the toast names any that could not start.
+// A database with no schedule gets a one-off dump to the first
+// destination. A schedule's own menu still backs up just that one
+// (backups.runNow with its id).
 
 import { backups, type OpOutput } from "@seylo/ops";
 import { useOpMutation } from "@seylo/ops/react";
@@ -19,18 +20,23 @@ type Policy = OpOutput<typeof backups.listPolicies>["policies"][number];
 type Choice = OpOutput<typeof backups.listDestinations>["choices"][number];
 export type RunAllResult = OpOutput<typeof backups.runAll>;
 
-/** What the toast says after Back up now for every schedule. */
+/**
+ * What the toast says after Back up now for every schedule. A schedule that
+ * could not start is counted whether the node refused its run or the panel
+ * refused it before storing one (skipped with reason error).
+ */
 export function runAllToast(result: RunAllResult): { tone: "success" | "info" | "warning"; text: string } {
   const failed = result.runs.filter((r) => r.status === "failed");
   const started = result.runs.length - failed.length;
   const running = result.skipped.filter((s) => s.reason === "running").length;
-  if (result.runs.length === 0) {
+  const errors = [...failed.map((r) => r.error ?? ""), ...result.skipped.filter((s) => s.reason === "error").map((s) => s.error ?? "")];
+  if (started === 0 && errors.length === 0) {
     return { tone: "info", text: running > 0 ? t("serviceBackups.allRunning") : t("serviceBackups.allOff") };
   }
-  const parts = [t("serviceBackups.startedMany", { count: started })];
+  const parts = started > 0 ? [t("serviceBackups.startedMany", { count: started })] : [];
   if (running > 0) parts.push(t("serviceBackups.alsoRunning", { count: running }));
-  if (failed.length > 0) parts.push(t("serviceBackups.notStarted", { count: failed.length, error: failed[0]?.error ?? "" }));
-  return { tone: failed.length > 0 ? "warning" : "success", text: parts.join(" ") };
+  if (errors.length > 0) parts.push(t("serviceBackups.notStarted", { count: errors.length, error: errors[0] ?? "" }));
+  return { tone: errors.length > 0 ? "warning" : "success", text: parts.join(" ") };
 }
 
 /** Which Back up now applies: every schedule, a one-off dump of a database without one, or none (nothing to back up to yet). */

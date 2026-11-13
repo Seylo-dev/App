@@ -1,9 +1,10 @@
 // The Backups tab. Back up now at the top backs up every enabled schedule
 // at once (backups.runAll; before, only the first), and so does the
 // database Connection tab's; a schedule's own menu backs up just that one.
-// Each row of the "Backups and restores" card names what it holds
-// ("Database", "Volume uploads", "Restore of the <date> backup of
-// Database"), and a backup that is there has Download, which opens the
+// A schedule the panel refused before storing its run is named in the
+// toast ("1 could not start: ..."). Each row of the "Backups and
+// restores" card names what it holds ("Database", "Volume uploads",
+// "Restore of the <date> backup of Database"), and a backup that is there has Download, which opens the
 // link the panel signs straight from the bucket. A backup whose destination
 // was deleted (Settings > Backups) says "Destination deleted", has no
 // Restore or Download, and Remove from list marks it deleted; its dialog
@@ -201,6 +202,16 @@ test.describe("backups", () => {
         "backups.listPolicies": () => ({ policies: threeSchedules }),
         "backups.runAll": (input) => {
           all.push(input);
+          // The second time, the panel refused one schedule before storing a run (its volume gone).
+          if (all.length === 2) {
+            return {
+              runs: [startedRun(threeSchedules[0] as Policy)],
+              skipped: [
+                { policyId: "b000000000000002", reason: "error", error: "That volume does not belong to this service." },
+                { policyId: "b000000000000003", reason: "disabled" },
+              ],
+            };
+          }
           return {
             runs: threeSchedules.filter((p) => p.enabled).map(startedRun),
             skipped: [{ policyId: "b000000000000003", reason: "disabled" }],
@@ -229,11 +240,11 @@ test.describe("backups", () => {
     await expect.poll(() => one).toEqual([{ serviceId: svc.db, policyId: "b000000000000002" }]);
     expect(all).toHaveLength(1);
 
-    // The database Connection tab's Back up now is the same one.
+    // The database Connection tab's Back up now is the same one; a schedule that could not start is named.
     await page.goto(`/p/${ids.acme}/s/${svc.db}/connection`);
     const card = page.getByRole("region", { name: "Backups", exact: true });
     await card.getByRole("button", { name: "Back up now" }).click();
-    await expect(page.getByText("Started 2 backups.")).toBeVisible();
+    await expect(page.getByText("Started 1 backup. 1 could not start: That volume does not belong to this service.")).toBeVisible();
     expect(all).toEqual([{ serviceId: svc.db }, { serviceId: svc.db }]);
     expect(one).toHaveLength(1);
   });

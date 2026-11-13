@@ -1,15 +1,19 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { allOps, backups as backupOps, databases as dbOps } from "@seylo/ops";
+import { ai as aiOps, allOps, approvals as approvalOps, backups as backupOps, databases as dbOps } from "@seylo/ops";
 import { buildAiTools } from "@seylo/ops/generators";
 import { EventSchema } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
-import { auditLog, backupDestinations, backupPolicies, backupRuns, grants, volumes } from "../src/db/schema";
+import { authenticate } from "../src/auth/authenticate";
+import { approvals, auditLog, backupDestinations, backupPolicies, backupRuns, grants, volumes } from "../src/db/schema";
+import { setModelProvider } from "../src/modules/ai/client";
 import { backupFileName } from "../src/modules/backups/ops";
 import { presign } from "../src/modules/backups/presign";
 import { ownObjectKey } from "../src/modules/backups/runs";
 import { runDueBackups } from "../src/modules/backups/schedule";
 import { storageConfig } from "../src/modules/backups/storage";
+import { callTool } from "../src/modules/mcp/tools";
+import { scriptedModel, settled } from "./ai-fake";
 import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
 
@@ -662,6 +666,117 @@ describe("Back up now for the whole service (runAll)", () => {
     expect(rows.map((r) => r.status)).toEqual(["failed", "failed"]);
   });
 
+  test("two Back up nows at once, or the scheduler meanwhile, never start a schedule twice", async () => {
+    const { node, app, data, webVault, cache } = await volumeSchedules();
+    const asked: string[] = [];
+    let gate: Promise<void> | null = null;
+    const agent = fakeAgent(
+      panel,
+      node.id,
+      {
+        runBackup: async (req) => {
+          asked.push(req.subject.what.value);
+          const held = gate;
+          gate = null;
+          if (held) await held;
+          return {};
+        },
+      },
+      [],
+      [signed],
+    );
+    const hold = () => {
+      let release = () => {};
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => release();
+    };
+    const running = () =>
+      panel.deps.db
+        .select({ policyId: backupRuns.policyId })
+        .from(backupRuns)
+        .where(and(eq(backupRuns.serviceId, app.id), eq(backupRuns.status, "running")))
+        .all()
+        .map((r) => r.policyId);
+    const reached = async (n: number) => {
+      while (asked.length < n) await Bun.sleep(1);
+    };
+    const policyIds = (body: { runs: { policyId: string }[] }) => body.runs.map((r) => r.policyId);
+
+    // The first call waits on the node with data's run stored; a second one (another tab, the
+    // Connection tab's button) starts only web-vault, and the first then leaves web-vault alone.
+    let release = hold();
+    const first = callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    await reached(1);
+    const second = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(policyIds(second.body)).toEqual([webVault]);
+    expect(second.body.skipped).toEqual([
+      { policyId: data, reason: "running" },
+      { policyId: cache, reason: "disabled" },
+    ]);
+    release();
+    const firstDone = await first;
+    expect(policyIds(firstDone.body)).toEqual([data]);
+    expect(firstDone.body.skipped).toEqual([
+      { policyId: webVault, reason: "running" },
+      { policyId: cache, reason: "disabled" },
+    ]);
+    expect(asked).toEqual(["data", "web-vault"]);
+    expect(running().sort()).toEqual([data, webVault].sort());
+
+    // Both done. Back up now waits on the node for data while the scheduler starts web-vault, due now.
+    for (const run of [...firstDone.body.runs, ...second.body.runs]) backupResult(node.id, run.id, true, keyFor(run.id, ".tar.gz"));
+    const now = new Date();
+    panel.deps.db
+      .update(backupPolicies)
+      .set({ nextRunAt: new Date(now.getTime() + 3600_000) })
+      .where(eq(backupPolicies.id, data))
+      .run();
+    panel.deps.db
+      .update(backupPolicies)
+      .set({ nextRunAt: new Date(now.getTime() - 1000) })
+      .where(eq(backupPolicies.id, webVault))
+      .run();
+    release = hold();
+    const manual = callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    await reached(3);
+    expect(await runDueBackups(panel.deps, now)).toBe(1);
+    release();
+    const manualDone = await manual;
+    expect(policyIds(manualDone.body)).toEqual([data]);
+    expect(manualDone.body.skipped).toContainEqual({ policyId: webVault, reason: "running" });
+    expect(asked).toEqual(["data", "web-vault", "data", "web-vault"]);
+    expect(running().sort()).toEqual([data, webVault].sort());
+    agent.disconnect();
+  });
+
+  test("a schedule refused before its run is stored is named with why, not dropped", async () => {
+    const { node, app, data, webVault, cache } = await volumeSchedules();
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, [], [signed]);
+    // web-vault's volume became a file mount after its schedule was made: checkTarget refuses it before any run row.
+    const volumeId = panel.deps.db.select().from(backupPolicies).where(eq(backupPolicies.id, webVault)).get()?.volumeId as string;
+    panel.deps.db.update(volumes).set({ kind: "file" }).where(eq(volumes.id, volumeId)).run();
+
+    const res = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.runs.map((r: { policyId: string; status: string }) => [r.policyId, r.status])).toEqual([[data, "running"]]);
+    expect(res.body.skipped).toEqual([
+      { policyId: webVault, reason: "error", error: "That volume does not belong to this service." },
+      { policyId: cache, reason: "disabled" },
+    ]);
+    expect(panel.deps.db.select().from(backupRuns).where(eq(backupRuns.policyId, webVault)).all()).toEqual([]);
+    const audited = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, backupOps.runAll.id)).get();
+    expect(audited?.input).toMatchObject({ skipped: res.body.skipped });
+
+    // When it is the only one on, nothing starts: its error, as a single Back up now gets it.
+    await callOp(panel, backupOps.updatePolicy, { serviceId: app.id, policyId: data, enabled: false }, { cookie });
+    const alone = await callOp(panel, backupOps.runAll, { serviceId: app.id }, { cookie });
+    expect(alone.status).toBe(400);
+    expect(alone.body.error.message).toBe("That volume does not belong to this service.");
+    agent.disconnect();
+  });
+
   test("needs backups.run on the service", async () => {
     const { app } = await volumeSchedules();
     const member = await createUser(panel, "member");
@@ -865,6 +980,82 @@ describe("download links", () => {
     expect(allOps.find((op) => op.id === backupOps.runAll.id)?.modelApproval).toBeUndefined();
     // The assistant asks for every change.
     expect(buildAiTools(allOps).find((tool) => tool.opId === backupOps.downloadUrl.id)?.needsApproval).toBe(true);
+    agent.disconnect();
+  });
+
+  test("a model's link needs databases.credentials of whoever asked, not only of the person who approves it", async () => {
+    const { dbId, agent, runId } = await databaseBackup();
+    const pendingApprovals = () => panel.deps.db.select().from(approvals).where(eq(approvals.opId, backupOps.downloadUrl.id)).all();
+    const tool = async (token: string) => {
+      const principal = authenticate(panel.deps.db, { bearerToken: token });
+      if (principal.type !== "apiKey") throw new Error("not a key");
+      const args = { serviceId: dbId, runId };
+      return callTool(panel.deps, { name: "backups_downloadUrl", args, bearerToken: token, principal, ip: null, userAgent: null });
+    };
+
+    // An MCP token limited to backups: refused at once, nothing waits for a person to approve it.
+    const narrowed = createApiKey(panel, ownerId, { kind: "mcp", actions: ["backups.*"] });
+    const viaHttp = await callOp(panel, backupOps.downloadUrl, { serviceId: dbId, runId }, { bearer: narrowed });
+    expect(viaHttp.status).toBe(403);
+    expect(viaHttp.body.error).toMatchObject({ code: "FORBIDDEN", details: { action: "databases.credentials" } });
+    const viaMcp = await tool(narrowed);
+    expect(viaMcp?.isError).toBe(true);
+    expect(viaMcp?.content[0]?.text).toStartWith("FORBIDDEN: A database backup holds the database's logins");
+    expect(pendingApprovals()).toHaveLength(0);
+
+    // A member's token asks while the member holds databases.credentials, and loses it before the approval:
+    // approving refuses, as the owner who approves could have the link but the requester no longer may.
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", dbId, ["backups.restore", "databases.credentials"]);
+    const asked = await tool(createApiKey(panel, member.user.id, { kind: "mcp" }));
+    expect(asked?.content[0]?.text).toContain("needs a person's approval");
+    const [approval] = pendingApprovals();
+    panel.deps.db.delete(grants).where(eq(grants.userId, member.user.id)).run();
+    grant(panel, member.user.id, "service", dbId, ["backups.restore"]);
+    const approved = await callOp(panel, approvalOps.approve, { approvalId: approval?.id as string }, { cookie });
+    expect(approved.status).toBe(403);
+    expect(approved.body.error.message).toContain("The requester may not do this: A database backup holds the database's logins");
+    const after = panel.deps.db
+      .select()
+      .from(approvals)
+      .where(eq(approvals.id, approval?.id as string))
+      .get();
+    expect(after).toMatchObject({ status: "pending", resultPreview: null });
+    expect(
+      panel.deps.db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.opId, backupOps.downloadUrl.id), eq(auditLog.outcome, "ok")))
+        .all(),
+    ).toHaveLength(0);
+
+    // The assistant, for a member with backups.restore only: the call fails, nothing is queued.
+    const model = scriptedModel();
+    setModelProvider(model.provider);
+    try {
+      const updated = await callOp(
+        panel,
+        aiOps.updateSettings,
+        { enabled: true, anthropicApiKey: "sk-ant-test-0123456789abcd", allowMembers: true },
+        { cookie },
+      );
+      expect(updated.status).toBe(200);
+      model.script = [
+        [{ type: "tool_use", id: "tu_dl", name: "backups_downloadUrl", input: { serviceId: dbId, runId } }],
+        [{ type: "text", text: "I cannot." }],
+      ];
+      const sent = await callOp(panel, aiOps.send, { message: "download the latest backup" }, { cookie: member.cookie });
+      expect(sent.status).toBe(200);
+      await settled(panel, sent.body.conversationId);
+      const reply = (await callOp(panel, aiOps.conversation, { conversationId: sent.body.conversationId }, { cookie: member.cookie })).body
+        .messages[1];
+      expect(reply.parts[0]).toMatchObject({ type: "tool_call", opId: backupOps.downloadUrl.id, status: "error", approvalId: null });
+      expect(reply.parts[0].resultPreview).toStartWith("FORBIDDEN: A database backup holds the database's logins");
+      // Still only the MCP request above.
+      expect(pendingApprovals()).toHaveLength(1);
+    } finally {
+      setModelProvider(null);
+    }
     agent.disconnect();
   });
 

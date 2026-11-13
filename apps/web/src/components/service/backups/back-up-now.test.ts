@@ -73,4 +73,21 @@ test("the toast counts the backups it started and says why nothing started", () 
     tone: "warning",
     text: "Started 1 backup. 1 could not start: The node is offline.",
   });
+  // One the panel refused before storing a run (its volume gone) counts too; before, the toast left it out.
+  const refused = { policyId: "b000000000000002", reason: "error" as const, error: "That volume does not belong to this service." };
+  expect(runAllToast({ runs: [run()], skipped: [refused] })).toEqual({
+    tone: "warning",
+    text: "Started 1 backup. 1 could not start: That volume does not belong to this service.",
+  });
+  expect(
+    runAllToast({
+      runs: [run(), run({ id: "r000000000000002", status: "failed", error: "The node is offline." })],
+      skipped: [refused, { policyId: "b000000000000003", reason: "running" }],
+    }),
+  ).toEqual({ tone: "warning", text: "Started 1 backup. 1 was already running. 2 could not start: The node is offline." });
+  // Nothing started and one refused: no "Started 0".
+  expect(runAllToast({ runs: [], skipped: [refused, { policyId: "b000000000000003", reason: "disabled" }] })).toEqual({
+    tone: "warning",
+    text: "1 could not start: That volume does not belong to this service.",
+  });
 });

@@ -277,20 +277,27 @@ export const runNow = defineOp({
   audit: true,
 });
 
-/** Why backups.runAll left a schedule out. */
-export const RunAllSkip = Type.Union([Type.Literal("disabled"), Type.Literal("running")]);
+/** Why backups.runAll left a schedule out: off, a backup of it still running, or refused before its run was stored (error says why). */
+export const RunAllSkip = Type.Union([Type.Literal("disabled"), Type.Literal("running"), Type.Literal("error")]);
 
 export const runAll = defineOp({
   id: "backups.runAll",
   kind: "mutation",
   summary: "Back up every schedule now",
   description:
-    "Starts a backup of every enabled schedule of a service at once (its database and each scheduled volume), each to its own destination and counted toward its own keepLast, as when it runs on time. Disabled schedules are skipped, and so is a schedule with a backup still running (never started twice); skipped says which and why, and runs is empty when every schedule was skipped. A service with no schedule is refused (BAD_REQUEST, reason noSchedules): start a one-off with backups.runNow. When no backup could start (the node offline, an agent too old) it fails as backups.runNow does; when only some could, runs also lists those that failed to start, with their error. backups.runNow with a policyId starts a single schedule.",
+    "Starts a backup of every enabled schedule of a service at once (its database and each scheduled volume), each to its own destination and counted toward its own keepLast, as when it runs on time. Disabled schedules are skipped, and so is a schedule with a backup still running (never started twice, also when two calls or the scheduler overlap); skipped says which and why, and runs is empty when every schedule was skipped. A service with no schedule is refused (BAD_REQUEST, reason noSchedules): start a one-off with backups.runNow. When no backup could start (the node offline, an agent too old, a schedule's volume gone) it fails as backups.runNow does; when only some could, runs also lists those that failed to start with their error, and skipped (reason error, with error) those refused before a run was recorded. backups.runNow with a policyId starts a single schedule.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     /** The runs it started, in the schedules' order: running, or failed when the node could not start one. */
     runs: Type.Array(Run),
-    skipped: Type.Array(Type.Object({ policyId: Id, reason: RunAllSkip })),
+    skipped: Type.Array(
+      Type.Object({
+        policyId: Id,
+        reason: RunAllSkip,
+        /** Why it could not start, with reason error only. */
+        error: Type.Optional(Type.String()),
+      }),
+    ),
   }),
   permission: serviceScope("backups.run"),
   mcp: true,

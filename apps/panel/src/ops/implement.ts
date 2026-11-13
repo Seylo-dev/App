@@ -5,6 +5,7 @@
 import { type AnyOpContract, OpError, type OpInput, type OpOutput } from "@seylo/ops";
 import type { Access } from "../auth/access";
 import type { Principal, PrincipalUser } from "../auth/principal";
+import type { PanelDb } from "../db/client";
 import type { Deps } from "../deps";
 
 /** Response side effects that only make sense over HTTP (the browser session). */
@@ -65,10 +66,24 @@ export interface OpContext extends Deps {
 export interface OpHandler<C extends AnyOpContract = AnyOpContract> {
   contract: C;
   run(input: OpInput<C>, ctx: OpContext): Promise<OpOutput<C>> | OpOutput<C>;
+  /**
+   * A permission check beyond op.permission that needs the resource (a
+   * database service's logins, say); throws OpError (FORBIDDEN). The
+   * pipeline runs it for every caller right after op.permission, before a
+   * model's call waits for approval, and the approvals module runs it for
+   * the requester when a call is queued and again when it is approved
+   * (OpRunner.authorize): an approver who may do more never lends that to
+   * the requester. Set with implement()'s options.
+   */
+  guard?(input: OpInput<C>, check: { db: PanelDb; access: Access }): void;
 }
 
-export function implement<C extends AnyOpContract>(contract: C, run: OpHandler<C>["run"]): OpHandler<C> {
-  return { contract, run };
+export function implement<C extends AnyOpContract>(
+  contract: C,
+  run: OpHandler<C>["run"],
+  options: { guard?: OpHandler<C>["guard"] } = {},
+): OpHandler<C> {
+  return options.guard ? { contract, run, guard: options.guard } : { contract, run };
 }
 
 /**

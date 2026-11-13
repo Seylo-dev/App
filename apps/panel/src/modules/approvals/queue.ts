@@ -1,12 +1,13 @@
 // The approval queue: a model (MCP client or the AI assistant) asked to run
 // an op a person must approve first. The exact input is sealed; a redacted
 // copy is shown. Approving checks that both the approver and the requester
-// may run the op, then replays it through the normal pipeline with
-// approvalId set (the only way a destructive op runs for a model).
+// may run the op (its permission and its handler's guard), then replays it
+// through the normal pipeline with approvalId set (the only way a
+// destructive op runs for a model).
 
 import { type AnyOpContract, actionAllowed, allOps, OpError, redact } from "@seylo/ops";
 import { and, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
-import { createAccess, isNarrowedKey, type Target } from "../../auth/access";
+import { isNarrowedKey, type Target } from "../../auth/access";
 import { avatarField } from "../../auth/avatar";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
@@ -246,12 +247,16 @@ export async function approve(
   if (!op) throw new OpError("CONFLICT", "This action no longer exists in this panel version.");
   const input = parseInput(op.input, openInput(deps, row), false);
 
-  // The approver must be allowed to do it themselves, and so must the requester still.
-  createAccess(deps.db, approver).require(op.permission, op.kind, input);
+  // The approver must be allowed to do it themselves, and so must the
+  // requester still: the op's permission and its handler's guard (a
+  // database backup's link needs databases.credentials), as the pipeline
+  // checks them. The call then runs as the approver, so a check left to the
+  // handler alone would pass on the approver's rights.
+  deps.ops.authorize(op, approver, input);
   const requester = requesterPrincipal(deps.db, row);
   if (!requester) throw new OpError("CONFLICT", "The person or token that asked for this can no longer act. Deny it instead.");
   try {
-    createAccess(deps.db, requester).require(op.permission, op.kind, input);
+    deps.ops.authorize(op, requester, input);
   } catch (error) {
     if (error instanceof OpError) throw new OpError("FORBIDDEN", `The requester may not do this: ${error.message}`);
     throw error;

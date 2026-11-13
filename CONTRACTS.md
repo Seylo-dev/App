@@ -1618,6 +1618,14 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   (403) unless the call carries
   `approvalId`, which only the approvals module sets when it replays a call
   a person approved (the approvals module checks that the approval matches the op and input).
+  An op's handler may carry a guard (`implement(op, run, { guard })`, a
+  check beyond `op.permission` that needs the resource, such as
+  `backups.downloadUrl`'s `databases.credentials` on a database): the
+  pipeline runs it for every caller right after the permission check,
+  before this approval gate, and `OpRunner.authorize` (permission plus
+  guard) is what the MCP tool queue, the assistant's queue and
+  `approve()` (approver and requester) check, since an approved call
+  runs as the approver.
   The one exception: `mcp` tokens (on any transport) while the MCP setting
   "Ask before destructive actions" is off (`mcp.update`
   `askBeforeDestructive: false`, settings key `mcpAskBeforeDestructive`,
@@ -4948,10 +4956,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   order; disabled schedules and schedules with a backup run still
   `running` are skipped (`skipped`, reason `disabled` or `running`, so a
   schedule never runs twice at once; one stuck `running` waits for the
-  12-hour sweep); no schedule at all is BAD_REQUEST `noSchedules`. When
-  no backup could start it throws the first start error, as `runNow`
-  does, after recording each failed run; when some did, `runs` holds the
-  failed ones too. `backups.runNow` with a `policyId` still starts that
+  12-hour sweep); no schedule at all is BAD_REQUEST `noSchedules`. The
+  running check is made per schedule right before its `startBackup`,
+  whose run insert follows with no await between, so a second `runAll`
+  (or `runNow`, or the scheduler) that started a schedule while this one
+  waited on the node is seen. When no backup could start it throws the
+  first start error, as `runNow` does, after recording each failed run;
+  when some did, `runs` holds the failed ones too, and a schedule refused
+  before its run was stored (`checkTarget`, a missing destination, no
+  node) is in `skipped` with reason `error` and `error` (the OpError's
+  message; an unexpected error is logged and named generically). The
+  toast counts both as "could not start". `backups.runNow` with a `policyId` still starts that
   one schedule (enabled or not). The Backups tab's header Back up now
   and the database Connection tab's both call `runAll`
   (`web/.../backups/back-up-now.ts`; before 0.2.15 they ran only the
@@ -4972,7 +4987,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `ownObjectKey` and whose destination still exists (else BAD_REQUEST, or
   CONFLICT `noDestination`). It needs `backups.restore`, and on a
   database service `databases.credentials` as well (FORBIDDEN, details
-  `action`), like a clone or export of a database's data; it is audited
+  `action`), like a clone or export of a database's data. That second
+  check is the handler's guard (`downloadAllowed`), so the pipeline makes
+  it for every caller before a model's call waits for approval, and the
+  approvals module makes it for the requester when it queues the call
+  and again on approve (an approved call runs as the approver, so a
+  check in the handler alone would pass on the approver's rights). It is
+  audited
   with `fileName` and `destinationId`, refusals included. Its `url` is
   not `sensitive`: a model's call waits for a person's approval and then
   gets the link (the approval's result keeps it, dead after 300 s);
