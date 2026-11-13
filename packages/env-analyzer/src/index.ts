@@ -1,5 +1,6 @@
 // @seylo/env-analyzer: .env parsing with source ranges, ${{service.VAR}}
-// references, resolution and diagnostics. Pure functions with no
+// references (${{service.LIST[n]}} for one item of a list variable such as
+// DOMAINS), resolution and diagnostics. Pure functions with no
 // dependencies, so the web editor, the panel and the MCP server run the
 // same code and agree on every underline.
 //
@@ -7,7 +8,17 @@
 //   const { values } = resolveEnv(parsed, context);
 
 export { analyzeEnv, analyzeParsed, pickPublicVariable } from "./analyze";
-export { appVariables, type BuiltinVariable, builtinVariablesFor, clickhouseVariables, databaseVariables } from "./builtins";
+export {
+  appVariables,
+  type BuiltinVariable,
+  builtinVariablesFor,
+  clickhouseVariables,
+  databaseVariables,
+  listItemName,
+  listItems,
+  listNames,
+  referenceValue,
+} from "./builtins";
 export { type EnvEdit, setEnvVariable } from "./edit";
 export { browserPrefixes, isBrowserVariable } from "./hardcoded";
 export { type HostMention, hostMentions } from "./hosts";

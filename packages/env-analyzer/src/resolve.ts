@@ -2,6 +2,7 @@
 // desired state for an agent, for hovers in the editor, and for the
 // References list.
 
+import { listItems, referenceValue } from "./builtins";
 import { missingNodes } from "./nodes";
 import { formatReference, substituteReferences } from "./references";
 import type { AnalyzeContext, EnvReference, ParsedEnv, ReferenceTarget, ReferenceVariable } from "./types";
@@ -56,7 +57,9 @@ export function resolveEnv(parsed: ParsedEnv, context: AnalyzeContext): Resolved
       values[entry.key] = entry.value;
       continue;
     }
-    const result = substituteReferences(entry.value, (target, variable) => findVariable(context, target, variable)?.variable.value ?? null);
+    const result = substituteReferences(entry.value, (target, variable, index) =>
+      referenceValue(findVariable(context, target, variable)?.variable, index),
+    );
     values[entry.key] = result.value;
     for (const missing of result.unresolved) unresolved.push({ key: entry.key, ...missing });
   }
@@ -67,6 +70,12 @@ export interface ReferenceHover {
   reference: EnvReference;
   target: ReferenceTarget | null;
   variable: ReferenceVariable | null;
+  /**
+   * What the reference becomes: the variable's value, or for
+   * ${{api.DOMAINS[1]}} that item ("" past the end). Null when unknown,
+   * hidden from the caller, or an index on a variable that is no list.
+   */
+  value: string | null;
   /** False when the variable is internal and the target misses one of this service's nodes. */
   reachable: boolean;
 }
@@ -74,18 +83,22 @@ export interface ReferenceHover {
 /** What a hover over a reference shows. */
 export function describeReference(reference: EnvReference, context: AnalyzeContext): ReferenceHover {
   const found = findVariable(context, reference.target, reference.variable);
-  if (!found) return { reference, target: null, variable: null, reachable: false };
+  if (!found) return { reference, target: null, variable: null, value: null, reachable: false };
   const reachable = found.variable.scope !== "internal" || missingNodes(context.self.nodes, found.target.nodes).length === 0;
-  return { reference, target: found.target, variable: found.variable, reachable };
+  return { reference, target: found.target, variable: found.variable, value: referenceValue(found.variable, reference.index), reachable };
 }
 
 export interface ReferenceCompletion {
-  /** "db.EXPOSED_URL" */
+  /** "db.EXPOSED_URL", "api.DOMAINS[1]" */
   label: string;
   /** "${{db.EXPOSED_URL}}" */
   insertText: string;
   target: ReferenceTarget;
   variable: ReferenceVariable;
+  /** The n of an item of a list ("api.DOMAINS[1]"); left out for the variable itself. */
+  index?: number;
+  /** What it becomes: the variable's value, or the item's. */
+  value: string | null;
   reachable: boolean;
 }
 
@@ -93,6 +106,8 @@ export interface ReferenceCompletion {
  * Every reference the service could insert, reachable ones first. The
  * References button lists these; internal variables of services on other
  * nodes are included but marked unreachable so the UI can grey them out.
+ * A list with two or more items (DOMAINS of a service with several
+ * domains) is followed by each item, LIST[0] to LIST[n-1].
  */
 export function referenceCompletions(context: AnalyzeContext): ReferenceCompletion[] {
   const out: ReferenceCompletion[] = [];
@@ -100,13 +115,28 @@ export function referenceCompletions(context: AnalyzeContext): ReferenceCompleti
   for (const target of own ? [own, ...context.targets] : context.targets) {
     const sameNodes = missingNodes(context.self.nodes, target.nodes).length === 0;
     for (const variable of target.variables) {
+      const reachable = variable.scope !== "internal" || sameNodes;
       out.push({
         label: `${target.name}.${variable.name}`,
         insertText: formatReference(target.name, variable.name),
         target,
         variable,
-        reachable: variable.scope !== "internal" || sameNodes,
+        value: variable.value,
+        reachable,
       });
+      const items = variable.list && variable.value !== null ? listItems(variable.value) : [];
+      if (items.length < 2) continue;
+      items.forEach((item, index) =>
+        out.push({
+          label: `${target.name}.${variable.name}[${index}]`,
+          insertText: formatReference(target.name, variable.name, index),
+          target,
+          variable,
+          index,
+          value: item,
+          reachable,
+        }),
+      );
     }
   }
   return out.sort((a, b) => Number(b.reachable) - Number(a.reachable));

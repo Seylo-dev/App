@@ -7,14 +7,16 @@
 // literal.ts warnings for references the app gets as text ('${{api.URL}}'
 // in single quotes, api.URL without ${{ }}).
 
+import { listItemName, listItems } from "./builtins";
 import { checkHardcoded } from "./hardcoded";
 import { hostMentions } from "./hosts";
 import { checkBareReferences, checkSingleQuoted } from "./literal";
 import { missingNodes } from "./nodes";
 import { parseEnv } from "./parse";
 import { formatReference, sharedTarget } from "./references";
+import { selfTarget } from "./resolve";
 import { LineIndex } from "./source";
-import { suggest } from "./suggest";
+import { closestNames, suggest } from "./suggest";
 import type {
   AnalyzeContext,
   AnalyzeResult,
@@ -25,6 +27,7 @@ import type {
   ParsedEnv,
   QuickFix,
   ReferenceTarget,
+  ReferenceVariable,
   SourceRange,
 } from "./types";
 
@@ -82,8 +85,10 @@ function checkReference(
 ): Diagnostic[] {
   const params = { target: reference.target, variable: reference.variable, key: entry.key };
   if (reference.target.toLowerCase() === context.self.name.toLowerCase() && reference.target !== sharedTarget) {
-    // Its own built-in values (DOMAIN, URL, ...) depend on none of its variables: fine.
-    if (context.self.builtins?.some((v) => v.name === reference.variable)) return [];
+    // Its own built-in values (DOMAIN, URL, ...) depend on none of its variables: fine, an index aside.
+    const own = selfTarget(context);
+    const builtin = own?.variables.find((v) => v.name === reference.variable);
+    if (own && builtin) return checkIndex(entry, reference, own, builtin) ?? [];
     const builtins = (context.self.builtins ?? []).map((v) => v.name);
     return [
       diag(
@@ -108,7 +113,8 @@ function checkReference(
   const variable = target.variables.find((v) => v.name === reference.variable);
   if (!variable) {
     const what = target.kind === "shared" ? "the shared variables" : target.name;
-    const names = target.variables.map((v) => v.name);
+    // With an index only a list would do: DOMAINZ[1] -> DOMAINS[1], never DOMAIN[1].
+    const names = target.variables.filter((v) => reference.index === undefined || v.list).map((v) => v.name);
     return [
       diag(
         "unknown-variable",
@@ -121,6 +127,9 @@ function checkReference(
       ),
     ];
   }
+
+  const indexed = checkIndex(entry, reference, target, variable);
+  if (indexed?.some((d) => d.severity === "error")) return indexed;
 
   const cycle = findCycle(context, targets, selfDeps, { target: target.name, variable: variable.name }, entry.key);
   if (cycle) {
@@ -142,12 +151,82 @@ function checkReference(
     const missing = missingNodes(context.self.nodes, target.nodes);
     if (missing.length > 0) out.push(crossNodeDiagnostic("reference", target, missing, context, reference.range, reference, entry));
   }
-  if (variable.value === "" && out.length === 0) {
+  // An item past the end says how many there are instead (an empty list has none).
+  if (indexed) out.push(...indexed);
+  else if (variable.value === "" && out.length === 0) {
     out.push(
       diag("empty-reference", "warning", `${target.name}.${variable.name} has no value yet`, variable.description, params, reference.range),
     );
   }
   return out;
+}
+
+/**
+ * The index of VARIABLE[n], or null without one: not-a-list on a variable
+ * that is no list (with "Did you mean" a list a typo away, DOMAIN[1] ->
+ * DOMAINS[1], and the reference without the index), index-out-of-range
+ * past the end of the list as it is now, [] when the item exists or the
+ * list's value is not known.
+ */
+function checkIndex(entry: EnvEntry, reference: EnvReference, target: ReferenceTarget, variable: ReferenceVariable): Diagnostic[] | null {
+  if (reference.index === undefined) return null;
+  const index = reference.index;
+  const at = String(index);
+  const range = indexedRange(reference);
+  const params = { target: target.name, variable: variable.name, key: entry.key, index: at };
+  if (!variable.list) {
+    const lists = target.variables.filter((v) => v.list).map((v) => v.name);
+    const fixes: QuickFix[] = closestNames(variable.name, lists).map((name) => {
+      const text = formatReference(reference.target, name, index);
+      return { kind: "edit", title: `Use ${text}`, edits: [{ range: reference.range, text }] };
+    });
+    const plain = formatReference(reference.target, variable.name);
+    fixes.push({ kind: "edit", title: `Use ${plain}`, edits: [{ range: reference.range, text: plain }] });
+    const listed = lists.length > 0 ? ` ${target.name} has ${lists.join(", ")}.` : "";
+    return [
+      diag(
+        "not-a-list",
+        "error",
+        `${variable.name} is not a list, so it takes no [${at}]`,
+        `Only list variables such as DOMAINS take an index.${listed} Write ${plain} for the whole value.`,
+        { ...params, lists: lists.join(", "), reference: plain },
+        range,
+        fixes,
+      ),
+    ];
+  }
+  if (variable.value === null) return [];
+  const items = listItems(variable.value);
+  if (index < items.length) return [];
+  const noun = listItemName(variable.name);
+  const has =
+    items.length === 0
+      ? `${target.name} has no ${noun}s yet`
+      : `${target.name} has ${items.length} ${noun}${items.length === 1 ? "" : "s"}: ${indexNames(variable.name, items.length)}`;
+  return [
+    diag(
+      "index-out-of-range",
+      "warning",
+      has,
+      `${variable.name}[${at}] is empty until ${target.name} has ${index + 1} ${noun}${index === 0 ? "" : "s"}. Indexes start at 0: ${variable.name}[0] is the first.`,
+      { ...params, count: String(items.length), item: noun, indexes: items.length > 0 ? indexNames(variable.name, items.length) : "" },
+      range,
+    ),
+  ];
+}
+
+/** "DOMAINS[0]", "DOMAINS[0] and DOMAINS[1]", "DOMAINS[0] to DOMAINS[2]". */
+function indexNames(name: string, count: number): string {
+  if (count === 1) return `${name}[0]`;
+  if (count === 2) return `${name}[0] and ${name}[1]`;
+  return `${name}[0] to ${name}[${count - 1}]`;
+}
+
+/** From the variable's name to the end of its [n]: what an index problem underlines. */
+function indexedRange(reference: EnvReference): SourceRange {
+  const from = reference.variableRange;
+  const to = reference.indexRange ?? from;
+  return { ...from, end: to.end, endLine: to.endLine, endColumn: to.endColumn };
 }
 
 /**

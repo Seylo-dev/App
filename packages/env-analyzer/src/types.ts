@@ -20,17 +20,22 @@ export interface SourceRange {
 
 export type QuoteStyle = "none" | "single" | "double" | "backtick";
 
-/** A ${{target.VARIABLE}} reference inside a value. */
+/** A ${{target.VARIABLE}} reference inside a value, or ${{target.VARIABLE[n]}} for one item of a list. */
 export interface EnvReference {
-  /** Exactly as written, for example "${{ db.URL }}". */
+  /** Exactly as written, for example "${{ db.URL }}" or "${{api.DOMAINS[1]}}". */
   raw: string;
   /** Service name, or "project" for the project's shared variables. */
   target: string;
+  /** The variable's name, without an index: "DOMAINS" for ${{api.DOMAINS[1]}}. */
   variable: string;
   /** The whole ${{...}}. */
   range: SourceRange;
   targetRange: SourceRange;
   variableRange: SourceRange;
+  /** The n of VARIABLE[n], 0-based: item n of a list variable (ReferenceVariable.list). Left out without [n]. */
+  index?: number;
+  /** The [n], brackets included. Left out without [n]. */
+  indexRange?: SourceRange;
 }
 
 export interface EnvEntry {
@@ -87,6 +92,13 @@ export type ContextCode =
   | "service-not-exposed"
   /** The referenced variable exists but has no value yet (for example no domain yet). */
   | "empty-reference"
+  /** Error: VARIABLE[n] on a variable that is no list (only list variables such as DOMAINS take an index). */
+  | "not-a-list"
+  /**
+   * Warning: VARIABLE[n] past the end of the list as it is now (api has 2
+   * domains, DOMAINS[2] asks for a third): it resolves to "" until there is one.
+   */
+  | "index-out-of-range"
   /** Following the reference leads back to this variable (or into a loop), so it can never resolve. */
   | "reference-cycle"
   /**
@@ -162,6 +174,12 @@ export interface ReferenceVariable {
   secret?: boolean;
   /** Short English hint, for example "public URL". */
   description: string;
+  /**
+   * A comma-separated list (DOMAINS): a reference may pick one item by its
+   * 0-based index, ${{api.DOMAINS[1]}}. Left out for every other variable,
+   * which takes no index.
+   */
+  list?: boolean;
   /**
    * References written in this variable's own value (user variables of a
    * target), for cycle detection. Built-in variables leave it out.

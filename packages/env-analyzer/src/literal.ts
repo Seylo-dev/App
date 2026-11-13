@@ -7,13 +7,13 @@
 // to models: message, detail, params and fixes name the key, the reference
 // or the token, never the rest of the value.
 
-import { builtinNames } from "./builtins";
+import { builtinNames, listNames } from "./builtins";
 import { escapeDouble, parseEnv } from "./parse";
 import { formatReference, scanReferences, sharedTarget } from "./references";
 import { selfTarget } from "./resolve";
 import type { LineIndex } from "./source";
 import { closestNames } from "./suggest";
-import type { AnalyzeContext, Diagnostic, EnvEntry, EnvReference, QuickFix, TextEdit } from "./types";
+import type { AnalyzeContext, Diagnostic, EnvEntry, EnvReference, QuickFix, ReferenceVariable, TextEdit } from "./types";
 
 /** single-quoted-reference: one warning per well-formed ${{target.VARIABLE}} inside a single-quoted value. */
 export function checkSingleQuoted(index: LineIndex, entry: EnvEntry): Diagnostic[] {
@@ -87,6 +87,8 @@ const rightDelimiter = /[\s"'`,;/:|?#&)>\]]/;
 const serviceNameShape = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 /** Stands in for text inside ${{ }}: neither part of a token nor a delimiter. */
 const masked = "\0";
+/** [n] right where a token's variable ends. */
+const indexAt = /\[(\d+)\]/y;
 
 /**
  * bare-reference: a name.VARIABLE token in an unquoted or double-quoted
@@ -96,6 +98,9 @@ const masked = "\0";
  * shaped like a service name (no wrap; a typo of a target that has the
  * variable gets "Did you mean" fixes). VARIABLE must be an exact variable
  * name in capitals, so example.com, file.txt, api.domain and 1.2 never match.
+ * An index right after it belongs to the token (api.DOMAINS[1]) when
+ * VARIABLE is a list (the target's, or a built-in list name for a name that
+ * is no target); on any other variable the token is left alone.
  */
 export function checkBareReferences(index: LineIndex, entry: EnvEntry, context: AnalyzeContext): Diagnostic[] {
   if (entry.quote !== "none" && entry.quote !== "double") return [];
@@ -118,8 +123,13 @@ export function checkBareReferences(index: LineIndex, entry: EnvEntry, context: 
     if (name === "" || !upperVariable.test(variable) || !/[A-Z]/.test(variable)) continue;
     const before = scan.charAt(at - 1);
     if (at > 0 && !leftDelimiter.test(before) && !(before === "/" && scan.charAt(at - 2) !== "/")) continue;
-    if (after < scan.length && !rightDelimiter.test(scan.charAt(after))) continue;
-    const diagnostic = bareReference(index, entry, context, start + at, `${name}.${variable}`, name, variable);
+    // An index is part of the token: api.DOMAINS[1]. Sticky, so nothing is copied per dot.
+    indexAt.lastIndex = after;
+    const bracket = indexAt.exec(scan);
+    const end = after + (bracket?.[0].length ?? 0);
+    if (end < scan.length && !rightDelimiter.test(scan.charAt(end))) continue;
+    const item = bracket ? Number(bracket[1]) : null;
+    const diagnostic = bareReference(index, entry, context, start + at, scan.slice(at, end), name, variable, item);
     if (diagnostic) out.push(diagnostic);
   }
   return out;
@@ -133,25 +143,31 @@ function bareReference(
   token: string,
   name: string,
   variable: string,
+  /** The n of token's [n] (api.DOMAINS[1]), null without one. */
+  item: number | null,
 ): Diagnostic | null {
   const own = selfTarget(context);
   const isSelf = name !== sharedTarget && name.toLowerCase() === context.self.name.toLowerCase();
   const target = isSelf ? own : (context.targets.find((t) => t.name.toLowerCase() === name.toLowerCase()) ?? null);
-  const known = target?.variables.some((v) => v.name === variable) ?? false;
+  // With an index only a list counts: wrapped, db.PASSWORD[1] would be no reference either.
+  const takes = (v: ReferenceVariable) => v.name === variable && (item === null || v.list === true);
+  const found = target?.variables.find((v) => v.name === variable);
+  if (found && !takes(found)) return null;
+  const known = !!found;
   if (!known) {
-    if (!builtinNames.has(variable)) return null;
+    if (!(item === null ? builtinNames : listNames).has(variable)) return null;
     if (!target && !isSelf && !(serviceNameShape.test(name) && /[a-z]/.test(name))) return null;
   }
 
   const range = index.range(from, from + token.length);
   const use = (reference: string): QuickFix => ({ kind: "edit", title: `Use ${reference}`, edits: [{ range, text: reference }] });
-  const wrapped = formatReference(name, variable);
-  const reference = known && target ? formatReference(target.name, variable) : "";
+  const wrapped = formatReference(name, variable, item);
+  const reference = known && target ? formatReference(target.name, variable, item) : "";
   // A typo of a target that has the variable: "Did you mean", like unknown-service.
   const candidates = !target && !isSelf ? [...(own ? [own] : []), ...context.targets] : [];
   const suggestions = closestNames(
     name,
-    candidates.filter((t) => t.variables.some((v) => v.name === variable)).map((t) => t.name),
+    candidates.filter((t) => t.variables.some(takes)).map((t) => t.name),
   );
   const reason = reference ? "reference" : target || isSelf ? "noVariable" : "unknownService";
 
@@ -172,7 +188,7 @@ function bareReference(
     detail,
     params: { key: entry.key, token, target: target?.name ?? name, variable, reference, wrapped, reason, suggestions: suggestions.join(", ") },
     range,
-    fixes: reference ? [use(reference)] : suggestions.map((s) => use(formatReference(s, variable))),
+    fixes: reference ? [use(reference)] : suggestions.map((s) => use(formatReference(s, variable, item))),
   };
 }
 
