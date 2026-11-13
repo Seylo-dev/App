@@ -24,8 +24,13 @@ test.describe("database timed expose", () => {
   test("an open expose shows how to connect, counts down, extends by an hour and closes", async ({ page }) => {
     let extended: Record<string, unknown> | null = null;
     let closed: Record<string, unknown> | null = null;
+    // 47 minutes left from now: the demo's own expiresAt counts from when the worker loaded it, which
+    // can be minutes before this test when other specs ran first in the same worker.
+    const open = { ...demoDbExpose, expiresAt: new Date(Date.now() + 47 * 60_000).toISOString() };
     await installDemo(page, {
       overrides: {
+        "exposures.get": (input) =>
+          input.serviceId === svc.db ? { ...exposuresOf(svc.db), timed: [open] } : exposuresOf(String(input.serviceId)),
         "exposures.extendTimed": (input) => {
           extended = input;
           return { ...demoDbExpose, expiresAt: new Date(Date.now() + Number(input.durationMinutes) * 60_000).toISOString() };
