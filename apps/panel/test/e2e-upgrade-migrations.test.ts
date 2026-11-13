@@ -7,11 +7,12 @@
 //
 // The update from 0.2.15: its panel.db has the migrations up to
 // 0020_build_progress_logged, and 0.2.16 adds 0021_project_dashboard_collapsed,
-// 0022_deployment_port_move, 0023_backup_contents and
-// 0024_exposure_allow_plain. The panel opens such a file the way it does at
-// start (openDatabases) and must apply all four, in order, keeping every
-// row. Drizzle's migrator skips a migration whose journal "when" is not
-// later than the last one it applied, so the four were cut on separate
+// 0022_deployment_port_move, 0023_backup_contents,
+// 0024_exposure_allow_plain and 0025_domain_origin_unknown_since. The panel
+// opens such a file the way it does at start (openDatabases) and must apply
+// all five, in order, keeping every row. Drizzle's migrator skips a
+// migration whose journal "when" is not later than the last one it applied,
+// so the ones cut on separate
 // branches and renumbered for 0.2.16 with times after 0020's: the test
 // would see a skipped one as a missing column.
 
@@ -54,7 +55,7 @@ test("check 38 expects as many migrations as the panel records, read from the jo
 type Journal = { entries: { idx: number; tag: string; when: number }[] };
 const journalOf = (folder: string) => JSON.parse(readFileSync(join(folder, "meta/_journal.json"), "utf8")) as Journal;
 
-test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", () => {
+test("a 0.2.15 panel.db updates through 0021-0025 at start and keeps its rows", () => {
   const migrations = loadConfig({}, join(import.meta.dir, "..")).migrationsDir;
   const journal = journalOf(join(migrations, "panel"));
   expect(journal.entries.map((e) => e.tag).slice(20)).toEqual([
@@ -63,6 +64,7 @@ test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", 
     "0022_deployment_port_move",
     "0023_backup_contents",
     "0024_exposure_allow_plain",
+    "0025_domain_origin_unknown_since",
   ]);
   const dir = mkdtempSync(join(tmpdir(), "seylo-upgrade-0215-"));
   try {
@@ -82,6 +84,7 @@ test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", 
       db.all<{ name: string }>(sql.raw(`select name from pragma_table_info('${table}')`)).map((c) => c.name);
     expect(columns(v0215.db, "project_prefs")).not.toContain("dashboard_collapsed");
     expect(columns(v0215.db, "deployments")).not.toContain("port_move");
+    expect(columns(v0215.db, "domains")).not.toContain("origin_unknown_since");
     expect(columns(v0215.db, "backup_runs")).not.toContain("contents");
     expect(columns(v0215.db, "port_exposures")).not.toContain("allow_plain");
     const at = 1_762_000_000_000;
@@ -98,6 +101,8 @@ test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", 
       `insert into backup_destinations (id, name, endpoint, bucket, access_key_id, secret_access_key_sealed, created_at, updated_at) values ('dst000000000001', 'acme-backups', 'https://r2.example.test', 'acme-backups', 'example-access-key', 'sealed:example', ${at}, ${at})`,
       `insert into backup_policies (id, service_id, destination_id, target, schedule, keep_last, stop_service, created_at, updated_at) values ('bpl000000000001', 'svc000000000002', 'dst000000000001', 'database', '0 3 * * *', 14, 0, ${at}, ${at})`,
       `insert into backup_runs (id, kind, target, policy_id, service_id, destination_id, status, object_key, size_bytes, started_at, finished_at) values ('brn000000000001', 'backup', 'database', 'bpl000000000001', 'svc000000000002', 'dst000000000001', 'succeeded', 'seylo/svc000000000002/bpl000000000001/20251101T030000Z-brn000000000001.dump', 18400000, ${at}, ${at + 12_000}), ('brn000000000002', 'restore', 'database', 'bpl000000000001', 'svc000000000002', 'dst000000000001', 'running', null, null, ${at + 100_000}, null)`,
+      // Behind Cloudflare: the apex reached the node, www has no origin (as the owner's did), shop's was unknown.
+      `insert into domains (id, service_id, host, target_port, dns_status, dns_checked_at, origin_status, origin_checked_at, cert_status, live_at, created_at, updated_at) values ('dom000000000001', 'svc000000000001', 'example.com', 3000, 'proxied', ${at}, 'node', ${at}, 'valid', ${at}, ${at}, ${at}), ('dom000000000002', 'svc000000000001', 'www.example.com', 3000, 'proxied', ${at + 1_000}, null, null, 'valid', ${at}, ${at}, ${at}), ('dom000000000003', 'svc000000000001', 'shop.example.com', 3000, 'proxied', ${at}, 'unknown', ${at}, 'valid', ${at}, ${at}, ${at})`,
     ])
       v0215.db.run(sql.raw(statement));
     const tables = [
@@ -111,6 +116,7 @@ test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", 
       "backup_destinations",
       "backup_policies",
       "backup_runs",
+      "domains",
     ];
     const dump = (db: typeof v0215.db, table: string) => db.all<Record<string, unknown>>(sql.raw(`select * from ${table} order by rowid`));
     const before = Object.fromEntries(tables.map((table) => [table, dump(v0215.db, table)]));
@@ -129,6 +135,8 @@ test("a 0.2.15 panel.db updates through 0021-0024 at start and keeps its rows", 
         backup_runs: () => ({ selection: null, contents: null, warnings: null }),
         // An exposure from before takes TLS clients only, as it did.
         port_exposures: () => ({ allow_plain: 0 }),
+        // No backfill: an origin unknown from before starts its run at the first re-check.
+        domains: () => ({ origin_unknown_since: null }),
       };
       for (const table of tables) {
         const want = (before[table] ?? []).map((row) => ({ ...row, ...(added[table]?.(row) ?? {}) }));

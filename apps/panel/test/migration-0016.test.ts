@@ -104,9 +104,10 @@ test("0016 and 0017 apply on a 0.2.9 panel.db: its rows stay, and exports and im
       .returning()
       .get();
     const released = new Date(1760000000000);
-    db.insert(schema.domains)
-      .values({ serviceId: service.id, host: "shop.example.com", targetPort: 80, dnsStatus: "ok", acmeReleasedAt: released })
-      .run();
+    // In SQL: the schema's domains has columns from after 0.2.9 (origin_unknown_since, 0025).
+    db.run(
+      sql`insert into domains (id, service_id, host, target_port, dns_status, acme_released_at, created_at, updated_at) values ('dom000000000001', ${service.id}, 'shop.example.com', 80, 'ok', ${released.getTime()}, ${released.getTime()}, ${released.getTime()})`,
+    );
 
     migrate(db, { migrationsFolder: join(migrations, "panel") });
     const [count] = db.all<{ n: number }>(sql`select count(*) as n from __drizzle_migrations`);
