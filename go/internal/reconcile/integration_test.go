@@ -354,7 +354,9 @@ func TestITListensOnAnotherPort(t *testing.T) {
 	e := newIT(t)
 	for _, tc := range []struct {
 		name, listen, want string
-		listening          []*agentv1.ListeningPort
+		// also: a second httpd started first (it goes to the background), on these addresses.
+		also      string
+		listening []*agentv1.ListeningPort
 	}{
 		{
 			name: "api", listen: "6000",
@@ -366,8 +368,18 @@ func TestITListensOnAnotherPort(t *testing.T) {
 			want:      "The app listens only on 127.0.0.1:6000; it must listen on 0.0.0.0 (all addresses), on port 80",
 			listening: []*agentv1.ListeningPort{{Port: 6000, LoopbackOnly: true}},
 		},
+		{
+			// 80 on 127.0.0.1 is the mistake, whatever else listens on all addresses (an inspector on 9229).
+			name: "inspector", listen: "9229", also: "127.0.0.1:80",
+			want:      "The app listens only on 127.0.0.1:80; it must listen on 0.0.0.0 (all addresses) for the health check and its domains to reach it.",
+			listening: []*agentv1.ListeningPort{{Port: 80, LoopbackOnly: true}, {Port: 9229}},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			also := ""
+			if tc.also != "" {
+				also = "httpd -p " + tc.also + " -h /www && "
+			}
 			id := e.id(tc.name)
 			s := &agentv1.ServiceSpec{
 				// A project (network) of its own each: the next container would get the address the last one had,
@@ -376,7 +388,7 @@ func TestITListensOnAnotherPort(t *testing.T) {
 				Kind:  agentv1.ServiceKind_SERVICE_KIND_APP,
 				Image: &agentv1.ImageRef{Reference: itImage},
 				Container: &agentv1.ContainerConfig{
-					Command:         []string{"sh", "-c", "mkdir -p /www && echo Server is running on port 6000 && exec httpd -f -p " + tc.listen + " -h /www"},
+					Command:         []string{"sh", "-c", "mkdir -p /www && " + also + "echo Server is running on port 6000 && exec httpd -f -p " + tc.listen + " -h /www"},
 					StopGracePeriod: durationpb.New(time.Second),
 				},
 				Ports:   []*agentv1.PortSpec{{ContainerPort: 80, Protocol: agentv1.PortProtocol_PORT_PROTOCOL_TCP}},

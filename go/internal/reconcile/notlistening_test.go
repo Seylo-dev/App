@@ -110,6 +110,16 @@ func TestDeployNotListeningHint(t *testing.T) {
 			want: refused + "The app listens only on 127.0.0.1:80; it must listen on 0.0.0.0 (all addresses) for the health check and its domains to reach it.",
 		},
 		{
+			// A Node inspector (9229) or a metrics port on all addresses
+			// is no port to switch to: 80 on 127.0.0.1 is the mistake.
+			name: "only on loopback on the checked port, another port on all addresses",
+			tcp:  procTCP("0100007F:0050", "00000000:2405"),
+			want: refused + "The app listens only on 127.0.0.1:80; it must listen on 0.0.0.0 (all addresses) for the health check and its domains to reach it.",
+			listening: &agentv1.NotListening{Port: 80, Read: true, Listening: []*agentv1.ListeningPort{
+				{Port: 80, LoopbackOnly: true}, {Port: 9221},
+			}},
+		},
+		{
 			name:      "it listens on nothing",
 			edit:      func(s *agentv1.ServiceSpec) { s.Routing = nil },
 			tcp:       procTCP(),

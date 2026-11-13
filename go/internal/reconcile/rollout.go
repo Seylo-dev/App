@@ -368,18 +368,24 @@ func notListeningHint(spec *agentv1.ServiceSpec, port uint32, read bool, ports [
 // listeningHint is the hint for a container that listens on other ports
 // than the one checked, or only on a loopback address; "" when it listens
 // on nothing (or, oddly, on the checked port itself).
+//
+// The checked port bound only to a loopback address is the mistake to name
+// whatever else the app listens on: another port on all addresses is then
+// a debugger's or a metrics port (9229, 9090), not the one to switch to.
 func listeningHint(port uint32, ports []health.ListenPort, member, routed bool) string {
 	var others []uint32
 	var loopback *health.ListenPort
 	for i, p := range ports {
 		switch {
-		case p.LoopbackOnly:
-			if loopback == nil || p.Port == port {
-				loopback = &ports[i]
-			}
+		case p.Port == port && p.LoopbackOnly:
+			return loopbackHint(p, port)
 		case p.Port == port:
 			// It listens there after all (it started just now): the general hint.
 			return ""
+		case p.LoopbackOnly:
+			if loopback == nil {
+				loopback = &ports[i]
+			}
 		default:
 			others = append(others, p.Port)
 		}
@@ -405,14 +411,20 @@ func listeningHint(port uint32, ports []health.ListenPort, member, routed bool) 
 	if loopback == nil {
 		return ""
 	}
-	addr := netip.AddrPortFrom(loopback.Loopback, uint16(loopback.Port)).String()
-	if !loopback.Loopback.IsValid() {
-		addr = fmt.Sprintf("127.0.0.1:%d", loopback.Port)
+	return loopbackHint(*loopback, port)
+}
+
+// loopbackHint is the hint for a port the app listens on only on a
+// loopback address (l), port being the one checked.
+func loopbackHint(l health.ListenPort, port uint32) string {
+	addr := netip.AddrPortFrom(l.Loopback, uint16(l.Port)).String()
+	if !l.Loopback.IsValid() {
+		addr = fmt.Sprintf("127.0.0.1:%d", l.Port)
 	}
-	if loopback.Port == port {
+	if l.Port == port {
 		return fmt.Sprintf("The app listens only on %s; it must listen on 0.0.0.0 (all addresses) for the health check and its domains to reach it.", addr)
 	}
-	return fmt.Sprintf("The app listens only on %s; it must listen on 0.0.0.0 (all addresses), on port %d (or the service's port must be %d).", addr, port, loopback.Port)
+	return fmt.Sprintf("The app listens only on %s; it must listen on 0.0.0.0 (all addresses), on port %d (or the service's port must be %d).", addr, port, l.Port)
 }
 
 // listeningOf reads what a new container whose default check (TCP on port)
