@@ -7,7 +7,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { toast } from "@seylo/ui/components/toast";
-import { IconArrowUpRight, IconServer2 } from "@tabler/icons-react";
+import { IconArrowUpRight, IconPlayerPlay, IconPlayerStop, IconRefresh, IconServer2 } from "@tabler/icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../i18n/t";
@@ -134,6 +134,7 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
     return (
       <>
         <Button onClick={() => stopBox.mutate({ serviceId: service.id })} disabled={stopBox.isPending}>
+          <IconPlayerStop size={15} stroke={1.9} aria-hidden="true" />
           {t("service.header.stop")}
         </Button>
         <Button variant="primary" onClick={() => openBox.mutate({ serviceId: service.id })} disabled={openBox.isPending}>
@@ -153,17 +154,20 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
         <>
           {!service.stopped && service.status !== "idle" && (
             <Button onClick={() => restart.mutate({ serviceId: service.id })} disabled={restart.isPending}>
+              <IconRefresh size={15} stroke={1.9} aria-hidden="true" className={restart.isPending ? "animate-spin" : undefined} />
               {t("service.header.restart")}
             </Button>
           )}
           {service.stopped ? (
             <Button onClick={() => start.mutate({ serviceId: service.id })} disabled={start.isPending}>
+              <IconPlayerPlay size={15} stroke={1.9} aria-hidden="true" />
               {t("service.header.start")}
             </Button>
           ) : (
             service.status !== "idle" &&
             !panel && (
               <Button onClick={() => setConfirmStop(true)} disabled={stop.isPending}>
+                <IconPlayerStop size={15} stroke={1.9} aria-hidden="true" />
                 {t("service.header.stop")}
               </Button>
             )
