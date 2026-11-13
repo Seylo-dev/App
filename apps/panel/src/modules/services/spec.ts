@@ -120,6 +120,19 @@ export function builtAppPort(
   return spec.ports.find((p) => p.protocol !== "udp")?.containerPort ?? fallback ?? defaultAppPort;
 }
 
+/**
+ * Ports with the first TCP port (the one the default health check dials)
+ * replaced by port, or port added first when there is none; another TCP
+ * entry of the same port goes (services.usePort).
+ */
+export function withFirstPort(ports: readonly Port[], port: number): Port[] {
+  const first = ports.findIndex((p) => p.protocol !== "udp");
+  const tcp: Port = { containerPort: port, protocol: "tcp" };
+  const out = first < 0 ? [tcp, ...ports] : ports.map((p, i) => (i === first ? tcp : p));
+  const keep = Math.max(first, 0);
+  return out.filter((p, i) => i === keep || p.protocol === "udp" || p.containerPort !== port);
+}
+
 /** What a deploy snapshots: the settings agents run until the next deploy. */
 export interface RunSettings {
   container: ContainerSettings;

@@ -21,7 +21,7 @@ import { implement } from "../../ops/implement";
 import { assertEngineRunsOn } from "../databases/capability";
 import { engineFor, finish, nextGeneration } from "../deployments/engine";
 import { appendLog } from "../deployments/logs";
-import { hasActiveDeploy } from "../deployments/queue";
+import { assertNoDeployForPlacement } from "../deployments/queue";
 import { initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
 import { assertNoActiveCopy } from "./copies";
 import { assertNode, dataVolumes } from "./insert";
@@ -47,7 +47,7 @@ export const move = implement(serviceOps.move, (input, ctx) => {
   assertNoActiveCopy(ctx.db, svc.id, { anySource: true });
   assertEngineRunsOn(ctx.db, ctx.agents, svc.id, input.toNodeId, nodeNames(ctx.db, [input.toNodeId]).get(input.toNodeId));
   if (!svc.liveDeploymentId) throw new OpError("CONFLICT", "Deploy the service before moving it.");
-  if (hasActiveDeploy(ctx, svc.id)) throw new OpError("CONFLICT", "Wait for the running deploy to finish.");
+  assertNoDeployForPlacement(ctx, svc.id);
   const live = ctx.db.select().from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get();
   if (!live?.imageRef) throw new OpError("CONFLICT", "The live version has no image to move.");
 

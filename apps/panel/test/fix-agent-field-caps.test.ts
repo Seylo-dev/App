@@ -5,9 +5,9 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { NodeFactsSchema } from "@seylo/proto";
+import { DeployProgressSchema, NodeFactsSchema } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { capFields, factsLimits, maxAgentVersionLength, statusLimits } from "../src/agent-hub/field-caps";
+import { capFields, factsLimits, maxAgentVersionLength, reportFieldLimits, statusLimits } from "../src/agent-hub/field-caps";
 import { nodes } from "../src/db/schema";
 import { toNode } from "../src/modules/nodes/view";
 import type { FakeAgent } from "./fake-agent";
@@ -145,4 +145,15 @@ test("NodeFacts from 0.2.1 (buildx, Tailscale) are cut too, the Serve URL and me
   const normal = create(NodeFactsSchema, { tailscale: { serve: { url: `https://${"a".repeat(253)}` } } });
   capFields(normal, factsLimits);
   expect(normal.tailscale?.serve?.url.length).toBe(261);
+});
+
+test("a failed deploy's last output (0.2.16) keeps its newest lines, like a crash report's", () => {
+  const progress = create(DeployProgressSchema, {
+    serviceId: "s",
+    lastOutput: Array.from({ length: 500 }, (_, i) => `line ${i} ${"x".repeat(i === 499 ? 5000 : 0)}`),
+  });
+  capFields(progress, reportFieldLimits);
+  expect(progress.lastOutput.length).toBe(reportFieldLimits.maxList);
+  expect(progress.lastOutput[0]).toBe("line 300 ");
+  expect(progress.lastOutput.at(-1)?.length).toBe(reportFieldLimits.maxListItem);
 });

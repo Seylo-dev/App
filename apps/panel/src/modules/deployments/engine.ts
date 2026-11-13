@@ -41,7 +41,9 @@ import {
   type DeployNodeResult,
   type DeployStep,
   deployments,
+  domains,
   nodes,
+  type PortMove,
   servicePlacements,
   services,
   sourceUploads,
@@ -51,11 +53,12 @@ import type { RefusedSpec } from "../../desired";
 import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
 import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-sha";
-import { dataVolumes } from "../services/insert";
+import { dataVolumes, writeSpec } from "../services/insert";
 import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService } from "../services/rows";
 import { assertImageAllowed } from "../services/source-guard";
-import { needsBuild, readSpec, runSettingsOf } from "../services/spec";
+import { needsBuild, readSpec, runSettingsOf, withFirstPort } from "../services/spec";
+import { reportedFailure } from "./failure";
 import { reportedHealth, reportedWaitMs } from "./image-health";
 import { appendLog, LineSplitter, maxLineLength } from "./logs";
 import { registryGcJobType } from "./registry-gc";
@@ -72,8 +75,14 @@ export const buildTimeoutMs = 90 * 60_000;
  * for at most the agent's 45-minute build timeout.
  */
 export const queuedBuildTimeoutMs = 4 * buildTimeoutMs;
-/** Extra time on top of the health timeout for pulling and switching. */
+/**
+ * Extra time on top of the health timeout for pulling and switching: a
+ * target node that reports no progress for the health timeout plus this
+ * fails the rollout (checkRollout's watchdog).
+ */
 const rolloutGraceMs = 5 * 60_000;
+/** A rollout fails this many watchdog periods after it started, however it progresses. */
+const rolloutStages = 3;
 /** Progress lines a build remembers as logged (builds.progress_logged); an agent sends about five per run. */
 const maxProgressLogged = 64;
 /** Longest run id kept in a progress key (an agent's is 16 hex digits). */
@@ -698,16 +707,42 @@ async function rollout(s: EngineState, d: DeploymentRow): Promise<void> {
   const results = Object.fromEntries(d.targetNodeIds.map((id) => [id, { status: "pending" as const, message: "", digest: null }]));
   const names = d.targetNodeIds.map((id) => nodeName(s, id));
   const steps = setStep(d.steps, "ship", "running", { nodeId: d.targetNodeIds[0] ?? null, detail: `Shipping to ${names.join(", ")}` });
+  let movedDomains = 0;
   const current = db.transaction((tx) => {
     tx.update(services).set({ targetDeploymentId: d.id, generation: d.generation, stopped: false }).where(eq(services.id, svc.id)).run();
+    // services.usePort: the domains go to the new port with the new containers, in the same desired state.
+    const move = d.portMove;
+    if (move && !move.applied && move.domainIds.length > 0) {
+      movedDomains = tx
+        .update(domains)
+        .set({ targetPort: move.toPort })
+        .where(and(eq(domains.serviceId, svc.id), inArray(domains.id, move.domainIds), eq(domains.targetPort, move.fromPort)))
+        .returning({ id: domains.id })
+        .all().length;
+    }
     return tx
       .update(deployments)
-      .set({ status: "deploying", phaseStartedAt: now, nodeResults: results, steps })
+      .set({
+        status: "deploying",
+        phaseStartedAt: now,
+        nodeResults: results,
+        steps,
+        ...(move && !move.applied ? { portMove: { ...move, applied: true } } : {}),
+      })
       .where(eq(deployments.id, d.id))
       .returning()
       .get();
   });
   log(s, current, "ship", `Rolling out generation ${d.generation} on ${names.join(", ")}.`);
+  if (movedDomains > 0 && d.portMove) {
+    log(
+      s,
+      current,
+      "ship",
+      `${movedDomains === 1 ? "Its domain moves" : `${movedDomains} domains move`} to port ${d.portMove.toPort} with it.`,
+    );
+    s.deps.live.publish(`service:${svc.id}`, { type: "invalidate", ops: ["domains.list", "exposures.get", "env.references"] });
+  }
   s.deps.agents.desired.markDirty({ serviceId: svc.id });
   publishDeploymentChange(s.deps, svc.id, d.id);
 
@@ -745,7 +780,8 @@ export function recordDeployProgress(s: Pick<EngineState, "deps">, nodeId: strin
   const results = { ...d.nodeResults };
   const name = nodeNameOf(s, nodeId);
   const reported = reportedHealth(progress);
-  if (Object.keys(reported).length > 0) results[nodeId] = { ...(results[nodeId] as DeployNodeResult), ...reported };
+  // Any word from the node is progress: the rollout watchdog (checkRollout) counts from the latest.
+  results[nodeId] = { ...(results[nodeId] as DeployNodeResult), ...reported, progressAt: Date.now() };
   switch (progress.stage) {
     case DeployStage.PULLING:
       steps = setStep(steps, "ship", "running", { detail: `Pulling on ${name}` });
@@ -768,21 +804,27 @@ export function recordDeployProgress(s: Pick<EngineState, "deps">, nodeId: strin
     case DeployStage.SUCCEEDED:
       results[nodeId] = { ...results[nodeId], status: "ok", message: progress.message, digest: results[nodeId]?.digest ?? null };
       break;
-    case DeployStage.FAILED:
+    case DeployStage.FAILED: {
+      // The reason alone; the new container's output (and, before 0.2.16, the end of the message) apart.
+      const { reason, extra } = reportedFailure(progress);
       results[nodeId] = {
         ...results[nodeId],
+        ...extra,
         status: "failed",
-        message: progress.message || `The new version did not start on ${name}.`,
+        message: reason || `The new version did not start on ${name}.`,
         digest: null,
       };
       break;
+    }
     default:
       break;
   }
   db.update(deployments).set({ steps, nodeResults: results }).where(eq(deployments.id, d.id)).run();
-  if (progress.message) {
+  // A failure is logged once, by finish() (checkRollout runs on the kick this returns), under the step
+  // that was running; its output never goes into the log, which holds Seylo's own lines.
+  if (progress.message && progress.stage !== DeployStage.FAILED) {
     const step = progress.stage === DeployStage.PULLING ? "ship" : progress.stage <= DeployStage.HEALTH_CHECKING ? "health" : "switch";
-    appendLog(s.deps, d.serviceId, d.id, step, [`${name}: ${progress.message}`], progress.stage === DeployStage.FAILED);
+    appendLog(s.deps, d.serviceId, d.id, step, [`${name}: ${progress.message}`]);
   }
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   return d.id;
@@ -858,23 +900,75 @@ async function checkRollout(s: EngineState, d: DeploymentRow): Promise<void> {
   const failed = entries.find(([, r]) => r.status === "failed");
   if (failed) {
     const [nodeId, r] = failed;
-    return void finish(s, d, "failed", `${nodeName(s, nodeId)}: ${r.message} The previous version stayed live.`, { alert: false });
+    return void finish(s, d, "failed", `${nodeName(s, nodeId)}: ${sentence(r.message)} The previous version stayed live.`, {
+      alert: false,
+    });
   }
   if (entries.length > 0 && entries.every(([, r]) => r.status === "ok")) return succeed(s, d);
+  const pending = entries.filter(([, r]) => r.status === "pending").map(([id]) => id);
+
+  // A node whose desired state no longer holds the service never rolls it out: fail now, not after the timeout.
+  const placed = new Set(
+    s.deps.db
+      .select({ nodeId: servicePlacements.nodeId })
+      .from(servicePlacements)
+      .where(eq(servicePlacements.serviceId, d.serviceId))
+      .all()
+      .map((p) => p.nodeId),
+  );
+  const gone = pending.filter((id) => !placed.has(id));
+  if (gone.length > 0) {
+    const now = [...placed].map((id) => nodeName(s, id));
+    return void finish(
+      s,
+      d,
+      "failed",
+      `${gone.map((id) => nodeName(s, id)).join(", ")} no longer ${gone.length === 1 ? "runs" : "run"} this service: its nodes changed after this deploy started, so nothing rolls it out there. ` +
+        (now.length > 0 ? `Deploy again to roll it out on ${now.join(", ")}.` : "Place it on a node and deploy again."),
+    );
+  }
 
   const settings = d.runSettings as { deploy?: { healthTimeoutSeconds?: number } } | null;
   // A node gated on the image's HEALTHCHECK may wait past the setting for its start period: wait as long as it says.
   const healthMs = Math.max((settings?.deploy?.healthTimeoutSeconds ?? 300) * 1000, reportedWaitMs(d.nodeResults));
   const started = (d.phaseStartedAt ?? d.createdAt).getTime();
-  if (Date.now() - started > healthMs + rolloutGraceMs) {
-    const waiting = entries.filter(([, r]) => r.status === "pending").map(([id]) => nodeName(s, id));
+  const now = Date.now();
+  // The watchdog: a node that said nothing about the rollout (no DeployProgress) for longer than the
+  // health timeout and a margin is not rolling it out. Each stage it reports restarts the count.
+  const quietMs = healthMs + rolloutGraceMs;
+  const quiet = pending.filter((id) => now - (results[id]?.progressAt ?? started) > quietMs);
+  if (quiet.length > 0) {
+    const offline = quiet.filter((id) => !s.deps.agents.isOnline(id));
     return void finish(
       s,
       d,
       "failed",
-      `${waiting.join(", ")} did not report the new version healthy within ${Math.round((healthMs + rolloutGraceMs) / 1000)}s. The previous version stayed live.`,
+      `No progress from ${quiet.map((id) => nodeName(s, id)).join(", ")} for ${minutesText(quietMs)}` +
+        (offline.length > 0 ? ` (${offline.map((id) => nodeName(s, id)).join(", ")} ${offline.length === 1 ? "is" : "are"} offline)` : "") +
+        ". The previous version stayed live.",
     );
   }
+  // However it progresses, a rollout ends: one stage after another can each take nearly the whole wait.
+  const capMs = rolloutStages * quietMs;
+  if (now - started > capMs) {
+    return void finish(
+      s,
+      d,
+      "failed",
+      `${pending.map((id) => nodeName(s, id)).join(", ")} did not report the new version healthy within ${minutesText(capMs)}. The previous version stayed live.`,
+    );
+  }
+}
+
+/** A reason as one sentence: its own full stop, or one added. */
+function sentence(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function minutesText(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
 /** The digest a node runs for this generation, from its state report (image sources: what the tag pulled). */
@@ -958,6 +1052,7 @@ export function finish(
   const now = new Date();
   let reverted = false;
   let projectBack: string | null = null;
+  let portBack: PortMove | null = null;
   // Its build's node: a build that ends here (cancelled, timed out, failed) lets the ones queued behind it move up.
   const lastBuild = db
     .select({ id: builds.id, nodeId: builds.nodeId })
@@ -966,6 +1061,13 @@ export function finish(
     .orderBy(desc(builds.createdAt))
     .get();
   db.transaction((tx) => {
+    // Read here: rollout() may have applied it since d was loaded.
+    const move = tx.select({ portMove: deployments.portMove }).from(deployments).where(eq(deployments.id, d.id)).get()?.portMove;
+    if (move) {
+      restorePortMove(tx, d.serviceId, move);
+      portBack = move;
+      reverted = true;
+    }
     tx.update(deployments)
       .set({
         status: outcome,
@@ -998,6 +1100,15 @@ export function finish(
     }
   });
   appendLog(s.deps, d.serviceId, d.id, lastStep(d), [message], outcome === "failed");
+  const back = portBack as PortMove | null;
+  if (back) {
+    appendLog(s.deps, d.serviceId, d.id, lastStep(d), [
+      back.applied
+        ? `The service's port and its domains are back on ${back.fromPort}, where the live version listens.`
+        : `The service's port is back on ${back.fromPort}, where the live version listens.`,
+    ]);
+    publishService(s.deps, d.serviceId);
+  }
   if (d.projectMove) {
     const back = projectBack === d.projectMove.fromProjectId;
     appendLog(s.deps, d.serviceId, d.id, lastStep(d), [
@@ -1045,6 +1156,36 @@ export function finish(
     }
   }
   if (s.chains) kickNext(s as EngineState, d.serviceId);
+}
+
+/**
+ * A services.usePort deployment that did not go live: the service's first
+ * port goes back to the old one (unless changed since) and, once rollout()
+ * moved them, so do its domains, so the live version keeps serving where it
+ * listens and the next deploy finds the settings it runs with.
+ */
+function restorePortMove(tx: Pick<Deps["db"], "select" | "insert" | "update" | "delete">, serviceId: string, move: PortMove): void {
+  const svc = tx.select({ spec: services.spec }).from(services).where(eq(services.id, serviceId)).get();
+  if (svc) {
+    const spec = readSpec(svc.spec);
+    if (spec.ports.find((p) => p.protocol !== "udp")?.containerPort === move.toPort) {
+      writeSpec(tx, serviceId, { ...spec, ports: withFirstPort(spec.ports, move.fromPort) });
+    }
+  }
+  if (move.applied && move.domainIds.length > 0) {
+    tx.update(domains)
+      .set({ targetPort: move.fromPort })
+      .where(and(eq(domains.serviceId, serviceId), inArray(domains.id, move.domainIds), eq(domains.targetPort, move.toPort)))
+      .run();
+  }
+}
+
+/** The service and its Domains tab changed (a port move went back): open screens refetch. */
+function publishService(deps: Pick<Deps, "live">, serviceId: string): void {
+  deps.live.publish(`service:${serviceId}`, {
+    type: "invalidate",
+    ops: ["services.get", "domains.list", "exposures.get", "env.references"],
+  });
 }
 
 /** A failed move leaves the service on (or puts it back on) the node it came from. */

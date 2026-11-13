@@ -107,17 +107,19 @@ test("migration 0003 moves Mongo databases off the mongosh check, and only those
     const legacy = service("old-mongo", "mongo", check(legacyMongoHealthCommand));
     const custom = service("tuned-mongo", "mongo", check(["mongosh", "--quiet", "--eval", "db.runCommand({ping: 1}).ok"]));
     const postgres = service("pg", "postgres", check(legacyMongoHealthCommand));
-    const moved = db
-      .insert(deployments)
-      .values({
-        serviceId: legacy,
-        generation: 2,
-        trigger: "move",
-        status: "live",
-        runSettings: { ports: [{ containerPort: 27017, protocol: "tcp" }], healthCheck: check(legacyMongoHealthCommand) },
-      })
-      .returning()
-      .get().id;
+    // Written as SQL: drizzle names every column of today's schema, and deployments has gained
+    // some since 0003 (port_move in 0.2.16).
+    const moved = "dmongomoved00001";
+    sqlite
+      .prepare(
+        "insert into deployments (id, service_id, generation, trigger, status, run_settings, created_at) values (?, ?, 2, 'move', 'live', ?, ?)",
+      )
+      .run(
+        moved,
+        legacy,
+        JSON.stringify({ ports: [{ containerPort: 27017, protocol: "tcp" }], healthCheck: check(legacyMongoHealthCommand) }),
+        Date.now(),
+      );
 
     migrate(db, { migrationsFolder: join(migrations, "panel") });
     const spec = (id: string) =>

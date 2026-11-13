@@ -638,7 +638,7 @@ export const setPlacements = defineOp({
   kind: "mutation",
   summary: "Set replicas per node",
   description:
-    "Sets on which nodes a service runs and how many replicas on each. Several nodes are load balanced through each node's edge. Services with volumes run on one node only (use services.move to change it). Deploys the change right away.",
+    "Sets on which nodes a service runs and how many replicas on each. Several nodes are load balanced through each node's edge. Services with volumes run on one node only (use services.move to change it). Deploys the change right away. A change of nodes (replica counts alone are fine) is refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of that deploy) while a deploy of the service is queued, building or rolling out: it rolls out on the nodes it started with, so wait for it or cancel it (deployments.cancel) first.",
   input: Type.Object({
     serviceId: Id,
     placements: Type.Array(Type.Object({ nodeId: Id, replicas: Type.Integer({ minimum: 1, maximum: 32 }) }), {
@@ -664,10 +664,34 @@ export const move = defineOp({
   kind: "mutation",
   summary: "Move a service to another node",
   description:
-    "Moves a single-node service to another node: deploys it there, copies its volumes while the old copy is stopped, switches traffic, then removes the old copy. Progress shows as a deployment with trigger move; on failure the service stays on the old node.",
+    "Moves a single-node service to another node: deploys it there, copies its volumes while the old copy is stopped, switches traffic, then removes the old copy. Progress shows as a deployment with trigger move; on failure the service stays on the old node. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of that deploy) while a deploy of the service is queued or running.",
   input: Type.Object({ serviceId: Id, toNodeId: Id }),
   output: Type.Object({ deploymentId: Id }),
   permission: permission.service("services.move", serviceScope),
+  mcp: true,
+  audit: true,
+});
+
+export const usePort = defineOp({
+  id: "services.usePort",
+  kind: "mutation",
+  summary: "Switch a service to the port its app listens on",
+  description:
+    "For a deploy that failed because the app listens on another port than the service's (Deployment.portHint, \"The app listens on port 6000, not 80.\"): sets the service's first TCP port to port (replacing fromPort, the one the failed deploy checked), moves its domains whose target port was fromPort to port, and starts a deploy, which returns. A built app's PORT follows the port as usual. When a live version serves, the domains move when the new deployment rolls out, so the live one keeps its routes meanwhile, and they and the port go back to fromPort if that deployment fails or is cancelled. Needs services.deploy too. Refused (CONFLICT) for compose members (their ports come from the stack's compose file) and services other than apps, with reason portChanged when the service's first port is no longer fromPort, and with reason deployRunning (deploymentId, serviceId) while a deploy of it is queued or running.",
+  input: Type.Object({
+    serviceId: Id,
+    port: Type.Integer({ minimum: 1, maximum: 65535 }),
+    /** The port the failed deploy checked (Deployment.portHint.port); refused when the service's port is no longer this one. */
+    fromPort: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
+  }),
+  output: Type.Object({
+    deploymentId: Id,
+    ports: Type.Array(Port),
+    /** Domains whose target port moves to port: now, or when the deployment rolls out (domainsMove "rollout"). */
+    domainIds: Type.Array(Id),
+    domainsMove: Type.Union([Type.Literal("now"), Type.Literal("rollout")]),
+  }),
+  permission: permission.service("services.update", serviceScope),
   mcp: true,
   audit: true,
 });

@@ -22,6 +22,8 @@ const base: Deployment = {
   canRollback: false,
   rollbackOf: null,
   error: "fetching the source failed: could not fetch main - check the address, the branch and the credentials (exit status 128)",
+  lastOutput: null,
+  portHint: null,
   createdAt: "2026-11-09T10:00:00Z",
   startedAt: "2026-11-09T10:00:00Z",
   finishedAt: "2026-11-09T10:00:04Z",

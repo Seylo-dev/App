@@ -449,7 +449,7 @@ export class FakeFleet {
     generation: number,
     stage: DeployStage,
     message = "",
-    extra: Pick<MessageInitShape<typeof DeployProgressSchema>, "imageHealthCheck" | "healthTimeout"> = {},
+    extra: Pick<MessageInitShape<typeof DeployProgressSchema>, "imageHealthCheck" | "healthTimeout" | "lastOutput" | "notListening"> = {},
   ): void {
     this.emit(nodeId, {
       case: "deployProgress",

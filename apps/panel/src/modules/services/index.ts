@@ -11,10 +11,11 @@ import { move, moveJob } from "./move";
 import { moveProject, moveProjectImpact } from "./move-project";
 import { serviceOpsHandlers } from "./ops";
 import { uploadRoutes } from "./upload";
+import { usePort } from "./use-port";
 
 export default defineModule({
   name: "services",
-  ops: [...serviceOpsHandlers, remove, move, clonePreview, clone, moveProjectImpact, moveProject],
+  ops: [...serviceOpsHandlers, remove, move, clonePreview, clone, moveProjectImpact, moveProject, usePort],
   jobs: [moveJob, cloneDataJob],
   http: (deps) => uploadRoutes(deps),
 });

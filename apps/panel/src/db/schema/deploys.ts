@@ -36,6 +36,29 @@ export interface DeployNodeResult {
   imageHealthCheck?: StoredImageHealthCheck;
   /** How long the node waits for the new version to be healthy (DeployProgress health_timeout), when it said. */
   healthWaitSeconds?: number;
+  /**
+   * A failed rollout: the new container's last output lines
+   * (DeployProgress.last_output, agents from 0.2.16; split off the end of
+   * an older agent's message, after "last output:"). Kept apart from the
+   * reason (message) and the deploy log, which are Seylo's own lines.
+   */
+  lastOutput?: string[];
+  /**
+   * A failed rollout whose default check (TCP on the first port) was
+   * refused all along: the port checked and what the container listened on
+   * instead (DeployProgress.not_listening, agents from 0.2.16).
+   */
+  notListening?: StoredNotListening;
+  /** When the node last reported progress or state for this rollout (epoch ms): the rollout watchdog counts from it. */
+  progressAt?: number;
+}
+
+/** DeployNodeResult.notListening. */
+export interface StoredNotListening {
+  port: number;
+  /** False when the node could not read the container's sockets. */
+  read: boolean;
+  listening: { port: number; loopbackOnly: boolean }[];
 }
 
 /** DeployNodeResult.imageHealthCheck: the ops' services.ImageHealthCheck. */
@@ -61,6 +84,22 @@ export interface ProjectMove {
    * older panel have none.
    */
   fromDeploymentId?: string;
+}
+
+/**
+ * services.usePort on a service whose live version serves (0.2.16): the
+ * domains that sent traffic to the old port move to the new one when this
+ * deployment rolls out (with its new containers), not before, so the live
+ * version keeps its routes while it builds. If it then fails or is
+ * cancelled, they and the service's port go back to the old one, where the
+ * live version still listens.
+ */
+export interface PortMove {
+  fromPort: number;
+  toPort: number;
+  domainIds: string[];
+  /** Set once rollout() moved the domains. */
+  applied: boolean;
 }
 
 /** A release of a service. Rollback deploys an older row's image digest again. */
@@ -125,6 +164,8 @@ export const deployments = sqliteTable(
      * back (services/move-project.ts).
      */
     projectMove: json<ProjectMove>("project_move"),
+    /** services.usePort with a live version serving: the domains this deployment moves to its port (PortMove). */
+    portMove: json<PortMove>("port_move"),
     /** Deployments (of other services) that must finish before this one starts, for example a template's database. */
     waitFor: json<string[]>("wait_for").notNull().default(sql`'[]'`),
     /** Archive of an upload source (source_uploads.id) this deploy builds. */

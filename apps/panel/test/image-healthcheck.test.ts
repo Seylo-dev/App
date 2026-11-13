@@ -247,6 +247,7 @@ describe("what the node reports", () => {
     engineFor(panel.deps).kick(d.id);
     await fleet.settle();
     expect(row(d.id)?.status).toBe("failed");
-    expect(row(d.id)?.error).toContain("did not report the new version healthy within 600s");
+    // Nothing from the node since the rollout began: the watchdog (300 s and 5 minutes) says so (0.2.16).
+    expect(row(d.id)?.error).toBe("No progress from node-a for 10 minutes. The previous version stayed live.");
   });
 });

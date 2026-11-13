@@ -8,7 +8,7 @@ import { domains, projectPrefs, projects, servicePlacements, services, volumes }
 import type { Deps } from "../../deps";
 import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
-import { assertNoActiveDeploy, queueDeploy } from "../deployments/queue";
+import { assertNoActiveDeploy, assertNoDeployForPlacement, queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { dropRepoHooks } from "../github/repo-hooks";
@@ -337,6 +337,8 @@ const setPlacements = implement(serviceOps.setPlacements, (input, ctx) => {
     throw new OpError("CONFLICT", "Services with volumes run on one node. Use Move to change the node.", { field: "placements" });
   }
   const currentIds = new Set(current.map((p) => p.nodeId));
+  // Other nodes while a deploy runs: it would roll out on the old ones (replica counts alone are fine).
+  if (nodeIds.length !== currentIds.size || nodeIds.some((id) => !currentIds.has(id))) assertNoDeployForPlacement(ctx, row.id);
   if (hasVolumes && current.length > 0 && !nodeIds.every((id) => currentIds.has(id))) {
     throw new OpError("CONFLICT", "Services with volumes change nodes with Move, which copies their data.", { field: "placements" });
   }

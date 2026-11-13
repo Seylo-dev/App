@@ -11,6 +11,7 @@ import { backupRuns, builds, deployments, nodes, services } from "../../db/schem
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { getSetting } from "../../settings";
+import { splitLastOutput } from "../deployments/failure";
 import { arrivalGraceMs } from "../panelMove/keys";
 import type { RaiseAlert } from "./sink";
 
@@ -132,7 +133,8 @@ export function subscribeAgentEvents(deps: Deps): void {
         event: "deploy_failed",
         key: `deploy-failed:${serviceId}:${generation}:${nodeId}`,
         title: `Deploy of ${name} failed`,
-        message: progress.message || "The new version never became healthy. The previous version is still serving.",
+        // The reason alone: an agent before 0.2.16 appends the new container's output after "last output:".
+        message: splitLastOutput(progress.message).reason || "The new version never became healthy. The previous version is still serving.",
         serviceId,
         nodeId,
       }));

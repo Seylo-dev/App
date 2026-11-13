@@ -120,6 +120,34 @@ export const Deployment = Type.Object({
   rollbackOf: Type.Union([Id, Type.Null()]),
   /** Safe to show: "No answer on port 3001 within 60s. The previous version stayed live." */
   error: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * A failed rollout: the new container's last output (its own stdout and
+   * stderr, secrets redacted) on the node where it failed, kept apart from
+   * error and the deploy log. Agents before 0.2.16 send it inside their
+   * failure message, after "last output:", and the panel splits it off.
+   * null when there is none. Added in 0.2.16.
+   */
+  lastOutput: Type.Union([Type.Object({ node: NodeRef, lines: Type.Array(Type.String()) }), Type.Null()]),
+  /**
+   * A failed rollout whose default health check (TCP on the service's first
+   * port) was refused all along while the app listened elsewhere, as the
+   * node read it from the container (agents from 0.2.16): port is the port
+   * checked, listening the other ports it listens on on all addresses
+   * (services.usePort switches the service to one of them, when canUsePort:
+   * an app service that is not a compose member), loopbackOnly those it
+   * listens on only on 127.0.0.1 (it must listen on 0.0.0.0 instead). null
+   * otherwise. Added in 0.2.16.
+   */
+  portHint: Type.Union([
+    Type.Object({
+      node: NodeRef,
+      port: Type.Integer({ minimum: 1, maximum: 65535 }),
+      listening: Type.Array(Type.Integer({ minimum: 1, maximum: 65535 })),
+      loopbackOnly: Type.Array(Type.Integer({ minimum: 1, maximum: 65535 })),
+      canUsePort: Type.Boolean(),
+    }),
+    Type.Null(),
+  ]),
   createdAt: Timestamp,
   startedAt: Type.Union([Timestamp, Type.Null()]),
   finishedAt: Type.Union([Timestamp, Type.Null()]),

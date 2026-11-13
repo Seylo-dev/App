@@ -1,0 +1,1 @@
+ALTER TABLE `deployments` ADD `port_move` text;

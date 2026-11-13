@@ -9,7 +9,7 @@
 export interface FieldLimits {
   /** Longest string field (a message, an error, an id). */
   maxString: number;
-  /** Most entries of a repeated field; `lastLines` keeps its newest entries, the others their first. */
+  /** Most entries of a repeated field; `lastLines` and `lastOutput` keep their newest entries, the others their first. */
   maxList: number;
   /** Longest string entry of a repeated field (one output line). */
   maxListItem: number;
@@ -55,8 +55,8 @@ const statusPartLimits: FieldLimits = { maxString: 256, maxList: 16, maxListItem
 /** Ports keep the PEM and the ACME error for their TLS host name too. */
 const openPortLimits: FieldLimits = { ...statusPartLimits, longer: { ...pemLimit, certificateError: 2048 } };
 
-/** Lists whose newest entries matter (output tails). */
-const tailLists = new Set(["lastLines"]);
+/** Lists whose newest entries matter (output tails: a crash report's lines, a failed deploy's last output since 0.2.16). */
+const tailLists = new Set(["lastLines", "lastOutput"]);
 
 /**
  * Cuts every string and list of a decoded protobuf message in place, nested

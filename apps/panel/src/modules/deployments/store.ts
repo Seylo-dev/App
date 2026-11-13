@@ -26,6 +26,7 @@ import type { Deps } from "../../deps";
 import { waitingBuilds, waitingDetail } from "../builds/slots";
 import { databaseKinds } from "../domains/lookup";
 import { nodeNames } from "../services/rows";
+import { lastOutputOf, portHintOf } from "./failure";
 
 export type DeploymentRow = typeof deployments.$inferSelect;
 export type Deployment = Static<typeof deploymentOps.Deployment>;
@@ -161,7 +162,21 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
     if (r.builtOnNodeId) nodeIds.add(r.builtOnNodeId);
     for (const id of r.targetNodeIds) nodeIds.add(id);
     for (const s of r.steps) if (s.nodeId) nodeIds.add(s.nodeId);
+    for (const id of Object.keys(r.nodeResults)) nodeIds.add(id);
   }
+  // Whether services.usePort applies to a failed deploy's service: an app of its own, not a compose member.
+  const failedServices = [...new Set(rows.filter((r) => r.status === "failed").map((r) => r.serviceId))];
+  const ownApps = new Set(
+    failedServices.length === 0
+      ? []
+      : db
+          .select({ id: services.id, kind: services.kind, parentId: services.parentId })
+          .from(services)
+          .where(inArray(services.id, failedServices))
+          .all()
+          .filter((s) => s.kind === "app" && s.parentId === null)
+          .map((s) => s.id),
+  );
   // Builds waiting for a free slot on their node: their clone step says so instead of "Fetching source".
   const waits = waitingBuilds(
     db,
@@ -208,6 +223,8 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
     const databaseImage = databaseImages.get(r.serviceId);
     const wait = waits.get(r.id);
     const buildWait = wait ? { node: ref(wait.nodeId) as { id: string; name: string }, position: wait.position } : null;
+    const output = r.status === "failed" ? lastOutputOf(r.nodeResults) : null;
+    const hint = r.status === "failed" ? portHintOf(r.nodeResults) : null;
     return {
       id: r.id,
       serviceId: r.serviceId,
@@ -242,6 +259,16 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       canRollback: r.status === "superseded" && keep.has(r.id) && (databaseImage === undefined || sameDatabaseImage(r, databaseImage)),
       rollbackOf: r.rollbackOf,
       error: r.error,
+      lastOutput: output ? { node: ref(output.nodeId) as { id: string; name: string }, lines: output.lines } : null,
+      portHint: hint
+        ? {
+            node: ref(hint.nodeId) as { id: string; name: string },
+            port: hint.port,
+            listening: hint.listening,
+            loopbackOnly: hint.loopbackOnly,
+            canUsePort: hint.listening.length > 0 && ownApps.has(r.serviceId),
+          }
+        : null,
       createdAt: r.createdAt.toISOString(),
       startedAt: r.startedAt?.toISOString() ?? null,
       finishedAt: r.finishedAt?.toISOString() ?? null,

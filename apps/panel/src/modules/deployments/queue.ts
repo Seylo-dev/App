@@ -4,7 +4,7 @@
 
 import { OpError } from "@seylo/ops";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { type DeploymentTrigger, deployments, sourceUploads } from "../../db/schema";
+import { type DeploymentTrigger, deployments, type PortMove, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { panelServiceId } from "../nodes/panel-service";
 import { activeCopy, assertNoActiveCopy, heldPushMessage } from "../services/copies";
@@ -31,6 +31,8 @@ export interface QueueDeployInput {
   uploadId?: string | null;
   /** Deployments of other services to wait for (a template's database before its app). */
   waitFor?: string[];
+  /** services.usePort with a live version: the domains to move to the new port when this deployment rolls out. */
+  portMove?: PortMove | null;
   /** Lines for the start of the deploy log, such as which watch path a push matched. */
   notes?: readonly string[];
 }
@@ -80,6 +82,7 @@ export function queueDeploy(deps: Deps, input: QueueDeployInput): DeploymentRow 
       noCache: input.noCache ?? false,
       uploadId,
       waitFor: input.waitFor ?? [],
+      portMove: input.portMove ?? null,
       steps: initialSteps(rollback === null && spec.source.type !== "image"),
     })
     .returning()
@@ -112,7 +115,7 @@ export function hasActiveDeploy(deps: Pick<Deps, "db">, serviceId: string): bool
  * clicks never pile deploys up. Pushes and trigger URLs still queue behind
  * the running one (queuePushDeploy), so no push is lost.
  */
-export function assertNoActiveDeploy(deps: Pick<Deps, "db">, serviceId: string, member?: { name: string }): void {
+export function assertNoActiveDeploy(deps: Pick<Deps, "db">, serviceId: string, member?: { name: string }, then = "deploy again"): void {
   const active = activeDeploy(deps, serviceId);
   if (!active) return;
   const what = active.status === "queued" ? "is waiting to start" : "is running";
@@ -120,13 +123,27 @@ export function assertNoActiveDeploy(deps: Pick<Deps, "db">, serviceId: string, 
   const whose = member ? member.name : "this service";
   throw new OpError(
     "CONFLICT",
-    `A deploy of ${whose} (generation ${active.generation}) ${what}. Wait for it to finish, or cancel it, then deploy again.`,
+    `A deploy of ${whose} (generation ${active.generation}) ${what}. Wait for it to finish, or cancel it, then ${then}.`,
     {
       reason: "deployRunning",
       deploymentId: active.id,
       serviceId,
     },
   );
+}
+
+/**
+ * Where a service runs changes only between deploys (services.setPlacements,
+ * services.move): a deploy rolls out on the nodes it started with, so one
+ * moved elsewhere meanwhile waited for nodes that no longer had the service
+ * (the owner's trust-api, 2026-11-13). Refusing is safer than cancelling and
+ * restarting the deploy on the new nodes: nothing the person did not ask
+ * for is thrown away (a build that ran for minutes, a deploy someone else
+ * started), a move's volume copy never races a rollout, and the person
+ * decides what goes first; the error names the deploy to cancel or wait for.
+ */
+export function assertNoDeployForPlacement(deps: Pick<Deps, "db">, serviceId: string): void {
+  assertNoActiveDeploy(deps, serviceId, undefined, "change where it runs (the deploy rolls out on the nodes it started with)");
 }
 
 export type PushDeploy =
