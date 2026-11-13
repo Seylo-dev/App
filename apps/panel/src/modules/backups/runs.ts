@@ -149,6 +149,21 @@ export function policyBackup(policy: PolicyRow): BackupWhat {
   };
 }
 
+/**
+ * The id of a backup of this schedule that is still running (a scheduled
+ * one, Back up now on the schedule's menu or for the whole service), if
+ * any. Callers read it right before startBackup, whose run insert follows
+ * with no await between, so a start made meanwhile elsewhere is seen and a
+ * schedule never runs twice at once.
+ */
+export function runningBackup(db: PanelDb, policyId: string): string | undefined {
+  return db
+    .select({ id: backupRuns.id })
+    .from(backupRuns)
+    .where(and(eq(backupRuns.policyId, policyId), eq(backupRuns.kind, "backup"), eq(backupRuns.status, "running")))
+    .get()?.id;
+}
+
 /** Checks the target exists on the service: a database service, or one of its data volumes. */
 export function checkTarget(db: PanelDb, serviceId: string, target: "database" | "volume", volumeId: string | null | undefined) {
   if (target === "database") {

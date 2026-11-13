@@ -4960,7 +4960,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   running check is made per schedule right before its `startBackup`,
   whose run insert follows with no await between, so a second `runAll`
   (or `runNow`, or the scheduler) that started a schedule while this one
-  waited on the node is seen. When no backup could start it throws the
+  waited on the node is seen. The scheduler (`runDueBackups`,
+  `modules/backups/schedule.ts`) makes the same check (`runningBackup`)
+  for each due schedule after moving its `nextRunAt`: a schedule with a
+  backup still `running` (its last scheduled one, or a Back up now) is not
+  started that time, a warning in the panel log names it and the running
+  run, and it runs at its next time (before, it started a second run
+  alongside). When no backup could start it throws the
   first start error, as `runNow` does, after recording each failed run;
   when some did, `runs` holds the failed ones too, and a schedule refused
   before its run was stored (`checkTarget`, a missing destination, no

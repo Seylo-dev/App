@@ -24,6 +24,7 @@ import {
   policyBackup,
   queuePrune,
   type RunRow,
+  runningBackup,
   startBackup,
   toRun,
   toRuns,
@@ -323,16 +324,6 @@ export const runNow = implement(backupOps.runNow, async (input, ctx) => {
 
 type RunAllSkipped = Static<typeof backupOps.runAll.output>["skipped"][number];
 
-function backupRunning(ctx: OpContext, policyId: string): boolean {
-  return (
-    ctx.db
-      .select({ id: backupRuns.id })
-      .from(backupRuns)
-      .where(and(eq(backupRuns.policyId, policyId), eq(backupRuns.kind, "backup"), eq(backupRuns.status, "running")))
-      .get() !== undefined
-  );
-}
-
 /** What a schedule's failed start tells the caller: the panel's own message, never an internal error's. */
 function startError(ctx: OpContext, error: unknown, policyId: string): string {
   if (error instanceof OpError) return error.message;
@@ -366,7 +357,7 @@ export const runAll = implement(backupOps.runAll, async (input, ctx) => {
     // Read here, right before startBackup inserts its run with no await
     // between: a second Back up now, or the scheduler, that started this
     // schedule while this loop waited on the node is seen.
-    else if (backupRunning(ctx, policy.id)) skipped.push({ policyId: policy.id, reason: "running" });
+    else if (runningBackup(ctx.db, policy.id)) skipped.push({ policyId: policy.id, reason: "running" });
     else {
       try {
         started.push(await startBackup(ctx, policyBackup(policy)));

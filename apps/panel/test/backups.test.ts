@@ -751,6 +751,71 @@ describe("Back up now for the whole service (runAll)", () => {
     agent.disconnect();
   });
 
+  test("the scheduler skips a schedule whose backup is still running, says so, and runs it at its next time", async () => {
+    const { node, app, data, webVault } = await volumeSchedules();
+    const asked: string[] = [];
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void asked.push(req.backupId) }, [], [signed]);
+    const warnings: { meta: Record<string, unknown>; message: string }[] = [];
+    const logger = Object.assign(Object.create(panel.deps.logger), {
+      warn: (meta: Record<string, unknown>, message: string) => void warnings.push({ meta, message }),
+    }) as typeof panel.deps.logger;
+    const deps = { ...panel.deps, logger };
+    const runsOf = (policyId: string) =>
+      panel.deps.db
+        .select()
+        .from(backupRuns)
+        .where(eq(backupRuns.policyId, policyId))
+        .all()
+        .map((r) => ({ id: r.id, status: r.status }));
+    const statuses = (policyId: string) =>
+      runsOf(policyId)
+        .map((r) => r.status)
+        .sort();
+    const nextRunAt = (policyId: string) =>
+      panel.deps.db.select().from(backupPolicies).where(eq(backupPolicies.id, policyId)).get()?.nextRunAt?.getTime() ?? 0;
+
+    // Back up now on data's menu is still running when data's time comes: data is left alone,
+    // web-vault starts, and data's next time moves on as usual.
+    const manual = await callOp(panel, backupOps.runNow, { serviceId: app.id, policyId: data }, { cookie });
+    expect(manual.body.status).toBe("running");
+    const now = new Date();
+    for (const policyId of [data, webVault])
+      panel.deps.db
+        .update(backupPolicies)
+        .set({ nextRunAt: new Date(now.getTime() - 1000) })
+        .where(eq(backupPolicies.id, policyId))
+        .run();
+    expect(await runDueBackups(deps, now)).toBe(2);
+    expect(asked).toEqual([data, webVault]);
+    expect(runsOf(data)).toEqual([{ id: manual.body.id, status: "running" }]);
+    expect(nextRunAt(data)).toBeGreaterThan(now.getTime());
+    expect(warnings).toEqual([
+      {
+        meta: { policyId: data, serviceId: app.id, runningRunId: manual.body.id, nextRunAt: new Date(nextRunAt(data)).toISOString() },
+        message: "scheduled backup skipped: the schedule's previous backup is still running; it runs at its next time",
+      },
+    ]);
+
+    // A day later: data's backup finished and it runs; web-vault's scheduled one is still running, so web-vault waits.
+    backupResult(node.id, manual.body.id, true, keyFor(manual.body.id, ".tar.gz"));
+    const webVaultRun = runsOf(webVault)[0] as { id: string };
+    const later = new Date(now.getTime() + 86_400_000);
+    expect(await runDueBackups(deps, later)).toBe(2);
+    expect(asked).toEqual([data, webVault, data]);
+    expect(statuses(data)).toEqual(["running", "succeeded"]);
+    expect(runsOf(webVault)).toEqual([{ id: webVaultRun.id, status: "running" }]);
+    expect(warnings.map((w) => w.meta.policyId)).toEqual([data, webVault]);
+    expect(warnings[1]?.meta.runningRunId).toBe(webVaultRun.id);
+
+    // Once it finished, web-vault runs at its next time (and data, still running, waits).
+    backupResult(node.id, webVaultRun.id, true, keyFor(webVaultRun.id, ".tar.gz"));
+    expect(await runDueBackups(deps, new Date(later.getTime() + 86_400_000))).toBe(2);
+    expect(statuses(webVault)).toEqual(["running", "succeeded"]);
+    expect(asked).toEqual([data, webVault, data, webVault]);
+    expect(warnings.map((w) => w.meta.policyId)).toEqual([data, webVault, data]);
+    agent.disconnect();
+  });
+
   test("a schedule refused before its run is stored is named with why, not dropped", async () => {
     const { node, app, data, webVault, cache } = await volumeSchedules();
     const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, [], [signed]);
