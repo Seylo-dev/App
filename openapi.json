@@ -34409,7 +34409,7 @@
       "get": {
         "operationId": "env.analyze",
         "summary": "Check a service's environment",
-        "description": "Runs the env analyzer over the saved .env of a service and returns its diagnostics: syntax errors, unknown references, internal addresses of services on another node (there is no cross-node private network), and warnings for references the app would get as text (single-quoted-reference: a ${{target.VARIABLE}} in single quotes; bare-reference: api.URL written without ${{ }}), each with its fix. The web editor runs the same analyzer locally on unsaved text.",
+        "description": "Runs the env analyzer over the saved .env of a service and returns its diagnostics: syntax errors, unknown references, internal addresses of services on another node (there is no cross-node private network), indexes (not-a-list: VARIABLE[n] on a variable that is no list; index-out-of-range: a warning for DOMAINS[n] past the service's domains, empty until it has that many), and warnings for references the app would get as text (single-quoted-reference: a ${{target.VARIABLE}} in single quotes; bare-reference: api.URL written without ${{ }}), each with its fix. The web editor runs the same analyzer locally on unsaved text.",
         "tags": [
           "env"
         ],
@@ -34519,6 +34519,14 @@
                               },
                               {
                                 "const": "empty-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "not-a-list",
+                                "type": "string"
+                              },
+                              {
+                                "const": "index-out-of-range",
                                 "type": "string"
                               },
                               {
@@ -34950,7 +34958,7 @@
       "get": {
         "operationId": "env.references",
         "summary": "List what a service can reference",
-        "description": "Returns every ${{target.VARIABLE}} the service can use: other services of the project with their built-in variables (URL, INTERNAL_URL, EXPOSED_URL, ...) and the project's shared variables, with resolved values for hovers and the nodes each target runs on. The result is the analyzer context for @seylo/env-analyzer.",
+        "description": "Returns every ${{target.VARIABLE}} the service can use: other services of the project with their built-in variables (URL, DOMAIN, DOMAINS, INTERNAL_URL, EXPOSED_URL, ...) and the project's shared variables, with resolved values for hovers and the nodes each target runs on. A variable with list: true (DOMAINS: every domain host of an app, primary first, comma separated) also takes a 0-based index, ${{api.DOMAINS[1]}} for its second domain. The result is the analyzer context for @seylo/env-analyzer.",
         "tags": [
           "env"
         ],
@@ -35077,6 +35085,10 @@
                               },
                               "description": {
                                 "type": "string"
+                              },
+                              "list": {
+                                "description": "A comma-separated list: a reference may pick one item by its 0-based index, ${{api.DOMAINS[1]}}.",
+                                "type": "boolean"
                               },
                               "dependsOn": {
                                 "type": "array",
@@ -35233,6 +35245,10 @@
                                 },
                                 "description": {
                                   "type": "string"
+                                },
+                                "list": {
+                                  "description": "A comma-separated list: a reference may pick one item by its 0-based index, ${{api.DOMAINS[1]}}.",
+                                  "type": "boolean"
                                 },
                                 "dependsOn": {
                                   "type": "array",
@@ -35417,6 +35433,14 @@
                               },
                               {
                                 "const": "empty-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "not-a-list",
+                                "type": "string"
+                              },
+                              {
+                                "const": "index-out-of-range",
                                 "type": "string"
                               },
                               {
@@ -35797,6 +35821,14 @@
                               },
                               {
                                 "const": "empty-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "not-a-list",
+                                "type": "string"
+                              },
+                              {
+                                "const": "index-out-of-range",
                                 "type": "string"
                               },
                               {
@@ -36200,6 +36232,14 @@
                                 "type": "string"
                               },
                               {
+                                "const": "not-a-list",
+                                "type": "string"
+                              },
+                              {
+                                "const": "index-out-of-range",
+                                "type": "string"
+                              },
+                              {
                                 "const": "reference-cycle",
                                 "type": "string"
                               },
@@ -36597,6 +36637,14 @@
                               },
                               {
                                 "const": "empty-reference",
+                                "type": "string"
+                              },
+                              {
+                                "const": "not-a-list",
+                                "type": "string"
+                              },
+                              {
+                                "const": "index-out-of-range",
                                 "type": "string"
                               },
                               {

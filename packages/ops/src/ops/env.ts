@@ -43,6 +43,8 @@ export const DiagnosticCode = Type.Union(
     "internal-address-other-node",
     "service-not-exposed",
     "empty-reference",
+    "not-a-list",
+    "index-out-of-range",
     "reference-cycle",
     "hardcoded-reference",
     "single-quoted-reference",
@@ -88,6 +90,16 @@ export const ReferenceVariable = Type.Object({
    */
   secret: Type.Optional(Type.Boolean()),
   description: Type.String(),
+  /**
+   * A comma-separated list (DOMAINS): a reference may pick one item, 0-based, ${{api.DOMAINS[1]}}.
+   * Left out for every other variable, which takes no index.
+   */
+  list: Type.Optional(
+    Type.Boolean({
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
+      description: "A comma-separated list: a reference may pick one item by its 0-based index, ${{api.DOMAINS[1]}}.",
+    }),
+  ),
   /** References written in this variable's own value, for cycle detection. Built-in variables leave it out. */
   dependsOn: Type.Optional(Type.Array(Type.Object({ target: Type.String(), variable: Type.String() }))),
 });
@@ -216,7 +228,7 @@ export const references = defineOp({
   summary: "List what a service can reference",
   description:
     // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
-    "Returns every ${{target.VARIABLE}} the service can use: other services of the project with their built-in variables (URL, INTERNAL_URL, EXPOSED_URL, ...) and the project's shared variables, with resolved values for hovers and the nodes each target runs on. The result is the analyzer context for @seylo/env-analyzer.",
+    "Returns every ${{target.VARIABLE}} the service can use: other services of the project with their built-in variables (URL, DOMAIN, DOMAINS, INTERNAL_URL, EXPOSED_URL, ...) and the project's shared variables, with resolved values for hovers and the nodes each target runs on. A variable with list: true (DOMAINS: every domain host of an app, primary first, comma separated) also takes a 0-based index, ${{api.DOMAINS[1]}} for its second domain. The result is the analyzer context for @seylo/env-analyzer.",
   input: Type.Object({ serviceId: Id }),
   output: AnalyzeContext,
   sensitive: { output: ["targets.*.variables.*.value"] },
@@ -231,7 +243,7 @@ export const analyze = defineOp({
   summary: "Check a service's environment",
   description:
     // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
-    "Runs the env analyzer over the saved .env of a service and returns its diagnostics: syntax errors, unknown references, internal addresses of services on another node (there is no cross-node private network), and warnings for references the app would get as text (single-quoted-reference: a ${{target.VARIABLE}} in single quotes; bare-reference: api.URL written without ${{ }}), each with its fix. The web editor runs the same analyzer locally on unsaved text.",
+    "Runs the env analyzer over the saved .env of a service and returns its diagnostics: syntax errors, unknown references, internal addresses of services on another node (there is no cross-node private network), indexes (not-a-list: VARIABLE[n] on a variable that is no list; index-out-of-range: a warning for DOMAINS[n] past the service's domains, empty until it has that many), and warnings for references the app would get as text (single-quoted-reference: a ${{target.VARIABLE}} in single quotes; bare-reference: api.URL written without ${{ }}), each with its fix. The web editor runs the same analyzer locally on unsaved text.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({ diagnostics: Type.Array(Diagnostic) }),
   permission: serviceScope("env.view"),

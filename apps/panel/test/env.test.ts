@@ -137,6 +137,7 @@ describe("env ops", () => {
     expect(ctx.body.self.builtins.map((v: { name: string; value: string }) => [v.name, v.value])).toEqual([
       ["URL", "https://api.fsn.example.com"],
       ["DOMAIN", "api.fsn.example.com"],
+      ["DOMAINS", "api.fsn.example.com"],
       ["INTERNAL_URL", "http://api:3000"],
       ["INTERNAL_HOST", "api"],
       ["INTERNAL_PORT", "3000"],

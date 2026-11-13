@@ -1,6 +1,7 @@
 // Every env value of one project, resolved: built-in variables of each
-// service (URL, INTERNAL_URL, database credentials, ...), each service's
-// own .env keys with ${{svc.VAR}} references followed across services, and
+// service (URL, DOMAINS, INTERNAL_URL, database credentials, ...), each
+// service's own .env keys with ${{svc.VAR}} references (and
+// ${{svc.DOMAINS[n]}}, one item of a list) followed across services, and
 // the project's shared variables. References that loop never resolve
 // (the analyzer reports them as reference-cycle). The References op, the
 // analyzer context and the desired state all read from this one graph.
@@ -15,6 +16,7 @@ import {
   parseEnv,
   type ReferenceTarget,
   type ReferenceVariable,
+  referenceValue,
   sharedTarget,
   substituteReferences,
 } from "@seylo/env-analyzer";
@@ -23,7 +25,7 @@ import { domains, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { exposedConnection, exposureState, findDatabase, internalConnection, loadDatabase } from "../databases/info";
 import { databaseKinds, mainPort, type ServiceRow, serviceNodes } from "../domains/lookup";
-import { domainUrl, primaryDomain } from "../domains/rows";
+import { domainUrl, primaryDomain, serviceDomains } from "../domains/rows";
 import { readProjectEnv, readServiceEnv } from "./store";
 
 export interface GraphService {
@@ -90,6 +92,7 @@ function builtinsFor(deps: Pick<Deps, "db" | "secrets">, row: ServiceRow): { bui
     const port = mainPort(row);
     values.set("URL", primary ? domainUrl(primary) : "");
     values.set("DOMAIN", primary?.host ?? "");
+    values.set("DOMAINS", domainHosts(deps.db, row.id).join(","));
     values.set("INTERNAL_URL", port ? `http://${row.name}:${port}` : "");
     values.set("INTERNAL_HOST", row.name);
     values.set("INTERNAL_PORT", port ? String(port) : "");
@@ -108,8 +111,27 @@ function builtinsFor(deps: Pick<Deps, "db" | "secrets">, row: ServiceRow): { bui
       scope: def.scope,
       sensitive: def.sensitive || (databaseKinds.has(row.kind) && credentialVariables.has(def.name)),
       description: def.description,
+      ...(def.list ? { list: true } : {}),
     })),
   };
+}
+
+/**
+ * Every host the service answers on, for DOMAINS: in the Domains tab's
+ * order (primary first, then oldest first), redirect-only domains left
+ * out, a host with several paths once, wildcard hosts as written.
+ */
+export function domainHosts(db: Deps["db"], serviceId: string): string[] {
+  const hosts: string[] = [];
+  const seen = new Set<string>();
+  for (const row of serviceDomains(db, serviceId)) {
+    if (row.forward) continue;
+    const key = row.host.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hosts.push(row.host);
+  }
+  return hosts;
 }
 
 export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: string): EnvGraph {
@@ -153,8 +175,8 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
       result = entry.value;
     } else {
       const self = service.row.name.toLowerCase();
-      const out = substituteReferences(entry.value, (target, variable) =>
-        target.toLowerCase() === self ? ownBuiltin(service, variable) : value(target, variable),
+      const out = substituteReferences(entry.value, (target, variable, index) =>
+        target.toLowerCase() === self ? ownBuiltin(service, variable, index) : valueAt(target, variable, index),
       );
       result = out.unresolved.length > 0 ? null : out.value;
     }
@@ -162,9 +184,15 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
     return result;
   };
 
-  /** A service's own built-in value (its DOMAIN, URL, ...), the only part of itself its env may reference. */
-  const ownBuiltin = (service: GraphService, variable: string): string | null =>
-    service.builtins.find((b) => b.name === variable)?.value ?? null;
+  /**
+   * A service's own built-in value (its DOMAIN, URL, ...), the only part of itself its env may
+   * reference; with an index, that item of a list (DOMAINS[1]).
+   */
+  const ownBuiltin = (service: GraphService, variable: string, index: number | null): string | null =>
+    referenceValue(
+      service.builtins.find((b) => b.name === variable),
+      index,
+    );
 
   const value = (target: string, variable: string): string | null => {
     if (target === sharedTarget) return sharedMap.get(variable) ?? null;
@@ -173,6 +201,13 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
     const builtin = service.builtins.find((b) => b.name === variable);
     if (builtin) return builtin.value;
     return ownValue(service, variable);
+  };
+
+  /** value() for ${{target.VARIABLE[n]}}: only a built-in list takes an index (shared and own variables are no lists). */
+  const valueAt = (target: string, variable: string, index: number | null): string | null => {
+    if (index === null) return value(target, variable);
+    const service = target === sharedTarget ? undefined : byName.get(target.toLowerCase());
+    return service ? ownBuiltin(service, variable, index) : null;
   };
 
   // Whether target.variable carries a database credential: a database's PASSWORD or connection
@@ -245,10 +280,10 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
           values.set(entry.key, entry.value);
           continue;
         }
-        const out = substituteReferences(entry.value, (target, variable) => {
+        const out = substituteReferences(entry.value, (target, variable, index) => {
           // Its own DOMAIN, URL, ... resolve; its own variables do not (a loop back into this file).
-          if (target.toLowerCase() === self) return ownBuiltin(service, variable);
-          return value(target, variable);
+          if (target.toLowerCase() === self) return ownBuiltin(service, variable, index);
+          return valueAt(target, variable, index);
         });
         values.set(entry.key, out.value);
         for (const miss of out.unresolved) unresolved.push({ key: entry.key, ...miss });
