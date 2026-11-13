@@ -183,6 +183,19 @@ export const DatabaseConnection = Type.Object({
     }),
     Type.Null(),
   ]),
+  /**
+   * The open timed exposes of the database (exposures.openTimed) whose port
+   * the node reported: the URL exposures.get has, with the password (the
+   * same user and password as inside). Empty without one.
+   */
+  timed: Type.Array(
+    Type.Object({
+      exposureId: Id,
+      host: Type.String(),
+      port: Type.Integer({ minimum: 1, maximum: 65535 }),
+      url: Type.String(),
+    }),
+  ),
 });
 
 /** A short-lived link through the node's edge listener; opening it sets a cookie for that tool only. */
@@ -436,10 +449,10 @@ export const connection = defineOp({
   kind: "query",
   summary: "Get connection details",
   description:
-    "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Both use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
+    "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords, and the URL of each open timed expose (exposures.openTimed). All use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
   input: Type.Object({ serviceId: Id }),
   output: DatabaseConnection,
-  sensitive: { output: ["internal.url", "internal.password", "internal.httpUrl", "exposed.url", "exposed.password"] },
+  sensitive: { output: ["internal.url", "internal.password", "internal.httpUrl", "exposed.url", "exposed.password", "timed.*.url"] },
   permission: serviceScope("databases.credentials"),
   mcp: true,
   audit: false,

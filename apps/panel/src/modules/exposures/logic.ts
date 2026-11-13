@@ -3,14 +3,14 @@
 // primary domain is live, timed exposes, and the ports agents report back
 // when they picked one themselves (listen port 0).
 
-import type { exposures as exposureOps } from "@seylo/ops";
+import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
 import type { ServiceStatus } from "@seylo/proto";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, inArray, lte, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { nodes, portExposures, serviceAccess } from "../../db/schema";
 import type { Deps } from "../../deps";
-import { getService, mainPort, nodeHost, serviceNodes } from "../domains/lookup";
+import { getService, invalidateService, mainPort, nodeHost, serviceNodes } from "../domains/lookup";
 import { domainUrl, primaryDomain } from "../domains/rows";
 
 export type ExposureRow = typeof portExposures.$inferSelect;
@@ -183,10 +183,17 @@ export function sweepExpired(db: PanelDb, now = new Date()): string[] {
   return [...new Set(expired.map((e) => e.serviceId))];
 }
 
-/** The deps a sweep needs; used by the exposures.sweep job. */
+/**
+ * The deps a sweep needs; used by the exposures.sweep job. Open screens of
+ * the swept services read their access again, so an ended expose leaves
+ * the card (and a database's timed URL its connection details).
+ */
 export function sweepAndMark(deps: Pick<Deps, "db" | "agents" | "live">, now = new Date()): number {
   const services = sweepExpired(deps.db, now);
-  for (const serviceId of services) deps.agents.desired.markDirty({ serviceId });
+  for (const serviceId of services) {
+    deps.agents.desired.markDirty({ serviceId });
+    invalidateService(deps, serviceId, [exposureOps.get.id, dbOps.connection.id]);
+  }
   return services.length;
 }
 

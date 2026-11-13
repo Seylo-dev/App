@@ -20046,7 +20046,7 @@
       "get": {
         "operationId": "databases.connection",
         "summary": "Get connection details",
-        "description": "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Both use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
+        "description": "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords, and the URL of each open timed expose (exposures.openTimed). All use the database's own user and password; the exposed one only over TLS. Internal URLs only work for services of the project on the same node.",
         "tags": [
           "databases"
         ],
@@ -20080,7 +20080,8 @@
                   "type": "object",
                   "required": [
                     "internal",
-                    "exposed"
+                    "exposed",
+                    "timed"
                   ],
                   "properties": {
                     "internal": {
@@ -20158,6 +20159,36 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "timed": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "exposureId",
+                          "host",
+                          "port",
+                          "url"
+                        ],
+                        "properties": {
+                          "exposureId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "host": {
+                            "type": "string"
+                          },
+                          "port": {
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -36932,6 +36963,7 @@
                     "expiresAt",
                     "firewallHint",
                     "openedBy",
+                    "database",
                     "createdAt"
                   ],
                   "properties": {
@@ -37027,6 +37059,104 @@
                         }
                       }
                     },
+                    "database": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "engine",
+                            "user",
+                            "database",
+                            "tls",
+                            "url",
+                            "command"
+                          ],
+                          "properties": {
+                            "engine": {
+                              "anyOf": [
+                                {
+                                  "const": "postgres",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mysql",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mariadb",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mongo",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "redis",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "valkey",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "keydb",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "dragonfly",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "clickhouse",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "user": {
+                              "type": "string"
+                            },
+                            "database": {
+                              "type": "string"
+                            },
+                            "tls": {
+                              "anyOf": [
+                                {
+                                  "const": "database",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "none",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "url": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "command": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "createdAt": {
                       "format": "date-time",
                       "type": "string"
@@ -37049,7 +37179,7 @@
       "get": {
         "operationId": "exposures.get",
         "summary": "Get a service's IP:port access",
-        "description": "Returns the first-run IP:port access of a service (open, redirecting to the primary domain, or closed, with its auto-close settings) and its open timed exposes.",
+        "description": "Returns the first-run IP:port access of a service (open, redirecting to the primary domain, or closed, with its auto-close settings) and its open timed exposes; a database's say how to connect (client command and URL, without the password).",
         "tags": [
           "exposures"
         ],
@@ -37195,6 +37325,7 @@
                           "expiresAt",
                           "firewallHint",
                           "openedBy",
+                          "database",
                           "createdAt"
                         ],
                         "properties": {
@@ -37290,6 +37421,104 @@
                               }
                             }
                           },
+                          "database": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "engine",
+                                  "user",
+                                  "database",
+                                  "tls",
+                                  "url",
+                                  "command"
+                                ],
+                                "properties": {
+                                  "engine": {
+                                    "anyOf": [
+                                      {
+                                        "const": "postgres",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "mysql",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "mariadb",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "mongo",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "redis",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "valkey",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "keydb",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "dragonfly",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "clickhouse",
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "user": {
+                                    "type": "string"
+                                  },
+                                  "database": {
+                                    "type": "string"
+                                  },
+                                  "tls": {
+                                    "anyOf": [
+                                      {
+                                        "const": "database",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "none",
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "url": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "command": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "createdAt": {
                             "format": "date-time",
                             "type": "string"
@@ -37347,7 +37576,7 @@
       "post": {
         "operationId": "exposures.openTimed",
         "summary": "Open a timed expose",
-        "description": "Opens a container port on node-ip:port for a limited time, only for the given IPs or CIDRs (default: the caller's IP). The agent closes it on time even if the panel is down. For local development and debugging.",
+        "description": "Opens a container port on node-ip:port for a limited time, only for the given IPs or CIDRs (default: the caller's IP). The agent closes it on time even if the panel is down. For local development and debugging, databases included: for a database it opens the database's port (ClickHouse also its HTTP port 8123) and the result has the client command; databases.connection gives the URL with the password. The relay adds no TLS, so a database without TLS of its own is reached unencrypted.",
         "tags": [
           "exposures"
         ],
@@ -37368,7 +37597,6 @@
                 "type": "object",
                 "required": [
                   "serviceId",
-                  "targetPort",
                   "durationMinutes"
                 ],
                 "properties": {
@@ -37432,6 +37660,7 @@
                     "expiresAt",
                     "firewallHint",
                     "openedBy",
+                    "database",
                     "createdAt"
                   ],
                   "properties": {
@@ -37526,6 +37755,104 @@
                           "type": "string"
                         }
                       }
+                    },
+                    "database": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "engine",
+                            "user",
+                            "database",
+                            "tls",
+                            "url",
+                            "command"
+                          ],
+                          "properties": {
+                            "engine": {
+                              "anyOf": [
+                                {
+                                  "const": "postgres",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mysql",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mariadb",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mongo",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "redis",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "valkey",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "keydb",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "dragonfly",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "clickhouse",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "user": {
+                              "type": "string"
+                            },
+                            "database": {
+                              "type": "string"
+                            },
+                            "tls": {
+                              "anyOf": [
+                                {
+                                  "const": "database",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "none",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "url": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "command": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "createdAt": {
                       "format": "date-time",

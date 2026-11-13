@@ -1,37 +1,51 @@
 // Exposure op handlers: first-run IP:port access and timed exposes locked
-// to an IP or CIDR. The agent enforces expiries itself; the panel keeps the
-// rows, sweeps expired ones and records the ports agents picked.
+// to an IP or CIDR, of apps and databases alike (a database's timed expose
+// opens its own port and says how to connect: databases/timed.ts). The
+// agent enforces expiries itself; the panel keeps the rows, sweeps expired
+// ones and records the ports agents picked.
 
-import { env as envOps, exposures as exposureOps, OpError } from "@seylo/ops";
+import { databases as dbOps, env as envOps, exposures as exposureOps, OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, gt } from "drizzle-orm";
 import { portExposures } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
-import { exposedAddress, findDatabase, loadDatabase } from "../databases/info";
+import { type DatabaseInfo, exposedAddress, findDatabase, loadDatabase } from "../databases/info";
+import { timedAccess, timedPorts } from "../databases/timed";
 import { normalizeCidr, normalizeCidrs } from "../domains/checks";
-import { getService, invalidateService, nodeHost, openedByOf, serviceNodes } from "../domains/lookup";
+import { getService, invalidateService, mainPort, nodeHost, openedByOf, serviceNodes } from "../domains/lookup";
 import { closeFirstRun, type ExposureRow, firewallHint, firstRunAccess, openFirstRun, saveAccessSettings } from "./logic";
 
 type TimedExpose = Static<typeof exposureOps.TimedExpose>;
 
+/** What a change of IP:port access makes screens read again; databases.connection lists the timed URLs. */
+const exposureReads = [exposureOps.get.id, envOps.references.id, dbOps.connection.id];
+
 function afterChange(ctx: OpContext, serviceId: string) {
   ctx.agents.desired.markDirty({ serviceId });
-  invalidateService(ctx, serviceId, [exposureOps.get.id, envOps.references.id]);
+  invalidateService(ctx, serviceId, exposureReads);
 }
 
-function toTimed(ctx: OpContext, row: ExposureRow): TimedExpose {
+/** The database a service is, with its credentials; null for every other service. */
+function databaseOf(ctx: OpContext, serviceId: string): DatabaseInfo | null {
+  return findDatabase(ctx.db, serviceId) ? loadDatabase(ctx, serviceId) : null;
+}
+
+function toTimed(ctx: OpContext, row: ExposureRow, db: DatabaseInfo | null): TimedExpose {
   const node = serviceNodes(ctx.db, row.serviceId).find((n) => n.id === row.nodeId);
+  const host = node ? nodeHost(node) : "";
+  const port = row.listenPort > 0 ? row.listenPort : null;
   return {
     id: row.id,
     serviceId: row.serviceId,
     nodeId: row.nodeId,
-    host: node ? nodeHost(node) : "",
-    port: row.listenPort > 0 ? row.listenPort : null,
+    host,
+    port,
     targetPort: row.targetPort,
     allowedCidrs: row.allowedCidrs,
     expiresAt: (row.expiresAt ?? row.createdAt).toISOString(),
-    firewallHint: firewallHint(ctx.db, row.nodeId, row.listenPort > 0 ? row.listenPort : null),
+    firewallHint: firewallHint(ctx.db, row.nodeId, port),
     openedBy: { kind: row.openedVia, name: row.openedByLabel },
+    database: db ? timedAccess(db, host, port, row.targetPort) : null,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -56,13 +70,13 @@ export const get = implement(exposureOps.get, (input, ctx) => {
     .where(and(eq(portExposures.serviceId, input.serviceId), eq(portExposures.kind, "timed"), gt(portExposures.expiresAt, new Date())))
     .all();
   let database: { host: string; port: number; allowedCidrs: string[] } | null = null;
-  if (findDatabase(ctx.db, input.serviceId)) {
-    const info = loadDatabase(ctx, input.serviceId);
+  const info = databaseOf(ctx, input.serviceId);
+  if (info) {
     // None while the node's agent is too old to keep the port TLS only: it is closed there.
     const address = exposedAddress(info);
     if (address?.port && info.exposure) database = { host: address.host, port: address.port, allowedCidrs: info.exposure.allowedCidrs };
   }
-  return { firstRun: firstRunAccess(ctx.db, input.serviceId), timed: timed.map((row) => toTimed(ctx, row)), database };
+  return { firstRun: firstRunAccess(ctx.db, input.serviceId), timed: timed.map((row) => toTimed(ctx, row, info)), database };
 });
 
 export const setFirstRun = implement(exposureOps.setFirstRun, (input, ctx) => {
@@ -78,8 +92,31 @@ export const setFirstRun = implement(exposureOps.setFirstRun, (input, ctx) => {
   return firstRunAccess(ctx.db, input.serviceId);
 });
 
+/**
+ * The container port a timed expose opens: the one asked for, else a
+ * database's own port or the service's main one. A database's expose takes
+ * only its own port (ClickHouse also its HTTP port): nothing else listens
+ * in its container.
+ */
+function timedTarget(ctx: OpContext, serviceId: string, db: DatabaseInfo | null, asked: number | undefined): number {
+  if (db) {
+    const ports = timedPorts(db);
+    if (asked !== undefined && !ports.includes(asked)) {
+      throw new OpError("BAD_REQUEST", `${db.engine.label} listens on ${ports.join(" or ")}; a timed expose of it opens that port.`, {
+        field: "targetPort",
+      });
+    }
+    return asked ?? db.engine.port;
+  }
+  const port = asked ?? mainPort(getService(ctx.db, serviceId));
+  if (port === null) throw new OpError("BAD_REQUEST", "This service has no TCP port; pass targetPort.", { field: "targetPort" });
+  return port;
+}
+
 export const openTimed = implement(exposureOps.openTimed, (input, ctx) => {
   getService(ctx.db, input.serviceId);
+  const db = databaseOf(ctx, input.serviceId);
+  const targetPort = timedTarget(ctx, input.serviceId, db, input.targetPort);
   const nodes = serviceNodes(ctx.db, input.serviceId);
   const node = input.nodeId ? nodes.find((n) => n.id === input.nodeId) : nodes[0];
   if (!node) {
@@ -115,7 +152,7 @@ export const openTimed = implement(exposureOps.openTimed, (input, ctx) => {
       nodeId: node.id,
       kind: "timed",
       listenPort: input.port ?? 0,
-      targetPort: input.targetPort,
+      targetPort,
       allowedCidrs: cidrs,
       expiresAt: new Date(Date.now() + input.durationMinutes * 60_000),
       createdBy: by.userId,
@@ -125,7 +162,7 @@ export const openTimed = implement(exposureOps.openTimed, (input, ctx) => {
     .returning()
     .get();
   afterChange(ctx, input.serviceId);
-  return toTimed(ctx, row);
+  return toTimed(ctx, row, db);
 });
 
 export const extendTimed = implement(exposureOps.extendTimed, (input, ctx) => {
@@ -137,7 +174,7 @@ export const extendTimed = implement(exposureOps.extendTimed, (input, ctx) => {
     .returning()
     .get();
   afterChange(ctx, input.serviceId);
-  return toTimed(ctx, updated);
+  return toTimed(ctx, updated, databaseOf(ctx, input.serviceId));
 });
 
 export const close = implement(exposureOps.close, (input, ctx) => {

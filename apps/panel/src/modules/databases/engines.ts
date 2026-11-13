@@ -575,25 +575,33 @@ export function healthCommand(engine: Exclude<DatabaseEngine, "mongo">): string[
   }
 }
 
+/** Credentials for a URL; a null password leaves it out (user@host), for people who may not see it. */
+export type UrlCredentials = Omit<Credentials, "password"> & { password: string | null };
+
+function urlAuth(creds: UrlCredentials): string {
+  const user = encodeURIComponent(creds.user);
+  return creds.password === null ? `${user}@` : `${user}:${encodeURIComponent(creds.password)}@`;
+}
+
 /** Connection URL; credentials are URL-safe by construction (the password alphabet is restricted). */
-export function connectionUrl(engine: DatabaseEngine, creds: Credentials, host: string, port: number, tls = false): string {
+export function connectionUrl(engine: DatabaseEngine, creds: UrlCredentials, host: string, port: number, tls = false): string {
   const e = engines[engine];
-  const auth = `${encodeURIComponent(creds.user)}:${encodeURIComponent(creds.password)}@`;
   const path = e.hasDatabase ? `/${encodeURIComponent(creds.database)}` : "";
   const params = [engine === "mongo" ? "authSource=admin" : "", tls ? e.tlsParams : ""].filter(Boolean).join("&");
   const scheme = e.redisLike && tls ? "rediss" : e.scheme;
-  return `${scheme}://${auth}${host}:${port}${path}${params ? `?${params}` : ""}`;
+  return `${scheme}://${urlAuth(creds)}${host}:${port}${path}${params ? `?${params}` : ""}`;
 }
 
 /**
  * ClickHouse's HTTP interface on the project network, in the form its HTTP
  * clients take (the database as the path): http://user:password@host:8123/db.
- * Null for the other engines.
+ * port: another port that reaches it (a timed expose). Null for the other
+ * engines.
  */
-export function httpUrl(engine: DatabaseEngine, creds: Credentials, host: string): string | null {
-  const port = engines[engine].httpPort;
-  if (port === null) return null;
-  return `http://${encodeURIComponent(creds.user)}:${encodeURIComponent(creds.password)}@${host}:${port}/${encodeURIComponent(creds.database)}`;
+export function httpUrl(engine: DatabaseEngine, creds: UrlCredentials, host: string, port?: number): string | null {
+  const own = engines[engine].httpPort;
+  if (own === null) return null;
+  return `http://${urlAuth(creds)}${host}:${port ?? own}/${encodeURIComponent(creds.database)}`;
 }
 
 /**

@@ -3,7 +3,7 @@
 // portgate. A scheduled job sweeps ended rows every minute; ports the
 // agents picked are recorded from their service status.
 
-import { exposures as exposureOps } from "@seylo/ops";
+import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
 import type { ServiceStatus } from "@seylo/proto";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
@@ -35,7 +35,8 @@ function trackPorts(deps: Deps) {
     for (const status of statuses) {
       if (status.openPorts.length === 0) continue;
       try {
-        if (recordReportedPorts(deps.db, nodeId, status).length > 0) invalidateService(deps, status.serviceId, [exposureOps.get.id]);
+        if (recordReportedPorts(deps.db, nodeId, status).length > 0)
+          invalidateService(deps, status.serviceId, [exposureOps.get.id, dbOps.connection.id]);
       } catch (error) {
         deps.logger.warn({ err: error, nodeId, serviceId: status.serviceId }, "recording reported ports failed");
       }

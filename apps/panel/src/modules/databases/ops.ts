@@ -9,14 +9,14 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { databases as dbOps, domains as domainOps, env as envOps, OpError, terminals } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
 import { userOf } from "../../auth/principal";
 import { portExposures, serviceDatabases } from "../../db/schema";
-import { implement } from "../../ops/implement";
+import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { normalizeCidrs } from "../domains/checks";
-import { invalidateService } from "../domains/lookup";
+import { invalidateService, nodeHost, serviceNodes } from "../domains/lookup";
 import { assertHostUnclaimed } from "../domains/ownership";
 import { issuerName } from "../domains/rows";
 import { writeServiceEnv } from "../env/store";
@@ -51,6 +51,7 @@ import {
   writeSecret,
 } from "./info";
 import { createdPgdata } from "./pgdata";
+import { timedUrl } from "./timed";
 import { afterChange, changeMainPassword } from "./users";
 
 type Database = Static<typeof dbOps.Database>;
@@ -221,8 +222,27 @@ export const get = implement(dbOps.get, (input, ctx) => toDatabase(loadDatabase(
 
 export const connection = implement(dbOps.connection, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
-  return { internal: internalConnection(info), exposed: exposedConnection(info) };
+  return { internal: internalConnection(info), exposed: exposedConnection(info), timed: timedConnections(ctx, info) };
 });
+
+/** The open timed exposes whose port the node reported, as URLs with the password. */
+function timedConnections(ctx: Pick<OpContext, "db">, info: DatabaseInfo) {
+  const rows = ctx.db
+    .select()
+    .from(portExposures)
+    .where(and(eq(portExposures.serviceId, info.service.id), eq(portExposures.kind, "timed"), gt(portExposures.expiresAt, new Date())))
+    .all()
+    .filter((row) => row.listenPort > 0);
+  const placed = serviceNodes(ctx.db, info.service.id);
+  return rows.flatMap((row) => {
+    const node = placed.find((n) => n.id === row.nodeId);
+    if (!node) return [];
+    const host = nodeHost(node);
+    return [
+      { exposureId: row.id, host, port: row.listenPort, url: timedUrl(info, host, row.listenPort, row.targetPort, info.admin.password) },
+    ];
+  });
+}
 
 // One user inside and through the exposed port: user "exposed" (kept for older callers) changes it too.
 export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) =>

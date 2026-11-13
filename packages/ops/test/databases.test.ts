@@ -25,5 +25,6 @@ test("the check finds a URL field nobody listed", () => {
   const connection = databaseOps.find((op) => op.id === "databases.connection");
   if (!connection) throw new Error("databases.connection is missing");
   const unlisted = { ...connection, sensitive: { output: ["internal.url", "internal.password", "exposed.url", "exposed.password"] } };
-  expect(unredactedPaths(unlisted, "output", credentialLike)).toEqual(["internal.httpUrl"]);
+  // The timed exposes' URLs (0.2.16) are in an array: the check looks inside it too.
+  expect(unredactedPaths(unlisted, "output", credentialLike)).toEqual(["internal.httpUrl", "timed.*.url"]);
 });

@@ -1,13 +1,15 @@
 // Agent-owned IP:port listeners (portgate) that reach a service without a
 // domain: first-run access on node-ip:port that closes (after redirecting
 // to the primary domain) once a domain is live, and timed exposes locked to
-// one IP or CIDR for local development. Exposed databases are managed by
+// one IP or CIDR for local development, databases included (the database's
+// Connection tab). A database's permanent exposure is managed by
 // databases.setExposure and only listed here.
 
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Empty, Id, Timestamp } from "../schemas";
+import { DatabaseEngine } from "./databases";
 import { Cidr, ContainerPort } from "./domains";
 
 /**
@@ -37,6 +39,32 @@ export const FirstRunAccess = Type.Object({
   firewallHint: Type.Union([Type.String(), Type.Null()]),
 });
 
+/**
+ * How to connect to a database through a timed expose, without the
+ * password (databases.connection timed has the URL with it). The gate
+ * relays the database's port as it is, adding no TLS: "database" when the
+ * database serves TLS itself (MySQL, MariaDB from 11.4, Postgres while its
+ * exposed port is on, which turned TLS on in it), and url and command ask
+ * for it; "none" when it has none, so the connection is not encrypted (it
+ * is still locked to allowedCidrs and closes at expiresAt).
+ */
+export const TimedDatabaseAccess = Type.Object({
+  engine: DatabaseEngine,
+  /** The database's own user, as on the Connection tab. */
+  user: Type.String(),
+  /** Default database; empty for the Redis-like engines. */
+  database: Type.String(),
+  tls: Type.Union([Type.Literal("database"), Type.Literal("none")]),
+  /** For example "postgresql://postgres@203.0.113.10:41000/shop"; null until the node reports the port. */
+  url: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The engine's client, ready to run, asking for the password: psql,
+   * mysql or mariadb, mongosh, redis-cli or clickhouse-client (curl for
+   * ClickHouse's HTTP port). Null until the node reports the port.
+   */
+  command: Type.Union([Type.String(), Type.Null()]),
+});
+
 export const TimedExpose = Type.Object({
   id: Id,
   serviceId: Id,
@@ -54,6 +82,8 @@ export const TimedExpose = Type.Object({
     kind: Type.Union([Type.Literal("user"), Type.Literal("apiKey"), Type.Literal("mcp"), Type.Literal("ai")]),
     name: Type.String(),
   }),
+  /** Set for a database: its client command and URL through this port, without the password. Null for other services. */
+  database: Type.Union([TimedDatabaseAccess, Type.Null()]),
   createdAt: Timestamp,
 });
 
@@ -64,7 +94,7 @@ export const get = defineOp({
   kind: "query",
   summary: "Get a service's IP:port access",
   description:
-    "Returns the first-run IP:port access of a service (open, redirecting to the primary domain, or closed, with its auto-close settings) and its open timed exposes.",
+    "Returns the first-run IP:port access of a service (open, redirecting to the primary domain, or closed, with its auto-close settings) and its open timed exposes; a database's say how to connect (client command and URL, without the password).",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     firstRun: FirstRunAccess,
@@ -101,10 +131,11 @@ export const openTimed = defineOp({
   kind: "mutation",
   summary: "Open a timed expose",
   description:
-    "Opens a container port on node-ip:port for a limited time, only for the given IPs or CIDRs (default: the caller's IP). The agent closes it on time even if the panel is down. For local development and debugging.",
+    "Opens a container port on node-ip:port for a limited time, only for the given IPs or CIDRs (default: the caller's IP). The agent closes it on time even if the panel is down. For local development and debugging, databases included: for a database it opens the database's port (ClickHouse also its HTTP port 8123) and the result has the client command; databases.connection gives the URL with the password. The relay adds no TLS, so a database without TLS of its own is reached unencrypted.",
   input: Type.Object({
     serviceId: Id,
-    targetPort: ContainerPort,
+    /** Defaults to a database's port, else the service's main port. A database takes only its own port (ClickHouse also 8123). */
+    targetPort: Type.Optional(ContainerPort),
     /** 5 minutes to 24 hours. */
     durationMinutes: Type.Integer({ minimum: 5, maximum: 1440 }),
     /** Defaults to the caller's address as /32 or /128. Callers without an address (MCP over a socket) must pass one. */
