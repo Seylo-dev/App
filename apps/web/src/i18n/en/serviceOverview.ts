@@ -11,6 +11,12 @@ export default {
   deploys: "Deploys",
   allDeploys: "All deploys",
   liveIs: "Live: {version}, deployed {when}",
+  /** The Deploys card's line under a deploy in progress: the deploy that serves now. */
+  liveNow: "Live now",
+  /** The same line when none of the recent deploys is live: the newest one that ended. */
+  lastFinished: "Last finished deploy",
+  /** Deploys waiting behind the one in progress (pushes queue behind a running deploy). */
+  queuedBehind: { one: "{count} more deploy queued behind it", other: "{count} more deploys queued behind it" },
   lastHour: "Last hour",
   members: "Members",
   membersHint: "Each compose service is its own service with logs, domains and deploys",

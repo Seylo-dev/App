@@ -19,18 +19,20 @@ import { Link, Navigate } from "@tanstack/react-router";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { useLiveUp } from "../../../lib/live";
+import { useActiveDeploy } from "../active-deploy";
 import { CronRuns } from "../cron/cron-page";
 import { describeCron } from "../cron-text";
-import { StepChips } from "../deploy-steps";
-import { deploymentTitle, deploymentVersion } from "../deployment-meta";
+import { deployListRefresh } from "../deploy-refresh";
+import { type Deployment, StepChips } from "../deploy-steps";
+import { deploymentTitle, deploymentVersion, runningClockMs } from "../deployment-meta";
 import { AddDomainDialog } from "../domains/domain-dialogs";
 import { NoRouteChip } from "../domains/no-route";
-import { formatBytes, formatPercent, formatRelative } from "../format";
+import { formatBytes, formatClock, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { OpErrorNote, retryOp } from "../op-state";
 import { PrivateRepoHint } from "../private-repo-hint";
 import { TerminalSkeleton } from "../service-skeletons";
-import { hasRunningInstance, isActiveDeployment, isDatabaseKind } from "../status";
+import { hasRunningInstance, isDatabaseKind } from "../status";
 import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
 import { latestDeployLimit } from "../tab-prefetch";
 import { pickMode, type TerminalMode, useTerminalModes } from "../terminal/access";
@@ -38,7 +40,9 @@ import { ModeSwitch, ServiceTerminal } from "../terminal/console-pages";
 import { consoleMayAttach, consoleRun } from "../terminal/follow";
 import { TerminalNote } from "../terminal/terminal-panel";
 import { crashPolicyLabel } from "../usage-strip";
+import { useServerNow } from "../use-now";
 import type { ServiceDetail } from "../use-service";
+import { latestDeployView } from "./latest-deploy";
 
 /** The Overview console card's height: about 20 lines of output with the header and the stdin line. */
 export const consoleCardHeight = 480;
@@ -135,20 +139,29 @@ function AppOverview({ service }: { service: ServiceDetail }) {
   );
 }
 
+/**
+ * The Deploys card (latest-deploy.ts): the deploy in progress or waiting
+ * with its steps and, on one line under it, the live one; or, with nothing
+ * in progress, the newest deploy. service:<id> refreshes it when a deploy
+ * moves; it also polls (slowly while nothing moves) and refetches when the
+ * tab is shown, so a missed update never leaves an old deploy on it
+ * (deploy-refresh.ts).
+ */
 function LatestDeploy({ service }: { service: ServiceDetail }) {
-  // service:<id> refreshes this list when a deployment moves; poll fast only while the socket is down.
   const liveUp = useLiveUp();
   const list = useOp(
     deployments.list,
     { serviceId: service.id, limit: latestDeployLimit },
-    {
-      retry: retryOp,
-      refetchInterval: (q) => (q.state.data?.deployments.some((d) => isActiveDeployment(d.status)) ? (liveUp ? 15_000 : 2000) : false),
-    },
+    { retry: retryOp, ...deployListRefresh(liveUp, true) },
   );
+  // The header's query: the deploy in progress even when it is not among the card's rows.
+  const active = useActiveDeploy(service.id);
   const p = { projectId: service.projectId, serviceId: service.id };
-  const latest = list.data?.deployments[0];
-  const live = list.data?.deployments.find((d) => d.live);
+  const view = list.data ? latestDeployView(list.data.deployments, active) : null;
+  const latest = view?.main;
+  // The panel's time, every second while a deploy's clock runs.
+  const now = useServerNow(view?.inProgress ? 1000 : 30_000);
+  const clock = latest ? runningClockMs(latest, now) : null;
   return (
     <Panel
       title={t("serviceOverview.deploys")}
@@ -175,7 +188,7 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
         </LoadingRegion>
       ) : list.isError ? (
         <OpErrorNote error={list.error} compact />
-      ) : !latest ? (
+      ) : !view || !latest ? (
         <EmptyState compact title={t("serviceDeploys.empty")} description={t("serviceDeploys.emptyHint")} />
       ) : (
         <div className="flex flex-col gap-3">
@@ -183,22 +196,46 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
             <b className="text-[13.5px] font-semibold">{deploymentTitle(latest, service.source)}</b>
             <span className="font-mono text-xs text-muted-foreground">{deploymentVersion(latest)}</span>
             <DeploymentStatusChip status={latest.status} buildWaiting={latest.buildWait != null} />
-            <span className="ml-auto text-xs text-muted-foreground">{formatRelative(latest.createdAt)}</span>
+            <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
+              {clock !== null ? formatClock(clock) : formatRelative(latest.createdAt, now)}
+            </span>
           </div>
           <StepChips steps={latest.steps} buildWait={latest.buildWait} />
+          {view.queuedBehind > 0 && (
+            <span className="text-[12.5px] text-muted-foreground">{t("serviceOverview.queuedBehind", { count: view.queuedBehind })}</span>
+          )}
           {latest.error && <span className="text-[12.5px] text-chip-red-fg">{latest.error}</span>}
           <PrivateRepoHint service={service} d={latest} />
-          {live && live.id !== latest.id && (
-            <span className="text-[12.5px] text-muted-foreground">
-              {t("serviceOverview.liveIs", {
-                version: deploymentVersion(live) || deploymentTitle(live, service.source),
-                when: formatRelative(live.createdAt),
-              })}
-            </span>
-          )}
+          {view.other &&
+            (view.inProgress ? (
+              <DeployLine service={service} d={view.other} now={now} />
+            ) : (
+              <span className="text-[12.5px] text-muted-foreground">
+                {t("serviceOverview.liveIs", {
+                  version: deploymentVersion(view.other) || deploymentTitle(view.other, service.source),
+                  when: formatRelative(view.other.createdAt, now),
+                })}
+              </span>
+            ))}
         </div>
       )}
     </Panel>
+  );
+}
+
+/**
+ * One finished deploy on one line under the one in progress: what runs now while the new one ships. Its chip
+ * says Live (or how the newest one ended); a screen reader hears what the line is first.
+ */
+function DeployLine({ service, d, now }: { service: ServiceDetail; d: Deployment; now: number }) {
+  return (
+    <div data-slot="deploy-line" className="flex min-w-0 items-center gap-2 rounded-control bg-muted px-2.5 py-1.5">
+      <span className="sr-only">{d.live ? t("serviceOverview.liveNow") : t("serviceOverview.lastFinished")}</span>
+      <DeploymentStatusChip status={d.status} />
+      <span className="min-w-0 truncate text-[12.5px] font-medium">{deploymentTitle(d, service.source)}</span>
+      <span className="shrink-0 font-mono text-xs text-muted-foreground">{deploymentVersion(d)}</span>
+      <span className="ml-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground">{formatRelative(d.createdAt, now)}</span>
+    </div>
   );
 }
 
