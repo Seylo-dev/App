@@ -39,8 +39,9 @@ import { buildNodeText } from "./build-node";
 import { firstTcpPort, LastOutput, UsePortButtons } from "./deploy-failure";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
+import { deployListRefresh } from "./deploy-refresh";
 import { type Deployment, StepChips } from "./deploy-steps";
-import { DeploymentChips, deploymentDurationMs, deploymentTitle, deploymentVersion, healthFailed } from "./deployment-meta";
+import { DeploymentChips, deploymentDurationMs, deploymentTitle, deploymentVersion, healthFailed, runningClockMs } from "./deployment-meta";
 import { formatClock, formatRelative, formatTimeOfDay } from "./format";
 import { useInvalidate } from "./invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "./op-state";
@@ -48,7 +49,7 @@ import { PrivateRepoHint } from "./private-repo-hint";
 import { deploymentLook, isActiveDeployment } from "./status";
 import { DeploymentStatusChip } from "./status-chip";
 import { deploymentsPageSize } from "./tab-prefetch";
-import { useNow } from "./use-now";
+import { useServerNow } from "./use-now";
 import type { ServiceDetail } from "./use-service";
 
 const pageSize = deploymentsPageSize;
@@ -59,11 +60,9 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
   const first = useOp(
     deployments.list,
     { serviceId: service.id, limit: pageSize },
-    {
-      retry: retryOp,
-      // service:<id> invalidates this list when a deployment moves; poll fast only while the socket is down.
-      refetchInterval: (q) => (q.state.data?.deployments.some((d) => isActiveDeployment(d.status)) ? (liveUp ? 15_000 : 2000) : false),
-    },
+    // service:<id> invalidates this list when a deployment moves; it also polls while one moves (fast while the
+    // socket is down) and refetches when the tab is shown again (deploy-refresh.ts).
+    { retry: retryOp, ...deployListRefresh(liveUp) },
   );
   const [open, setOpen] = useState<Deployment | null>(null);
   const rows = first.data?.deployments ?? [];
@@ -205,7 +204,9 @@ function LoadMore({
 }
 
 function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Deployment; onLogs: () => void }) {
-  const now = useNow(isActiveDeployment(d.status) ? 1000 : 30_000);
+  // The panel's time: the row's clock counts from the panel's startedAt, whatever this computer's clock says.
+  const now = useServerNow(isActiveDeployment(d.status) ? 1000 : 30_000);
+  const clock = runningClockMs(d, now);
   const invalidate = useInvalidate();
   const [confirmRollback, setConfirmRollback] = useState(false);
   const fail = (error: unknown) =>
@@ -292,7 +293,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
                 d.status !== "superseded" && <DeploymentStatusChip status={d.status} buildWaiting={d.buildWait != null} />
               )}
               <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
-                {running && d.startedAt ? formatClock(now - Date.parse(d.startedAt)) : formatRelative(d.createdAt, now)}
+                {clock !== null ? formatClock(clock) : formatRelative(d.createdAt, now)}
               </span>
             </div>
             {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
@@ -374,7 +375,7 @@ function RowButton({
 function SideLog({ service, d }: { service: ServiceDetail; d: Deployment }) {
   const buffer = useLogBuffer(100_000);
   const log = useDeploymentLog(service.id, d.id, buffer);
-  const now = useNow(isActiveDeployment(d.status) ? 1000 : 0);
+  const now = useServerNow(isActiveDeployment(d.status) ? 1000 : 0);
   const running = isActiveDeployment(d.status);
   const took = deploymentDurationMs(d, now);
   return (

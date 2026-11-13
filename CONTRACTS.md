@@ -1500,6 +1500,32 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   (`live.onTopicActive(listener)` on the hub hears a topic's first follower
   arrive and its last one leave, by unsubscribe, a closed socket or a
   dropped grant; `live.subscribers(topic)`).
+- Live socket liveness (0.2.16, `apps/panel/src/live/endpoint.ts`,
+  `apps/web/src/lib/live.ts`): pages cannot see WebSocket protocol pings,
+  so the panel sends every live socket `{ type: "heartbeat", intervalMs }`
+  each `liveHeartbeatMs` (15 s, the timer of the session checks) and at
+  once in answer to a client `{ type: "ping" }`. The web app pings when a
+  socket opens, every interval and when its tab is shown or the network
+  comes back; once it has heard one heartbeat from the panel, a socket
+  that brings nothing for two intervals plus 10 s, or leaves a wake's ping
+  unanswered for 10 s, is dropped without waiting for a close and replaced
+  at once (subscribe again, refetch everything). The panel ends
+  (`terminate()`) a socket that pinged once and then sent nothing for
+  `liveSilentCloseMs` (150 s; the heartbeats' sends keep Bun's own idle
+  timeout from noticing), and a socket whose event Bun dropped (`send()`
+  returned 0: past the 16 MiB backpressure limit), so its tab reconnects
+  and refetches. Both sides stay compatible with versions before 0.2.16:
+  an older panel answers a ping with a BAD_REQUEST error without a topic
+  and sends no heartbeats, so the web app never expects them, and an older
+  tab never pings, so its quiet socket is never ended.
+- Deploy screens do not rely on the socket alone
+  (`components/service/deploy-refresh.ts`): deploy lists poll while a
+  listed deploy is queued or running (15 s, 2 s while the socket is down)
+  and refetch when the tab is shown; the Overview's Deploys card also polls
+  every 60 s (15 s while the socket is down) while nothing moves. A
+  `deployment` event on `deployment:<id>` writes only the cached lists and
+  gets that hold that deployment, keeping their age and invalidated mark
+  (`applyDeployment`).
 - Permissions: see "Permission model" below.
 
 #### Permission model

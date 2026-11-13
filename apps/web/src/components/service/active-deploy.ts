@@ -8,6 +8,8 @@
 
 import { deployments } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
+import { useLiveUp } from "../../lib/live";
+import { deployListRefresh } from "./deploy-refresh";
 import type { Deployment } from "./deploy-steps";
 import { retryOp } from "./op-state";
 import { isActiveDeployment } from "./status";
@@ -16,9 +18,13 @@ import { isActiveDeployment } from "./status";
  * The deploy of the service in progress, or null. `enabled`: false for
  * services that never deploy (databases, the panel). Every screen asks the
  * same query, so it is one request; deploy, cancel and the service's live
- * events refresh it with the rest of deployments.list.
+ * events refresh it with the rest of deployments.list, and while a deploy
+ * is in progress it also polls and refetches when the tab is shown, like
+ * the deploy lists (deploy-refresh.ts), so the header never keeps
+ * "Deploying" and Cancel deploy after the deploy ended.
  */
 export function useActiveDeploy(serviceId: string, enabled = true): Deployment | null {
-  const active = useOp(deployments.list, { serviceId, active: true, limit: 1 }, { enabled, retry: retryOp });
+  const liveUp = useLiveUp();
+  const active = useOp(deployments.list, { serviceId, active: true, limit: 1 }, { enabled, retry: retryOp, ...deployListRefresh(liveUp) });
   return active.data?.deployments.find((d) => isActiveDeployment(d.status)) ?? null;
 }

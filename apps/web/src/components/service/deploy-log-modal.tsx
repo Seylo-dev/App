@@ -23,7 +23,7 @@ import { formatDuration, formatRelative, formatTimeOfDay } from "./format";
 import { OpErrorNote, retryOp } from "./op-state";
 import { isActiveDeployment } from "./status";
 import { DeploymentStatusChip } from "./status-chip";
-import { useNow } from "./use-now";
+import { useServerNow } from "./use-now";
 
 export function DeployLogModal({
   serviceId,
@@ -60,7 +60,7 @@ function ModalBody({
   servicePort?: number | null;
   initial: Deployment;
 }) {
-  const now = useNow(isActiveDeployment(initial.status) ? 1000 : 0);
+  const now = useServerNow(isActiveDeployment(initial.status) ? 1000 : 0);
   // deployment:<id> and service:<id> invalidate this while it runs; poll fast only while the socket is down.
   const liveUp = useLiveUp();
   const live = useOp(

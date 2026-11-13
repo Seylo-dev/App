@@ -21,6 +21,7 @@ import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import type { Deployment } from "./deploy-steps";
 import { formatBytes, formatDuration, shortDigest, shortSha } from "./format";
+import { isActiveDeployment } from "./status";
 
 type Trigger = (typeof deployments.DeploymentTrigger)["static"];
 
@@ -84,11 +85,21 @@ export function deploymentVersion(d: Deployment): string {
   return shortDigest(d.image?.digest);
 }
 
-/** Total time of a finished deploy, or the time so far for a running one. */
+/** Total time of a finished deploy, or the time so far for a running one (now: the panel's time, useServerNow). */
 export function deploymentDurationMs(d: Deployment, now: number): number | null {
   if (d.durationMs != null) return d.durationMs;
   const from = d.startedAt ?? d.createdAt;
-  return d.finishedAt ? Date.parse(d.finishedAt) - Date.parse(from) : now - Date.parse(from);
+  return d.finishedAt ? Date.parse(d.finishedAt) - Date.parse(from) : Math.max(0, now - Date.parse(from));
+}
+
+/**
+ * The elapsed clock of a deploy that started and still moves (now: the
+ * panel's time, useServerNow), or null: a queued deploy has not started,
+ * and a final one shows when it ran instead, so its clock stops the moment
+ * the row says it ended.
+ */
+export function runningClockMs(d: Pick<Deployment, "status" | "startedAt">, now: number): number | null {
+  return isActiveDeployment(d.status) && d.startedAt ? Math.max(0, now - Date.parse(d.startedAt)) : null;
 }
 
 export function healthFailed(d: Deployment): boolean {

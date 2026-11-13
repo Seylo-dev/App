@@ -6,6 +6,7 @@
 // and port: only this panel's own pages can read the key.
 
 import { sessionKeyHeader, sessionKeyStorage } from "@seylo/ops";
+import { serverClock } from "./server-clock";
 
 export function readSessionKey(): string | null {
   try {
@@ -36,11 +37,13 @@ export function sessionKeyHeaders(): Record<string, string> {
   return key ? { [sessionKeyHeader]: key } : {};
 }
 
-/** fetch for the op client: adds the key to every call and keeps a new one. */
+/** fetch for the op client: adds the key to every call and keeps a new one; its Date header sets the panel's clock. */
 export async function sessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   for (const [name, value] of Object.entries(sessionKeyHeaders())) headers.set(name, value);
+  const sentAt = Date.now();
   const response = await fetch(input, { ...init, headers });
+  serverClock.observe(response.headers.get("date"), sentAt, Date.now());
   rememberSessionKey(response.headers);
   return response;
 }
