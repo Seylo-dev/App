@@ -15,6 +15,7 @@ import type { AgentHub } from "../../agent-hub/hub";
 import { userOf } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { portExposures, serviceDatabases } from "../../db/schema";
+import { allowListOpensAFamily, heldByAllowList } from "../../http/ip-ranges";
 import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { normalizeCidrs } from "../domains/checks";
@@ -301,7 +302,7 @@ function exposeDatabase(input: OpInput<typeof dbOps.setExposure>, ctx: OpContext
   if (tlsHostname && tlsHostname !== info.row.tlsHostname) {
     assertHostUnclaimed(ctx.db, tlsHostname, { field: "tlsHostname", exceptDatabaseOf: info.service.id });
   }
-  const cidrs = input.allowedCidrs === undefined ? (info.exposure?.allowedCidrs ?? []) : normalizeCidrs(input.allowedCidrs);
+  const cidrs = allowListAfter(input, info.exposure);
   // An engine with known, unfixed holes (KeyDB) is never open to anyone with the password.
   if (input.enabled && info.engine.exposureNeedsAllowlist && cidrs.length === 0) {
     throw new OpError(
@@ -315,7 +316,7 @@ function exposeDatabase(input: OpInput<typeof dbOps.setExposure>, ctx: OpContext
   if (input.allowPlain && !input.enabled) {
     throw new OpError("BAD_REQUEST", "Connections without TLS need exposure on.", { field: "allowPlain" });
   }
-  const { wasPlain, allowPlain, openedToEveryone } = plainChange(input, info.exposure, cidrs);
+  const { wasPlain, allowPlain, widened, openToEveryone } = plainChange(input, info.exposure, cidrs);
   // An older agent ignores the field and stays TLS only: refuse turning it on there instead of a switch that does nothing.
   if (allowPlain && !wasPlain && !nodeHasCapability(ctx.db, ctx.agents, node.id, plainExposureCapability)) {
     throw new OpError(
@@ -324,12 +325,12 @@ function exposeDatabase(input: OpInput<typeof dbOps.setExposure>, ctx: OpContext
       { field: "allowPlain", reason: "agentTooOld" },
     );
   }
-  // Emptying the allow list while it stays on opens plain clients to every IP: audited the same way as turning it on there.
-  if (allowPlain !== wasPlain || openedToEveryone) {
+  // Widening the allow list while it stays on lets plain clients in from new addresses: audited the same way as turning it on there.
+  if (allowPlain !== wasPlain || widened) {
     // The input says what was asked; this says what changed (turning exposure off ends it too).
     ctx.auditDetails?.({
       plainConnections: allowPlain ? "allowed" : "tlsOnly",
-      ...(allowPlain ? { openToEveryone: cidrs.length === 0 } : {}),
+      ...(allowPlain ? { openToEveryone } : {}),
     });
   }
   ctx.db.transaction((tx) => {
@@ -378,24 +379,36 @@ function exposeDatabase(input: OpInput<typeof dbOps.setExposure>, ctx: OpContext
 
 export const setExposure = implement(dbOps.setExposure, exposeDatabase, { modelApproval: weakensTls });
 
+/** The allow list a setExposure call leaves: the input's, normalized (BAD_REQUEST when an entry is not one), or the stored one. */
+function allowListAfter(input: OpInput<typeof dbOps.setExposure>, exposure: ExposureRow | null): string[] {
+  return input.allowedCidrs === undefined ? (exposure?.allowedCidrs ?? []) : normalizeCidrs(input.allowedCidrs);
+}
+
 /**
  * What a setExposure call does to clients without TLS, from its input, the
  * stored exposure row and the allow list it leaves (cidrs): whether they
- * were let in, whether they are after it, and whether it opens them to
- * every IP (an allow list emptied while they stay let in). The handler
- * audits from it and weakensTls from it, so the two agree.
+ * were let in, whether they are after it, whether the list now lets them
+ * in from addresses the old one did not (emptied, or an entry the old list
+ * does not hold, such as 0.0.0.0/0, while they stay let in; from an empty
+ * list every new one is narrower), and whether every IP gets in (an empty
+ * list, a /0, or ranges adding up to a whole family). The handler audits
+ * from it and weakensTls from it, so the two agree.
  */
 function plainChange(input: OpInput<typeof dbOps.setExposure>, exposure: ExposureRow | null, cidrs: readonly string[]) {
   const wasPlain = exposure?.allowPlain ?? false;
   const allowPlain = input.enabled ? (input.allowPlain ?? wasPlain) : false;
-  const openedToEveryone = allowPlain && wasPlain && cidrs.length === 0 && (exposure?.allowedCidrs.length ?? 0) > 0;
-  return { wasPlain, allowPlain, openedToEveryone };
+  const before = exposure?.allowedCidrs ?? [];
+  const widened =
+    allowPlain && wasPlain && before.length > 0 && (cidrs.length === 0 || cidrs.some((cidr) => !heldByAllowList(cidr, before)));
+  const openToEveryone = cidrs.length === 0 || allowListOpensAFamily(cidrs);
+  return { wasPlain, allowPlain, widened, openToEveryone };
 }
 
 /**
  * setExposure's modelApproval check (its contract says "conditional"): a
- * model's call that lets clients in without TLS, or opens them to every IP,
- * waits for a person's approval. Every other change, turning them off
+ * model's call that lets clients in without TLS, or lets them in from more
+ * addresses (an allow list emptied or widened), waits for a person's
+ * approval. Every other change, a narrower list and turning them off
  * among them, runs as before.
  */
 function weakensTls(input: OpInput<typeof dbOps.setExposure>, check: { db: PanelDb }): boolean {
@@ -403,6 +416,14 @@ function weakensTls(input: OpInput<typeof dbOps.setExposure>, check: { db: Panel
   // Not a database: the handler refuses it at once.
   if (!row) return false;
   const exposure = exposureOf(check.db, row);
-  const { wasPlain, allowPlain, openedToEveryone } = plainChange(input, exposure, input.allowedCidrs ?? exposure?.allowedCidrs ?? []);
-  return allowPlain && (!wasPlain || openedToEveryone);
+  let cidrs: string[];
+  try {
+    cidrs = allowListAfter(input, exposure);
+  } catch (error) {
+    // An entry that is not an address: the handler refuses it at once too.
+    if (error instanceof OpError) return false;
+    throw error;
+  }
+  const { wasPlain, allowPlain, widened } = plainChange(input, exposure, cidrs);
+  return allowPlain && (!wasPlain || widened);
 }

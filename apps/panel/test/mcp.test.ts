@@ -425,7 +425,7 @@ test("Ask before destructive actions off: an MCP token's destructive call runs r
     });
   // The instructions name what waits, a database's clients without TLS too.
   expect((await initialize()).body.result.instructions).toContain(
-    "Destructive actions, backup download links and letting a database's clients in without TLS (databases_setExposure allowPlain, or an emptied allowedCidrs while it is on) are queued for a person to approve",
+    "Destructive actions, backup download links and letting a database's clients in without TLS (databases_setExposure allowPlain, or an allowedCidrs emptied or widened while it is on) are queued for a person to approve",
   );
   expect((await callOp(panel, mcp.update, { askBeforeDestructive: false }, { cookie: owner.cookie })).status).toBe(200);
   const init = await initialize();

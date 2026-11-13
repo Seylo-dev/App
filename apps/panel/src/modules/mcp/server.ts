@@ -116,7 +116,7 @@ async function handleMessage(ctx: MessageContext, message: unknown) {
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
       const panelName = readPanelName(ctx.deps.db);
       const destructive = readMcpSafety(ctx.deps.db).askBeforeDestructive
-        ? "Destructive actions, backup download links and letting a database's clients in without TLS (databases_setExposure allowPlain, or an emptied allowedCidrs while it is on) are queued for a person to approve; use approvals_get to follow them."
+        ? "Destructive actions, backup download links and letting a database's clients in without TLS (databases_setExposure allowPlain, or an allowedCidrs emptied or widened while it is on) are queued for a person to approve; use approvals_get to follow them."
         : "Destructive actions, backup download links and letting a database's clients in without TLS run right away on this panel, without a person's approval: confirm with the user before you call one.";
       return rpcResult(id, {
         protocolVersion: supportedProtocolVersions.includes(asked) ? asked : supportedProtocolVersions[0],

@@ -5553,15 +5553,24 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   is never refused. Same permission as the rest of exposure
   (`databases.expose`); audited with the input and, when it changed,
   `plainConnections` "allowed" (with `openToEveryone` when
-  `allowedCidrs` is empty) or "tlsOnly"; emptying the allow list while it
-  stays on is audited as `plainConnections` "allowed" with
-  `openToEveryone` true too. Those two are also what a model's call waits
-  for a person on (`modelApproval: "conditional"`, the handler's
+  `allowedCidrs` is empty, holds a /0 or ranges adding up to every IPv4
+  or every IPv6 address, such as 0.0.0.0/1 with 128.0.0.0/1:
+  `http/ip-ranges.ts` `allowListOpensAFamily`) or "tlsOnly"; widening a
+  non-empty allow list while it stays on (emptying it, or an entry the
+  stored list does not hold, as `heldByAllowList` reads it: one stored
+  entry of the same family covering its whole range, IPv4-mapped IPv6
+  staying IPv6 as on the node; a range split across two stored entries
+  counts as new) is audited as `plainConnections` "allowed" with
+  `openToEveryone` too. Those two are also what a model's call waits for
+  a person on (`modelApproval: "conditional"`, the handler's
   `weakensTls` reads the same `plainChange` the audit does): turning it
-  on (from off, exposing again included) and emptying a non-empty allow
-  list while it stays on. Sending `allowPlain: true` while it is already
-  on, other lists, ports and host names, `allowPlain: false` (with an
-  empty list too) and turning exposure off run as before.
+  on (from off, exposing again included) and widening a non-empty allow
+  list while it stays on, so 0.0.0.0/0, ::/0, 0.0.0.0/1 with
+  128.0.0.0/1 or the model's own address in place of a person's list
+  wait like an empty one. Sending `allowPlain: true` while it is already
+  on, a list inside the stored one (from an empty list any list),
+  ports and host names, `allowPlain: false` (with an empty or catch-all
+  list too) and turning exposure off run as before.
   `databases.get exposure` has
   `allowPlain` (the setting) and `plainNeedsNodeUpdate` (the node's agent
   is older: the port stays TLS only whatever the setting says, and the

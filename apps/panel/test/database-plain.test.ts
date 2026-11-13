@@ -3,8 +3,9 @@
 // audited, sent to the agent (DatabaseExposure.allow_plain) only when its
 // agent advertises database.exposure.plain.v1, and reset when exposure is
 // turned off. The exposed URL keeps asking for TLS. A model (MCP, AI) that
-// turns it on, or empties the allow list while it is on, waits for a
-// person's approval (modelApproval "conditional").
+// turns it on, or empties or widens the allow list while it is on (0.0.0.0/0
+// in place of a list, say), waits for a person's approval (modelApproval
+// "conditional").
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { allOps, approvals as approvalOps, databases as dbOps } from "@seylo/ops";
@@ -224,12 +225,15 @@ test("a model's call that lets clients in without TLS waits for a person; its ot
     (await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, allowedCidrs: ["198.51.100.0/24"] }, { bearer: key })).status,
   ).toBe(200);
 
-  // With it on, the model may change the list, and say on again (nobody new gets in), but not empty it.
-  expect(await runs({ allowedCidrs: ["203.0.113.0/24"] })).toMatchObject({ allowPlain: true, allowedCidrs: ["203.0.113.0/24"] });
-  expect(await runs({ allowPlain: true, port: 41000 })).toMatchObject({ allowPlain: true, allowedCidrs: ["203.0.113.0/24"] });
+  // With it on, the model may narrow the list, and say on again (nobody new gets in), but not empty it or let in
+  // addresses the list did not hold.
+  expect(await runs({ allowedCidrs: ["198.51.100.0/25"] })).toMatchObject({ allowPlain: true, allowedCidrs: ["198.51.100.0/25"] });
+  expect(await runs({ allowPlain: true, port: 41000 })).toMatchObject({ allowPlain: true, allowedCidrs: ["198.51.100.0/25"] });
   await waits({ allowedCidrs: [] });
   await waits({ allowedCidrs: [], allowPlain: true });
-  expect(await exposureOf(serviceId)).toMatchObject({ allowPlain: true, allowedCidrs: ["203.0.113.0/24"] });
+  await waits({ allowedCidrs: ["203.0.113.0/24"] });
+  await waits({ allowedCidrs: ["198.51.100.0/24"] });
+  expect(await exposureOf(serviceId)).toMatchObject({ allowPlain: true, allowedCidrs: ["198.51.100.0/25"] });
   // Emptying it while turning plain clients off, or turning exposure off, lets nobody in without TLS.
   expect(await runs({ allowedCidrs: [], allowPlain: false })).toMatchObject({ allowPlain: false, allowedCidrs: [] });
   expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: false }, { bearer: mcp })).status).toBe(200);
@@ -247,8 +251,71 @@ test("a model's call that lets clients in without TLS waits for a person; its ot
     { serviceId, enabled: true, allowPlain: true },
     { serviceId, enabled: true, allowedCidrs: [] },
     { serviceId, enabled: true, allowedCidrs: [], allowPlain: true },
+    { serviceId, enabled: true, allowedCidrs: ["203.0.113.0/24"] },
+    { serviceId, enabled: true, allowedCidrs: ["198.51.100.0/24"] },
     { serviceId, enabled: true, allowPlain: true },
   ]);
+});
+
+test("a catch-all allow list in place of the person's waits like an empty one; a narrower one runs", async () => {
+  const { serviceId } = await exposedDb();
+  const asPerson = async (input: Record<string, unknown>) =>
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, ...input }, { cookie })).status).toBe(200);
+  await asPerson({ allowedCidrs: ["203.0.113.7/32"], allowPlain: true });
+  const mcp = createApiKey(panel, ownerId, { kind: "mcp" });
+  const asModel = (input: Record<string, unknown>) =>
+    callOp(panel, dbOps.setExposure, { serviceId, enabled: true, ...input }, { bearer: mcp });
+  const waits = async (allowedCidrs: string[]) => {
+    const asked = await asModel({ allowedCidrs });
+    expect(asked.status).toBe(403);
+    expect(asked.body.error.code).toBe("APPROVAL_REQUIRED");
+    expect(await exposureOf(serviceId)).toMatchObject({ allowPlain: true, allowedCidrs: ["203.0.113.7/32"] });
+  };
+
+  // Every IP, every IPv4 or IPv6 address, the same in two halves, or another address (the model's own).
+  await waits(["0.0.0.0/0", "::/0"]);
+  await waits(["0.0.0.0/0"]);
+  await waits(["::/0"]);
+  await waits(["0.0.0.0/1", "128.0.0.0/1"]);
+  await waits(["198.51.100.9"]);
+  await waits(["203.0.113.7/32", "198.51.100.9"]);
+  await waits(["203.0.113.0/24"]);
+
+  // Narrower or the same runs: the person's list, a range inside a wider one, an entry written without its /32.
+  const runs = async (input: Record<string, unknown>) => {
+    const ran = await asModel(input);
+    expect(ran.status).toBe(200);
+    return ran.body.exposure;
+  };
+  expect(await runs({ allowedCidrs: ["203.0.113.7"] })).toMatchObject({ allowPlain: true, allowedCidrs: ["203.0.113.7/32"] });
+  await asPerson({ allowedCidrs: ["203.0.113.0/24"] });
+  expect(await runs({ allowedCidrs: ["203.0.113.7/32", "203.0.113.128/25"] })).toMatchObject({
+    allowedCidrs: ["203.0.113.7/32", "203.0.113.128/25"],
+  });
+  // A catch-all while turning plain clients off lets nobody in without TLS.
+  expect(await runs({ allowedCidrs: ["0.0.0.0/0"], allowPlain: false })).toMatchObject({ allowPlain: false, allowedCidrs: ["0.0.0.0/0"] });
+});
+
+test("a catch-all allow list is audited as open to every IP, and widening one while plain clients are on is audited", async () => {
+  const { serviceId } = await exposedDb("mysql");
+  const set = async (input: Record<string, unknown>) =>
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, ...input }, { cookie })).status).toBe(200);
+  await set({ allowedCidrs: ["0.0.0.0/0"], allowPlain: true });
+  // Inside the old list: nothing new about plain clients.
+  await set({ allowedCidrs: ["0.0.0.0/1", "128.0.0.0/1"] });
+  await set({ allowedCidrs: ["203.0.113.7"] });
+  // Wider again, in two halves, then to one more address.
+  await set({ allowedCidrs: ["0.0.0.0/1", "128.0.0.0/1"] });
+  await set({ allowedCidrs: ["203.0.113.7"] });
+  await set({ allowedCidrs: ["203.0.113.7", "198.51.100.9"] });
+  const rows = audited();
+  expect(rows).toHaveLength(7);
+  expect(rows[1]).toMatchObject({ allowPlain: true, plainConnections: "allowed", openToEveryone: true });
+  expect(rows[2]).not.toHaveProperty("plainConnections");
+  expect(rows[3]).not.toHaveProperty("plainConnections");
+  expect(rows[4]).toMatchObject({ plainConnections: "allowed", openToEveryone: true });
+  expect(rows[5]).not.toHaveProperty("plainConnections");
+  expect(rows[6]).toMatchObject({ plainConnections: "allowed", openToEveryone: false });
 });
 
 test("the MCP tool queues it for a person, whose approval runs it; Ask before destructive actions off runs it right away", async () => {
