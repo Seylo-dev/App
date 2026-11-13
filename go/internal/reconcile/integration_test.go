@@ -278,7 +278,8 @@ func TestITRolloutUnhealthyRollback(t *testing.T) {
 	bad.Deploy.HealthTimeout = durationpb.New(4 * time.Second)
 	e.apply(3, bad)
 	p := e.result(id, 3)
-	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED || !strings.Contains(p.GetMessage(), "starting broken") {
+	// The app's own output is apart from the reason since 0.2.16 (DeployProgress.last_output).
+	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED || !slices.Contains(p.GetLastOutput(), "starting broken") || strings.Contains(p.GetMessage(), "starting broken") {
 		t.Fatalf("gen 3: %v", p)
 	}
 	e.settle()
@@ -369,7 +370,9 @@ func TestITListensOnAnotherPort(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			id := e.id(tc.name)
 			s := &agentv1.ServiceSpec{
-				Id: id, ProjectId: e.prefix + "p", Name: tc.name, Generation: 1,
+				// A project (network) of its own each: the next container would get the address the last one had,
+				// and the host's neighbour entry for it can still name the old one (a dial timeout, not a refusal).
+				Id: id, ProjectId: e.prefix + tc.name, Name: tc.name, Generation: 1,
 				Kind:  agentv1.ServiceKind_SERVICE_KIND_APP,
 				Image: &agentv1.ImageRef{Reference: itImage},
 				Container: &agentv1.ContainerConfig{
