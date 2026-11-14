@@ -349,7 +349,7 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 
 	var target, others []docker.Container
 	for _, c := range list {
-		if w.hashOf(c.ID, c.Labels, spec, hash) == hash {
+		if w.hashOf(c.ID, c.Labels, spec, hash) == hash && !w.dnsOutdated(spec, c) {
 			target = append(target, c)
 		} else {
 			others = append(others, c)
@@ -380,6 +380,23 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 	}
 	w.rollout(ctx, spec, hash, others)
 	return false
+}
+
+// dnsOutdated: a deploy of spec (a generation this worker has not
+// finished) finds c created with other DNS than a container gets now (the
+// node's DNS cache was turned on or off since). The deploy then creates
+// the container again, as for a changed spec, so "redeploy to apply" holds
+// although the spec hash leaves DNS out. Only a deploy does: turning the
+// cache on or off, a restart or a resync alone recreates nothing.
+func (w *worker) dnsOutdated(spec *agentv1.ServiceSpec, c docker.Container) bool {
+	if w.r.o.DNS == nil || docker.IsPanelService(spec.GetId(), spec.GetProtected()) {
+		return false
+	}
+	gen := spec.GetGeneration()
+	if gen <= w.rec.Succeeded || labelUint(c, docker.LabelGeneration) >= gen {
+		return false
+	}
+	return docker.UsesDNSCache(c.Labels) != (len(w.r.o.DNS().Servers) > 0)
 }
 
 // waitingFor returns the first compose dependency that is not running.
