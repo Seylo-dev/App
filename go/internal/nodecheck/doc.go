@@ -18,9 +18,11 @@
 //	                  test container on the default bridge (an image
 //	                  already here, never pulled), our running containers'
 //	                  resolv.conf (build workers, apps), daemon.json's
-//	                  "dns" and the host dockerd's --dns; in the agent's
-//	                  run it restarts our build workers that lost theirs
-//	                  (Env.RestartWorkers)
+//	                  "dns" and the host dockerd's --dns; then a test
+//	                  container on seylo-edge resolves github.com through
+//	                  Docker's embedded DNS (works, slow, fails, bounded in
+//	                  time); in the agent's run it restarts our build
+//	                  workers that lost theirs (Env.RestartWorkers)
 //	network.firewall  ufw or firewalld allow 80 and 443
 //	time.sync         NTP state and skew against the panel's clock
 //	panel.reachable   GET <panel>/api/health and its latency

@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/build"
@@ -183,6 +184,73 @@ func TestRealContainerDNS(t *testing.T) {
 	docker("restart", "-t", "0", app)
 	if r = e.containerDNS(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
 		t.Fatalf("after the app's restart: %v %q", r.GetStatus(), r.GetDetail())
+	}
+
+	// No test container is left behind.
+	if left := docker("ps", "-aq", "--filter", "label="+seylodocker.LabelDNSCheck); left != "" {
+		t.Fatalf("test containers left: %s", left)
+	}
+}
+
+// TestRealContainerDNSLookup runs the Container DNS check's lookup against
+// the VM's Docker, on a network of the test's own (the check's is
+// seylo-edge, which other tests in the VM may own): it resolves github.com
+// and the check passes. A lookup container whose only server drops every
+// query (192.0.2.53, TEST-NET-1, as --dns, which the embedded DNS forwards
+// to) fails the check with nslookup's error and the server to try, after
+// nslookup's own 5 s and well within the run's bound. No test container
+// is left behind.
+func TestRealContainerDNSLookup(t *testing.T) {
+	if os.Getenv("SEYLO_IT") == "" {
+		t.Skip("SEYLO_IT not set")
+	}
+	docker := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	docker("pull", "-q", "busybox:1.37")
+	var b [3]byte
+	_, _ = rand.Read(b[:])
+	network := "seylo-dnslk-" + hex.EncodeToString(b[:])
+	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
+	docker("network", "create", network)
+
+	e := &Env{DataDir: t.TempDir(), GOARCH: runtime.GOARCH, lookupNetwork: network}
+	e.defaults()
+	start := time.Now()
+	r := e.containerDNS(context.Background())
+	t.Logf("%v in %v | %s | %s", r.GetStatus(), time.Since(start), r.GetDetail(), r.GetFixHint())
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || !strings.Contains(r.GetDetail(), "; a test container on "+network+" resolved github.com in ") ||
+		!strings.Contains(r.GetDetail(), "through Docker's embedded DNS, which forwards to ") {
+		t.Fatalf("the VM's Docker: %v %q", r.GetStatus(), r.GetDetail())
+	}
+
+	e.lookupServers = []string{"192.0.2.53"}
+	start = time.Now()
+	l := e.lookupDNS(context.Background(), "busybox:1.37", nil)
+	took := time.Since(start)
+	t.Logf("dropped: %+v in %v", l, took)
+	if l.Skipped != "" || l.Address != "" || l.Error != "connection timed out; no servers could be reached" {
+		t.Fatalf("a lookup through a server that drops it = %+v", l)
+	}
+	if l.Took < lookupWait-time.Second || l.Took > lookupWait+2*time.Second || took > lookupTimeout {
+		t.Fatalf("the lookup took %v (nslookup's limit %v), the run %v (bound %v)", l.Took, lookupWait, took, lookupTimeout)
+	}
+	start = time.Now()
+	r = e.containerDNS(context.Background())
+	t.Logf("%v in %v | %s | %s", r.GetStatus(), time.Since(start), r.GetDetail(), r.GetFixHint())
+	want := "a test container on " + network + " could not resolve github.com through Docker's embedded DNS, which forwards to 192.0.2.53: " +
+		"connection timed out; no servers could be reached (after "
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL || !strings.HasPrefix(r.GetDetail(), want) ||
+		!strings.Contains(r.GetFixHint(), "Check on the node that 192.0.2.53 answers (`dig @192.0.2.53 github.com`)") {
+		t.Fatalf("a lookup through a server that drops it: %v %q %q", r.GetStatus(), r.GetDetail(), r.GetFixHint())
+	}
+	if d := time.Since(start); d > probeTimeout+lookupTimeout {
+		t.Fatalf("the check took %v", d)
 	}
 
 	// No test container is left behind.

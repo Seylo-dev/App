@@ -144,7 +144,8 @@ func TestContainerDNSRestartsStaleWorkers(t *testing.T) {
 			wantCalled: true,
 			want:       pass,
 			detail: []string{`gets 8.8.8.8, 1.1.1.1, from "dns": [8.8.8.8, 1.1.1.1] in `, "/etc/docker/daemon.json" + restartedNote +
-				`; Docker 29.1.3 loses its "dns" setting when it is reloaded (systemctl reload docker, or a SIGHUP; moby#52060, fixed in Docker 29.3.0), so restart Docker instead of reloading it`},
+				`; Docker 29.1.3 loses its "dns" setting when it is reloaded (systemctl reload docker, or a SIGHUP; moby#52060, fixed in Docker 29.3.0), so restart Docker instead of reloading it` +
+				"; a test container on seylo-edge resolved github.com in 30 ms"},
 			notDetails: []string{"still has no DNS server"},
 		},
 		{

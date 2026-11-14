@@ -355,6 +355,11 @@ type dnsNode struct {
 	runErr    error  // docker run's error
 	systemctl string // systemctl show's ExecStart; "" fails
 	mainPID   string // systemctl show's MainPID; "" fails
+	// lookup is the lookup container's output; "" for a fast answer
+	// (lookupWorks).
+	lookup    string
+	lookupErr error // the lookup container's docker run error
+	noEdge    bool  // docker network inspect finds no edge network
 	cmds      []string
 	// deadRm are docker rm commands run with a context already done.
 	deadRm []string
@@ -380,6 +385,16 @@ func (n *dnsNode) run(ctx context.Context, w io.Writer, name string, args ...str
 	switch docker := strings.Join(args[3:], " "); {
 	case docker == "image ls --format {{.Repository}}:{{.Tag}}":
 		_, _ = io.WriteString(w, n.images)
+	case strings.HasPrefix(docker, "network inspect "):
+		if n.noEdge {
+			return fmt.Errorf("exit status 1: Error response from daemon: network %s not found", docker[strings.LastIndexByte(docker, ' ')+1:])
+		}
+		_, _ = io.WriteString(w, docker[strings.LastIndexByte(docker, ' ')+1:]+"\n")
+	case strings.HasPrefix(docker, "run ") && strings.Contains(docker, " --entrypoint sh "):
+		if n.lookupErr != nil {
+			return n.lookupErr
+		}
+		_, _ = io.WriteString(w, cmp.Or(n.lookup, lookupWorks))
 	case strings.HasPrefix(docker, "run "):
 		if n.runErr != nil {
 			return n.runErr
@@ -527,7 +542,11 @@ func TestContainerDNSRealNode(t *testing.T) {
 	env, _, etc := dnsEnv(t, dnsCase{
 		daemonJSON: `{"dns": ["8.8.8.8", "1.1.1.1"], "live-restore": true}`,
 		dockerd:    "/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock",
-		node:       dnsNode{images: "alpine:3.20\nmoby/buildkit:buildx-stable-1\n", resolv: realNodeResolvConf},
+		// The lookup container, created after the reload too, asks the
+		// embedded DNS, which has nothing to forward to.
+		node: dnsNode{images: "alpine:3.20\nmoby/buildkit:buildx-stable-1\n", resolv: realNodeResolvConf,
+			lookup: lookupOut("5.00", "5.00", 1, "Server:\t\t127.0.0.11\nAddress:\t127.0.0.11:53\n\n** server can't find github.com: SERVFAIL\n\n",
+				projectResolvConf("[invalid IP invalid IP]", true))},
 		// Created after the reload, like the test container.
 		workers: map[string]string{worker: realNodeResolvConf},
 		containers: []dnsContainer{
@@ -546,7 +565,9 @@ func TestContainerDNSRealNode(t *testing.T) {
 	detail := `containers get no DNS server they can use: a test container on Docker's default bridge (moby/buildkit:buildx-stable-1) gets "invalid IP", "invalid IP", ` +
 		`although "dns" in ` + file + ` gives 8.8.8.8, 1.1.1.1: Docker 29.1.3 loses its "dns" setting when it is reloaded (systemctl reload docker, or a SIGHUP; moby#52060, fixed in Docker 29.3.0); ` +
 		`builds cannot pull images (the build worker runs on Docker's default bridge) and apps cannot look up names outside this server; ` +
-		`the build worker ` + worker + ` still has no DNS server it can use, from before, so builds there cannot pull images`
+		`the build worker ` + worker + ` still has no DNS server it can use, from before, so builds there cannot pull images; ` +
+		`a test container on seylo-edge could not resolve github.com through Docker's embedded DNS, which forwards to "invalid IP", "invalid IP": ` +
+		`server can't find github.com: SERVFAIL (after under 10 ms)`
 	if r.GetDetail() != detail {
 		t.Errorf("detail\n got: %s\nwant: %s", r.GetDetail(), detail)
 	}
@@ -621,7 +642,8 @@ func TestContainerDNSEmptyEntries(t *testing.T) {
 	var ran bool
 	runCmd := regexp.MustCompile(`docker run --rm --name seylo-dnscheck-[0-9a-f]{8} --pull never --network bridge --label seylo\.dnscheck=true --label traefik\.enable=false --entrypoint cat moby/buildkit:buildx-stable-1 /etc/resolv\.conf$`)
 	for _, c := range node.cmds {
-		if strings.Contains(c, "docker run ") {
+		// The lookup container (TestContainerDNSLookup) has its own command.
+		if strings.Contains(c, "docker run ") && !strings.Contains(c, " --entrypoint sh ") {
 			ran = true
 			if !runCmd.MatchString(c) {
 				t.Errorf("test container command %q", c)

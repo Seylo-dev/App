@@ -3,8 +3,6 @@ package nodecheck
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,6 +77,10 @@ import (
 //     at Docker's next restart). GET /info has no DNS field; its
 //     ServerVersion says whether a reload can explain "invalid IP" for a
 //     setting that is fine now.
+//
+// Then a second test container, on our edge network, resolves a name
+// through Docker's embedded DNS: servers that look fine may still not
+// answer from this node (dnslookup.go).
 //
 // It never changes daemon.json or restarts Docker: a restart stops every
 // container on the server unless live-restore is on, Wings' game servers
@@ -744,9 +746,7 @@ func (e *Env) probeDNS(ctx context.Context) dnsProbe {
 			" image on this node, and the check pulls none"}
 	}
 	e.removeLeftoverProbes(ctx)
-	var b [4]byte
-	_, _ = rand.Read(b[:])
-	name := brand.Slug + "-dnscheck-" + hex.EncodeToString(b[:])
+	name := probeContainerName()
 	// Like every container we create, out of a Docker-provider Traefik's
 	// sight (Wings').
 	out, err := e.dockerCLI(ctx, "run", "--rm", "--name", name, "--pull", "never", "--network", "bridge",
@@ -935,11 +935,14 @@ type dnsFindings struct {
 	// they had (staleReloadLost before the restart).
 	Restarted       []string
 	RestartedReload bool
+	// Lookup is the test container's lookup of a name on our edge network
+	// (dnslookup.go).
+	Lookup dnsLookup
 }
 
 func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
-	info, err := e.Docker.Info(ctx)
-	if err != nil {
+	info, dockerErr := e.Docker.Info(ctx)
+	if dockerErr != nil {
 		info = nil
 	}
 	f := dnsFindings{
@@ -950,6 +953,7 @@ func (e *Env) containerDNS(ctx context.Context) *agentv1.NodeCheckResult {
 		BuildsConfig: e.layout().BuildsDockerConfig(),
 		Heals:        e.RestartWorkers != nil,
 	}
+	f.Lookup = e.lookupDNS(ctx, f.Probe.Image, dockerErr)
 	if info != nil {
 		f.LiveRestore = &info.LiveRestoreEnabled
 		f.Version = info.ServerVersion
@@ -1068,10 +1072,13 @@ func (f dnsFindings) staleText() string {
 	return strings.Join(parts, ", and ")
 }
 
-// result is the check's result, with the build workers the check
-// restarted at the end of the detail.
+// result is the check's result: what the servers containers get say
+// (judge), the build workers the check restarted, and the test
+// container's lookup (withLookup), at the end of the detail unless it
+// decides the status.
 func (f dnsFindings) result() *agentv1.NodeCheckResult {
 	r := f.judge()
+	defer f.withLookup(r)
 	if n := len(f.Restarted); n > 0 {
 		note := fmt.Sprintf("restarted %s %s, which had no DNS server %s could use, from before: %s now %s the servers new containers get, and %s %s build cache",
 			plural(n, "the build worker", "the build workers"), strings.Join(f.Restarted, ", "), plural(n, "it", "they"),

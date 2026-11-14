@@ -41,7 +41,8 @@ type Env struct {
 	Resolver *net.Resolver
 	// GOARCH is the agent's architecture (runtime.GOARCH).
 	GOARCH string
-	// ResolveNames are looked up by the DNS check besides the panel host.
+	// ResolveNames are looked up by the DNS check besides the panel host;
+	// the Container DNS check's test container looks up the first.
 	ResolveNames []string
 	// GatePorts lists the ports the agent's portgate listens on (first-run
 	// IP:port access, timed expose, exposed databases). The gate binds in
@@ -60,6 +61,13 @@ type Env struct {
 	// CLI's and troubleshoot's runs).
 	RestartWorkers func(ctx context.Context, builders []string) []string
 	Now            func() time.Time
+
+	// lookupNetwork is the network of the Container DNS check's lookup
+	// container; "" for docker.EdgeNetwork. Tests use their own.
+	lookupNetwork string
+	// lookupServers are --dns servers for the lookup container (tests: a
+	// resolver that drops every query).
+	lookupServers []string
 }
 
 func (e *Env) defaults() {
