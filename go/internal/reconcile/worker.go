@@ -383,11 +383,16 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 }
 
 // dnsOutdated: a deploy of spec (a generation this worker has not
-// finished) finds c created with other DNS than a container gets now (the
-// node's DNS cache was turned on or off since). The deploy then creates
-// the container again, as for a changed spec, so "redeploy to apply" holds
-// although the spec hash leaves DNS out. Only a deploy does: turning the
-// cache on or off, a restart or a resync alone recreates nothing.
+// finished) finds c created without the node's DNS cache while the cache
+// is proven (ACTIVE: ContainerDNS has servers), or with it while the
+// setting is off. The deploy then creates the container again, as for a
+// changed spec, so "redeploy to apply" holds although the spec hash leaves
+// DNS out. Decided from the setting and the proof, never from a moment
+// the cache is only not proven (STARTING after every agent start, BLOCKED
+// after a failed test): a deploy then leaves the container's DNS as it is,
+// instead of restarting it to take the cache away. Only a deploy does:
+// turning the cache on or off, a restart or a resync alone recreates
+// nothing.
 func (w *worker) dnsOutdated(spec *agentv1.ServiceSpec, c docker.Container) bool {
 	if w.r.o.DNS == nil || docker.IsPanelService(spec.GetId(), spec.GetProtected()) {
 		return false
@@ -396,7 +401,11 @@ func (w *worker) dnsOutdated(spec *agentv1.ServiceSpec, c docker.Container) bool
 	if gen <= w.rec.Succeeded || labelUint(c, docker.LabelGeneration) >= gen {
 		return false
 	}
-	return docker.UsesDNSCache(c.Labels) != (len(w.r.o.DNS().Servers) > 0)
+	dns := w.r.o.DNS()
+	if docker.UsesDNSCache(c.Labels) {
+		return !dns.CacheOn
+	}
+	return len(dns.Servers) > 0
 }
 
 // waitingFor returns the first compose dependency that is not running.
