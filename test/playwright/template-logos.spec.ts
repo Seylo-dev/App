@@ -4,9 +4,11 @@
 // tile, one without keeps its letter tile, and so does one whose logo fails
 // to load. The popular images row gets the same tiles from the logos
 // bundled with the web app. The catalog line under the title says where the
-// templates come from; the owner checks for new ones and changes the source
-// there. Screenshots in every preset go to $SHOTS_DIR/template-logos/<preset>.png,
-// the source dialog to catalog-source.png.
+// templates come from (this panel has no catalog key, so the official
+// catalog is not switched on yet); the owner checks for new ones and changes
+// the source there. Screenshots in every preset go to
+// $SHOTS_DIR/template-logos/<preset>.png, the line without the key to
+// catalog-not-switched-on.png, the source dialog to catalog-source.png.
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
@@ -99,19 +101,21 @@ test("a logo that does not load falls back to the letter tile", async ({ page })
   await expectLogo(templateCard(page, "Uptime Kuma", "Monitoring"), "Uptime Kuma");
 });
 
-test("the catalog line: the shipped copy, Check for new templates, and the owner's source dialog", async ({ page }) => {
+test("the catalog line: the shipped copy, not switched on yet, and the owner's source dialog", async ({ page }) => {
   mkdirSync(shots, { recursive: true });
   await page.goto("/templates");
   const line = page.getByTestId("catalog-status");
-  // This panel has no catalog key (a development build): it lists the copy it ships and never downloads.
-  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\./);
-  const notifications = page.getByRole("region", { name: "Notifications" });
-  await line.getByRole("button", { name: "Check for new templates" }).click();
-  await expect(notifications.getByText("No new templates.")).toBeVisible();
+  // This panel has no catalog key (brand.json's is still the placeholder): it lists the copy it ships, never
+  // downloads, says so, and offers no check that could find nothing.
+  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\. The official catalog is not switched on yet, so no new templates are downloaded\./);
+  await expect(line.getByRole("button", { name: "Catalog source" })).toBeVisible();
+  await expect(line.getByRole("button", { name: "Check for new templates" })).toHaveCount(0);
+  await page.screenshot({ path: `${shots}/catalog-not-switched-on.png` });
 
   await line.getByRole("button", { name: "Catalog source" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Catalog source" })).toBeVisible();
+  await expect(dialog.getByTestId("catalog-not-switched-on")).toContainText(/^Not switched on yet in \S+ \S+: /);
   const official = dialog.getByRole("switch", { name: "Official catalog" });
   await expect(official).toBeChecked();
   // A private catalog without a key: saving waits for "Allow it without a signature", which shows the warning.
@@ -136,6 +140,22 @@ test("the catalog line: the shipped copy, Check for new templates, and the owner
   await page.getByRole("dialog").getByRole("switch", { name: "Official catalog" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(line).not.toContainText("Downloads are off.");
+});
+
+test("with the catalog key, Check for new templates asks the panel and says what it found", async ({ page }) => {
+  // The panel's own status as a build with the key shows it; the check itself goes to this (keyless) panel, which finds nothing.
+  await page.route("**/api/v1/templates.catalogStatus*", async (route) => {
+    const status = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...status, official: { ...status.official, signingKey: true } } });
+  });
+  await page.goto("/templates");
+  const line = page.getByTestId("catalog-status");
+  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\./);
+  await expect(line).not.toContainText("not switched on");
+  const check = page.waitForResponse((r) => r.url().includes("/api/v1/templates.refreshCatalog") && r.ok());
+  await line.getByRole("button", { name: "Check for new templates" }).click();
+  await check;
+  await expect(page.getByRole("region", { name: "Notifications" }).getByText("No new templates.")).toBeVisible();
 });
 
 test("templates a catalog update brought carry a New tag; templates for a newer panel are counted", async ({ page }) => {

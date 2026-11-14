@@ -3111,8 +3111,7 @@ never type the ids by hand.
     shipped one's reason is in `lastError`), so a catalog never stops the
     panel from starting.
   - Copies: the panel ships `templates/catalog.json` (+ `.minisig`), verified
-    with the same key at load (skipped while the key is the brand
-    placeholder: development builds, which then never download). Downloads
+    with the same key at load (skipped while the key is not set). Downloads
     go to `<dataDir>/templates/official/` (private: `.../extra/`), written
     to a temp file and renamed, and are verified again on every read, so an
     edited copy is ignored. The panel uses the download when its sequence
@@ -3120,6 +3119,22 @@ never type the ids by hand.
     that one may be newer). State (sequence floor, commit, fetchedAt,
     lastTriedAt, lastError, knownSlugs) is the `templatesCatalogState`
     setting in panel.db, not a file.
+  - No key yet: `templatesMinisignPublicKey` stays the brand placeholder
+    until the owner makes the catalog key (a blank key counts the same,
+    `remote.ts` `catalogKeySet`). Such a build lists the shipped copy
+    unsigned and never downloads the official catalog: not at start, not on
+    the 6-hour schedule, not on `templates.refreshCatalog`, not when the
+    owner turns it back on, and a download kept on disk by a build with the
+    key is not used (`lastTriedAt`/`fetchedAt` stay null). A private
+    catalog still downloads. `catalogStatus.official.signingKey` is false
+    and the Templates page says "The official catalog is not switched on
+    yet, so no new templates are downloaded." (the Catalog source dialog
+    says it under the Official catalog switch, which still saves the
+    setting for later), and shows "Check for new templates" only when a
+    check can download something (the official catalog on with the key, or
+    a private one). `make sync-templates` without `--local` writes nothing,
+    says what it needs and exits 0; `release-preflight.sh` only warns, also
+    for an unsigned shipped copy, so neither stops a release.
   - When: at start (schedule `templates.refresh`, `runNow`) and every 6
     hours (jitter 10 min); `templates.refreshCatalog` (`templates.manage`,
     audited) on demand; one check at a time. A refresh publishes

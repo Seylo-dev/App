@@ -2,8 +2,10 @@
 // templates come from (the official catalog downloaded from GitHub, or the
 // copy bundled with the panel), the last failed check, a private catalog,
 // how many are new or need a newer panel, and "Check for new templates" for
-// people who hold templates.manage. The owner changes the source in
-// CatalogSourceDialog.
+// people who hold templates.manage when there is something to download. A
+// build without the catalog key (signingKey false, until the owner makes
+// one) says plainly that the official catalog is not switched on yet. The
+// owner changes the source in CatalogSourceDialog.
 
 import { brand } from "@seylo/brand";
 import { type OpOutput, templates } from "@seylo/ops";
@@ -36,7 +38,11 @@ export function catalogSentences(status: CatalogStatus): string[] {
     out.push(t("templates.catalog.bundled", { product: brand.displayName, version: official.bundledWith }));
   } else out.push(t("templates.catalog.none"));
   if (!official.enabled) out.push(t("templates.catalog.downloadsOff"));
-  else if (official.lastError)
+  else if (!official.signingKey) {
+    out.push(t("templates.catalog.notSwitchedOn"));
+    // No download was tried: an error is about the copy that ships (one from a build with the key is old news).
+    if (official.origin === null && official.lastError) out.push(official.lastError);
+  } else if (official.lastError)
     out.push(
       official.lastTriedAt
         ? t("templates.catalog.lastError", { error: official.lastError, when: formatRelative(official.lastTriedAt) })
@@ -55,6 +61,11 @@ export function catalogSentences(status: CatalogStatus): string[] {
   return out;
 }
 
+/** "Check for new templates" can download something: the official catalog (on, and this build has its key) or a private one. */
+export function canCheckCatalog(status: CatalogStatus): boolean {
+  return status.canRefresh && ((status.official.enabled && status.official.signingKey) || status.extra !== null);
+}
+
 export function CatalogStatusLine({ status }: { status: CatalogStatus }) {
   const [sourceOpen, setSourceOpen] = useState(false);
   const refresh = useSettingsMutation(templates.refreshCatalog, {
@@ -65,6 +76,7 @@ export function CatalogStatusLine({ status }: { status: CatalogStatus }) {
       return out.newSlugs.length > 0 ? t("templates.catalog.found", { count: out.newSlugs.length }) : t("templates.catalog.upToDate");
     },
   });
+  const canCheck = canCheckCatalog(status);
   return (
     <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-muted-foreground" data-testid="catalog-status">
       <span className="min-w-0">
@@ -84,9 +96,9 @@ export function CatalogStatusLine({ status }: { status: CatalogStatus }) {
           </span>
         )}
       </span>
-      {(status.canRefresh || status.canChangeSource) && (
+      {(canCheck || (status.canChangeSource && status.source)) && (
         <span className="flex gap-1.5">
-          {status.canRefresh && (
+          {canCheck && (
             <Button size="sm" onClick={() => refresh.mutate({})} disabled={refresh.isPending}>
               <IconRefresh size={14} stroke={1.8} className={refresh.isPending ? "animate-spin" : undefined} />
               {refresh.isPending ? t("templates.catalog.checking") : t("templates.catalog.check")}
@@ -100,23 +112,41 @@ export function CatalogStatusLine({ status }: { status: CatalogStatus }) {
           )}
         </span>
       )}
-      {status.source && <CatalogSourceDialog open={sourceOpen} onOpenChange={setSourceOpen} source={status.source} />}
+      {status.source && (
+        <CatalogSourceDialog
+          open={sourceOpen}
+          onOpenChange={setSourceOpen}
+          source={status.source}
+          signingKey={status.official.signingKey}
+          version={status.official.bundledWith}
+        />
+      )}
     </div>
   );
 }
 
-function CatalogSourceDialog({ open, onOpenChange, source }: { open: boolean; onOpenChange: (open: boolean) => void; source: Source }) {
+function CatalogSourceDialog({
+  open,
+  onOpenChange,
+  ...form
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  source: Source;
+  signingKey: boolean;
+  version: string;
+}) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="top-[10%] max-w-[560px]">
         {/* Remounted on open, so the form starts from the saved setting. */}
-        {open && <SourceForm source={source} onDone={() => onOpenChange(false)} />}
+        {open && <SourceForm {...form} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function SourceForm({ source, onDone }: { source: Source; onDone: () => void }) {
+function SourceForm({ source, signingKey, version, onDone }: { source: Source; signingKey: boolean; version: string; onDone: () => void }) {
   const [official, setOfficial] = useState(source.official);
   const [withExtra, setWithExtra] = useState(source.extra !== null);
   const [url, setUrl] = useState(source.extra?.url ?? "");
@@ -148,6 +178,11 @@ function SourceForm({ source, onDone }: { source: Source; onDone: () => void }) 
           <span className="text-[12.5px] text-muted-foreground">
             {t("templates.catalog.officialDescription", { repo: `${brand.githubOrg}/${brand.templatesRepo}` })}
           </span>
+          {!signingKey && (
+            <span className="text-[12.5px] text-muted-foreground" data-testid="catalog-not-switched-on">
+              {t("templates.catalog.notSwitchedOnDialog", { product: brand.displayName, version })}
+            </span>
+          )}
         </span>
         <Switch id="catalog-official" checked={official} onCheckedChange={setOfficial} />
       </div>

@@ -266,9 +266,13 @@ Each release:
    panel (`apps/panel/scripts/check-templates.ts`) and writes
    `templates/`. Commit the result. `scripts/release-preflight.sh` refuses a
    release whose `templates/catalog.json` is unsigned or older than the
-   published catalog. When a template needs a feature this release adds,
-   raise `check` in the Templates repo's `panel.json` to this tag after the
-   release.
+   published catalog. While `templatesMinisignPublicKey` is still the
+   placeholder (step 8 not done), there is nothing signed to vendor:
+   `make sync-templates` writes nothing, says so and exits 0, and the
+   preflight only warns, so the release ships the committed copy unsigned
+   and its panels never download one. When a template needs a feature this
+   release adds, raise `check` in the Templates repo's `panel.json` to this
+   tag after the release.
 2. Run a dry run on `main`: Actions > Release > Run workflow, or
    `gh workflow run release.yml -f dry_run=true`. It runs the same Build
    and test job and builds everything a release attaches from its build

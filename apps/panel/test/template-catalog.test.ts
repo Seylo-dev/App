@@ -10,7 +10,7 @@
 // that template.
 
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { templates } from "@seylo/ops";
@@ -276,6 +276,43 @@ describe("downloading the official catalog", () => {
     expect(off.body.official).toMatchObject({ enabled: false, origin: "bundled" });
     expect(await refresh(keyed.panel, keyed.owner)).toMatchObject({ official: { lastTriedAt: null } });
     expect(fetched).toEqual([]);
+  });
+
+  test("without the catalog key (the placeholder or blank) nothing is downloaded at start, on a check or when downloads go back on, and a kept download is not used", async () => {
+    for (const unset of ["PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY", "", " "]) {
+      // A newer catalog a build with a key downloaded and kept, also on offer at the official URL.
+      const other = catalogKey();
+      const newer = fixtureCatalog({ sequence: 9, add: { notes: simpleTemplate("Notes") } });
+      const dataDir = tempDir();
+      mkdirSync(join(dataDir, "templates", "official"), { recursive: true });
+      writeFileSync(join(dataDir, "templates", "official", "catalog.json"), newer);
+      writeFileSync(join(dataDir, "templates", "official", "catalog.json.minisig"), other.sign(newer));
+      const fetched = serveCatalogs({ [officialUrl]: { catalog: newer, signature: other.sign(newer) } });
+      catalogSource.publicKey = unset;
+      // The shipped copy without a signature and not trusted by the test: no key means none is asked for.
+      catalogHooks.setBundled({ text: fixtureCatalog() });
+      const panel = testPanel({ dataDir });
+      panels.push(panel);
+      const { cookie: owner } = await createUser(panel, "owner");
+
+      await panel.runner.runDue(panel.deps, new Date(Date.now() + 3600_000));
+      await refresh(panel, owner);
+      await callOp(panel, templates.setCatalogSource, { official: false, extra: null }, { cookie: owner });
+      await callOp(panel, templates.setCatalogSource, { official: true, extra: null }, { cookie: owner });
+      expect(fetched).toEqual([]);
+      expect((await status(panel, owner)).official).toMatchObject({
+        origin: "bundled",
+        sequence: 1,
+        templates: 3,
+        signingKey: false,
+        enabled: true,
+        fetchedAt: null,
+        lastTriedAt: null,
+        lastError: null,
+      });
+      expect(await slugs(panel, owner)).toEqual(["board", "flows", "metrics"]);
+      resetCatalogs();
+    }
   });
 });
 

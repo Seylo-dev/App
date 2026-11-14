@@ -1017,6 +1017,14 @@ preflight --no-secret-key "${catalog_vars[@]}"
 expect_ok "release preflight only warns when the published catalog cannot be downloaded" "could not download the published template catalog"
 preflight --no-secret-key "${catalog_vars[@]}" BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY="${BRAND_PLACEHOLDER_PREFIX}TEMPLATES_MINISIGN_PUBLIC_KEY"
 expect_ok "release preflight only warns while brand.json has no catalog key" "ships its template catalog unsigned"
+# Until the owner makes the catalog key the shipped copy has no signature and
+# the published one may be newer: neither stops a release.
+rm "$vendored_catalog/catalog.json.minisig"
+catalog_json 9 >"$published_catalog/catalog.json"
+preflight --no-secret-key "${catalog_vars[@]}" BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY="${BRAND_PLACEHOLDER_PREFIX}TEMPLATES_MINISIGN_PUBLIC_KEY"
+expect_ok "release preflight passes an unsigned template catalog while brand.json has no catalog key" "release-preflight: ok"
+preflight --no-secret-key "${catalog_vars[@]}" BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY=
+expect_ok "release preflight takes an empty catalog key as no key" "CONTRIBUTING.md, Releases, step 8" "release-preflight: ok"
 
 # ---- Docker missing: installed without a question (owner decision for 0.2.1)
 # The installer asks nothing on the way: a join piped into sh over ssh, from

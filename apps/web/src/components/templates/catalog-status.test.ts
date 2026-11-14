@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type CatalogStatus, catalogSentences, templateTags } from "./catalog-status";
+import { type CatalogStatus, canCheckCatalog, catalogSentences, templateTags } from "./catalog-status";
 
 const base: CatalogStatus = {
   official: {
@@ -49,6 +49,41 @@ describe("the Templates page's catalog line", () => {
     expect(off).toEqual(["Catalog bundled with Seylo 0.2.17.", "Downloads are off.", "Private catalog: templates.example.com (unsigned)."]);
     const signed = catalogSentences({ ...base, extra: { ...base.official, host: "templates.example.com", signed: true } });
     expect(signed.at(-1)).toBe("Private catalog: templates.example.com.");
+  });
+
+  test("a build without the catalog key says plainly that the official catalog is not switched on yet", () => {
+    const bundled = { ...base.official, origin: "bundled" as const, signingKey: false, fetchedAt: null, lastTriedAt: null };
+    expect(catalogSentences({ ...base, official: bundled })).toEqual([
+      "Catalog bundled with Seylo 0.2.17.",
+      "The official catalog is not switched on yet, so no new templates are downloaded.",
+    ]);
+    // An error left from a build that had the key is old news; the shipped copy failing is not.
+    expect(catalogSentences({ ...base, official: { ...bundled, lastError: "Could not reach github.com." } })).toHaveLength(2);
+    expect(
+      catalogSentences({
+        ...base,
+        official: { ...bundled, origin: null, templates: 0, lastError: "The catalog that ships with this panel was not used: x" },
+      }),
+    ).toEqual([
+      "No template catalog could be read.",
+      "The official catalog is not switched on yet, so no new templates are downloaded.",
+      "The catalog that ships with this panel was not used: x",
+    ]);
+    // Turned off by the owner: that is what the line says.
+    expect(catalogSentences({ ...base, official: { ...bundled, enabled: false } })).toEqual([
+      "Catalog bundled with Seylo 0.2.17.",
+      "Downloads are off.",
+    ]);
+  });
+
+  test("Check for new templates shows only when something can be downloaded", () => {
+    const noKey = { ...base.official, signingKey: false };
+    const extra = { ...base.official, host: "templates.example.com", signed: true };
+    expect(canCheckCatalog(base)).toBe(true);
+    expect(canCheckCatalog({ ...base, canRefresh: false })).toBe(false);
+    expect(canCheckCatalog({ ...base, official: noKey })).toBe(false);
+    expect(canCheckCatalog({ ...base, official: { ...base.official, enabled: false } })).toBe(false);
+    expect(canCheckCatalog({ ...base, official: noKey, extra })).toBe(true);
   });
 
   test("tags: New for slugs a catalog update brought, and where a private template comes from", () => {

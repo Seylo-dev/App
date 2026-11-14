@@ -14,16 +14,22 @@
 // apps/panel/scripts/check-templates.ts (they must install on this panel),
 // then writes templates/catalog.json, catalog.json.minisig, and NOTICE and
 // the LICENSE.* files from the catalog (the image ships the logos, so it
-// ships their credits). While brand.json has no catalog key (development),
-// only --local works and the copy is written unsigned.
+// ships their credits).
+//
+// While brand.json has no catalog key (templatesMinisignPublicKey is still
+// the placeholder) there is no signed catalog to download: without --local
+// it writes nothing, says so and exits 0, so the release step does not stop
+// a release (the release ships the committed copy unsigned, and
+// release-preflight.sh only warns). --local still works and writes the copy
+// unsigned.
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isPlaceholder, templatesMinisignPublicKey } from "@seylo/brand";
+import { templatesMinisignPublicKey } from "@seylo/brand";
 import { checkTemplates, formatProblems, readCatalog } from "../apps/panel/scripts/check-templates";
 import { MinisignError, verifyMinisign } from "../apps/panel/src/crypto/minisign";
 import { CatalogFileError, parseCatalogFile } from "../apps/panel/src/modules/templates/catalog-file";
-import { catalogSource, officialSource } from "../apps/panel/src/modules/templates/remote";
+import { catalogKeySet, catalogSource, officialSource } from "../apps/panel/src/modules/templates/remote";
 
 const root = resolve(import.meta.dir, "..");
 const dir = join(root, "templates");
@@ -50,7 +56,7 @@ for (let i = 0; i < args.length; i += 2) {
 }
 if (signaturePath && !local) fail(usage);
 
-const keyed = !isPlaceholder(templatesMinisignPublicKey);
+const keyed = catalogKeySet(templatesMinisignPublicKey);
 let bytes: Uint8Array;
 let signature: string | null;
 if (local) {
@@ -61,10 +67,18 @@ if (local) {
       ? readFileSync(`${local}.minisig`, "utf8")
       : null;
 } else {
-  if (!keyed)
-    fail(
-      "brand.json templatesMinisignPublicKey is a placeholder, so no download can be verified. Set the catalog key (CONTRIBUTING.md, Releases) or use --local.",
+  if (!keyed) {
+    // Nothing signed to vendor yet: the release ships the committed copy, unsigned (release-preflight.sh warns).
+    console.log(
+      [
+        "sync-templates: nothing to do: brand.json has no catalog key yet (templatesMinisignPublicKey is the placeholder),",
+        "so there is no signed catalog to download; templates/catalog.json stays as committed and ships unsigned.",
+        "To vendor a newer catalog before the key exists: bun scripts/sync-templates.ts --local <catalog.json>",
+        "(built in the Templates repo by check-templates.ts --emit). To set the key: CONTRIBUTING.md, Releases, step 8.",
+      ].join("\n"),
     );
+    process.exit(0);
+  }
   bytes = await download(catalogSource.officialUrl);
   signature = new TextDecoder().decode(await download(`${catalogSource.officialUrl}.minisig`));
 }

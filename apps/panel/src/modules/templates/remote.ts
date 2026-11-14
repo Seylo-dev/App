@@ -26,8 +26,11 @@ export const catalogSource = {
   maxBytes: 20 * 1024 * 1024,
 };
 
-/** The build has the official catalog's key (a placeholder turns downloads off). */
-export const officialKeyConfigured = () => !isPlaceholder(catalogSource.publicKey);
+/** A catalog key that is set: not blank and not the brand placeholder (no key: the shipped copy only, never a download). */
+export const catalogKeySet = (key: string) => key.trim() !== "" && !isPlaceholder(key.trim());
+
+/** The build has the official catalog's key (until the owner makes one, downloads are off). */
+export const officialKeyConfigured = () => catalogKeySet(catalogSource.publicKey);
 
 export class CatalogFetchError extends Error {
   override name = "CatalogFetchError";

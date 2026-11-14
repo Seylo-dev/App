@@ -102,7 +102,7 @@ fi
 catalog_dir=${PREFLIGHT_CATALOG_DIR:-${BASH_SOURCE[0]%/*}/../templates}
 catalog_sequence() { sed -n 's/^  "sequence": \([0-9][0-9]*\),\{0,1\}$/\1/p' "$1" | head -n 1; }
 if [ -z "${BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY:-}" ] || placeholder "$BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY"; then
-  warn "brand.json templatesMinisignPublicKey is a placeholder: this release ships its template catalog unsigned and never downloads a newer one"
+  warn "brand.json templatesMinisignPublicKey is not set yet: this release ships its template catalog unsigned and its panels never download a newer one (to switch the official catalog on: CONTRIBUTING.md, Releases, step 8)"
 elif [ ! -f "$catalog_dir/catalog.json.minisig" ]; then
   fail "templates/catalog.json is not signed; run make sync-templates and commit the result"
 else
