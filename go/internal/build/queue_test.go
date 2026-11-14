@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,9 +20,12 @@ func TestQueueLimitsAndOrder(t *testing.T) {
 	}
 
 	got := make(chan int, 2)
+	var done sync.WaitGroup
 	for i := 1; i <= 2; i++ {
 		ahead := make(chan int, 1)
+		done.Add(1)
 		go func() {
+			defer done.Done()
 			r, err := q.Acquire(ctx, func(n int) { ahead <- n })
 			if err != nil {
 				t.Error(err)
@@ -44,6 +48,9 @@ func TestQueueLimitsAndOrder(t *testing.T) {
 	if a, b := <-got, <-got; a != 1 || b != 2 {
 		t.Fatalf("started in order %d, %d", a, b)
 	}
+	// Each build releases its slot after it reports that it started, so
+	// wait for both to finish before reading the stats.
+	done.Wait()
 	if running, waiting := q.Stats(); running != 0 || waiting != 0 {
 		t.Fatalf("stats %d running %d waiting", running, waiting)
 	}
