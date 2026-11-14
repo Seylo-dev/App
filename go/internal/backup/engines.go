@@ -111,6 +111,28 @@ printf '[client]\npassword="%s"\n' "$DB_PASSWORD_CNF" > /tmp/.backup.cnf
 if command -v mariadb-dump >/dev/null 2>&1; then DUMP=mariadb-dump; CLIENT=mariadb; else DUMP=mysqldump; CLIENT=mysql; fi
 `
 
+// mysqlRestoreSession raises, for the restore's own session only, the
+// timeouts a server drops a quiet client by: while the download is slow the
+// client waits between two statements (wait_timeout, 8 hours by default
+// but minutes on many tuned servers; MariaDB says "Server has gone away",
+// MySQL 8 "disconnected by the server because of inactivity") or in the
+// middle of one (net_read_timeout). 86400 is what mysqldump's
+// --network-timeout (on by default in MySQL 8.0+) sets for dumps. It goes
+// on the command line: as init-command in the option file the dump tools
+// read too, mysqldump 5.7 and 8.0 and mariadb-dump stop with "unknown
+// variable".
+const mysqlRestoreSession = `--init-command="SET SESSION wait_timeout = 86400, net_read_timeout = 86400, net_write_timeout = 86400"`
+
+// pgRestoreSession: a psql restore waits between two statements while the
+// download is slow, and a server with idle_session_timeout (Postgres 14+,
+// off by default) ends such a session; pg_dump's SET lines turn the other
+// timeouts off but not this one. PGOPTIONS turns it off for every session
+// of the restore (\connect too) on servers that know the setting.
+const pgRestoreSession = `V=$(psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname=postgres --no-password --no-psqlrc --tuples-only --no-align --quiet -c 'SHOW server_version_num' </dev/null 2>/dev/null) || V=0
+case "$V" in ''|*[!0-9]*) V=0 ;; esac
+if [ "$V" -ge 140000 ]; then export PGOPTIONS="-c idle_session_timeout=0"; fi
+`
+
 // mongoAuth adds credentials, when the database has a user, after the
 // job's own arguments.
 const mongoAuth = `set -e
@@ -403,7 +425,7 @@ func restoreJob(t dbTarget, ext, run string) (dbJob, error) {
 		case extSQL:
 			// pg_dumpall output; "role already exists" errors are expected
 			// and harmless, so psql does not stop on errors.
-			j.script = `exec psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname=postgres --no-password --quiet --file=-`
+			j.script = pgRestoreSession + `exec psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname=postgres --no-password --quiet --file=-`
 			j.gzip = true
 		default:
 			return dbJob{}, bad
@@ -412,7 +434,7 @@ func restoreJob(t dbTarget, ext, run string) (dbJob, error) {
 		if ext != extSQL {
 			return dbJob{}, bad
 		}
-		j.script = mysqlPrelude + `exec $CLIENT --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER"`
+		j.script = mysqlPrelude + `exec $CLIENT --defaults-extra-file=/tmp/.backup.cnf ` + mysqlRestoreSession + ` --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER"`
 		j.gzip = true
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
 		if ext != extMongo {
