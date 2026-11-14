@@ -184,7 +184,11 @@ in GitHub only as secrets of the `release` environment of
 [Seylo-dev/App](https://github.com/Seylo-dev/App). Only the Sign job of the
 release workflow, for a `v*` tag and after a maintainer approves it, can
 read them. The job that builds a release (and runs `bun install` and the npm
-build scripts) never sees the key.
+build scripts) never sees the key. The same key signs the template catalog
+that [Seylo-dev/Templates](https://github.com/Seylo-dev/Templates) publishes,
+so its secrets are also in that repository's `catalog` environment, for
+runs on `main` only; the panel uses a downloaded catalog only when that
+signature checks out.
 
 ## How releases are signed
 

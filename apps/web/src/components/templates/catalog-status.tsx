@@ -2,10 +2,12 @@
 // templates come from (the official catalog downloaded from GitHub, or the
 // copy bundled with the panel), the last failed check, a private catalog,
 // how many are new or need a newer panel, and "Check for new templates" for
-// people who hold templates.manage when there is something to download. A
-// build without the catalog key (signingKey false, until the owner makes
-// one) says plainly that the official catalog is not switched on yet. The
-// owner changes the source in CatalogSourceDialog.
+// people who hold templates.manage when there is something to download.
+// Until the Templates repo publishes its first catalog, GitHub answers 404
+// (notPublished): the line says the official catalog is not published yet
+// and when it last checked, never as an error. A build without the catalog
+// key (signingKey false: a fork) says it downloads
+// none. The owner changes the source in CatalogSourceDialog.
 
 import { brand } from "@seylo/brand";
 import { type OpOutput, templates } from "@seylo/ops";
@@ -39,7 +41,7 @@ export function catalogSentences(status: CatalogStatus): string[] {
   } else out.push(t("templates.catalog.none"));
   if (!official.enabled) out.push(t("templates.catalog.downloadsOff"));
   else if (!official.signingKey) {
-    out.push(t("templates.catalog.notSwitchedOn"));
+    out.push(t("templates.catalog.noKey"));
     // No download was tried: an error is about the copy that ships (one from a build with the key is old news).
     if (official.origin === null && official.lastError) out.push(official.lastError);
   } else if (official.lastError)
@@ -48,6 +50,11 @@ export function catalogSentences(status: CatalogStatus): string[] {
         ? t("templates.catalog.lastError", { error: official.lastError, when: formatRelative(official.lastTriedAt) })
         : official.lastError,
     );
+  else if (official.notPublished) {
+    // A 404 for catalog.json: nothing to download yet, which is not an error.
+    out.push(t(official.origin === "downloaded" ? "templates.catalog.notPublishedNow" : "templates.catalog.notPublished"));
+    if (official.lastTriedAt) out.push(t("templates.catalog.lastChecked", { when: formatRelative(official.lastTriedAt) }));
+  }
   if (status.newSlugs.length > 0) out.push(t("templates.catalog.newCount", { count: status.newSlugs.length }));
   if (extra) {
     out.push(t(extra.signed ? "templates.catalog.private" : "templates.catalog.privateUnsigned", { host: extra.host }));
@@ -66,15 +73,19 @@ export function canCheckCatalog(status: CatalogStatus): boolean {
   return status.canRefresh && ((status.official.enabled && status.official.signingKey) || status.extra !== null);
 }
 
+/** The toast after "Check for new templates": what it found. An official catalog not published yet is no failure. */
+export function checkResult(out: CatalogStatus): string {
+  const error = out.official.enabled ? out.official.lastError : null;
+  if (error) return t("templates.catalog.checkFailed", { error });
+  if (out.newSlugs.length > 0) return t("templates.catalog.found", { count: out.newSlugs.length });
+  return out.official.notPublished ? t("templates.catalog.notPublished") : t("templates.catalog.upToDate");
+}
+
 export function CatalogStatusLine({ status }: { status: CatalogStatus }) {
   const [sourceOpen, setSourceOpen] = useState(false);
   const refresh = useSettingsMutation(templates.refreshCatalog, {
     invalidates: refreshes,
-    success: (out) => {
-      const error = out.official.enabled ? out.official.lastError : null;
-      if (error) return t("templates.catalog.checkFailed", { error });
-      return out.newSlugs.length > 0 ? t("templates.catalog.found", { count: out.newSlugs.length }) : t("templates.catalog.upToDate");
-    },
+    success: checkResult,
   });
   const canCheck = canCheckCatalog(status);
   return (
@@ -172,19 +183,21 @@ function SourceForm({ source, signingKey, version, onDone }: { source: Source; s
         <DialogTitle>{t("templates.catalog.source")}</DialogTitle>
         <DialogDescription>{t("templates.catalog.sourceDescription")}</DialogDescription>
       </div>
-      <div className="flex items-start gap-3">
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Label htmlFor="catalog-official">{t("templates.catalog.officialTitle")}</Label>
-          <span className="text-[12.5px] text-muted-foreground">
-            {t("templates.catalog.officialDescription", { repo: `${brand.githubOrg}/${brand.templatesRepo}` })}
-          </span>
-          {!signingKey && (
-            <span className="text-[12.5px] text-muted-foreground" data-testid="catalog-not-switched-on">
-              {t("templates.catalog.notSwitchedOnDialog", { product: brand.displayName, version })}
+      <div className="flex flex-col gap-2.5">
+        <div className="flex items-start gap-3">
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <Label htmlFor="catalog-official">{t("templates.catalog.officialTitle")}</Label>
+            <span className="text-[12.5px] text-muted-foreground">
+              {t("templates.catalog.officialDescription", { repo: `${brand.githubOrg}/${brand.templatesRepo}` })}
             </span>
-          )}
-        </span>
-        <Switch id="catalog-official" checked={official} onCheckedChange={setOfficial} />
+          </span>
+          <Switch id="catalog-official" checked={official} onCheckedChange={setOfficial} />
+        </div>
+        {!signingKey && (
+          <p className="m-0 text-[12.5px] text-muted-foreground" data-testid="catalog-no-key">
+            {t("templates.catalog.noKeyDialog", { product: brand.displayName, version })}
+          </p>
+        )}
       </div>
       <div className="flex flex-col gap-2.5 border-t border-divider pt-4">
         <div className="flex items-start gap-3">

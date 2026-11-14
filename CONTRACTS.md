@@ -3080,10 +3080,15 @@ never type the ids by hand.
     Seylo-dev/Templates) publishes one rolling release, tag `catalog`, with
     two assets on every merge to main:
     `https://github.com/<githubOrg>/<templatesRepo>/releases/download/catalog/catalog.json`
-    and `.../catalog.json.minisig`, signed by the catalog key (`brand.json`
-    `templatesMinisignPublicKey`, a key of its own, not the release key).
+    and `.../catalog.json.minisig`, signed by the release key (`brand.json`
+    `templatesMinisignPublicKey`, the same value as `minisignPublicKey`,
+    owner decision 2026-11-14; a field of its own so the catalog could get
+    a key of its own later, `tools/brandgen` tests that the two match).
     Plain download URLs, no GitHub API. No environment variable repoints the
-    official source or its key (tests replace `catalogSource`).
+    official source or its key (tests replace `catalogSource`); a test build
+    may compile in another URL (`bun --define __TEST_CATALOG_URL__`,
+    `remote.ts`), which `test/playwright/run.sh` points at the panel's own
+    404. Only that URL may be plain HTTP.
   - Format 1 (`catalog-file.ts`): `{ format: 1, source:
     "<githubOrg>/<templatesRepo>", commit, sequence (git rev-list --count),
     generatedAt, notice, licenses: { "LICENSE.<name>": text }, templates: [{
@@ -3101,7 +3106,10 @@ never type the ids by hand.
     timeout per file, no redirect to plain HTTP; a signature that does not
     match is fetched once more after 10 s (the publish job uploads the two
     files one after the other). Any failure refuses the whole catalog, keeps
-    the current one and records the reason (`lastError`). A catalog that
+    the current one and records the reason (`lastError`). A 404 for the
+    official `catalog.json` is not a failure (see "Not published yet"); a
+    404 for the signature alone, any other status, and a private catalog's
+    404 are. A catalog that
     passes but has a template this panel cannot read (meta.yaml it does not
     understand or with a value of the wrong kind, a missing file, a bad
     slug) loses only that template (`catalogStatus.skipped`). A download is
@@ -3111,30 +3119,48 @@ never type the ids by hand.
     shipped one's reason is in `lastError`), so a catalog never stops the
     panel from starting.
   - Copies: the panel ships `templates/catalog.json` (+ `.minisig`), verified
-    with the same key at load (skipped while the key is not set). Downloads
+    with the same key at load when it has a signature. Without one it is
+    used as it is: it ships inside the signed release, a release made before
+    the first publish ships the committed copy unsigned, and
+    `release-preflight.sh` refuses that once a catalog is published. Downloads
     go to `<dataDir>/templates/official/` (private: `.../extra/`), written
     to a temp file and renamed, and are verified again on every read, so an
     edited copy is ignored. The panel uses the download when its sequence
     is at least the shipped copy's, else the shipped copy (after an upgrade
     that one may be newer). State (sequence floor, commit, fetchedAt,
-    lastTriedAt, lastError, knownSlugs) is the `templatesCatalogState`
-    setting in panel.db, not a file.
-  - No key yet: `templatesMinisignPublicKey` stays the brand placeholder
-    until the owner makes the catalog key (a blank key counts the same,
-    `remote.ts` `catalogKeySet`). Such a build lists the shipped copy
-    unsigned and never downloads the official catalog: not at start, not on
-    the 6-hour schedule, not on `templates.refreshCatalog`, not when the
-    owner turns it back on, and a download kept on disk by a build with the
-    key is not used (`lastTriedAt`/`fetchedAt` stay null). A private
-    catalog still downloads. `catalogStatus.official.signingKey` is false
-    and the Templates page says "The official catalog is not switched on
-    yet, so no new templates are downloaded." (the Catalog source dialog
-    says it under the Official catalog switch, which still saves the
-    setting for later), and shows "Check for new templates" only when a
-    check can download something (the official catalog on with the key, or
-    a private one). `make sync-templates` without `--local` writes nothing,
-    says what it needs and exits 0; `release-preflight.sh` only warns, also
-    for an unsigned shipped copy, so neither stops a release.
+    lastTriedAt, lastError, notPublished, knownSlugs) is the
+    `templatesCatalogState` setting in panel.db, not a file.
+  - Not published yet: until the Templates repo has the signing secrets
+    (CONTRIBUTING.md, Releases, step 8) it publishes nothing and GitHub
+    answers 404 for `catalog.json`. The panel lists the shipped copy, asks
+    for `catalog.json` only (no signature, no retry) and next at the 6-hour
+    check, and records the try without an error:
+    `catalogStatus.official.notPublished` true, `lastError` null (false
+    again after any other outcome, and while downloads are off or without
+    the key). The Templates page says "The official catalog is not
+    published yet. Last checked <when>." ("... is not published at the
+    moment, so this copy stays." over a download), "Check for new
+    templates" answers "The official catalog is not published yet.", and
+    nothing shows an error toast or alert. `make sync-templates` keeps
+    `templates/` as committed, says so and exits 0 (a 404 for the signature
+    alone, another status or no answer exits 1). `release-preflight.sh`
+    only warns, also for the unsigned shipped copy; it refuses an unsigned
+    copy once a catalog is published or when it cannot tell (no answer).
+  - No key (a fork): `templatesMinisignPublicKey` the brand placeholder (a
+    blank key counts the same, `remote.ts` `catalogKeySet`). Such a build
+    lists the shipped copy unsigned and never downloads the official
+    catalog: not at start, not on the 6-hour schedule, not on
+    `templates.refreshCatalog`, not when the owner turns it back on, and a
+    download kept on disk by a build with the key is not used
+    (`lastTriedAt`/`fetchedAt` stay null). A private catalog still
+    downloads. `catalogStatus.official.signingKey` is false and the
+    Templates page says "This build has no key for the official catalog, so
+    no new templates are downloaded." (the Catalog source dialog says so
+    below the Official catalog switch, which still saves the setting), and
+    shows "Check for new templates" only when a check can download
+    something (the official catalog on with the key, or a private one).
+    `make sync-templates` without `--local` writes nothing, says what it
+    needs and exits 0; `release-preflight.sh` only warns.
   - When: at start (schedule `templates.refresh`, `runNow`) and every 6
     hours (jitter 10 min); `templates.refreshCatalog` (`templates.manage`,
     audited) on demand; one check at a time. A refresh publishes

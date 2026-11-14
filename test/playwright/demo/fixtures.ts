@@ -485,6 +485,7 @@ export const catalogStatus = {
     lastError: null,
     enabled: true,
     signingKey: true,
+    notPublished: false,
     bundledWith: "0.2.17",
   },
   extra: null,

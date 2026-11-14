@@ -4,11 +4,14 @@
 // tile, one without keeps its letter tile, and so does one whose logo fails
 // to load. The popular images row gets the same tiles from the logos
 // bundled with the web app. The catalog line under the title says where the
-// templates come from (this panel has no catalog key, so the official
-// catalog is not switched on yet); the owner checks for new ones and changes
-// the source there. Screenshots in every preset go to
-// $SHOTS_DIR/template-logos/<preset>.png, the line without the key to
-// catalog-not-switched-on.png, the source dialog to catalog-source.png.
+// templates come from: this panel has the catalog key (the release key) and
+// its official catalog URL is its own 404 (run.sh), as GitHub answers until
+// the Templates repo publishes its first catalog, so the line says the
+// official catalog is not published yet, never as an error. The owner
+// checks for new ones and changes the source there. Screenshots in every
+// preset go to $SHOTS_DIR/template-logos/<preset>.png, the line to
+// catalog-not-published.png, the source dialog to catalog-source.png, and a
+// build without the key (its status routed) to catalog-no-key-dialog.png.
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
@@ -101,21 +104,23 @@ test("a logo that does not load falls back to the letter tile", async ({ page })
   await expectLogo(templateCard(page, "Uptime Kuma", "Monitoring"), "Uptime Kuma");
 });
 
-test("the catalog line: the shipped copy, not switched on yet, and the owner's source dialog", async ({ page }) => {
+test("the catalog line: the shipped copy, not published yet, and the owner's source dialog", async ({ page }) => {
   mkdirSync(shots, { recursive: true });
   await page.goto("/templates");
   const line = page.getByTestId("catalog-status");
-  // This panel has no catalog key (brand.json's is still the placeholder): it lists the copy it ships, never
-  // downloads, says so, and offers no check that could find nothing.
-  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\. The official catalog is not switched on yet, so no new templates are downloaded\./);
+  // The check at start got a 404: the shipped copy, "not published yet" and when, and no error anywhere.
+  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\. The official catalog is not published yet\. Last checked /);
+  await expect(line).not.toContainText("answered 404");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(line.getByRole("button", { name: "Check for new templates" })).toBeVisible();
   await expect(line.getByRole("button", { name: "Catalog source" })).toBeVisible();
-  await expect(line.getByRole("button", { name: "Check for new templates" })).toHaveCount(0);
-  await page.screenshot({ path: `${shots}/catalog-not-switched-on.png` });
+  await page.screenshot({ path: `${shots}/catalog-not-published.png` });
 
   await line.getByRole("button", { name: "Catalog source" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Catalog source" })).toBeVisible();
-  await expect(dialog.getByTestId("catalog-not-switched-on")).toContainText(/^Not switched on yet in \S+ \S+: /);
+  // This build has the key: no note under the switch.
+  await expect(dialog.getByTestId("catalog-no-key")).toHaveCount(0);
   const official = dialog.getByRole("switch", { name: "Official catalog" });
   await expect(official).toBeChecked();
   // A private catalog without a key: saving waits for "Allow it without a signature", which shows the warning.
@@ -135,27 +140,54 @@ test("the catalog line: the shipped copy, not switched on yet, and the owner's s
   await expect(dialog).toBeHidden();
   await expect(line).toContainText("Downloads are off.");
 
-  // And back on.
+  // And back on: that checks right away, and the answer is the same 404, not an error.
   await line.getByRole("button", { name: "Catalog source" }).click();
   await page.getByRole("dialog").getByRole("switch", { name: "Official catalog" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(line).not.toContainText("Downloads are off.");
+  await expect(line).toContainText("The official catalog is not published yet.");
 });
 
-test("with the catalog key, Check for new templates asks the panel and says what it found", async ({ page }) => {
-  // The panel's own status as a build with the key shows it; the check itself goes to this (keyless) panel, which finds nothing.
+test("Check for new templates asks the panel; before the first publish it says the catalog is not published yet, not that the check failed", async ({
+  page,
+}) => {
+  await page.goto("/templates");
+  const line = page.getByTestId("catalog-status");
+  const check = page.waitForResponse((r) => r.url().includes("/api/v1/templates.refreshCatalog") && r.ok());
+  await line.getByRole("button", { name: "Check for new templates" }).click();
+  const answer = await (await check).json();
+  expect(answer.official).toMatchObject({ notPublished: true, lastError: null, origin: "bundled" });
+  const notifications = page.getByRole("region", { name: "Notifications" });
+  await expect(notifications.getByText("The official catalog is not published yet.")).toBeVisible();
+  await expect(notifications.getByText("The check failed")).toHaveCount(0);
+  await expect(line).toContainText(/The official catalog is not published yet\. Last checked /);
+});
+
+test("a build without the catalog key: the line and the dialog say so, the note a gap below the switch", async ({ page }) => {
+  mkdirSync(shots, { recursive: true });
+  // The panel's own status as a build without the key (a fork) shows it.
   await page.route("**/api/v1/templates.catalogStatus*", async (route) => {
     const status = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...status, official: { ...status.official, signingKey: true } } });
+    await route.fulfill({ json: { ...status, official: { ...status.official, signingKey: false, notPublished: false } } });
   });
   await page.goto("/templates");
   const line = page.getByTestId("catalog-status");
-  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\./);
-  await expect(line).not.toContainText("not switched on");
-  const check = page.waitForResponse((r) => r.url().includes("/api/v1/templates.refreshCatalog") && r.ok());
-  await line.getByRole("button", { name: "Check for new templates" }).click();
-  await check;
-  await expect(page.getByRole("region", { name: "Notifications" }).getByText("No new templates.")).toBeVisible();
+  await expect(line).toContainText(
+    /^Catalog bundled with \S+ \S+\. This build has no key for the official catalog, so no new templates are downloaded\./,
+  );
+  await expect(line.getByRole("button", { name: "Check for new templates" })).toHaveCount(0);
+  await line.getByRole("button", { name: "Catalog source" }).click();
+  const dialog = page.getByRole("dialog");
+  const note = dialog.getByTestId("catalog-no-key");
+  await expect(note).toContainText(/^\S+ \S+ has no key for the official catalog: /);
+  // The note is not glued to the switch's description: the gap the dialog uses inside a section (10px),
+  // measured once the dialog's open animation (a scale) is done.
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  const description = dialog.getByText(/^Download new templates from /);
+  const above = await description.boundingBox();
+  const below = await note.boundingBox();
+  expect(below && above && below.y - (above.y + above.height)).toBeGreaterThanOrEqual(10);
+  await page.screenshot({ path: `${shots}/catalog-no-key-dialog.png` });
 });
 
 test("templates a catalog update brought carry a New tag; templates for a newer panel are counted", async ({ page }) => {

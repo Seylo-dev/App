@@ -245,34 +245,37 @@ Once, before the first release (owners):
    GitHub applies it to releases published after it is on, and drafts stay
    editable, so the Sign job still attaches its signatures. The Publish job
    warns on every release that is not immutable.
-8. The template catalog key. Templates are signed by a key of their own,
-   not the release key: the Templates repo signs a catalog on every merge
-   and takes outside pull requests, and a leaked catalog key can only ship
-   templates (sandboxed, previewed before install), never binaries. Make it
-   with `minisign -G -p catalog.pub -s catalog.key`, put the public key (the
-   `RW...` line) into `brand/brand.json` as `templatesMinisignPublicKey` and
-   run `make gen`. In Seylo-dev/Templates, create the `catalog` environment
-   (deployment branches: `main` only) with the secrets
-   `MINISIGN_SECRET_KEY` (the contents of `catalog.key`) and
-   `MINISIGN_PASSWORD`. Until the key is set, panels use the catalog they
-   ship and never download one, and the release preflight only warns.
+8. The template catalog's signing. The Templates repo signs its catalog
+   with the release key (owner decision 2026-11-14), so there is no key to
+   make: `brand/brand.json` `templatesMinisignPublicKey` is the same value
+   as `minisignPublicKey` (its own field, so the catalog could get a key of
+   its own later; `tools/brandgen` tests that the two match). In
+   Seylo-dev/Templates, create the `catalog` environment (deployment
+   branches: `main` only) with the secrets `MINISIGN_SECRET_KEY` and
+   `MINISIGN_PASSWORD`, the same values as in this repository's `release`
+   environment. Until then the Templates repo publishes nothing and GitHub
+   answers 404 for its catalog: panels list the catalog they ship and say
+   the official catalog is not published yet (not an error, checked again
+   every 6 hours), `make sync-templates` keeps `templates/` as committed and
+   exits 0, and the release preflight only warns.
 
 Each release:
 
 1. Vendor the template catalog: `make sync-templates` downloads the
    published catalog from the Templates repo's `catalog` release, verifies
-   it with `templatesMinisignPublicKey`, refuses one older than
-   `templates/catalog.json`, checks that every template installs on this
-   panel (`apps/panel/scripts/check-templates.ts`) and writes
+   it with `templatesMinisignPublicKey` (the release key), refuses one older
+   than `templates/catalog.json`, checks that every template installs on
+   this panel (`apps/panel/scripts/check-templates.ts`) and writes
    `templates/`. Commit the result. `scripts/release-preflight.sh` refuses a
-   release whose `templates/catalog.json` is unsigned or older than the
-   published catalog. While `templatesMinisignPublicKey` is still the
-   placeholder (step 8 not done), there is nothing signed to vendor:
-   `make sync-templates` writes nothing, says so and exits 0, and the
-   preflight only warns, so the release ships the committed copy unsigned
-   and its panels never download one. When a template needs a feature this
-   release adds, raise `check` in the Templates repo's `panel.json` to this
-   tag after the release.
+   release whose `templates/catalog.json` is older than the published
+   catalog, or unsigned while one is published. While nothing is published
+   yet (GitHub answers 404 until the Templates repo has the secrets of step
+   8 above), `make sync-templates` writes nothing, says so and exits 0, and
+   the preflight only warns, so the release ships the committed copy
+   unsigned; its panels list it and take the first published catalog at
+   their next check. When a template needs a feature this release adds,
+   raise `check` in the Templates repo's `panel.json` to this tag after the
+   release.
 2. Run a dry run on `main`: Actions > Release > Run workflow, or
    `gh workflow run release.yml -f dry_run=true`. It runs the same Build
    and test job and builds everything a release attaches from its build

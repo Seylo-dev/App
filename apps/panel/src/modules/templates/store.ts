@@ -8,13 +8,20 @@
 // private catalog (setting templatesCatalog.extra), kept under
 // <dataDir>/templates/extra/; an official slug wins over one of its own.
 //
-// Trust: the official catalog must verify with the compiled-in key
-// (remote.ts catalogSource.publicKey), the bundled copy too unless that key
-// is still the brand placeholder (development builds, which then never
-// download). A copy on disk is verified again every time it is read, so
+// Trust: a downloaded official catalog must verify with the compiled-in key
+// (remote.ts catalogSource.publicKey, the release key). The bundled copy is
+// part of the signed release, so it may ship without a signature (a release
+// made before the Templates repo published its first catalog ships the
+// committed copy unsigned; release-preflight.sh refuses that once one is
+// published); a signature it ships with must verify. Without the key (the
+// brand placeholder: a fork) the panel never downloads. A copy on disk is verified again every time it is read, so
 // editing it gets it ignored, not trusted. The panel never takes a catalog
 // with a lower sequence than one it accepted before (a replayed old catalog
 // would bring back old image pins).
+//
+// Until the Templates repo publishes its first catalog, GitHub answers 404
+// for it: the status says so (notPublished), not as an error, and the next
+// try is the scheduled one.
 //
 // A catalog that fails a check (signature, format, source, sequence, a file
 // whose sha256 does not match) is refused as a whole and the panel keeps
@@ -49,6 +56,7 @@ import {
   type FetchedCatalog,
   fetchCatalog,
   officialKeyConfigured,
+  officialNotPublished,
   officialSource,
   readCatalog,
 } from "./remote";
@@ -196,8 +204,10 @@ function loadBundled(): Loaded | string {
     : { bytes: new Uint8Array(readFileSync(path)), signature: existsSync(sigPath) ? readFileSync(sigPath, "utf8") : null };
   let value: Loaded | string;
   try {
-    // A development build has no catalog key and so ships an unsigned copy.
-    const publicKey = override?.trusted || !officialKeyConfigured() ? null : catalogSource.publicKey;
+    // The copy ships inside the signed release: one without a signature is taken as is (the
+    // committed copy, before the first catalog was published, or a build without the key); a
+    // signature it has must verify.
+    const publicKey = override?.trusted || !officialKeyConfigured() || stored.signature === null ? null : catalogSource.publicKey;
     const file = verified(stored, publicKey, "The catalog that ships with this panel");
     if (file.source !== officialSource) throw new CatalogFetchError(`It is from ${file.source}, not ${officialSource}.`);
     value = toLoaded(file, "official", false, "bundled");
@@ -410,11 +420,15 @@ async function refresh(deps: Pick<Deps, "db" | "logger">, which: { official: boo
           fetchedAt: triedAt,
           lastTriedAt: triedAt,
           lastError: null,
+          notPublished: false,
         },
       }));
     } catch (error) {
-      const message = failure(error);
-      writeState(deps.db, (s) => ({ ...s, official: { ...s.official, lastTriedAt: triedAt, lastError: message } }));
+      // GitHub answered 404 for catalog.json: none is published yet. Not an error, and no retry
+      // before the next scheduled check (fetchCatalog only tries again for a signature that does not match).
+      const notPublished = officialNotPublished(error);
+      const message = notPublished ? null : failure(error);
+      writeState(deps.db, (s) => ({ ...s, official: { ...s.official, lastTriedAt: triedAt, lastError: message, notPublished } }));
     }
   }
   const extraSetting = setting.extra;
@@ -497,6 +511,7 @@ export function catalogStatus(ctx: {
       lastError: state.official.lastError ?? (official ? null : bundledError),
       enabled: setting.official,
       signingKey: officialKeyConfigured(),
+      notPublished: setting.official && officialKeyConfigured() && state.official.notPublished === true,
       bundledWith: ctx.config.version,
     },
     extra: setting.extra ? { ...info(extra, extraTrack), host: hostOf(setting.extra.url), signed: setting.extra.publicKey !== null } : null,

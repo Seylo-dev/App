@@ -39,8 +39,8 @@ export const minisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBI
 /** TemplatesRepo is the repository under GitHubOrg that publishes the signed template catalog. */
 export const templatesRepo = "Templates";
 
-/** TemplatesMinisignPublicKey verifies the signed template catalog (a key of its own, not the release key). */
-export const templatesMinisignPublicKey = "PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY";
+/** TemplatesMinisignPublicKey verifies the signed template catalog (the release key, the same value as MinisignPublicKey). */
+export const templatesMinisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip";
 
 export const brand = {
   displayName,

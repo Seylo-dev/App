@@ -11,9 +11,12 @@ panel:
 
 - `catalog.json`: every template (meta.yaml, index.ts and its logo), in the
   catalog format of `apps/panel/src/modules/templates/catalog-file.ts`.
-- `catalog.json.minisig`: its signature by the catalog key
-  (`brand/brand.json` `templatesMinisignPublicKey`). A development build
-  without that key ships the copy unsigned.
+- `catalog.json.minisig`: its signature by the release key, which also
+  signs the catalog (`brand/brand.json` `templatesMinisignPublicKey`, the
+  same value as `minisignPublicKey`). Until the Templates repository
+  publishes its first catalog there is none: the copy here is the unsigned
+  snapshot taken before that (sequence 0), and `make sync-templates` keeps
+  it.
 - `NOTICE` and `LICENSE.*`: the logos' credits, written from the catalog.
 
 A panel uses this copy until it downloads a newer signed catalog from the

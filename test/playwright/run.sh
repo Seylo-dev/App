@@ -59,12 +59,17 @@ wait_for() {
 "$here/node_modules/.bin/playwright" install chromium >/dev/null
 
 # The specs stand in for GitHub where they need it, so this panel never talks
-# to it: a placeholder client id keeps GitHub off whatever brand.json holds.
+# to it: a placeholder client id keeps GitHub off whatever brand.json holds,
+# and the official template catalog's URL is the panel's own 404 (compiled
+# in with --define, templates/remote.ts __TEST_CATALOG_URL__), so its
+# catalog check says the catalog is not published yet, as GitHub does until
+# the Templates repo publishes its first one.
 # DO_NOT_TRACK and <SLUG>_TELEMETRY are emptied: a runner that exports one would lock telemetry off, and the
 # smoke spec checks the default-on setup page.
 env DO_NOT_TRACK= "${prefix}TELEMETRY=" "${prefix}DATA_DIR=$DATA_DIR" "${prefix}PORT=$panel_port" "${prefix}HOST=127.0.0.1" "${prefix}SECURE_COOKIES=false" \
   "${prefix}GITHUB_CLIENT_ID=PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID" \
-  bun "$root/apps/panel/src/main.ts" >"$shots/panel.log" 2>&1 &
+  bun --define "__TEST_CATALOG_URL__:\"http://127.0.0.1:$panel_port/api/templates/-/catalog.json\"" \
+  "$root/apps/panel/src/main.ts" >"$shots/panel.log" 2>&1 &
 pids+=($!)
 wait_for "http://127.0.0.1:$panel_port/api/v1/settings.boot" "the panel"
 

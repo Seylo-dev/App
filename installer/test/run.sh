@@ -79,12 +79,20 @@ mkdir -p "$shims"
 cat >"$shims/curl" <<'EOF'
 #!/bin/sh
 # curl -fsSL [--retry n] -o <dest> <url>: serves http://release.test/rel/* from $FAKE_RELEASE.
+# The Templates repo's catalog release comes from $FAKE_CATALOG: a missing
+# file answers 404 (exit 22 with -f), FAKE_CATALOG_DOWN gets no answer, and
+# -w '%{http_code}' prints the status.
 out=
 url=
+write=
+fail=
 while [ $# -gt 0 ]; do
   case $1 in
   -o) out=$2; shift ;;
-  --retry) shift ;;
+  --retry | -m) shift ;;
+  -w) write=$2; shift ;;
+  --*) ;;
+  -*f*) fail=1 ;;
   -*) ;;
   *) url=$1 ;;
   esac
@@ -92,12 +100,28 @@ while [ $# -gt 0 ]; do
 done
 printf '%s\n' "$url" >>"$SHIM_LOG.curl"
 case $url in
-http://release.test/rel/*) src=$FAKE_RELEASE/${url#http://release.test/rel/} ;;
-https://github.com/test-org/Templates/releases/download/catalog/*) src=${FAKE_CATALOG:-/nonexistent}/${url##*/} ;;
+http://release.test/rel/*)
+  src=$FAKE_RELEASE/${url#http://release.test/rel/}
+  [ -f "$src" ] || exit 22
+  cp "$src" "$out"
+  ;;
+https://github.com/test-org/Templates/releases/download/catalog/*)
+  src=${FAKE_CATALOG:-/nonexistent}/${url##*/}
+  if [ -n "${FAKE_CATALOG_DOWN:-}" ]; then
+    [ -z "$write" ] || printf 000
+    exit 7
+  fi
+  if [ -f "$src" ]; then
+    cp "$src" "$out"
+    [ -z "$write" ] || printf 200
+  else
+    [ -z "$write" ] || printf 404
+    [ -z "$fail" ] || exit 22
+    printf 'Not Found' >"$out"
+  fi
+  ;;
 *) exit 6 ;;
 esac
-[ -f "$src" ] || exit 22
-cp "$src" "$out"
 EOF
 # The docker CLI has a folder of its own: NO_DOCKER_CLI=1 leaves it out of
 # PATH (Docker is not installed).
@@ -1008,17 +1032,31 @@ expect_ok "release preflight passes when templates/catalog.json is the published
 catalog_json 6 >"$published_catalog/catalog.json"
 preflight --no-secret-key "${catalog_vars[@]}"
 expect_fail "release preflight refuses a template catalog older than the published one" "run make sync-templates"
+catalog_json 5 >"$published_catalog/catalog.json"
 rm "$vendored_catalog/catalog.json.minisig"
 preflight --no-secret-key "${catalog_vars[@]}"
-expect_fail "release preflight refuses an unsigned template catalog once brand.json has the catalog key" "templates/catalog.json is not signed"
-: >"$vendored_catalog/catalog.json.minisig"
+expect_fail "release preflight refuses an unsigned template catalog once a catalog is published" "templates/catalog.json is not signed"
+preflight --no-secret-key "${catalog_vars[@]}" FAKE_CATALOG_DOWN=1
+expect_fail "release preflight refuses an unsigned template catalog when it cannot tell whether one is published" \
+  "is not signed and the published template catalog could not be checked (HTTP 000)"
+# Until the Templates repo publishes its first catalog GitHub answers 404:
+# the committed copy ships unsigned, with a warning, and nothing stops the
+# release. One request, no retries.
 rm "$published_catalog/catalog.json"
+: >"$T/log.curl"
 preflight --no-secret-key "${catalog_vars[@]}"
+expect_ok "release preflight passes an unsigned template catalog while none is published (404)" \
+  "the official template catalog is not published yet" "ships templates/catalog.json (sequence 5) unsigned, as committed" "release-preflight: ok"
+if [ "$(grep -c '/releases/download/catalog/' "$T/log.curl")" = 1 ]; then pass "release preflight asks for the published catalog once"; else flunk "release preflight asks for the published catalog once" "$(curl_log)"; fi
+: >"$vendored_catalog/catalog.json.minisig"
+preflight --no-secret-key "${catalog_vars[@]}"
+expect_ok "release preflight only warns when the published catalog is gone" "the published template catalog is gone" "release-preflight: ok"
+preflight --no-secret-key "${catalog_vars[@]}" FAKE_CATALOG_DOWN=1
 expect_ok "release preflight only warns when the published catalog cannot be downloaded" "could not download the published template catalog"
 preflight --no-secret-key "${catalog_vars[@]}" BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY="${BRAND_PLACEHOLDER_PREFIX}TEMPLATES_MINISIGN_PUBLIC_KEY"
 expect_ok "release preflight only warns while brand.json has no catalog key" "ships its template catalog unsigned"
-# Until the owner makes the catalog key the shipped copy has no signature and
-# the published one may be newer: neither stops a release.
+# A fork without the catalog key: the shipped copy has no signature and the
+# published one may be newer; neither stops a release.
 rm "$vendored_catalog/catalog.json.minisig"
 catalog_json 9 >"$published_catalog/catalog.json"
 preflight --no-secret-key "${catalog_vars[@]}" BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY="${BRAND_PLACEHOLDER_PREFIX}TEMPLATES_MINISIGN_PUBLIC_KEY"

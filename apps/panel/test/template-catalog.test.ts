@@ -17,7 +17,8 @@ import { templates } from "@seylo/ops";
 import { auditLog } from "../src/db/schema";
 import * as catalogModule from "../src/modules/templates/catalog";
 import { CatalogError, parseMeta } from "../src/modules/templates/catalog";
-import { catalogSource } from "../src/modules/templates/remote";
+import { catalogCheckSeconds } from "../src/modules/templates/index";
+import { CatalogFetchError, catalogSource, fetchCatalog, officialNotPublished } from "../src/modules/templates/remote";
 import { catalogHooks } from "../src/modules/templates/store";
 import { catalogKey, fixtureCatalog, resetCatalogs, serveCatalogs, simpleTemplate } from "./catalog-fakes";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
@@ -141,7 +142,7 @@ describe("downloading the official catalog", () => {
         };
       } else serveCatalogs({ [officialUrl]: serve(next) });
       const after = await refresh(panel, owner);
-      expect(after.official).toMatchObject({ origin: "bundled", sequence: 1, templates: 3, fetchedAt: null });
+      expect(after.official).toMatchObject({ origin: "bundled", sequence: 1, templates: 3, fetchedAt: null, notPublished: false });
       expect(after.official.lastError).toContain(reason || "Could not reach github.com.");
       expect(after.official.lastTriedAt).not.toBeNull();
       expect(await slugs(panel, owner)).toEqual(["board", "flows", "metrics"]);
@@ -316,6 +317,98 @@ describe("downloading the official catalog", () => {
   });
 });
 
+describe("before the official catalog is published (GitHub answers 404)", () => {
+  /** A panel with the catalog key whose shipped copy has no signature, as a release made before the first publish ships it. */
+  async function startUnpublished() {
+    const key = catalogKey();
+    catalogSource.publicKey = key.publicKey;
+    catalogHooks.setBundled({ text: fixtureCatalog(), signature: null });
+    const panel = testPanel();
+    panels.push(panel);
+    const { cookie } = await createUser(panel, "owner");
+    return { key, panel, owner: cookie };
+  }
+
+  /** Runs every job due at `at` (other modules' scheduled jobs come due too; the runner starts four at a time). */
+  async function runJobsAt(panel: TestPanel, at: Date) {
+    for (let i = 0; i < 20 && (await panel.runner.runDue(panel.deps, at)) > 0; i++);
+  }
+
+  test("the check at start lists the shipped copy and says not published, with no error; nothing more until the 6-hour check", async () => {
+    const { panel, owner } = await startUnpublished();
+    const fetched = serveCatalogs({ [officialUrl]: {} });
+    const t0 = new Date(Date.now() + 60_000);
+    await runJobsAt(panel, t0);
+    // catalog.json only: no signature asked for, no second try.
+    expect(fetched).toEqual([officialUrl]);
+    const after = await status(panel, owner);
+    expect(after.official).toMatchObject({
+      origin: "bundled",
+      sequence: 1,
+      templates: 3,
+      signingKey: true,
+      notPublished: true,
+      fetchedAt: null,
+      lastError: null,
+    });
+    expect(after.official.lastTriedAt).not.toBeNull();
+    expect(await slugs(panel, owner)).toEqual(["board", "flows", "metrics"]);
+    // No retry or backoff in between: the next request is the scheduled one, 6 hours (and up to 10 minutes of jitter) later.
+    await runJobsAt(panel, new Date(t0.getTime() + 3600_000));
+    await runJobsAt(panel, new Date(t0.getTime() + (catalogCheckSeconds - 60) * 1000));
+    expect(fetched).toHaveLength(1);
+    await runJobsAt(panel, new Date(t0.getTime() + (catalogCheckSeconds + 601) * 1000));
+    expect(fetched).toEqual([officialUrl, officialUrl]);
+    expect((await status(panel, owner)).official).toMatchObject({ notPublished: true, lastError: null });
+  });
+
+  test("Check for new templates and turning downloads back on answer not published, never an error; the first published catalog is used", async () => {
+    const { key, panel, owner } = await startUnpublished();
+    serveCatalogs({ [officialUrl]: {} });
+    const checked = await refresh(panel, owner);
+    expect(checked.official).toMatchObject({ origin: "bundled", notPublished: true, lastError: null });
+    // Downloads off: nothing is checked, so nothing is said about publishing.
+    const off = await callOp(panel, templates.setCatalogSource, { official: false, extra: null }, { cookie: owner });
+    expect(off.body.official).toMatchObject({ enabled: false, notPublished: false, lastError: null });
+    const on = await callOp(panel, templates.setCatalogSource, { official: true, extra: null }, { cookie: owner });
+    expect(on.status).toBe(200);
+    expect(on.body.official).toMatchObject({ enabled: true, notPublished: true, lastError: null });
+    // A real failure is still one, and says nothing about publishing.
+    catalogSource.fetch = async () => {
+      throw new TypeError("network down");
+    };
+    expect((await refresh(panel, owner)).official).toMatchObject({ notPublished: false, lastError: "Could not reach github.com." });
+    // The Templates repo publishes its first catalog.
+    const first = fixtureCatalog({ sequence: 3, add: { notes: simpleTemplate("Notes") } });
+    serveCatalogs({ [officialUrl]: { catalog: first, signature: key.sign(first) } });
+    const published = await refresh(panel, owner);
+    expect(published.official).toMatchObject({ origin: "downloaded", sequence: 3, notPublished: false, lastError: null });
+    expect(await slugs(panel, owner)).toContain("notes");
+    // Taken down again later: the download stays, and the panel says nothing newer is published.
+    serveCatalogs({ [officialUrl]: {} });
+    expect((await refresh(panel, owner)).official).toMatchObject({
+      origin: "downloaded",
+      sequence: 3,
+      notPublished: true,
+      lastError: null,
+    });
+  });
+
+  test("only the official catalog.json's 404 counts: its signature's 404, another status or another URL is an error", async () => {
+    const notFound = (url: string, status = 404) => new CatalogFetchError("x", { url, status });
+    expect(officialNotPublished(notFound(officialUrl))).toBe(true);
+    expect(officialNotPublished(notFound(`${officialUrl}.minisig`))).toBe(false);
+    expect(officialNotPublished(notFound(officialUrl, 403))).toBe(false);
+    expect(officialNotPublished(notFound("https://templates.example.com/catalog.json"))).toBe(false);
+    expect(officialNotPublished(new CatalogFetchError("Could not reach github.com."))).toBe(false);
+    // What download() throws for a 404 is that.
+    serveCatalogs({ [officialUrl]: {} });
+    const error = await fetchCatalog({ url: officialUrl, publicKey: catalogKey().publicKey }).catch((e: unknown) => e);
+    expect(officialNotPublished(error)).toBe(true);
+    expect((error as Error).message).toBe("github.com answered 404 for catalog.json.");
+  });
+});
+
 describe("the catalog the panel ships and keeps", () => {
   test("offline: the shipped copy is used and the failed check is shown", async () => {
     const key = catalogKey();
@@ -323,19 +416,35 @@ describe("the catalog the panel ships and keeps", () => {
     // The scheduled check at start fails like a refresh: tests refuse every fetch (helpers.ts).
     await panel.runner.runDue(panel.deps, new Date(Date.now() + 3600_000));
     const after = await status(panel, owner);
-    expect(after.official).toMatchObject({ origin: "bundled", sequence: 1, templates: 3, lastError: "Could not reach github.com." });
+    expect(after.official).toMatchObject({
+      origin: "bundled",
+      sequence: 1,
+      templates: 3,
+      lastError: "Could not reach github.com.",
+      notPublished: false,
+    });
     expect(await slugs(panel, owner)).toEqual(["board", "flows", "metrics"]);
   });
 
-  test("a shipped copy that does not verify is not used", async () => {
-    const key = catalogKey();
-    catalogSource.publicKey = key.publicKey;
+  test("with the key, a shipped copy without a signature is used as it is (it ships in the signed release)", async () => {
+    // A release made before the Templates repo published its first catalog ships the committed copy unsigned.
+    catalogSource.publicKey = catalogKey().publicKey;
     catalogHooks.setBundled({ text: fixtureCatalog(), signature: null });
     const panel = testPanel();
     panels.push(panel);
     const { cookie } = await createUser(panel, "owner");
-    expect(await slugs(panel, cookie)).toEqual([]);
-    expect((await status(panel, cookie)).official.lastError).toContain("has no signature");
+    expect(await slugs(panel, cookie)).toEqual(["board", "flows", "metrics"]);
+    expect((await status(panel, cookie)).official).toMatchObject({
+      origin: "bundled",
+      sequence: 1,
+      templates: 3,
+      signingKey: true,
+      lastError: null,
+    });
+  });
+
+  test("a shipped copy whose signature does not verify is not used", async () => {
+    catalogSource.publicKey = catalogKey().publicKey;
     catalogHooks.setBundled({ text: fixtureCatalog(), signature: catalogKey().sign(fixtureCatalog()) });
     const other = testPanel();
     panels.push(other);

@@ -36,6 +36,26 @@ func TestValidateAcceptsRepoBrand(t *testing.T) {
 	}
 }
 
+// The template catalog is signed with the release key (owner decision
+// 2026-11-14): the two fields of the repo's brand.json hold one value. A
+// catalog key of its own would change this test on purpose.
+func TestRepoBrandSignsTemplatesWithTheReleaseKey(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "brand", "brand.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ParseBrand(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(b.MinisignPublicKey, PlaceholderPrefix) {
+		t.Fatalf("minisignPublicKey is a placeholder: %q", b.MinisignPublicKey)
+	}
+	if b.TemplatesMinisignPublicKey != b.MinisignPublicKey {
+		t.Fatalf("templatesMinisignPublicKey %q is not the release key %q", b.TemplatesMinisignPublicKey, b.MinisignPublicKey)
+	}
+}
+
 func TestValidateRejectsBadValues(t *testing.T) {
 	tests := map[string]func(*Brand){
 		"uppercase slug":     func(b *Brand) { b.Slug = "Seylo" },

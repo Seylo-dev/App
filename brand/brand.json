@@ -11,5 +11,5 @@
   "oauthClientId": "Ov23liX9a5KSfuT6qsYI",
   "minisignPublicKey": "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip",
   "templatesRepo": "Templates",
-  "templatesMinisignPublicKey": "PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY"
+  "templatesMinisignPublicKey": "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip"
 }

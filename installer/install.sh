@@ -26,7 +26,7 @@ BRAND_IMAGE='ghcr.io/seylo-dev/seylo'
 BRAND_OAUTH_CLIENT_ID='Ov23liX9a5KSfuT6qsYI'
 BRAND_MINISIGN_PUBLIC_KEY='RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip'
 BRAND_TEMPLATES_REPO='Templates'
-BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY='PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY'
+BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY='RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip'
 # ---- end brand ----
 
 # Release this installer belongs to ("latest" when rendered outside a release).

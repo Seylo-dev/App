@@ -16,7 +16,8 @@ declare module "../../settings" {
     /**
      * What the panel knows about its catalogs (store.ts): the highest
      * sequence it accepted from each (it never goes back to a lower one),
-     * the last download and the last error, and the slugs people with
+     * the last download and the last error, whether the last check found
+     * the official catalog not published yet, and the slugs people with
      * templates.manage have seen (the rest carry a New tag).
      */
     templatesCatalogState: {
@@ -35,4 +36,6 @@ export interface CatalogTrack {
   fetchedAt: string | null;
   lastTriedAt: string | null;
   lastError: string | null;
+  /** Official catalog only: the last check got a 404 for catalog.json (none published yet). Not an error. */
+  notPublished?: boolean;
 }

@@ -28,9 +28,11 @@ type Brand struct {
 	// TemplatesRepo is the repository under GitHubOrg that holds the
 	// template catalog and publishes it signed (release tag "catalog").
 	TemplatesRepo string `json:"templatesRepo"`
-	// TemplatesMinisignPublicKey verifies that catalog. It is a key of its
-	// own, not the release key: the catalog is signed on every merge in a
-	// repository that takes outside pull requests.
+	// TemplatesMinisignPublicKey verifies that catalog. It is the release
+	// key (the same value as MinisignPublicKey, owner decision 2026-11-14):
+	// the Templates repo signs its catalog with the key that signs releases.
+	// It stays a field of its own so the catalog could get a key of its own
+	// later without renaming anything.
 	TemplatesMinisignPublicKey string `json:"templatesMinisignPublicKey"`
 }
 
@@ -61,7 +63,7 @@ func (b Brand) fields() []field {
 		{"OAuthClientID", "oauthClientId", "BRAND_OAUTH_CLIENT_ID", "OAuthClientID is the public client id of the GitHub OAuth App used for device-flow sign-in.", b.OAuthClientID},
 		{"MinisignPublicKey", "minisignPublicKey", "BRAND_MINISIGN_PUBLIC_KEY", "MinisignPublicKey verifies signed release manifests.", b.MinisignPublicKey},
 		{"TemplatesRepo", "templatesRepo", "BRAND_TEMPLATES_REPO", "TemplatesRepo is the repository under GitHubOrg that publishes the signed template catalog.", b.TemplatesRepo},
-		{"TemplatesMinisignPublicKey", "templatesMinisignPublicKey", "BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY", "TemplatesMinisignPublicKey verifies the signed template catalog (a key of its own, not the release key).", b.TemplatesMinisignPublicKey},
+		{"TemplatesMinisignPublicKey", "templatesMinisignPublicKey", "BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY", "TemplatesMinisignPublicKey verifies the signed template catalog (the release key, the same value as MinisignPublicKey).", b.TemplatesMinisignPublicKey},
 	}
 }
 

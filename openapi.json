@@ -93022,7 +93022,7 @@
       "get": {
         "operationId": "templates.catalogStatus",
         "summary": "Get the template catalog's status",
-        "description": "Says where the template catalog comes from: the official catalog (the copy that ships with the panel or a newer signed download), its date and commit, the last check and its error, the owner's private catalog if any, which templates are new, and how many need a newer panel. added in 0.2.17",
+        "description": "Says where the template catalog comes from: the official catalog (the copy that ships with the panel or a newer signed download), its date and commit, the last check and its error or that none is published yet, the owner's private catalog if any, which templates are new, and how many need a newer panel. added in 0.2.17",
         "tags": [
           "templates"
         ],
@@ -93067,6 +93067,7 @@
                         "lastError",
                         "enabled",
                         "signingKey",
+                        "notPublished",
                         "bundledWith"
                       ],
                       "properties": {
@@ -93161,6 +93162,9 @@
                           "type": "boolean"
                         },
                         "signingKey": {
+                          "type": "boolean"
+                        },
+                        "notPublished": {
                           "type": "boolean"
                         },
                         "bundledWith": {
@@ -94685,7 +94689,7 @@
       "post": {
         "operationId": "templates.refreshCatalog",
         "summary": "Check for new templates",
-        "description": "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. One check runs at a time. added in 0.2.17",
+        "description": "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. A 404 for the official catalog (none published yet) is no failure: official.notPublished is true and lastError null. One check runs at a time. added in 0.2.17",
         "tags": [
           "templates"
         ],
@@ -94740,6 +94744,7 @@
                         "lastError",
                         "enabled",
                         "signingKey",
+                        "notPublished",
                         "bundledWith"
                       ],
                       "properties": {
@@ -94834,6 +94839,9 @@
                           "type": "boolean"
                         },
                         "signingKey": {
+                          "type": "boolean"
+                        },
+                        "notPublished": {
                           "type": "boolean"
                         },
                         "bundledWith": {
@@ -95450,6 +95458,7 @@
                         "lastError",
                         "enabled",
                         "signingKey",
+                        "notPublished",
                         "bundledWith"
                       ],
                       "properties": {
@@ -95544,6 +95553,9 @@
                           "type": "boolean"
                         },
                         "signingKey": {
+                          "type": "boolean"
+                        },
+                        "notPublished": {
                           "type": "boolean"
                         },
                         "bundledWith": {

@@ -239,8 +239,15 @@ export const CatalogStatus = Type.Object({
     ...CatalogInfo.properties,
     /** The owner's switch (CatalogSource.official). */
     enabled: Type.Boolean(),
-    /** This build has the catalog's signing key; without it the panel only uses the copy it ships with. */
+    /** This build has the catalog's signing key (the release key); without it the panel only uses the copy it ships with. */
     signingKey: Type.Boolean(),
+    /**
+     * The last check found no official catalog: GitHub answered 404 for
+     * catalog.json, so none is published yet. Not an error (lastError stays
+     * null): the panel keeps the catalog it has and checks again on its
+     * 6-hour schedule. False while downloads are off or without the key.
+     */
+    notPublished: Type.Boolean(),
     /** The panel version whose copy ships here. */
     bundledWith: Type.String(),
   }),
@@ -279,7 +286,7 @@ export const catalogStatus = defineOp({
   kind: "query",
   summary: "Get the template catalog's status",
   description:
-    "Says where the template catalog comes from: the official catalog (the copy that ships with the panel or a newer signed download), its date and commit, the last check and its error, the owner's private catalog if any, which templates are new, and how many need a newer panel. added in 0.2.17",
+    "Says where the template catalog comes from: the official catalog (the copy that ships with the panel or a newer signed download), its date and commit, the last check and its error or that none is published yet, the owner's private catalog if any, which templates are new, and how many need a newer panel. added in 0.2.17",
   input: Empty,
   output: CatalogStatus,
   permission: permission.signedIn(),
@@ -292,7 +299,7 @@ export const refreshCatalog = defineOp({
   kind: "mutation",
   summary: "Check for new templates",
   description:
-    "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. One check runs at a time. added in 0.2.17",
+    "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. A 404 for the official catalog (none published yet) is no failure: official.notPublished is true and lastError null. One check runs at a time. added in 0.2.17",
   input: Empty,
   output: CatalogStatus,
   permission: permission.global("templates.manage"),

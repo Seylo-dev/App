@@ -31,7 +31,10 @@ export default {
     none: "No template catalog could be read.",
     lastError: "{error} Last tried {when}.",
     downloadsOff: "Downloads are off.",
-    notSwitchedOn: "The official catalog is not switched on yet, so no new templates are downloaded.",
+    noKey: "This build has no key for the official catalog, so no new templates are downloaded.",
+    notPublished: "The official catalog is not published yet.",
+    notPublishedNow: "The official catalog is not published at the moment, so this copy stays.",
+    lastChecked: "Last checked {when}.",
     newCount: "{count} new.",
     needNewer: { one: "{count} template needs a newer {product}.", other: "{count} templates need a newer {product}." },
     skipped: { one: "{count} template could not be read.", other: "{count} templates could not be read." },
@@ -47,8 +50,8 @@ export default {
     officialTitle: "Official catalog",
     officialDescription:
       "Download new templates from {repo} every 6 hours. Off: only the templates bundled with this panel, for panels without internet access.",
-    notSwitchedOnDialog:
-      "Not switched on yet in {product} {version}: it lists the templates bundled with it and downloads none. This setting applies once an update switches the official catalog on.",
+    noKeyDialog:
+      "{product} {version} has no key for the official catalog: it lists the templates bundled with it and downloads none. The switch is saved for a build that has the key.",
     extraTitle: "Private catalog",
     extraDescription:
       "One more catalog in the same format, next to the official one. When both have a template with the same name, the official one is used.",

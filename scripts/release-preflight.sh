@@ -17,11 +17,14 @@
 #     Actions (.github/workflows/release.yml) the job's token can only write
 #     to the repository the workflow runs in, so that repository must be
 #     <githubOrg>/<githubRepo>;
-#   - with a catalog key in brand.json (templatesMinisignPublicKey): the
-#     template catalog the panel ships (templates/catalog.json) has no
-#     signature, or the published catalog of <githubOrg>/<templatesRepo> has
-#     a higher sequence ("run make sync-templates"). Without the key it only
-#     warns: the release then ships its catalog unsigned.
+#   - with a catalog key in brand.json (templatesMinisignPublicKey, the
+#     release key): the published catalog of <githubOrg>/<templatesRepo> has
+#     a higher sequence than the one the panel ships (templates/catalog.json),
+#     or the shipped one has no signature while a catalog is published ("run
+#     make sync-templates"), or it has none and the published one could not
+#     be checked. While nothing is published (GitHub answers 404) it only
+#     warns: the release ships the committed copy unsigned. Without the key
+#     (a fork) it only warns too.
 #
 # Warns (does not fail) about the GitHub OAuth client id placeholder and a
 # docs URL that does not answer.
@@ -98,25 +101,44 @@ fi
 
 # The template catalog the panel ships (templates/catalog.json, vendored by
 # `make sync-templates`) is signed and not older than the published one.
-# PREFLIGHT_CATALOG_DIR stands in for templates/ in installer/test/run.sh.
+# Until the Templates repo publishes its first catalog, GitHub answers 404
+# and the committed copy ships as it is (unsigned): that only warns, so it
+# never blocks a release. PREFLIGHT_CATALOG_DIR stands in for templates/ in
+# installer/test/run.sh.
 catalog_dir=${PREFLIGHT_CATALOG_DIR:-${BASH_SOURCE[0]%/*}/../templates}
 catalog_sequence() { sed -n 's/^  "sequence": \([0-9][0-9]*\),\{0,1\}$/\1/p' "$1" | head -n 1; }
 if [ -z "${BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY:-}" ] || placeholder "$BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY"; then
-  warn "brand.json templatesMinisignPublicKey is not set yet: this release ships its template catalog unsigned and its panels never download a newer one (to switch the official catalog on: CONTRIBUTING.md, Releases, step 8)"
-elif [ ! -f "$catalog_dir/catalog.json.minisig" ]; then
-  fail "templates/catalog.json is not signed; run make sync-templates and commit the result"
+  warn "brand.json templatesMinisignPublicKey is not set: this release ships its template catalog unsigned and its panels never download a newer one (the catalog is signed with the release key: CONTRIBUTING.md, Releases, step 8)"
 else
-  vendored=$(catalog_sequence "$catalog_dir/catalog.json")
+  catalog_url="https://github.com/$BRAND_GITHUB_ORG/${BRAND_TEMPLATES_REPO:-Templates}/releases/download/catalog/catalog.json"
   published_file=$(mktemp)
-  if ! command -v curl >/dev/null 2>&1 ||
-    ! curl -fsSL -m 30 -o "$published_file" "https://github.com/$BRAND_GITHUB_ORG/${BRAND_TEMPLATES_REPO:-Templates}/releases/download/catalog/catalog.json" 2>/dev/null; then
-    warn "could not download the published template catalog to compare it with templates/catalog.json"
+  # The HTTP status of the published catalog.json (000: no answer, or no curl).
+  status=000
+  if command -v curl >/dev/null 2>&1; then
+    status=$(curl -sSL -m 30 -o "$published_file" -w '%{http_code}' "$catalog_url" 2>/dev/null || true)
+    status=${status:-000}
+  fi
+  vendored=$(catalog_sequence "$catalog_dir/catalog.json")
+  if [ "$status" = 404 ]; then
+    if [ -f "$catalog_dir/catalog.json.minisig" ]; then
+      warn "the published template catalog is gone ($catalog_url answered 404); this release ships templates/catalog.json (sequence ${vendored:-unknown}) as committed"
+    else
+      warn "the official template catalog is not published yet ($catalog_url answered 404): this release ships templates/catalog.json (sequence ${vendored:-unknown}) unsigned, as committed; run make sync-templates once it is published"
+    fi
+  elif [ "$status" != 200 ]; then
+    if [ -f "$catalog_dir/catalog.json.minisig" ]; then
+      warn "could not download the published template catalog to compare it with templates/catalog.json (HTTP $status)"
+    else
+      fail "templates/catalog.json is not signed and the published template catalog could not be checked (HTTP $status); run make sync-templates and commit the result"
+    fi
   else
     published=$(catalog_sequence "$published_file")
     if [ -z "$vendored" ] || [ -z "$published" ]; then
       fail "could not read the sequence of templates/catalog.json (${vendored:-none}) or of the published catalog (${published:-none})"
     elif [ "$published" -gt "$vendored" ]; then
       fail "the published template catalog (sequence $published) is newer than templates/catalog.json ($vendored); run make sync-templates and commit the result"
+    elif [ ! -f "$catalog_dir/catalog.json.minisig" ]; then
+      fail "templates/catalog.json is not signed; run make sync-templates and commit the result"
     fi
   fi
   rm -f "$published_file"
