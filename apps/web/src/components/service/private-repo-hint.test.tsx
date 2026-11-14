@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { renderStatic } from "../../test/render";
+import { auth } from "@seylo/ops";
+import { type Answer, renderStatic } from "../../test/render";
 import type { Deployment } from "./deploy-steps";
-import { gitUrlHost, PrivateRepoHint, privateRepoProvider } from "./private-repo-hint";
+import { CloneNetworkHint, cloneNetworkFailed, gitUrlHost, PrivateRepoHint, privateRepoProvider } from "./private-repo-hint";
 import type { ServiceDetail } from "./use-service";
 
 const cloneFailed = {
@@ -78,4 +79,61 @@ test("the hint links to the Source tab", async () => {
   expect(out).toContain(", or pick a git credential there.");
   const none = await renderStatic(() => <PrivateRepoHint service={service} d={{ ...cloneFailed, status: "cancelled" }} />);
   expect(none).not.toContain("private");
+});
+
+// What the agent says for a clone that failed on the node's network (build.GitNetworkError): the incident's
+// "CONNECT tunnel failed, response 502", with the connection the node could not make.
+const networkError =
+  "fetching the source failed: node de-fsn-1 could not connect to github.com:443 - a network problem on the node, not the address, " +
+  "the branch or the credentials: dial tcp 140.82.121.4:443: i/o timeout (git exited with code 128). " +
+  "The node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
+const de = { id: "nodedefsn1000001", name: "de-fsn-1" };
+const cloneNetwork = {
+  status: "failed" as const,
+  error: `The build failed: ${networkError}`,
+  builtOn: de,
+  steps: [
+    { key: "clone", status: "failed", node: de, detail: networkError, durationMs: 30_400 },
+    { key: "build", status: "pending", node: de, detail: "", durationMs: null },
+  ] as Deployment["steps"],
+};
+
+const viewer = (role: "owner" | "admin" | "member"): Answer => [
+  auth.whoami,
+  {},
+  { viewer: { id: "u1", email: "you@example.com", name: "You", role }, via: "session" },
+];
+
+test("a clone that failed on the node's network: no private-repo hint, the node's Health check instead", async () => {
+  expect(cloneNetworkFailed(cloneNetwork)).toBe(true);
+  expect(privateRepoProvider(cloneNetwork, git("https://github.com/acme/private-api.git"))).toBeNull();
+  for (const role of ["owner", "admin"] as const) {
+    const out = await renderStatic(() => <CloneNetworkHint d={cloneNetwork} />, [viewer(role)]);
+    expect(out).toContain('data-slot="clone-network-hint"');
+    expect(out).toContain("A network problem on de-fsn-1 stopped the clone, not the repository&#x27;s address or credentials. Its ");
+    expect(out).toMatch(/<a [^>]*href="\/nodes\?node=nodedefsn1000001&amp;view=health"[^>]*>Health check<\/a>/);
+    expect(out).toContain(" tests the node&#x27;s DNS and connections.");
+  }
+  // A member does not see the Nodes page: no link.
+  const member = await renderStatic(() => <CloneNetworkHint d={cloneNetwork} />, [viewer("member")]);
+  expect(member).toContain(
+    "A network problem on de-fsn-1 stopped the clone, not the repository&#x27;s address or credentials. An admin can run the node&#x27;s Health check.",
+  );
+  expect(member).not.toContain("<a ");
+});
+
+test("the network hint shows only for a clone that failed on the network", async () => {
+  // The private-repo case and every other failure keep their own hint, or none.
+  expect(cloneNetworkFailed(cloneFailed)).toBe(false);
+  const privateOut = await renderStatic(() => <CloneNetworkHint d={{ ...cloneFailed, builtOn: de }} />, [viewer("owner")]);
+  expect(privateOut).not.toContain("clone-network-hint");
+  const built = {
+    ...cloneNetwork,
+    steps: [
+      { ...cloneNetwork.steps[0], status: "ok" },
+      { ...cloneNetwork.steps[1], status: "failed" },
+    ],
+  } as typeof cloneNetwork;
+  expect(cloneNetworkFailed(built)).toBe(false);
+  expect(cloneNetworkFailed({ ...cloneNetwork, status: "cancelled" as never })).toBe(false);
 });

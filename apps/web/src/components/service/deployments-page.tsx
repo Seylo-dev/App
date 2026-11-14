@@ -47,7 +47,7 @@ import { DeploymentChips, deploymentDurationMs, deploymentTitle, deploymentVersi
 import { formatClock, formatRelative, formatTimeOfDay } from "./format";
 import { useInvalidate } from "./invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "./op-state";
-import { PrivateRepoHint } from "./private-repo-hint";
+import { CloneNetworkHint, PrivateRepoHint } from "./private-repo-hint";
 import { deploymentLook, isActiveDeployment } from "./status";
 import { DeploymentStatusChip } from "./status-chip";
 import { deploymentsPageSize } from "./tab-prefetch";
@@ -310,6 +310,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
             {failed && <UsePortButtons serviceId={service.id} d={d} servicePort={firstTcpPort(service)} />}
             {failed && <LastOutput d={d} />}
             <PrivateRepoHint service={service} d={d} />
+            <CloneNetworkHint d={d} />
             {failed && <DeployHostAction service={service} error={d.error} />}
             {running ? <StepChips steps={d.steps} buildWait={d.buildWait} /> : <DeploymentChips d={d} now={now} />}
           </div>

@@ -65,7 +65,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 20 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.13, see "Container DNS check"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 20 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.13, with a lookup from a test container on seylo-edge since 0.2.17, see "Container DNS check"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, since 0.2.13 `set-panel`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI; `NodeStatus.RouteErrors` (0.2.13) lists the services whose route file reconcile cannot write, and `seylo status` prints them under Recent errors after the last 5 connection errors, whatever their number | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -253,8 +253,53 @@ right after it, since containers created between the two get `invalid
 IP`; with live-restore on by then the restart keeps containers running.
 Docker 28, 29.3 and later, and nodes without a "dns" setting keep the
 plain reload advice.
+
+The lookup (since 0.2.17, `go/internal/nodecheck/dnslookup.go`): servers
+that look fine may still not answer from the node (a node's provider
+firewall flagged its DNS sessions to 1.1.1.1 and dropped its new outbound
+connections for hours while every file read fine). After the reads above
+a second test container resolves a well-known name (the first of
+`Env.ResolveNames`, `github.com`) the way an app's container does,
+through Docker's embedded DNS on our edge network: `docker run --rm
+--name seylo-dnscheck-<8 hex> --pull never --network seylo-edge --label
+seylo.dnscheck=true --label traefik.enable=false --entrypoint sh <image>
+-c <script> sh github.com`, same image (none is pulled), DOCKER_CONFIG
+and leftover handling as the resolv.conf test container. The script runs
+busybox's `nslookup -type=a -timeout=5` (every probe image has it),
+reads `/proc/uptime` before and after it (the lookup's own time, 10 ms
+steps, without Docker's start of the container) and prints its
+resolv.conf (where the embedded DNS forwards: Docker's ExtServers note).
+nslookup gives up after 5 s; the whole run is bounded at 20 s (then `docker
+rm -f` with a context of its own). It only joins the edge network while
+it runs; nothing else is touched. Results, added to the detail next to
+what the reads say (daemon.json, the test container's servers): works
+("a test container on seylo-edge resolved github.com in 24 ms through
+Docker's embedded DNS, which forwards to 8.8.8.8, 1.1.1.1", the detail
+ends with it); slow, 1 s or more (warn, "..., but slowly: in 2.4 s");
+fails (fail, "a test container on seylo-edge could not resolve github.com
+through Docker's embedded DNS, which forwards to 8.8.8.8, 1.1.1.1:
+connection timed out; no servers could be reached (after 5.0 s)",
+nslookup's first error line). A lookup worse than the reads leads the
+detail and its hint comes first: check on the node that those servers
+answer (`dig @<first> github.com`), that no firewall drops DNS (port 53)
+to them (the node's, or the hosting provider's, some of which limit DNS
+sessions and then block the server), and to put servers that answer from
+the node in daemon.json and restart Docker, with what that restart stops
+(the restart text above); for a slow lookup, that each new connection of
+an app without a DNS cache waits that long. A lookup no worse than the
+reads follows them and their hint stays. No lookup, with the reason at
+the end of the detail: Docker not reachable (`GET /info` failed), no
+probe image (the resolv.conf test container's note already says so), no
+`seylo-edge` network yet ("the agent creates it when it starts"), the
+image has no `nslookup` (exit 127), the run failed or took longer than
+20 s. The build service's `WorkerDNS` runs no lookup.
 The panel and the web app show its title, detail and hint like every other
-check's. VM tests: `TestRealContainerDNS` (the test container on the VM's
+check's. VM tests: `TestRealContainerDNSLookup` (on a network of its own:
+the VM's Docker resolves and passes; a lookup container whose only server
+is 192.0.2.53 as `--dns`, which drops every query, fails with
+"connection timed out; no servers could be reached" after nslookup's 5 s,
+the run well within 20 s, no `seylo.dnscheck` container left),
+`TestRealContainerDNS` (the test container on the VM's
 Docker, dockerd found through its pid file, no `seylo.dnscheck` container
 left; a build worker with the real node's resolv.conf, and a
 `seylo.managed` container on its own network whose ExtServers note says
@@ -534,6 +579,39 @@ Summary; the full rules are in `proto/README.md` and the comments of
   node's config.yml path, and for the source's own host the admin's
   allowance too. A 0.2 agent behind a panel that never sends the field
   clones from public addresses only.
+  A fetch that fails on the node's network (since 0.2.17,
+  `build.GitNetworkError`, `go/internal/build/gitnet.go`) no longer says
+  "check the address, the branch and the credentials": git only sees the
+  fetch proxy's 502 ("CONNECT tunnel failed, response 502"), so the proxy
+  records (and logs to the build log, "The git connection to <host:port>
+  failed: <error>") the first connection it could not make that it did
+  not refuse, and a failed git command is a network failure when the
+  proxy recorded one, else when a line of its stderr is one of: a
+  connection refused, timed out, reset or without a route (curl's "Failed
+  to connect to <host> port <n>", ssh's "connect to host", Go's "dial tcp
+  <addr>: ...", `RPC failed; curl 7/28/52/55/56`, git-dial's "the git
+  server could not be reached"), a name that did not resolve ("Could not
+  resolve host/proxy/hostname", Go's "lookup <name>"), a proxy error
+  ("CONNECT tunnel failed, response <n>", "Received HTTP code <n> from
+  proxy after CONNECT", the agent's own HTTP proxy answering an error) or
+  a TLS error (certificate problems, GnuTLS and OpenSSL handshake errors).
+  Its message: "fetching the source failed: node <name> could not connect
+  to <host:port> (could not resolve <host> / could not get through a proxy
+  to / could not open a TLS connection to) - a network problem on the node
+  (TLS: or a certificate it does not trust), not the address, the branch
+  or the credentials: <first error line> (<git's exit>). The node's
+  Health check (its Health tab, or `seylo health` on the node) tests its
+  DNS and connections". The first error line is the proxy's error, else
+  git's line, with any `user:password@` in an address replaced by
+  `***@`, at most 300 bytes; the host is the one git asked the proxy for
+  (not the address it resolved to), else the one the line names, else the
+  source's. The node's name is its panel name from the desired state's
+  node settings (`build.Options.NodeName`; "this node" before the first
+  desired state). It applies to build clones (fetch, the commit-by-id
+  retry, which a network failure skips, checkout, submodules) and to
+  FetchGitFile. Wrong credentials, a missing branch, commit or repository
+  and a refused address keep their messages. The web app shows such a
+  deploy with `CloneNetworkHint` (below), never the private-repo hint.
 - `WatchMetricsRequest.light` and `lease` (added after 0.2.4, no new
   capability: WatchMetrics is `metrics.read.v1`): `light` asks for node
   samples with only CPU, memory and the network counters (no disks, load
@@ -1081,9 +1159,10 @@ local API, join and resume. The areas:
   `seylo.kind`, `seylo.generation`, `seylo.replica`, `seylo.protected`,
   `seylo.role`). Cleanup and pruning only touch resources with
   `seylo.managed=true`. The one exception is the Container DNS check's
-  test container (`seylo-dnscheck-<hex>`, `seylo.dnscheck=true`, not
-  managed): `docker run --rm` for under a second, and the check itself
-  removes one a cut-off run left behind.
+  test containers (`seylo-dnscheck-<hex>`, `seylo.dnscheck=true`, not
+  managed): `docker run --rm` for under a second (the lookup one on
+  `seylo-edge` at most 20 s), and the check itself removes one a cut-off
+  run left behind.
 - Every container gets `traefik.enable=false` and `--cgroup-parent=seylo.slice`
   and Docker restart policy `no`. Service containers and cron runs also
   get `--init` by their spec's `ContainerConfig.init` (since 0.2.15, see
@@ -6610,6 +6689,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   git URL on github.com, gitlab.com or bitbucket.org with no credential
   gets one hint under the error (`private-repo-hint.tsx`): connect it
   through that provider on the Source tab, or pick a git credential there.
+  A deploy whose clone failed on the node's network (the agent's "a
+  network problem on the node", since 0.2.17, see `build.GitNetworkError`)
+  gets `CloneNetworkHint` instead, for any source: "A network problem on
+  <node> stopped the clone, not the repository's address or credentials.
+  Its Health check tests the node's DNS and connections.", <node> the
+  clone step's node (else `builtOn`), "Health check" a link to
+  `/nodes?node=<id>&view=health` for owners and admins; members (no Nodes
+  page) read that an admin can run the node's Health check.
 - New app source tabs (0.2.2, `components/new-service/`): Docker image |
   GitHub | Git repository | Set up later, under a visible Source label (the
   track hugs its items and scrolls sideways on a phone, as every kit

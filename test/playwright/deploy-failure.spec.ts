@@ -7,14 +7,25 @@
 // The Advanced tab waits for a running deploy before it changes the nodes
 // or moves the service, and its Ports say that the domains, IP:port access
 // and tunnel on the old main port follow a port typed in (with the next
-// deploy when a version is live, else on save). Screenshots go to
+// deploy when a version is live, else on save). A clone that failed on
+// the node's network (0.2.17) names the node and links its Health check
+// instead of the private-repo hint. Screenshots go to
 // $SHOTS_DIR/deploy-failure.
 
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { failedDeployError, failedDeployId, failedDeployOutput, failedNewestList, servicesById, ids as svc } from "./demo/service";
+import {
+  failedDeployError,
+  failedDeployId,
+  failedDeployOutput,
+  failedNewestList,
+  handlers,
+  privateApiDeploy,
+  servicesById,
+  ids as svc,
+} from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
@@ -175,6 +186,48 @@ test("a main port typed in on the Advanced tab: what points at the old one follo
   await card.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved").first()).toBeVisible();
   expect(calls("services.update").at(-1)?.ports).toEqual([{ containerPort: 6000, protocol: "tcp" }]);
+});
+
+/**
+ * private-api's clone failed on de-fsn-1's network (agents from 0.2.17, build.GitNetworkError): the
+ * node's fetch proxy could not connect, git only said "CONNECT tunnel failed, response 502".
+ */
+const networkError =
+  "fetching the source failed: node de-fsn-1 could not connect to github.com:443 - a network problem on the node, not the address, " +
+  "the branch or the credentials: dial tcp 140.82.121.4:443: i/o timeout (git exited with code 128). " +
+  "The node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
+const networkDeploy = {
+  ...privateApiDeploy,
+  error: `The build failed: ${networkError}`,
+  steps: privateApiDeploy.steps.map((s) => (s.key === "clone" ? { ...s, detail: networkError } : s)),
+};
+const networkFailed = {
+  "deployments.list": (input: Input) =>
+    input.serviceId === svc.privateApi
+      ? { deployments: input.active === true || input.active === "true" ? [] : [networkDeploy], nextCursor: null, keptImages: 0 }
+      : handlers["deployments.list"]?.(input),
+  "deployments.get": (input: Input) =>
+    input.deploymentId === networkDeploy.id ? { deployment: networkDeploy, logTopic: `deployment:${input.deploymentId}` } : handlers["deployments.get"]?.(input),
+};
+
+test("a clone that failed on the node's network names the node and links its Health check, not the private-repo hint", async ({ page }) => {
+  await installDemo(page, { overrides: networkFailed });
+  const hintText =
+    "A network problem on de-fsn-1 stopped the clone, not the repository's address or credentials. Its Health check tests the node's DNS and connections.";
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}`);
+  const deploys = page.locator("section", { has: page.getByRole("heading", { name: "Deploys", exact: true }) });
+  await expect(deploys.getByText("node de-fsn-1 could not connect to github.com:443", { exact: false })).toBeVisible();
+  await expect(deploys.locator('[data-slot="clone-network-hint"]')).toHaveText(hintText);
+  await expect(page.locator('[data-slot="private-repo-hint"]')).toHaveCount(0);
+  await deploys.screenshot({ path: `${shots}/clone-network-overview.png` });
+
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}/deployments`);
+  const history = page.getByRole("region", { name: "History" });
+  await expect(history.locator('[data-slot="clone-network-hint"]')).toHaveText(hintText);
+  await expect(history.locator('[data-slot="private-repo-hint"]')).toHaveCount(0);
+  await page.screenshot({ path: `${shots}/clone-network-deployments.png` });
+  await history.getByRole("link", { name: "Health check" }).click();
+  await expect(page).toHaveURL(new RegExp(`/nodes\\?node=${ids.de}&view=health$`));
 });
 
 test("a main port typed in for an app with nothing live: what points at the old one follows on save", async ({ page }) => {

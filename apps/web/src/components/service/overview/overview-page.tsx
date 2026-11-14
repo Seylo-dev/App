@@ -30,7 +30,7 @@ import { NoRouteChip } from "../domains/no-route";
 import { formatBytes, formatClock, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { OpErrorNote, retryOp } from "../op-state";
-import { PrivateRepoHint } from "../private-repo-hint";
+import { CloneNetworkHint, PrivateRepoHint } from "../private-repo-hint";
 import { TerminalSkeleton } from "../service-skeletons";
 import { hasRunningInstance, isDatabaseKind } from "../status";
 import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
@@ -206,6 +206,7 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
           )}
           {latest.error && <span className="text-[12.5px] text-chip-red-fg">{latest.error}</span>}
           <PrivateRepoHint service={service} d={latest} />
+          <CloneNetworkHint d={latest} />
           {view.other &&
             (view.inProgress ? (
               <DeployLine service={service} d={view.other} now={now} />

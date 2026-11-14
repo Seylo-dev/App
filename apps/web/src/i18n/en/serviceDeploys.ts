@@ -49,6 +49,18 @@ export default {
   /** Under a deploy whose clone failed for a git URL on a known host with no credential; {sourceTab} is a link. */
   privateRepo: "If the repository is private, connect it through {provider} on the {sourceTab}, or pick a git credential there.",
   sourceTab: "Source tab",
+  /**
+   * Under a deploy whose clone failed on the node's network (the agent's "a network problem on the node",
+   * agents from 0.2.17), instead of privateRepo; {healthCheck} links to the node's Health tab.
+   */
+  cloneNetwork: {
+    admin:
+      "A network problem on {node} stopped the clone, not the repository's address or credentials. Its {healthCheck} tests the node's DNS and connections.",
+    member:
+      "A network problem on {node} stopped the clone, not the repository's address or credentials. An admin can run the node's Health check.",
+    healthCheck: "Health check",
+    unknownNode: "the build node",
+  },
   chips: {
     builtOn: "Built on {node}",
     notBuilt: "Pulled, not built",

@@ -127,6 +127,31 @@ test("a clone that failed before a commit keeps the branch it tried, after the b
   expect(fleet.builds).toHaveLength(1);
 });
 
+// The web's hint under such a deploy (CloneNetworkHint) links the node it names, the build node (builtOn).
+test("a clone that failed on the node's network shows the agent's words: the node, the host, the Health check", async () => {
+  const id = await createApp("api", {
+    type: "git",
+    url: "https://gitea.lan/acme/api.git",
+    branch: "main",
+    credentialId: null,
+    deployOnPush: false,
+  });
+  // build.GitNetworkError: the fetch's proxy could not connect, git only saw "CONNECT tunnel failed, response 502".
+  const message =
+    "fetching the source failed: node builder could not connect to gitea.lan:443 - a network problem on the node, not the address, " +
+    "the branch or the credentials: dial tcp 10.0.0.7:443: i/o timeout (git exited with code 128). " +
+    "The node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
+  fleet.buildScript = () => ({ result: "failed", message });
+  const failed = await deploy(id);
+
+  const [row] = await list(id);
+  expect(row).toMatchObject({ id: failed, status: "failed" });
+  expect(row?.error).toBe(`The build failed: ${message}`);
+  expect(row?.error).not.toContain("check the address");
+  const res = await callOp(panel, deploymentOps.get, { serviceId: id, deploymentId: failed }, { cookie });
+  expect(res.body.deployment).toMatchObject({ error: `The build failed: ${message}`, builtOn: { name: "builder" } });
+});
+
 test("what a deploy built from comes from its own row", () => {
   const archives = new Map([["up1", "app-v1.zip"]]);
   const clone = (status: "ok" | "failed", detail: string) => [{ key: "clone" as const, status, nodeId: null, detail, durationMs: 1 }];
