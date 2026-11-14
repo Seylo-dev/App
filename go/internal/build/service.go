@@ -76,6 +76,18 @@ type Options struct {
 	// restarted first. Nil skips that (nodecheck.NewWorkerDNS in the
 	// agent).
 	WorkerDNS WorkerDNS
+	// NodeName is the node's name in the panel, which a fetch that failed
+	// on the node's network names (GitNetworkError). Nil or "": "this
+	// node".
+	NodeName func() string
+}
+
+// nodeName is Options.NodeName's answer, "" without one.
+func (s *Service) nodeName() string {
+	if s.opts.NodeName == nil {
+		return ""
+	}
+	return s.opts.NodeName()
 }
 
 // Service is the node's Builder: a queue of detached build jobs.
@@ -453,6 +465,7 @@ func (s *Service) fetch(ctx context.Context, j *Job, req *agentv1.BuildRequest, 
 	case *agentv1.BuildSource_Git:
 		info, err := fetchGitOn(ctx, s.opts.Git, s.opts.Runner, j, source.Git, src, work, req.GetGitSubmodules())
 		if err != nil {
+			NameNode(err, s.nodeName())
 			return "", err
 		}
 		j.sourceInfo(info)

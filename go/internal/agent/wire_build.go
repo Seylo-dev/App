@@ -13,6 +13,7 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/build"
 	"github.com/seylo-dev/app/go/internal/compose"
+	"github.com/seylo-dev/app/go/internal/conn"
 	"github.com/seylo-dev/app/go/internal/nodecheck"
 	"github.com/seylo-dev/app/go/internal/registry"
 	"github.com/seylo-dev/app/go/internal/rpc"
@@ -32,6 +33,14 @@ func provideBuild(d *Deps) error {
 		// A worker that lost its DNS servers is restarted before a build
 		// uses it, judged by the Container DNS check's code.
 		WorkerDNS: nodecheck.NewWorkerDNS(nodecheck.Env{DataDir: d.Layout.Root()}),
+		// A fetch that failed on the node's network names the node as the
+		// panel does (its node settings follow a rename).
+		NodeName: func() string {
+			if d.Feed == nil {
+				return ""
+			}
+			return conn.PrintableLine(d.Feed.Settings().GetNodeName())
+		},
 	}
 	if d.Events != nil {
 		opts.Emit = d.Events.Emit
@@ -143,7 +152,8 @@ func wireBuildxFacts(d *Deps, version buildxVersionFunc) *buildxFacts {
 }
 
 // gitFileStatus maps FetchGitFile errors to statuses; the messages carry
-// no credentials (git's own output is not passed on).
+// no credentials (of git's own output only a network failure's first
+// line, with any credentials in an address replaced: build.GitNetworkError).
 func gitFileStatus(err error) error {
 	switch {
 	case errors.Is(err, build.ErrGitFileNotFound):

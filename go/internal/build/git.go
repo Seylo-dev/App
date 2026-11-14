@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ const credentialHelper = `!f() { test "$1" = get || exit 0; h=; while IFS= read 
 	`test -n "$h" && test "$h" = "$BUILD_GIT_HOST" || exit 0; echo "username=${BUILD_GIT_USER}"; echo "password=${BUILD_GIT_TOKEN}"; }; f`
 
 // ErrFetch is a source that could not be fetched (bad address, branch,
-// commit or credentials).
+// commit or credentials, or the node's network: GitNetworkError).
 var ErrFetch = errors.New("fetching the source failed")
 
 // git runs git commands for one checkout with the build's credentials.
@@ -48,6 +49,9 @@ type git struct {
 	env   []string
 	args  []string
 	proxy *gitProxy
+	// lastStderr is the start of the last command's stderr (do), which
+	// fetchErr reads for a network failure.
+	lastStderr string
 }
 
 // proxyEnv clears the proxy variables the agent passes to commands
@@ -230,8 +234,15 @@ func (g *git) cmd(dir string, args ...string) Cmd {
 	return Cmd{Name: "git", Args: append(all, args...), Env: g.env, Stdout: g.log, Stderr: g.log}
 }
 
+// do runs one git command; its stderr goes to the log and, the start of
+// it, to lastStderr.
 func (g *git) do(ctx context.Context, dir string, args ...string) error {
-	return g.run.Run(ctx, g.cmd(dir, args...))
+	cmd := g.cmd(dir, args...)
+	var tail stderrTail
+	cmd.Stderr = io.MultiWriter(g.log, &tail)
+	err := g.run.Run(ctx, cmd)
+	g.lastStderr = tail.String()
+	return err
 }
 
 // fetchGit is fetchGitOn for a node with config.yml's defaults.
@@ -279,6 +290,10 @@ func fetchGitOn(ctx context.Context, node GitNodeConfig, r Runner, log io.Writer
 			if refused := g.proxy.Refused(); refused != nil {
 				return nil, refused
 			}
+			// The network failed, not the server's support for ids.
+			if netErr := g.networkErr(err); netErr != nil {
+				return nil, netErr
+			}
 			fmt.Fprintf(log, "The server does not serve commits by id, fetching %s instead\n", ref)
 			if err := g.do(ctx, dir, "fetch", "-q", "--no-tags", "origin", ref); err != nil {
 				return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
@@ -311,7 +326,8 @@ func fetchGitOn(ctx context.Context, node GitNodeConfig, r Runner, log io.Writer
 }
 
 // fetchErr is a failed git command: the connection the proxy refused when
-// there was one (that is why it failed), else what the command was for.
+// there was one (that is why it failed), else a failure on the node's
+// network (networkErr), else what the command was for.
 func (g *git) fetchErr(ctx context.Context, err error, format string, args ...any) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -319,7 +335,35 @@ func (g *git) fetchErr(ctx context.Context, err error, format string, args ...an
 	if refused := g.proxy.Refused(); refused != nil {
 		return refused
 	}
+	if netErr := g.networkErr(err); netErr != nil {
+		return netErr
+	}
 	return fmt.Errorf("%w: %s (%v)", ErrFetch, fmt.Sprintf(format, args...), err)
+}
+
+// networkErr is the failed command err as a network failure: the first
+// connection the fetch's proxy could not make (its target and error),
+// else the first line of the command's stderr that names one. nil when
+// neither does.
+func (g *git) networkErr(err error) *GitNetworkError {
+	var netErr *GitNetworkError
+	if target, text := g.proxy.ConnFailed(); text != "" {
+		netErr = classifyGitNetwork(text, target)
+		if netErr == nil {
+			netErr = &GitNetworkError{Kind: GitConnect, Line: cleanGitLine(text)}
+		}
+		// The host git asked for, not the address it resolved to.
+		netErr.Target = target
+		if host, _, splitErr := net.SplitHostPort(target); splitErr == nil && netErr.Kind == GitDNS {
+			netErr.Target = host
+		}
+	} else {
+		netErr = classifyGitNetwork(g.lastStderr, g.proxy.policy.source.String())
+	}
+	if netErr != nil && err != nil {
+		netErr.Exit = err.Error()
+	}
+	return netErr
 }
 
 func describeRev(ref, commit string) string {

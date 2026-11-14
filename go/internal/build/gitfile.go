@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -40,6 +39,14 @@ var (
 // code and credentials: a shallow fetch without file contents (where the
 // server allows it), then only that file's blob. Nothing stays on the node.
 func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileRequest) (*agentv1.FetchGitFileResponse, error) {
+	res, err := s.fetchFile(ctx, req)
+	if err != nil {
+		NameNode(err, s.nodeName())
+	}
+	return res, err
+}
+
+func (s *Service) fetchFile(ctx context.Context, req *agentv1.FetchGitFileRequest) (*agentv1.FetchGitFileResponse, error) {
 	src := req.GetSource()
 	if src.GetUrl() == "" {
 		return nil, &InvalidError{Msg: "the repository address is required"}
@@ -109,8 +116,9 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	}
 	target := "FETCH_HEAD"
 	if err := fetch(want, true); err != nil {
-		// A refused address stays refused: no second try for the branch.
-		if src.GetCommit() == "" || ctx.Err() != nil || g.proxy.Refused() != nil {
+		// A refused address stays refused, and a network that failed is no
+		// server without commits by id: no second try for the branch.
+		if src.GetCommit() == "" || ctx.Err() != nil || g.proxy.Refused() != nil || g.networkErr(err) != nil {
 			return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
 		}
 		// The server does not serve commits by id: fetch the branch.
@@ -124,6 +132,9 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 		return nil, g.fetchErr(ctx, err, "commit %s is not on %s", short(src.GetCommit()), ref)
 	}
 	object := commit + ":" + p
+	// In a partial clone this may fetch the object: a connection the
+	// proxy could not make is that, not a missing file.
+	g.lastStderr = ""
 	kind, err := output(ctx, s.opts.Runner, g.cmd(dir, "cat-file", "-t", object))
 	if err != nil || kind != "blob" {
 		if ctx.Err() != nil {
@@ -131,6 +142,9 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 		}
 		if refused := g.proxy.Refused(); refused != nil {
 			return nil, refused
+		}
+		if netErr := g.networkErr(err); err != nil && netErr != nil {
+			return nil, netErr
 		}
 		return nil, fmt.Errorf("%w: %s at %s", ErrGitFileNotFound, p, short(commit))
 	}
@@ -148,8 +162,11 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	var content bytes.Buffer
 	cmd := g.cmd(dir, "cat-file", "blob", object)
 	cmd.Stdout = &limitedBuffer{buf: &content, max: int(limit)}
-	cmd.Stderr = io.Discard
+	// Not to the log: only a network failure's line is read from it.
+	var stderr stderrTail
+	cmd.Stderr = &stderr
 	if err := s.opts.Runner.Run(ctx, cmd); err != nil {
+		g.lastStderr = stderr.String()
 		return nil, g.fetchErr(ctx, err, "could not read %s", p)
 	}
 	return &agentv1.FetchGitFileResponse{Content: content.Bytes(), Commit: commit, SizeBytes: uint64(content.Len())}, nil

@@ -199,6 +199,9 @@ type gitProxy struct {
 	refused  *BlockedHostError
 	closed   bool
 	handlers sync.WaitGroup
+	// failedTarget and failedErr are the first connection the proxy could
+	// not make (not one it refused): what git asked for and why.
+	failedTarget, failedErr string
 }
 
 // syncWriter serializes the writes of git (through exec) and the proxy
@@ -278,6 +281,32 @@ func (p *gitProxy) Refused() *BlockedHostError {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.refused
+}
+
+// ConnFailed is the first connection the proxy could not make: the
+// host:port git asked for and the error; "" when every one worked.
+func (p *gitProxy) ConnFailed() (target, text string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.failedTarget, p.failedErr
+}
+
+// connFailed records a connection to target that failed (one the policy
+// refused is recorded by refuse), and logs it when logIt (the paths
+// through the agent's HTTP proxy log their own).
+func (p *gitProxy) connFailed(target string, err error, logIt bool) {
+	var blocked *BlockedHostError
+	if err == nil || errors.As(err, &blocked) {
+		return
+	}
+	p.mu.Lock()
+	if p.failedErr == "" {
+		p.failedTarget, p.failedErr = target, err.Error()
+	}
+	p.mu.Unlock()
+	if logIt {
+		fmt.Fprintf(p.log, "The git connection to %s failed: %v\n", target, err)
+	}
 }
 
 // Close stops the listener and every open tunnel, and waits for the
@@ -561,13 +590,19 @@ func (f forwardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	target := net.JoinHostPort(host, port)
 	if up == nil {
-		return f.p.transport.RoundTrip(r)
+		res, err := f.p.transport.RoundTrip(r)
+		f.p.connFailed(target, err, true)
+		return res, err
 	}
 	if err := f.p.checkBeforeUpstream(r.Context(), host, port); err != nil {
 		return nil, err
 	}
-	return f.p.viaUpstream.RoundTrip(r)
+	res, err := f.p.viaUpstream.RoundTrip(r)
+	// dialProxyServer logged a proxy it could not reach.
+	f.p.connFailed(target, err, false)
+	return res, err
 }
 
 func (p *gitProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -600,12 +635,14 @@ func (p *gitProxy) tunnel(w http.ResponseWriter, r *http.Request) {
 	var upstream net.Conn
 	// git's own https (curl) goes to the agent's HTTP proxy when one is set; ssh never did.
 	up, err := p.upstreamFor("https", host, port)
+	direct := false
 	switch {
 	case err != nil:
 		fmt.Fprintf(p.log, "The git connection to %s failed: %v\n", r.Host, err)
 	case up != nil && r.Header.Get(gitDialHeader) == "":
 		upstream, err = p.dialVia(r.Context(), up, host, port)
 	default:
+		direct = true
 		upstream, err = p.dial(r.Context(), host, port)
 	}
 	if err != nil {
@@ -614,6 +651,9 @@ func (p *gitProxy) tunnel(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, blocked.Error(), http.StatusForbidden)
 			return
 		}
+		// git only sees a 502 ("CONNECT tunnel failed, response 502"): the
+		// fetch's error names this one (networkErr). dialVia logged its own.
+		p.connFailed(r.Host, err, direct)
 		http.Error(w, "the git server could not be reached", http.StatusBadGateway)
 		return
 	}

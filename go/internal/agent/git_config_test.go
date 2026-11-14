@@ -113,6 +113,56 @@ func TestGitProxyResolvesFromConfig(t *testing.T) {
 	}
 }
 
+// A fetch that fails on the node's network names the node as the panel
+// does, also after a rename, and points at its Health check, not at the
+// credentials.
+func TestGitNetworkFailureNamesTheNode(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	for _, k := range []string{"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy"} {
+		t.Setenv(k, "")
+		_ = os.Unsetenv(k)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	_ = ln.Close()
+
+	d, _ := newTestDeps(t)
+	reg := rpc.NewAgentMux()
+	if err := provideBuild(d); err != nil {
+		t.Fatal(err)
+	}
+	if err := wireBuild(reg, d); err != nil {
+		t.Fatal(err)
+	}
+	panel := rpctest.NewPeer(t, reg)
+	fetch := func() error {
+		var resp agentv1.FetchGitFileResponse
+		return panel.Call(context.Background(), "FetchGitFile", &agentv1.FetchGitFileRequest{
+			Source: &agentv1.GitSource{Url: "https://" + closed + "/team/app.git", Ref: "main", AllowInternalHost: true},
+			Path:   "compose.yml",
+		}, &resp)
+	}
+	for i, name := range []string{"", "de-fsn-1", "de-fsn-2"} {
+		if name != "" {
+			d.Feed.Publish(&agentv1.DesiredState{Revision: uint64(i), Settings: &agentv1.NodeSettings{NodeName: name}})
+		}
+		who := "this node"
+		if name != "" {
+			who = "node " + name
+		}
+		err := fetch()
+		if err == nil || !strings.Contains(err.Error(), who+" could not connect to "+closed+" - a network problem on the node, not the address, the branch or the credentials") ||
+			!strings.Contains(err.Error(), "Health check") {
+			t.Fatalf("named %q: %v", name, err)
+		}
+	}
+}
+
 // NodeFacts.interface_addresses lists the node's public interface
 // addresses (what its git fetches refuse unless allowed), at most 64, so
 // the panel can count git hosts on them as internal.
