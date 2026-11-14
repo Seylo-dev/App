@@ -19,6 +19,7 @@ import type { ProxyTrust } from "../src/http/proxy-trust";
 import { type Logger, silentLogger } from "../src/logger";
 import type { PanelModule } from "../src/modules/module";
 import { type GeoFetch, setGeoFetch } from "../src/modules/nodes/location";
+import { catalogSource } from "../src/modules/templates/remote";
 import type { RateLimiter } from "../src/ops/rate-limit";
 import { createPanel, type Panel } from "../src/panel";
 import { hashPassword } from "../src/security/password";
@@ -37,6 +38,16 @@ export const refuseGeoLookups: GeoFetch = async () => {
 };
 setGeoFetch(refuseGeoLookups);
 
+/**
+ * No test downloads the real template catalog either: the scheduled check
+ * (templates.refresh) fails at once unless a test serves catalogs itself
+ * (template-catalog.test.ts) and puts this back after.
+ */
+export const refuseCatalogFetches = async (): Promise<Response> => {
+  throw new Error("tests never fetch the template catalog");
+};
+catalogSource.fetch = refuseCatalogFetches;
+
 export interface TestPanel extends Panel {
   close(): void;
 }
@@ -53,15 +64,24 @@ export function testPanel(
     masterKey?: Uint8Array;
     /** The data folder, for a test whose modules read it at start (a moved panel's commit marker). */
     dataDir?: string;
+    /** The panel's version ("dev" by default), for a test whose modules read it at start (templates' minPanel). */
+    version?: string;
   } = {},
 ): TestPanel {
   const config = {
     ...loadConfig({}, packageRoot),
+    ...(options.version ? { version: options.version } : {}),
     dataDir: options.dataDir ?? "/nonexistent",
     secureCookies: false,
     ...(options.webDist ? { webDist: options.webDist } : { webDist: "/nonexistent" }),
   };
-  const { panelPath = ":memory:", masterKey = crypto.getRandomValues(new Uint8Array(32)), dataDir: _dataDir, ...rest } = options;
+  const {
+    panelPath = ":memory:",
+    masterKey = crypto.getRandomValues(new Uint8Array(32)),
+    dataDir: _dataDir,
+    version: _version,
+    ...rest
+  } = options;
   const databases = openDatabases({ panelPath, metricsPath: ":memory:", migrationsDir: config.migrationsDir });
   const panel = createPanel({ config, databases, masterKey, logger: silentLogger(), ...rest });
   return { ...panel, close: () => databases.close() };

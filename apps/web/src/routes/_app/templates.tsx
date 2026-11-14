@@ -3,10 +3,15 @@
 // project (from a project's New service menu), ?q= and ?category= keep the
 // filter in the URL. ?tab=docker-hub switches to Docker Hub search (the
 // same search box, sent to dockerHub.search); the popular images row and
-// every Docker Hub result open the prefilled image form.
+// every Docker Hub result open the prefilled image form. Under the title,
+// the catalog line says where the templates come from (catalog-status.tsx);
+// templates a catalog update brought carry a New tag until someone with
+// templates.manage opens the page (templates.markCatalogSeen; the tags stay
+// for that visit).
 
 import { templates } from "@seylo/ops";
-import { useOp } from "@seylo/ops/react";
+import { useOp, useOpMutation } from "@seylo/ops/react";
+import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
 import { EnterOnChange } from "@seylo/ui/components/motion";
@@ -16,13 +21,14 @@ import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useDeferredValue, useState } from "react";
+import { type ReactNode, useDeferredValue, useEffect, useState } from "react";
 import { HubResults } from "../../components/docker-hub/hub-results";
 import { type HubTarget, ImageDialog } from "../../components/docker-hub/image-dialog";
 import { PopularRow } from "../../components/docker-hub/popular-row";
 import { useDebounced } from "../../components/docker-hub/use-debounced";
 import { PageHeader } from "../../components/page-header";
 import { QueryError } from "../../components/query-error";
+import { CatalogStatusLine, templateTags } from "../../components/templates/catalog-status";
 import { InstallDialog } from "../../components/templates/install-dialog";
 import { TemplateLogo } from "../../components/templates/template-logo";
 import { t } from "../../i18n/t";
@@ -59,6 +65,8 @@ function TemplatesPage() {
   // Categories and the count come from the unfiltered catalog, so the chips do not jump while typing.
   const all = useOp(templates.list, {});
   const categories = all.data?.categories ?? [];
+  const status = useOp(templates.catalogStatus, {});
+  const newSlugs = useNewSlugs(status.data);
 
   const pickCategory = (category: string | undefined) => void navigate({ search: (prev) => ({ ...prev, category }), replace: true });
 
@@ -96,6 +104,8 @@ function TemplatesPage() {
           </div>
         }
       />
+
+      {!hub && status.data && <CatalogStatusLine status={status.data} />}
 
       <Segmented
         aria-label={t("dockerHub.tabs")}
@@ -168,7 +178,16 @@ function TemplatesPage() {
                   </span>
                 </span>
                 <span className="text-[12.5px] leading-[1.45] text-ink-strong">{template.description}</span>
-                <span className="mt-auto border-t border-divider pt-2.5 text-[11.5px] text-muted-foreground">{template.creates}</span>
+                <span className="mt-auto flex items-center gap-1.5 border-t border-divider pt-2.5 text-[11.5px] text-muted-foreground">
+                  <span className="min-w-0 truncate">{template.creates}</span>
+                  <span className="ml-auto flex shrink-0 gap-1">
+                    {templateTags(template, newSlugs).map((tag) => (
+                      <Chip key={tag.label} tone={tag.tone} className="px-1.5 py-px text-[11px]">
+                        {tag.label}
+                      </Chip>
+                    ))}
+                  </span>
+                </span>
               </button>
             ))}
           </div>
@@ -181,6 +200,25 @@ function TemplatesPage() {
       <ImageDialog target={image} projectId={search.project} onClose={() => setImage(null)} />
     </>
   );
+}
+
+/**
+ * The slugs to tag New on this visit. Someone with templates.manage marks
+ * them seen when the page opens (for everyone after them), but keeps the
+ * tags until they leave.
+ */
+function useNewSlugs(status: { newSlugs: string[]; canRefresh: boolean } | undefined): ReadonlySet<string> {
+  const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
+  const markSeen = useOpMutation(templates.markCatalogSeen);
+  const fresh = status?.newSlugs ?? [];
+  const key = fresh.join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: key is the list of new slugs
+  useEffect(() => {
+    if (fresh.length === 0) return;
+    setSeen((before) => new Set([...before, ...fresh]));
+    if (status?.canRefresh) markSeen.mutate({});
+  }, [key, status?.canRefresh]);
+  return seen;
 }
 
 /** A template card while the catalog loads: logo, name and category, two lines of description, what it creates. */

@@ -1,0 +1,6 @@
+Test fixture logos
+
+Both logo files are drawn for these tests and belong to this repository:
+
+  templates/flows/logo.svg            a circle and a line
+  templates/board/logo.webp           a 1x1 lossless WebP

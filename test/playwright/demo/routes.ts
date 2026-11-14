@@ -125,6 +125,7 @@ const worldHandlers: Record<string, Handler> = {
     return { templates: list, categories: world.templates.categories };
   },
   "templates.get": () => world.n8nDetail,
+  "templates.catalogStatus": () => world.catalogStatus,
   "templates.preview": () => world.n8nPreview,
   "cliLogin.get": (input) => ({
     request: {

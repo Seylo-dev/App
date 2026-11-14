@@ -3,7 +3,11 @@
 Bug reports, fixes and features are welcome. For anything bigger than a fix,
 open an issue first so we can agree on the approach before you write it.
 
-- Code, the installer and templates: this repository.
+- Code and the installer: this repository.
+- One-click templates: [Seylo-dev/Templates](https://github.com/Seylo-dev/Templates)
+  (`bun run new <slug>`, `bun run check`, then a pull request). The panel
+  checks them with `apps/panel/scripts/check-templates.ts` from here and
+  ships a copy of the signed catalog in `templates/`.
 - User documentation (https://docs.seylo.dev): the docs app in the Website
   repo, [Seylo-dev/Website `apps/docs`](https://github.com/Seylo-dev/Website/tree/main/apps/docs).
 - Security problems: not in a public issue; see [SECURITY.md](SECURITY.md).
@@ -241,10 +245,31 @@ Once, before the first release (owners):
    GitHub applies it to releases published after it is on, and drafts stay
    editable, so the Sign job still attaches its signatures. The Publish job
    warns on every release that is not immutable.
+8. The template catalog key. Templates are signed by a key of their own,
+   not the release key: the Templates repo signs a catalog on every merge
+   and takes outside pull requests, and a leaked catalog key can only ship
+   templates (sandboxed, previewed before install), never binaries. Make it
+   with `minisign -G -p catalog.pub -s catalog.key`, put the public key (the
+   `RW...` line) into `brand/brand.json` as `templatesMinisignPublicKey` and
+   run `make gen`. In Seylo-dev/Templates, create the `catalog` environment
+   (deployment branches: `main` only) with the secrets
+   `MINISIGN_SECRET_KEY` (the contents of `catalog.key`) and
+   `MINISIGN_PASSWORD`. Until the key is set, panels use the catalog they
+   ship and never download one, and the release preflight only warns.
 
 Each release:
 
-1. Run a dry run on `main`: Actions > Release > Run workflow, or
+1. Vendor the template catalog: `make sync-templates` downloads the
+   published catalog from the Templates repo's `catalog` release, verifies
+   it with `templatesMinisignPublicKey`, refuses one older than
+   `templates/catalog.json`, checks that every template installs on this
+   panel (`apps/panel/scripts/check-templates.ts`) and writes
+   `templates/`. Commit the result. `scripts/release-preflight.sh` refuses a
+   release whose `templates/catalog.json` is unsigned or older than the
+   published catalog. When a template needs a feature this release adds,
+   raise `check` in the Templates repo's `panel.json` to this tag after the
+   release.
+2. Run a dry run on `main`: Actions > Release > Run workflow, or
    `gh workflow run release.yml -f dry_run=true`. It runs the same Build
    and test job and builds everything a release attaches from its build
    (binaries, checksums, `install.sh`, both panel images, the manifest),
@@ -252,7 +277,7 @@ Each release:
    `scripts/release-sign.sh` and a throwaway key made there, as the Sign job
    does, and publishes nothing. A run started by hand with `dry_run` off is
    refused: real releases only come from tags.
-2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
+3. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
    The Build and test job runs `make install`, `make check-gen`,
    `make test` and `make build-ts` on the tagged commit and hands
    `apps/web/dist` and `apps/panel/dist` on as an artifact. The Draft
@@ -267,7 +292,7 @@ Each release:
    (`v0.1.0-rc.1`) makes a pre-release that installs and the stable update
    channel do not follow (panels on the Pre-release channel, Settings >
    Updates, offer it); to promote it, tag the same commit `vX.Y.Z`.
-3. The Sign job waits for a reviewer: open the run, Review deployments,
+4. The Sign job waits for a reviewer: open the run, Review deployments,
    tick `release` and approve. It then checks the files (every file
    `checksums.txt` lists matches it; `manifest.json` is for this version and
    has the sha256 of this release's linux binaries and `install.sh`;
@@ -276,7 +301,7 @@ Each release:
    `brand.json`'s key, and attaches them to the draft once it is the only
    release with the tag and its `checksums.txt` and `manifest.json` are the
    signed files.
-4. The Publish job (`scripts/release-publish.sh`) then checks the draft
+5. The Publish job (`scripts/release-publish.sh`) then checks the draft
    without trusting the jobs that made it, and publishes it only when every
    check passes:
    - `checksums.txt` and `manifest.json` are signed by `brand.json`'s
@@ -304,13 +329,13 @@ Each release:
    drafts with one tag: delete the stale one, then re-run Publish). Running
    Publish again on a release that is already published checks it and
    changes nothing.
-5. On the first release only, the new package is private, so Publish stops
+6. On the first release only, the new package is private, so Publish stops
    with "The ghcr.io/seylo-dev/seylo package is private". Open it
    (github.com/orgs/Seylo-dev/packages > seylo), check that it is connected
    to the `App` repository, change its visibility to public (Package
    settings > Change visibility), then re-run the Publish job (the run's
    page > Publish > Re-run this job). It stays public for later releases.
-6. Once the release is published, the Start the install smoke test job
+7. Once the release is published, the Start the install smoke test job
    starts `.github/workflows/install-smoke.yml` for the tag (a release
    published with the workflow's token starts no `release: published`
    workflow, so it is started by hand there; one published by a person

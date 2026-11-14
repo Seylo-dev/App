@@ -1,95 +1,92 @@
-// Template logos: a built-in template that ships its app's logo
-// (templates/<slug>/logo.svg, .webp or .png, from dashboard-icons) lists a
-// URL the panel serves; every other template, custom ones included, lists
-// null and the web shows its letter tile.
+// Template logos: a catalog template that has its app's logo (logo.svg,
+// .webp or .png in the catalog) lists a URL the panel serves from the
+// catalog in memory, with ?v= from the file's sha256; every other template,
+// custom ones included, lists null and the web shows its letter tile. The
+// catalog is the fixture repository (flows: logo.svg, board: logo.webp,
+// metrics: none); the logo rules (size, safe SVG, NOTICE) are
+// scripts/check-templates.ts's.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { templates } from "@seylo/ops";
-import { builtInTemplates, catalogDir, logoFiles } from "../src/modules/templates/catalog";
+import { fixtureRepo, resetCatalogs, useFixtureBundle } from "./catalog-fakes";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
+beforeAll(() => useFixtureBundle());
+afterAll(resetCatalogs);
 beforeEach(() => {
   panel = testPanel();
 });
 afterEach(() => panel.close());
 
-/** Small enough for a 38 px tile: SVGs up to 50 KB, rasters up to 30 KB. */
-const maxBytes = (file: string) => (file.endsWith(".svg") ? 50_000 : 30_000);
-
 const get = (path: string) => panel.app.handle(new Request(`http://localhost${path}`));
-
-test("every logo file in the catalog is small, safe and listed in templates/NOTICE", () => {
-  const dir = catalogDir() as string;
-  const notice = readFileSync(join(dir, "NOTICE"), "utf8");
-  expect(notice).toContain("Apache License");
-  expect(existsSync(join(dir, "LICENSE.dashboard-icons"))).toBe(true);
-  let count = 0;
-  for (const slug of readdirSync(dir)) {
-    for (const file of logoFiles) {
-      const path = join(dir, slug, file);
-      if (!existsSync(path)) continue;
-      count++;
-      expect({ path, size: statSync(path).size <= maxBytes(file) }).toEqual({ path, size: true });
-      expect(notice).toContain(`templates/${slug}/${file}`);
-      if (file !== "logo.svg") continue;
-      // Shown through <img> (no scripts run there), but opened directly an SVG is a document: nothing active or remote in it.
-      const svg = readFileSync(path, "utf8");
-      expect(svg).toContain("<svg");
-      expect(svg).not.toMatch(/<script|<foreignObject|<image|\son[a-z]+\s*=|(?:href|src)\s*=\s*["']?(?:https?:|data:|javascript:)/i);
-    }
-  }
-  expect(count).toBeGreaterThanOrEqual(20);
-});
+const fixture = (path: string) => readFileSync(join(fixtureRepo, "templates", path));
+const v = (bytes: Buffer) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex").slice(0, 8);
 
 test("templates with a logo list its URL and the panel serves the file", async () => {
   const { cookie } = await createUser(panel, "owner");
   const list = await callOp(panel, templates.list, {}, { cookie });
   expect(list.status).toBe(200);
-  const all = list.body.templates as { slug: string; name: string; logoUrl: string | null }[];
-  const bySlug = new Map(all.map((t) => [t.slug, t]));
-  for (const [slug, template] of builtInTemplates()) {
-    const file = template.logoPath?.split("/").pop();
-    expect(bySlug.get(slug)?.logoUrl).toBe(file ? `/api/templates/${slug}/${file}` : null);
-  }
-  expect(bySlug.get("grafana")?.logoUrl).toBe("/api/templates/grafana/logo.svg");
-  expect(bySlug.get("uptime-kuma")?.logoUrl).toBe("/api/templates/uptime-kuma/logo.svg");
-  // No SVG upstream: a small WebP instead.
-  expect(bySlug.get("ghost")?.logoUrl).toBe("/api/templates/ghost/logo.webp");
-  // dashboard-icons has no Appsmith logo: the web shows the letter tile.
-  expect(bySlug.get("appsmith")?.logoUrl).toBeNull();
+  const bySlug = new Map((list.body.templates as { slug: string; logoUrl: string | null }[]).map((t) => [t.slug, t.logoUrl]));
+  const svgUrl = `/api/templates/flows/logo.svg?v=${v(fixture("flows/logo.svg"))}`;
+  expect(bySlug.get("flows")).toBe(svgUrl);
+  // A raster logo when the app has no small SVG.
+  expect(bySlug.get("board")).toBe(`/api/templates/board/logo.webp?v=${v(fixture("board/logo.webp"))}`);
+  // No logo: the web shows the letter tile.
+  expect(bySlug.get("metrics")).toBeNull();
   // templates.get carries the same URL.
-  expect((await callOp(panel, templates.get, { slug: "grafana" }, { cookie })).body.logoUrl).toBe("/api/templates/grafana/logo.svg");
+  expect((await callOp(panel, templates.get, { slug: "flows" }, { cookie })).body.logoUrl).toBe(svgUrl);
 
-  // Public (an <img> sends no credentials), typed, cached, and sandboxed if opened directly.
-  const svg = await get("/api/templates/grafana/logo.svg");
+  // Public (an <img> sends no credentials), typed, cached, and sandboxed if opened directly; the ?v= query is ignored.
+  const svg = await get(svgUrl);
   expect(svg.status).toBe(200);
   expect(svg.headers.get("content-type")).toStartWith("image/svg+xml");
   expect(svg.headers.get("x-content-type-options")).toBe("nosniff");
   expect(svg.headers.get("content-security-policy")).toContain("sandbox");
   expect(svg.headers.get("cache-control")).toContain("max-age");
-  expect(await svg.text()).toBe(readFileSync(join(catalogDir() as string, "grafana", "logo.svg"), "utf8"));
-  const webp = await get("/api/templates/ghost/logo.webp");
+  expect(await svg.text()).toBe(fixture("flows/logo.svg").toString("utf8"));
+  const webp = await get("/api/templates/board/logo.webp");
   expect(webp.status).toBe(200);
   expect(webp.headers.get("content-type")).toBe("image/webp");
-  const bytes = Buffer.from(await webp.arrayBuffer());
-  expect(bytes.subarray(8, 12).toString("latin1")).toBe("WEBP");
+  expect(Buffer.from(await webp.arrayBuffer()).equals(fixture("board/logo.webp"))).toBe(true);
 });
 
-test("only the file a template ships is served", async () => {
+test("only the file a template has is served", async () => {
   for (const path of [
-    "/api/templates/appsmith/logo.svg", // no logo
-    "/api/templates/ghost/logo.svg", // ships logo.webp
-    "/api/templates/grafana/logo.png",
-    "/api/templates/grafana/meta.yaml",
-    "/api/templates/grafana/index.ts",
+    "/api/templates/metrics/logo.svg", // no logo
+    "/api/templates/board/logo.svg", // has logo.webp
+    "/api/templates/flows/logo.png",
+    "/api/templates/flows/meta.yaml",
+    "/api/templates/flows/index.ts",
     "/api/templates/no-such-template/logo.svg",
-    "/api/templates/..%2Fgrafana/logo.svg",
+    "/api/templates/..%2Fflows/logo.svg",
   ])
     expect({ path, status: (await get(path)).status }).toEqual({ path, status: 404 });
 });
+
+test("a changed logo gets a new URL", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const before = (await callOp(panel, templates.get, { slug: "flows" }, { cookie })).body.logoUrl;
+  panel.close();
+  useFixtureBundle({ add: {}, edit: (json) => changeLogo(json) });
+  panel = testPanel();
+  const { cookie: again } = await createUser(panel, "owner");
+  const after = (await callOp(panel, templates.get, { slug: "flows" }, { cookie: again })).body.logoUrl as string;
+  expect(after).toStartWith("/api/templates/flows/logo.svg?v=");
+  expect(after).not.toBe(before);
+  expect(await (await get(after)).text()).toContain("#123456");
+  useFixtureBundle();
+});
+
+function changeLogo(json: Record<string, unknown>) {
+  const flows = (json.templates as { slug: string; files: Record<string, { sha256: string; base64?: string }> }[]).find(
+    (t) => t.slug === "flows",
+  );
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4" fill="#123456"/></svg>\n');
+  if (flows) flows.files["logo.svg"] = { sha256: new Bun.CryptoHasher("sha256").update(svg).digest("hex"), base64: svg.toString("base64") };
+}
 
 test("custom templates have no logo", async () => {
   const { cookie } = await createUser(panel, "owner");

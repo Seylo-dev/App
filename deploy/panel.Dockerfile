@@ -43,8 +43,9 @@ COPY apps/panel/package.json apps/panel/package.json
 COPY apps/panel/dist apps/panel/dist
 COPY apps/panel/drizzle apps/panel/drizzle
 COPY apps/web/dist apps/web/dist
-# The built-in template catalog (meta.yaml + index.ts per app), read at
-# runtime next to the bundle (modules/templates/catalog.ts catalogDir()).
+# The template catalog the panel ships (templates/catalog.json, its
+# signature and the logos' NOTICE, vendored by scripts/sync-templates.ts),
+# read at runtime next to the bundle (modules/templates/catalog.ts catalogDir()).
 COPY templates templates
 
 # The panel user runs the panel. The data folder is a bind mount the agent

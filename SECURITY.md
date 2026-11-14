@@ -261,7 +261,9 @@ jq -r '.panel.image + "@" + .panel.digest' manifest.json
 
 In scope: the `seylo` binary (node agent, node CLI and laptop CLI), the
 panel and its web app, the installer, release signing and the update path,
-the release workflow, and the templates in `templates/`.
+the release workflow, the template catalog the panel ships in `templates/`
+and how the panel fetches and verifies newer ones, and the templates in
+[Seylo-dev/Templates](https://github.com/Seylo-dev/Templates).
 
 Out of scope: the apps you deploy with Seylo, and the third-party images
 that templates or database tools use (report those to their projects).

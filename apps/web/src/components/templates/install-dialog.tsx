@@ -3,10 +3,12 @@
 // from templates.preview, which runs the template in the sandbox without
 // creating anything. Conflicts and warnings show before Install.
 
+import { brand } from "@seylo/brand";
 import { templates } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
+import { Chip } from "@seylo/ui/components/chip";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
@@ -22,9 +24,12 @@ import type { FormField, FormValue, TemplateDetail, TemplateSummary } from "../.
 import { KindBadge } from "../new-service/kinds";
 import { NodePicker, ProjectPicker } from "../pickers";
 import { QueryError } from "../query-error";
+import { templateTags } from "./catalog-status";
 import { TemplateLogo } from "./template-logo";
 
 const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+/** The dialog shows where a private catalog's template comes from, not the New tag. */
+const noNewSlugs: ReadonlySet<string> = new Set();
 
 export function InstallDialog({
   template,
@@ -102,7 +107,14 @@ function InstallForm({ summary, fixedProjectId, onClose }: { summary: TemplateSu
         <TemplateLogo slug={summary.slug} name={summary.name} logoUrl={summary.logoUrl} size={38} />
         <span className="flex min-w-0 flex-col gap-px">
           <DialogTitle className="text-base">{t("templates.install", { name: summary.name })}</DialogTitle>
-          <DialogDescription className="text-[12.5px]">{summary.creates}</DialogDescription>
+          <DialogDescription className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+            {summary.creates}
+            {templateTags(summary, noNewSlugs).map((tag) => (
+              <Chip key={tag.label} tone={tag.tone} className="px-1.5 py-px text-[11px]">
+                {tag.label}
+              </Chip>
+            ))}
+          </DialogDescription>
         </span>
         <DialogClose asChild>
           <Button size="icon" className="ml-auto size-8 rounded-control bg-muted shadow-none" aria-label={t("common.close")}>
@@ -171,7 +183,7 @@ function InstallForm({ summary, fixedProjectId, onClose }: { summary: TemplateSu
       <div className="flex shrink-0 flex-wrap items-center gap-2.5 rounded-b-card border-t border-divider bg-raised px-[22px] py-3.5">
         <span className="flex items-center gap-[7px] text-xs text-muted-foreground max-sm:basis-full">
           <IconShieldCheck size={14} stroke={2} className="text-chip-green-fg" aria-hidden="true" />
-          {t("templates.sandboxed")}
+          {summary.catalog === "private" ? t("templates.sandboxedPrivate", { product: brand.displayName }) : t("templates.sandboxed")}
         </span>
         {install.error && <span className="text-[12.5px] text-destructive">{errorMessage(install.error, t("common.unknownError"))}</span>}
         <Button className="ml-auto" onClick={onClose}>

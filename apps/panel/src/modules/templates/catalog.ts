@@ -1,28 +1,30 @@
-// The template catalog: built-in templates shipped in templates/<slug>/
-// (meta.yaml + index.ts, and the app's logo when there is one) and
-// templates people added on this panel (custom_templates). Only metadata is
-// read here; code runs in the sandbox.
+// The template catalog as the ops see it: catalog templates (the official
+// catalog and the owner's private one, held in memory by store.ts) and
+// templates people added on this panel (custom_templates). Only metadata
+// is read here; code runs in the sandbox.
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { templates as templateOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { parse as parseYaml } from "yaml";
 import type { PanelDb } from "../../db/client";
 import { customTemplates } from "../../db/schema";
+import { activeTemplates } from "./store";
 
 export type FormField = Static<typeof templateOps.FormField>;
 export type TemplateDetail = Static<typeof templateOps.TemplateDetail>;
+export type TemplateOrigin = TemplateDetail["catalog"];
 
 export interface Template {
   detail: TemplateDetail;
   source: string;
   metaYaml: string;
-  /** A built-in template's logo file (logo.ts serves it); null for custom templates and built-in ones without. */
-  logoPath: string | null;
+  /** A catalog template's logo (logo.ts serves it); null for custom templates and catalog ones without. */
+  logo: { file: LogoFile; bytes: Uint8Array; sha256: string } | null;
 }
 
-/** The logo file names a built-in template's folder may hold, the one used first when there are several. */
+/** The logo file names a template may have, the one used first when there are several. */
 export const logoFiles = ["logo.svg", "logo.webp", "logo.png"] as const;
 export type LogoFile = (typeof logoFiles)[number];
 
@@ -43,6 +45,7 @@ interface MetaYaml {
   creates?: string;
   links?: { label?: string; url?: string }[];
   body?: string;
+  minPanel?: unknown;
   schema?: { required?: string[]; properties?: Record<string, MetaProperty> };
 }
 
@@ -50,7 +53,12 @@ export class CatalogError extends Error {
   override name = "CatalogError";
 }
 
-/** Where the built-in catalog lives: the repository's templates/ folder, or one shipped next to the panel. */
+/**
+ * The folder holding the catalog that ships with the panel
+ * (templates/catalog.json and its .minisig, written by
+ * scripts/sync-templates.ts): the repository's templates/, or one shipped
+ * next to the panel.
+ */
 export function catalogDir(): string | null {
   const here = import.meta.dir;
   const candidates = [
@@ -61,19 +69,39 @@ export function catalogDir(): string | null {
     resolve(here, "../templates"),
     resolve(dirname(process.execPath), "templates"),
   ];
-  return candidates.find((dir) => existsSync(dir)) ?? null;
+  return candidates.find((dir) => existsSync(join(dir, "catalog.json"))) ?? null;
 }
 
 const fieldKey = /^[A-Za-z][A-Za-z0-9_]*$/;
 
-/** Reads meta.yaml text into the op shape; throws CatalogError on anything a form could not show. */
-export function parseMeta(slug: string, text: string, builtIn: boolean): TemplateDetail {
-  let meta: MetaYaml;
+/** The YAML of a meta.yaml; throws CatalogError when it is not YAML. */
+export function readMetaYaml(slug: string, text: string): MetaYaml {
   try {
-    meta = (parseYaml(text) ?? {}) as MetaYaml;
+    const value = parseYaml(text) ?? {};
+    if (typeof value !== "object" || Array.isArray(value)) throw new Error("it is not a mapping");
+    return value as MetaYaml;
   } catch (error) {
     throw new CatalogError(`${slug}/meta.yaml is not valid YAML: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/** meta.yaml's minPanel: the oldest panel version that reads the template; null when any does. */
+export function metaMinPanel(slug: string, text: string): string | null {
+  const value = readMetaYaml(slug, text).minPanel;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !/^\d+\.\d+\.\d+$/.test(value)) {
+    throw new CatalogError(`${slug}/meta.yaml: minPanel must be a version such as "0.2.17".`);
+  }
+  return value;
+}
+
+/**
+ * Reads meta.yaml text into the op shape; throws CatalogError on anything a
+ * form could not show. `origin` says where the template comes from
+ * (catalog templates are read only).
+ */
+export function parseMeta(slug: string, text: string, origin: TemplateOrigin, unsigned = false): TemplateDetail {
+  const meta = readMetaYaml(slug, text);
   if (!meta.name || !meta.description) throw new CatalogError(`${slug}/meta.yaml needs name and description.`);
   const required = new Set(meta.schema?.required ?? []);
   const fields: FormField[] = Object.entries(meta.schema?.properties ?? {}).map(([key, p]) => {
@@ -109,51 +137,50 @@ export function parseMeta(slug: string, text: string, builtIn: boolean): Templat
     description: meta.description,
     category: meta.category ?? "Other",
     tags: meta.tags ?? [],
-    // builtInTemplates sets it when the template's folder has a logo file; custom templates have none.
+    // The store sets it for catalog templates that have a logo; custom templates have none.
     logoUrl: null,
     creates: meta.creates ?? "",
-    builtIn,
+    builtIn: origin !== "custom",
+    catalog: origin,
+    unsigned,
     body: meta.body ?? "",
     links: (meta.links ?? []).filter((l) => l.label && l.url).map((l) => ({ label: l.label as string, url: l.url as string })),
     fields,
   };
 }
 
-let builtInCache: Map<string, Template> | null = null;
-
-/** Built-in templates, read once per process. */
-export function builtInTemplates(): Map<string, Template> {
-  if (builtInCache) return builtInCache;
-  const out = new Map<string, Template>();
-  const dir = catalogDir();
-  if (dir && existsSync(dir)) {
-    for (const slug of readdirSync(dir).sort()) {
-      const metaPath = join(dir, slug, "meta.yaml");
-      const codePath = join(dir, slug, "index.ts");
-      if (!existsSync(metaPath) || !existsSync(codePath)) continue;
-      const metaYaml = readFileSync(metaPath, "utf8");
-      const logo = logoFiles.find((file) => existsSync(join(dir, slug, file))) ?? null;
-      const detail = parseMeta(slug, metaYaml, true);
-      out.set(slug, {
-        detail: { ...detail, logoUrl: logo && `/api/templates/${encodeURIComponent(slug)}/${logo}` },
-        source: readFileSync(codePath, "utf8"),
-        metaYaml,
-        logoPath: logo && join(dir, slug, logo),
-      });
-    }
-  }
-  builtInCache = out;
-  return out;
+/**
+ * Form values for a dry run: the defaults, and for required fields without
+ * one a placeholder (an email address for fields named like one). Adding a
+ * custom template runs it with these; so does the catalog check
+ * (scripts/check-templates.ts).
+ */
+export function sampleValues(fields: readonly FormField[]): Record<string, string | number | boolean> {
+  const sample: Record<string, string | number | boolean> = {};
+  for (const f of fields)
+    if (f.required && f.default === null)
+      sample[f.key] =
+        f.type === "number"
+          ? 1
+          : f.type === "boolean"
+            ? true
+            : (f.options[0]?.value ?? (f.key.toLowerCase().includes("email") ? "owner@example.com" : "example"));
+  return sample;
 }
 
-/** Built-in plus custom templates; a custom slug never shadows a built-in one. */
+/** Catalog templates (official and private) this panel lists. */
+export function builtInTemplates(): Map<string, Template> {
+  return activeTemplates();
+}
+
+/** Catalog plus custom templates; a custom slug never shadows a catalog one. */
 export function allTemplates(db: PanelDb): Map<string, Template> {
   const out = new Map(builtInTemplates());
   for (const row of db.select().from(customTemplates).all()) {
     if (out.has(row.slug)) continue;
     try {
       const yamlText = typeof row.meta.yaml === "string" ? row.meta.yaml : "";
-      out.set(row.slug, { detail: parseMeta(row.slug, yamlText, false), source: row.source, metaYaml: yamlText, logoPath: null });
+      out.set(row.slug, { detail: parseMeta(row.slug, yamlText, "custom"), source: row.source, metaYaml: yamlText, logo: null });
     } catch {
       // A broken custom template is left out of the catalog rather than breaking it.
     }

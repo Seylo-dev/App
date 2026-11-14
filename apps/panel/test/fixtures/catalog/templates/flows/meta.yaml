@@ -1,0 +1,24 @@
+name: "Flows"
+description: "Test template: an app and its Postgres database, wired with references."
+category: "Automation"
+tags: ["automation", "workflows"]
+creates: "App + Postgres"
+links:
+  - label: "Docs"
+    url: "https://docs.example.com/flows"
+body: |
+  Test fixture for the panel's template tests (apps/panel/test).
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "example/flows:1.4.2"
+    timezone:
+      type: "string"
+      title: "Time zone"
+      description: "IANA zone for schedules."
+      default: "UTC"

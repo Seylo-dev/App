@@ -3,5 +3,7 @@
   "compilerOptions": {
     "types": ["bun"]
   },
-  "include": ["src", "test", "scripts", "drizzle.config.ts", "drizzle.metrics.config.ts"]
+  "include": ["src", "test", "scripts", "drizzle.config.ts", "drizzle.metrics.config.ts"],
+  // Template fixtures import "~templates-utils", which exists only inside the sandbox (src/template-runner/utils.ts).
+  "exclude": ["test/fixtures"]
 }

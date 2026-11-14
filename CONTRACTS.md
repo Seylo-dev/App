@@ -40,7 +40,7 @@ test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/install-smoke.yml  installs a published release with its install.sh on GitHub's amd64 and arm64 runners and runs test/install-smoke/smoke.sh (read-only token, no secret)
 test/install-smoke/       smoke.sh: owner, API key, a whoami service, its IP:port answers
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
-templates/                one-click template catalog (meta.yaml + index.ts per app, logo.* where one exists; README.md has the format, NOTICE the logos' source)
+templates/                the copy of the signed template catalog the panel ships (catalog.json + .minisig, NOTICE and LICENSE.* from it), written by scripts/sync-templates.ts (`make sync-templates`) from the Templates repo (<githubOrg>/<templatesRepo>); templates themselves live there
 ```
 
 The Go module path is `github.com/seylo-dev/app/go` (lowercase, as Go
@@ -3056,20 +3056,108 @@ never type the ids by hand.
 - Registry GC: every successful deploy enqueues `deployments.registryGc`; a daily
   `deployments.registryGcSweep` retries services whose old images are still in
   the registry.
-- Template logos: a built-in template may ship its app's logo as
-  `templates/<slug>/logo.svg`, else `logo.webp` or `logo.png`
-  (`catalog.ts` `logoFiles`, the first one found); `logoUrl` is then
-  `/api/templates/<slug>/<that file>` (public, `nosniff`, sandbox CSP, one
-  day of cache), and null for templates without one and every custom
-  template (the web shows the letter tile, as it does when an image fails
-  to load). The route serves only the file the template ships. The logos
-  are vendored from dashboard-icons (Apache-2.0) at a pinned commit, never
-  hotlinked: `templates/NOTICE` lists each file, its source and the
-  trademark note, `templates/LICENSE.dashboard-icons` is the license. The
-  popular images row bundles its own copies in
-  `apps/web/src/components/docker-hub/logos/`. SVGs stay under 50 KB and
-  rasters under 30 KB, with nothing active or remote in an SVG
-  (`template-logos.test.ts`).
+- Template logos: a catalog template may carry its app's logo as
+  `logo.svg`, else `logo.webp` or `logo.png` (`catalog.ts` `logoFiles`, the
+  first one found); `logoUrl` is then
+  `/api/templates/<slug>/<that file>?v=<first 8 hex of its sha256>`
+  (since 0.2.17; the route ignores the query; public, `nosniff`, sandbox
+  CSP, one day of cache, so a changed logo gets a new URL), and null for
+  templates without one and every custom template (the web shows the
+  letter tile, as it does when an image fails to load). The route serves
+  only the file the template has, from the active catalog in memory
+  (`store.ts`). The logos are vendored into the Templates repo from
+  dashboard-icons (Apache-2.0) at a pinned commit, never hotlinked; its
+  NOTICE (in the catalog, written to `templates/NOTICE` for the shipped
+  copy) lists each file, its source and the trademark note,
+  `LICENSE.dashboard-icons` is the license. The popular images row and the
+  New database form bundle their own copies, credited in
+  `apps/web/src/components/docker-hub/logos/NOTICE` with the license next to
+  it. SVGs stay under 50 KB and rasters under 30 KB, real SVG/WebP/PNG,
+  with nothing active or remote in an SVG (`check-templates.ts`).
+- Template catalog (since 0.2.17; `modules/templates/{catalog-file,remote,store,settings}.ts`,
+  `apps/panel/scripts/check-templates.ts`, `scripts/sync-templates.ts`):
+  - Source: the Templates repo (`brand.json` `githubOrg`/`templatesRepo`,
+    Seylo-dev/Templates) publishes one rolling release, tag `catalog`, with
+    two assets on every merge to main:
+    `https://github.com/<githubOrg>/<templatesRepo>/releases/download/catalog/catalog.json`
+    and `.../catalog.json.minisig`, signed by the catalog key (`brand.json`
+    `templatesMinisignPublicKey`, a key of its own, not the release key).
+    Plain download URLs, no GitHub API. No environment variable repoints the
+    official source or its key (tests replace `catalogSource`).
+  - Format 1 (`catalog-file.ts`): `{ format: 1, source:
+    "<githubOrg>/<templatesRepo>", commit, sequence (git rev-list --count),
+    generatedAt, notice, licenses: { "LICENSE.<name>": text }, templates: [{
+    slug, minPanel, name, description, category, creates, tags, files: {
+    "meta.yaml"|"index.ts": { sha256, text }, "logo.*": { sha256, base64 } } }]
+    }`, sorted slugs and keys, two-space indent. The name/category/... copies
+    are for the website; the panel parses meta.yaml. Unknown keys and files
+    are ignored; an incompatible format gets a new asset name
+    (`catalog-v2.json`) so `catalog.json` stays format 1 for old panels.
+    Built only by `check-templates.ts --emit`, so only templates that passed.
+  - Trust: the official catalog must verify with the compiled-in key, have
+    `format` 1, `source` `<githubOrg>/<templatesRepo>`, every file's sha256
+    and a `sequence` not lower than the highest the panel accepted (a
+    replayed catalog would bring back old image pins); 20 MB cap, 15 s
+    timeout per file, no redirect to plain HTTP; a signature that does not
+    match is fetched once more after 10 s (the publish job uploads the two
+    files one after the other). Any failure refuses the whole catalog, keeps
+    the current one and records the reason (`lastError`). A catalog that
+    passes but has a template this panel cannot read (meta.yaml it does not
+    understand, a missing file, a bad slug) loses only that template
+    (`catalogStatus.skipped`).
+  - Copies: the panel ships `templates/catalog.json` (+ `.minisig`), verified
+    with the same key at load (skipped while the key is the brand
+    placeholder: development builds, which then never download). Downloads
+    go to `<dataDir>/templates/official/` (private: `.../extra/`), written
+    to a temp file and renamed, and are verified again on every read, so an
+    edited copy is ignored. The panel uses the download when its sequence
+    is at least the shipped copy's, else the shipped copy (after an upgrade
+    that one may be newer). State (sequence floor, commit, fetchedAt,
+    lastTriedAt, lastError, knownSlugs) is the `templatesCatalogState`
+    setting in panel.db, not a file.
+  - When: at start (schedule `templates.refresh`, `runNow`) and every 6
+    hours (jitter 10 min); `templates.refreshCatalog` (`templates.manage`,
+    audited) on demand; one check at a time. A refresh publishes
+    `invalidate` for templates.list/get/source/catalogStatus.
+  - `minPanel` (optional in meta.yaml, "0.2.17"): a template whose minPanel
+    is above the panel's version is left out and counted
+    (`needNewerPanel`); a pre-release counts as its release, a development
+    build (no version, 0.0.0) lists everything.
+  - Source setting `templatesCatalog` (`templates.setCatalogSource`, owner
+    only, audited with `extraHost` and `unsigned`): `official` false = the
+    shipped copy only (no downloads, a download on disk is not used);
+    `extra` = one private catalog in the same format at an https URL
+    without user info, verified with its own minisign key, or taken
+    unsigned only with `allowUnsigned` (its templates say
+    `unsigned: true`). It is added to the official one (an official slug
+    wins); both win over custom templates. Changing it drops the old private
+    copy and its sequence floor and fetches right away; turning the official
+    one back on fetches it.
+  - `TemplateSummary.catalog` (`official` | `private` | `custom`) and
+    `unsigned`; `builtIn` is true for both catalogs (read only).
+    `templates.catalogStatus` (signed in) says where the catalog comes from,
+    `newSlugs` (slugs not in `knownSlugs`; on the first start every slug
+    counts as seen; `templates.markCatalogSeen`, `templates.manage`, adds the
+    current ones), `needNewerPanel`, `skipped`, `canRefresh`,
+    `canChangeSource` and, for the owner only, `source`. `saveCustom`
+    refuses any slug a catalog has, also one left out.
+  - Checks (`check-templates.ts`, the same code the panel runs): folder
+    (slug `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, at most 60, unique ignoring
+    case; only meta.yaml, index.ts and one logo), meta.yaml (`parseMeta` and
+    a strict schema: no unknown keys, description at most 140, https links,
+    a new category is a warning, minPanel not above panel.json `check`),
+    index.ts (compiled, run twice with the defaults and `sampleValues`
+    placeholders, every service named after `serviceName`), images (every
+    `image`/`*Image` default and app image has a tag that is not
+    latest/stable/main/nightly/edge, or a digest), install (preview and
+    create on an in-memory panel with a fake node), logos, NOTICE lines,
+    and `types/templates-utils.d.ts` declaring what `~templates-utils`
+    exports. `vendored-catalog.test.ts` runs it on the shipped copy.
+  - Template domains (since 0.2.17): a custom `host` must match
+    `domains.Hostname` and `path` `domains.PathPrefix` in the output
+    schema, since installing adds domains through domains.add's code, which
+    leaves input checks to the op pipeline. Before, any string under 253
+    characters went in.
 - First-run IP:port also opens when an app without ports gets its first port
   (`services.update`, no domain yet) and for compose members whose file
   publishes a TCP port. Exposures record `openedBy` "ai"/"mcp" from
@@ -5065,7 +5153,8 @@ lists main navigation items taken out of that person's sidebar; the panel
 keeps only names in `auth.sidebarItems` (dashboard, nodes, templates,
 activity, approvals: never settings), each once, drops unknown names
 without an error and leaves the key out when none is left. Global
-`templates.manage` gates custom templates.
+`templates.manage` gates custom templates and "Check for new templates"
+(`templates.refreshCatalog`); only the owner sets the catalog source.
 
 APIs for other modules (all in `apps/panel/src/modules/`):
 
@@ -5376,7 +5465,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   project is open there), `project:<id>` (`services.list`,
   `projects.get`) and `panel` (`deployments.recent`, `builds.queue`).
 - Templates run only in `apps/panel/src/template-runner` (QuickJS-wasm,
-  32 MiB, 1 s); the catalog format is `templates/README.md`.
+  32 MiB, 1 s); the template format (meta.yaml, index.ts) is documented in
+  the Templates repo's README, the catalog file format in
+  `modules/templates/catalog-file.ts`.
 - Docker Hub (`modules/dockerHub/`): `dockerHub.search`, `dockerHub.tags`
   and `dockerHub.inspect` are `signedIn` queries like the template catalog
   (MCP too, not audited); `dockerHub.create` needs `services.create` on the
@@ -7402,9 +7493,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the demo data: compact service cards with status and bars, collapsing,
   sorting the table by CPU with the mouse and keys, the view kept across
   reloads, phone width, the divider, screenshots per view in a light and a
-  dark preset), `template-logos.spec.ts` (app logos on the Templates page from the real
-  catalog: logo images, letter tiles without one or when one fails to load,
-  the popular images row and its dialog, a screenshot per preset),
+  dark preset), `template-logos.spec.ts` (app logos on the Templates page from the
+  catalog the panel ships: logo images with their `?v=` URLs, letter tiles
+  without one or when one fails to load, the popular images row and its
+  dialog, the catalog line under the title and the owner's Catalog source
+  dialog, a screenshot per preset),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `dns-cache.spec.ts` (0.2.17, a node's DNS cache on the demo data: turning

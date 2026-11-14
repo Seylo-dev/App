@@ -468,7 +468,33 @@ const tpl = (slug: string, name: string, category: string, description: string, 
   logoUrl: null,
   creates,
   builtIn: true,
+  catalog: "official" as const,
+  unsigned: false,
 });
+
+/** The Templates page's catalog line: the official catalog, downloaded. */
+export const catalogStatus = {
+  official: {
+    origin: "downloaded",
+    sequence: 137,
+    commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    generatedAt: "2026-11-14T10:00:00.000Z",
+    templates: 12,
+    fetchedAt: "2026-11-14T10:05:00.000Z",
+    lastTriedAt: "2026-11-14T10:05:00.000Z",
+    lastError: null,
+    enabled: true,
+    signingKey: true,
+    bundledWith: "0.2.17",
+  },
+  extra: null,
+  newSlugs: [],
+  needNewerPanel: 0,
+  skipped: [],
+  canRefresh: true,
+  canChangeSource: true,
+  source: { official: true, extra: null },
+};
 
 export const templates = {
   templates: [

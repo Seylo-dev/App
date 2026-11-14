@@ -40,7 +40,7 @@ Documentation: https://docs.seylo.dev (its source is the docs app in
   project's private network, with internal and TLS-exposed connection URLs,
   on-demand web UIs, a pre-logged-in shell and backups to S3 or R2.
 - **Compose stacks** run by the agent, and a template catalog in
-  Easypanel's format (our own templates).
+  Easypanel's format (our own templates, in [Seylo-dev/Templates](https://github.com/Seylo-dev/Templates), signed and updated without a panel release).
 - **Networking**: a private Docker network per project, automatic domains
   from one wildcard record per node, custom domains with Let's Encrypt,
   paths, basic auth, IP allowlists, rate limits and redirects, first-run
@@ -119,7 +119,7 @@ reports version `dev`).
 | `packages/` | Shared TypeScript: generated protocol and brand, operation registry, env analyzer, UI |
 | `installer/` | One-line installer (`installer/test` runs it against a fake signed release) |
 | `deploy/`, `.goreleaser.yaml` | Panel image and release build |
-| `templates/` | One-click template catalog |
+| `templates/` | The signed template catalog the panel ships (generated from [Seylo-dev/Templates](https://github.com/Seylo-dev/Templates)) |
 | `test/e2e-colima` | End-to-end test on three VMs |
 | `test/playwright` | Browser tests of the web app |
 | `tools/brandgen` | Generates brand constants for Go, TypeScript and the installer |

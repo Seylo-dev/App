@@ -1,11 +1,18 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+// Templates on the panel: listing, previewing and installing catalog
+// templates, and custom ones. The catalog is the fixture repository
+// (fixtures/catalog: flows = app + Postgres with references, metrics = a file
+// mount and a command, board = a required field and a select), so these
+// tests do not depend on the real catalog; that one is checked as a whole
+// by vendored-catalog.test.ts.
+
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { projects, templates } from "@seylo/ops";
 import { DeployStage } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { deployments, domains, nodes, serviceDatabases, services, volumes } from "../src/db/schema";
 import { readServiceEnv } from "../src/modules/env/store";
 import { serviceSpecFor } from "../src/modules/services/desired";
-import { builtInTemplates } from "../src/modules/templates/catalog";
+import { resetCatalogs, useFixtureBundle } from "./catalog-fakes";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
@@ -15,6 +22,8 @@ let cookie: string;
 let projectId: string;
 let nodeA: string;
 
+beforeAll(() => useFixtureBundle());
+afterAll(resetCatalogs);
 beforeEach(async () => {
   panel = testPanel();
   fleet = new FakeFleet(panel);
@@ -25,72 +34,34 @@ beforeEach(async () => {
 });
 afterEach(() => panel.close());
 
-/** Values for the required fields that have no default. */
-function requiredValues(slug: string): Record<string, string> {
-  const detail = builtInTemplates().get(slug)?.detail;
-  const out: Record<string, string> = {};
-  for (const f of detail?.fields ?? [])
-    if (f.required && f.default === null) out[f.key] = f.key.toLowerCase().includes("email") ? "owner@example.com" : "value";
-  return out;
-}
-
 describe("template catalog", () => {
-  test("ships at least 20 templates with forms and categories", async () => {
+  test("lists templates with forms and categories, filtered by text and category", async () => {
     const res = await callOp(panel, templates.list, {}, { cookie });
     expect(res.status).toBe(200);
-    expect(res.body.templates.length).toBeGreaterThanOrEqual(20);
-    expect(res.body.categories).toContain("Monitoring");
+    expect(res.body.templates.map((t: { slug: string }) => t.slug)).toEqual(["board", "flows", "metrics"]);
+    expect(res.body.categories).toEqual(["Automation", "Monitoring", "Productivity"]);
+    expect(res.body.templates[1]).toMatchObject({ slug: "flows", builtIn: true, catalog: "official", unsigned: false });
     const filtered = await callOp(panel, templates.list, { query: "postgres" }, { cookie });
-    expect(filtered.body.templates.map((t: { slug: string }) => t.slug)).toContain("pgadmin");
-    const n8n = await callOp(panel, templates.get, { slug: "n8n" }, { cookie });
-    expect(n8n.body).toMatchObject({ name: "n8n", builtIn: true, creates: "App + Postgres" });
-    expect(n8n.body.fields.map((f: { key: string }) => f.key)).toEqual(["image", "timezone"]);
+    expect(filtered.body.templates.map((t: { slug: string }) => t.slug)).toEqual(["flows", "metrics"]);
+    const monitoring = await callOp(panel, templates.list, { category: "Monitoring" }, { cookie });
+    expect(monitoring.body.templates.map((t: { slug: string }) => t.slug)).toEqual(["metrics"]);
+    const flows = await callOp(panel, templates.get, { slug: "flows" }, { cookie });
+    expect(flows.body).toMatchObject({ name: "Flows", builtIn: true, catalog: "official", creates: "App + Postgres" });
+    expect(flows.body.fields.map((f: { key: string }) => f.key)).toEqual(["image", "timezone"]);
     expect((await callOp(panel, templates.get, { slug: "nope" }, { cookie })).status).toBe(404);
-  });
-
-  test("every template runs in the sandbox and previews valid services", async () => {
-    const slugs = [...builtInTemplates().keys()];
-    expect(slugs.length).toBeGreaterThanOrEqual(20);
-    for (const slug of slugs) {
-      const res = await callOp(
-        panel,
-        templates.preview,
-        { projectId, slug, name: "app", nodeId: nodeA, values: requiredValues(slug) },
-        { cookie },
-      );
-      if (res.status !== 200) throw new Error(`${slug}: ${JSON.stringify(res.body)}`);
-      expect(res.body.services.length).toBeGreaterThan(0);
-      for (const s of res.body.services) {
-        expect(s.name.startsWith("app")).toBe(true);
-        expect(s.conflict).toBe(false);
-      }
-      const app = res.body.services.find((s: { kind: string }) => s.kind === "app");
-      expect(app.image).toMatch(/:[\w.-]+$/);
-    }
-  });
-
-  test("every template installs: services, databases, env, volumes and domains", async () => {
-    for (const slug of builtInTemplates().keys()) {
-      const project = (await callOp(panel, projects.create, { name: `p-${slug}` }, { cookie })).body.id;
-      const res = await callOp(
-        panel,
-        templates.create,
-        { projectId: project, slug, name: "app", nodeId: nodeA, values: requiredValues(slug) },
-        { cookie },
-      );
-      if (res.status !== 200) throw new Error(`${slug}: ${JSON.stringify(res.body)}`);
-      for (const s of res.body.services) expect(s.templateSlug).toBe(slug);
-    }
-    await fleet.settle();
+    const files = await callOp(panel, templates.source, { slug: "flows" }, { cookie });
+    expect(files.body.builtIn).toBe(true);
+    expect(files.body.source).toContain("export function generate");
+    expect(files.body.metaYaml).toContain('name: "Flows"');
   });
 });
 
 describe("installing a template", () => {
-  test("n8n: a Postgres database and an app wired with references and an automatic domain", async () => {
+  test("flows: a Postgres database and an app wired with references and an automatic domain", async () => {
     const preview = await callOp(
       panel,
       templates.preview,
-      { projectId, slug: "n8n", name: "flows", nodeId: nodeA, values: {} },
+      { projectId, slug: "flows", name: "flows", nodeId: nodeA, values: {} },
       { cookie },
     );
     expect(preview.body.services.map((s: { name: string; kind: string }) => [s.name, s.kind])).toEqual([
@@ -99,29 +70,30 @@ describe("installing a template", () => {
     ]);
     const app = preview.body.services[1];
     expect(app).toMatchObject({
-      image: "n8nio/n8n:1.80.0",
+      image: "example/flows:1.4.2",
       ports: [5678],
       internalOnly: false,
       domains: ["flows.n1.example.com"],
-      volumes: [{ name: "data", mountPath: "/home/node/.n8n" }],
+      volumes: [{ name: "data", mountPath: "/home/app/.flows" }],
     });
-    expect(app.envKeys).toContain("N8N_ENCRYPTION_KEY");
+    expect(app.envKeys).toContain("ENCRYPTION_KEY");
     // Preview never echoes generated values.
     expect(JSON.stringify(preview.body)).not.toMatch(/[0-9a-f]{64}/);
 
     const created = await callOp(
       panel,
       templates.create,
-      { projectId, slug: "n8n", name: "flows", nodeId: nodeA, values: { timezone: "Europe/Berlin" } },
+      { projectId, slug: "flows", name: "flows", nodeId: nodeA, values: { timezone: "Europe/Berlin" } },
       { cookie },
     );
     expect(created.status).toBe(200);
+    for (const s of created.body.services) expect(s.templateSlug).toBe("flows");
     await fleet.settle();
     const appRow = panel.deps.db.select().from(services).where(eq(services.name, "flows")).get();
     const env = readServiceEnv(panel.deps.db, panel.deps.secrets, appRow?.id as string).text;
-    expect(env).toContain("DB_POSTGRESDB_PASSWORD=${{flows-db.PASSWORD}}");
-    expect(env).toContain("GENERIC_TIMEZONE=Europe/Berlin");
-    expect(env).toMatch(/N8N_ENCRYPTION_KEY=[0-9a-f]{64}/);
+    expect(env).toContain("DB_PASSWORD=${{flows-db.PASSWORD}}");
+    expect(env).toContain("TIMEZONE=Europe/Berlin");
+    expect(env).toMatch(/ENCRYPTION_KEY=[0-9a-f]{64}/);
     expect(
       panel.deps.db
         .select()
@@ -140,9 +112,9 @@ describe("installing a template", () => {
       .get();
     fleet.deployProgress(nodeA, dbRow?.id as string, dbDeploy?.generation as number, DeployStage.SUCCEEDED);
     await fleet.settle();
-    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, appRow?.id as string, nodeA)?.image?.reference).toBe("n8nio/n8n:1.80.0");
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, appRow?.id as string, nodeA)?.image?.reference).toBe("example/flows:1.4.2");
 
-    const again = await callOp(panel, templates.create, { projectId, slug: "n8n", name: "flows", nodeId: nodeA, values: {} }, { cookie });
+    const again = await callOp(panel, templates.create, { projectId, slug: "flows", name: "flows", nodeId: nodeA, values: {} }, { cookie });
     expect(again.body.error.code).toBe("CONFLICT");
     expect(panel.deps.db.select().from(services).all()).toHaveLength(2);
   });
@@ -151,7 +123,7 @@ describe("installing a template", () => {
     const res = await callOp(
       panel,
       templates.create,
-      { projectId, slug: "prometheus", name: "prom", nodeId: nodeA, values: { retention: "30d" } },
+      { projectId, slug: "metrics", name: "prom", nodeId: nodeA, values: { retention: "30d" } },
       { cookie },
     );
     expect(res.status).toBe(200);
@@ -165,9 +137,32 @@ describe("installing a template", () => {
     expect(new TextDecoder().decode(spec?.files[0]?.content)).toContain("scrape_configs");
   });
 
-  test("required fields and selects are checked", async () => {
-    const res = await callOp(panel, templates.preview, { projectId, slug: "pgadmin", name: "pga", nodeId: nodeA, values: {} }, { cookie });
-    expect(res.body.error).toMatchObject({ code: "BAD_REQUEST", details: { field: "values.email" } });
+  test("required fields and selects are checked; an image pinned by digest installs", async () => {
+    const missing = await callOp(
+      panel,
+      templates.preview,
+      { projectId, slug: "board", name: "pad", nodeId: nodeA, values: {} },
+      { cookie },
+    );
+    expect(missing.body.error).toMatchObject({ code: "BAD_REQUEST", details: { field: "values.email" } });
+    const badPlan = await callOp(
+      panel,
+      templates.preview,
+      { projectId, slug: "board", name: "pad", nodeId: nodeA, values: { email: "a@example.com", plan: "huge" } },
+      { cookie },
+    );
+    expect(badPlan.body.error).toMatchObject({ code: "BAD_REQUEST", details: { field: "values.plan" } });
+    const created = await callOp(
+      panel,
+      templates.create,
+      { projectId, slug: "board", name: "pad", nodeId: nodeA, values: { email: "a@example.com", plan: "large" } },
+      { cookie },
+    );
+    expect(created.status).toBe(200);
+    await fleet.settle();
+    const env = readServiceEnv(panel.deps.db, panel.deps.secrets, created.body.services[0].id).text;
+    expect(env).toContain("PLAN=large");
+    expect(env).toMatch(/ADMIN_PASSWORD=[A-Za-z0-9]{32}/);
   });
 });
 
@@ -196,11 +191,11 @@ export function generate(input: { serviceName: string; image: string }) {
       { cookie },
     );
     expect(broken.body.error).toMatchObject({ code: "BAD_REQUEST", details: { field: "source" } });
-    const builtIn = await callOp(panel, templates.saveCustom, { slug: "n8n", metaYaml: meta, source: code }, { cookie });
-    expect(builtIn.body.error.code).toBe("CONFLICT");
+    const catalogSlug = await callOp(panel, templates.saveCustom, { slug: "flows", metaYaml: meta, source: code }, { cookie });
+    expect(catalogSlug.body.error.code).toBe("CONFLICT");
 
     const saved = await callOp(panel, templates.saveCustom, { slug: "hello", metaYaml: meta, source: code }, { cookie });
-    expect(saved.body).toMatchObject({ slug: "hello", name: "Hello", builtIn: false });
+    expect(saved.body).toMatchObject({ slug: "hello", name: "Hello", builtIn: false, catalog: "custom", unsigned: false });
     const list = await callOp(panel, templates.list, { query: "hello" }, { cookie });
     expect(list.body.templates.map((t: { slug: string; builtIn: boolean }) => [t.slug, t.builtIn])).toEqual([["hello", false]]);
     const files = await callOp(panel, templates.source, { slug: "hello" }, { cookie });
@@ -212,6 +207,24 @@ export function generate(input: { serviceName: string; image: string }) {
     expect((await callOp(panel, templates.deleteCustom, { slug: "hello" }, { cookie: memberCookie })).status).toBe(403);
     expect((await callOp(panel, templates.deleteCustom, { slug: "hello" }, { cookie })).status).toBe(200);
     expect((await callOp(panel, templates.get, { slug: "hello" }, { cookie })).status).toBe(404);
+  });
+
+  test("a required email field without a default gets an email address in the dry run", async () => {
+    const withEmail = `name: "Mailer"
+description: "Checks its email."
+schema:
+  type: object
+  required: ["adminEmail"]
+  properties:
+    adminEmail:
+      type: "string"
+`;
+    const strict = `export function generate(input: { serviceName: string; adminEmail: string }) {
+  if (!input.adminEmail.includes("@")) throw new Error("adminEmail must be an email address");
+  return { services: [{ type: "app", data: { serviceName: input.serviceName, source: { type: "image", image: "nginx:1.27" } } }] };
+}`;
+    const saved = await callOp(panel, templates.saveCustom, { slug: "mailer", metaYaml: withEmail, source: strict }, { cookie });
+    expect(saved.status).toBe(200);
   });
 });
 

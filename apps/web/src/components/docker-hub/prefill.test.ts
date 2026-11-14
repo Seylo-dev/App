@@ -145,9 +145,9 @@ describe("popular images", () => {
     for (const image of popularImages) for (const path of image.volumes ?? []) expect(path).toMatch(/^\/[^\s]+$/);
   });
 
-  test("logos are small bundled files listed in templates/NOTICE; RustFS keeps its letter tile", () => {
+  test("logos are small bundled files listed in their NOTICE; RustFS keeps its letter tile", () => {
     // Under bun test an asset import is the file's path.
-    const notice = readFileSync(new URL("../../../../../templates/NOTICE", import.meta.url), "utf8");
+    const notice = readFileSync(new URL("./logos/NOTICE", import.meta.url), "utf8");
     const withLogo = popularImages.filter((image) => image.logo);
     expect(withLogo.length).toBe(popularImages.length - 1);
     expect(popularImages.find((image) => image.id === "rustfs")?.logo).toBeUndefined();

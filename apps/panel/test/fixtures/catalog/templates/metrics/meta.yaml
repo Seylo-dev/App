@@ -1,0 +1,23 @@
+name: "Metrics"
+description: "Test template: a file mount and a command that replaces the entrypoint."
+category: "Monitoring"
+tags: ["metrics", "postgres-free"]
+creates: "App"
+links:
+  - label: "Docs"
+    url: "https://docs.example.com/metrics"
+body: |
+  Test fixture for the panel's template tests (apps/panel/test).
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      default: "example/metrics:3.1.0"
+    retention:
+      type: "string"
+      title: "Retention"
+      description: "How long samples are kept."
+      default: "15d"

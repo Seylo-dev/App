@@ -3,19 +3,18 @@ App logos
 The logo files below are copied from dashboard-icons
 (https://github.com/homarr-labs/dashboard-icons) at commit
 d767d7327db7f8ebd3715b552523f61889eea41c, under the Apache License,
-Version 2.0. The full license text is LICENSE.dashboard-icons in this folder.
+Version 2.0. The full license text is LICENSE.dashboard-icons.
 
   Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and Homarr Labs
 
 The logos and product names are trademarks of their owners. They are shown
-only to identify each app in the template catalog and the popular images
-row; showing them does not mean the owners endorse this project.
+only to identify each app in the template catalog; showing them does not
+mean the owners endorse this project.
 
 SVG files are unchanged copies of the upstream svg/<name>.svg. WebP files are
 the upstream png/<name>.png resized to 128 px and saved as WebP (the upstream
 SVG is missing or embeds a large PNG). Apps the set has no usable logo for
-(Appsmith, Redis Insight, and RustFS, which has only a wordmark) keep their
-letter tile.
+(Appsmith, Redis Insight) keep their letter tile.
 
 Template logos, served by the panel at /api/templates/<slug>/logo.<ext>:
 
@@ -41,34 +40,8 @@ Template logos, served by the panel at /api/templates/<slug>/logo.<ext>:
   templates/uptime-kuma/logo.svg      svg/uptime-kuma.svg
   templates/vaultwarden/logo.svg      svg/vaultwarden.svg
 
-Popular images logos, bundled into the web app
-(apps/web/src/components/docker-hub/logos/):
-
-  excalidraw.svg                      svg/excalidraw.svg
-  gitea.svg                           svg/gitea.svg
-  grafana.svg                         svg/grafana.svg
-  mailpit.svg                         svg/mailpit.svg
-  memos.webp                          png/memos.png (resized)
-  metabase.svg                        svg/metabase.svg
-  n8n.svg                             svg/n8n.svg
-  nginx.svg                           svg/nginx.svg
-  node-red.svg                        svg/node-red.svg
-  uptime-kuma.svg                     svg/uptime-kuma.svg
-  vaultwarden.svg                     svg/vaultwarden.svg
-
-Database engine logos in the New database form, bundled into the web app
-(apps/web/src/components/new-service/logos/); KeyDB and Dragonfly have no
-logo there and keep their letter badge:
-
-  clickhouse.svg                      svg/clickhouse.svg
-  mariadb.svg                         svg/mariadb.svg
-  mongodb.svg                         svg/mongodb.svg
-  mysql.svg                           svg/mysql.svg
-  postgresql.svg                      svg/postgresql.svg
-  redis.svg                           svg/redis.svg
-  valkey.svg                          svg/valkey.svg
-
 To add or update one: take the file from the same repository at a pinned
 commit (raw.githubusercontent.com/homarr-labs/dashboard-icons/<commit>/...),
 keep an SVG under 50 KB and a raster under 30 KB, list it here and update the
-commit above.
+commit above. A logo from somewhere else gets its own line with its source
+and license.

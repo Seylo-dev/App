@@ -11,7 +11,7 @@ VERSION ?= dev
 GO_MODULE := $(shell sed -n 's/^module //p' go/go.mod)
 VERSION_PKG := $(GO_MODULE)/internal/version
 
-.PHONY: help install gen gen-brand gen-proto gen-ts check-gen build build-go build-ts test test-go test-ts lint breaking \
+.PHONY: help install gen gen-brand gen-proto gen-ts check-gen sync-templates build build-go build-ts test test-go test-ts lint breaking \
 	test-installer test-release installer panel-image release-check release-snapshot release-dry-run release-draft release e2e e2e-checks e2e-refresh e2e-down
 
 help: ## List targets
@@ -36,6 +36,11 @@ gen-ts: ## Op and module indexes, openapi.json, the web route tree
 
 check-gen: ## Fail when generated code is stale (CI runs this)
 	scripts/check-generated.sh
+
+# Before tagging a release: the panel ships this copy of the template
+# catalog (templates/README.md), and release-preflight.sh refuses an old one.
+sync-templates: ## Vendor the signed template catalog from the Templates repo into templates/ (verified and checked; commit it)
+	bun scripts/sync-templates.ts
 
 build: build-go build-ts ## Build the seylo binary and the panel with its web app
 

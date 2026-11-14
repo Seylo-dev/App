@@ -93,6 +93,7 @@ done
 printf '%s\n' "$url" >>"$SHIM_LOG.curl"
 case $url in
 http://release.test/rel/*) src=$FAKE_RELEASE/${url#http://release.test/rel/} ;;
+https://github.com/test-org/Templates/releases/download/catalog/*) src=${FAKE_CATALOG:-/nonexistent}/${url##*/} ;;
 *) exit 6 ;;
 esac
 [ -f "$src" ] || exit 22
@@ -991,6 +992,31 @@ preflight --no-secret-key BRAND_MINISIGN_PUBLIC_KEY="$(sed -n 2p "$root/test/e2e
 expect_fail "release preflight --no-secret-key still refuses the committed e2e test key" "TEST-ONLY e2e key"
 preflight --no-secret-key FAKE_GH_PUSH=false
 expect_fail "release preflight --no-secret-key still refuses a GitHub repo the releaser cannot push to" "cannot push to it"
+# The template catalog the panel ships (templates/catalog.json, vendored by
+# scripts/sync-templates.ts) against the one the Templates repository publishes.
+vendored_catalog=$T/catalog-vendored
+published_catalog=$T/catalog-published
+mkdir -p "$vendored_catalog" "$published_catalog"
+catalog_json() { printf '{\n  "format": 1,\n  "sequence": %s,\n  "source": "test-org/Templates"\n}\n' "$1"; }
+catalog_json 5 >"$vendored_catalog/catalog.json"
+: >"$vendored_catalog/catalog.json.minisig"
+catalog_json 5 >"$published_catalog/catalog.json"
+catalog_vars=(BRAND_TEMPLATES_REPO=Templates BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY="$KEY" PREFLIGHT_CATALOG_DIR="$vendored_catalog"
+  FAKE_CATALOG="$published_catalog" SHIM_LOG="$T/log")
+preflight --no-secret-key "${catalog_vars[@]}"
+expect_ok "release preflight passes when templates/catalog.json is the published catalog" "release-preflight: ok"
+catalog_json 6 >"$published_catalog/catalog.json"
+preflight --no-secret-key "${catalog_vars[@]}"
+expect_fail "release preflight refuses a template catalog older than the published one" "run make sync-templates"
+rm "$vendored_catalog/catalog.json.minisig"
+preflight --no-secret-key "${catalog_vars[@]}"
+expect_fail "release preflight refuses an unsigned template catalog once brand.json has the catalog key" "templates/catalog.json is not signed"
+: >"$vendored_catalog/catalog.json.minisig"
+rm "$published_catalog/catalog.json"
+preflight --no-secret-key "${catalog_vars[@]}"
+expect_ok "release preflight only warns when the published catalog cannot be downloaded" "could not download the published template catalog"
+preflight --no-secret-key "${catalog_vars[@]}" BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY="${BRAND_PLACEHOLDER_PREFIX}TEMPLATES_MINISIGN_PUBLIC_KEY"
+expect_ok "release preflight only warns while brand.json has no catalog key" "ships its template catalog unsigned"
 
 # ---- Docker missing: installed without a question (owner decision for 0.2.1)
 # The installer asks nothing on the way: a join piped into sh over ssh, from

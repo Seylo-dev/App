@@ -16,7 +16,12 @@
 #     cannot push to it (the org is unclaimed or someone else's). In GitHub
 #     Actions (.github/workflows/release.yml) the job's token can only write
 #     to the repository the workflow runs in, so that repository must be
-#     <githubOrg>/<githubRepo>.
+#     <githubOrg>/<githubRepo>;
+#   - with a catalog key in brand.json (templatesMinisignPublicKey): the
+#     template catalog the panel ships (templates/catalog.json) has no
+#     signature, or the published catalog of <githubOrg>/<templatesRepo> has
+#     a higher sequence ("run make sync-templates"). Without the key it only
+#     warns: the release then ships its catalog unsigned.
 #
 # Warns (does not fail) about the GitHub OAuth client id placeholder and a
 # docs URL that does not answer.
@@ -89,6 +94,32 @@ else
   if [ "$push" != true ]; then
     fail "github.com/$BRAND_GITHUB_ORG/$BRAND_GITHUB_REPO does not exist or this token cannot push to it; claim the org and set brand.json githubOrg before releasing"
   fi
+fi
+
+# The template catalog the panel ships (templates/catalog.json, vendored by
+# `make sync-templates`) is signed and not older than the published one.
+# PREFLIGHT_CATALOG_DIR stands in for templates/ in installer/test/run.sh.
+catalog_dir=${PREFLIGHT_CATALOG_DIR:-${BASH_SOURCE[0]%/*}/../templates}
+catalog_sequence() { sed -n 's/^  "sequence": \([0-9][0-9]*\),\{0,1\}$/\1/p' "$1" | head -n 1; }
+if [ -z "${BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY:-}" ] || placeholder "$BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY"; then
+  warn "brand.json templatesMinisignPublicKey is a placeholder: this release ships its template catalog unsigned and never downloads a newer one"
+elif [ ! -f "$catalog_dir/catalog.json.minisig" ]; then
+  fail "templates/catalog.json is not signed; run make sync-templates and commit the result"
+else
+  vendored=$(catalog_sequence "$catalog_dir/catalog.json")
+  published_file=$(mktemp)
+  if ! command -v curl >/dev/null 2>&1 ||
+    ! curl -fsSL -m 30 -o "$published_file" "https://github.com/$BRAND_GITHUB_ORG/${BRAND_TEMPLATES_REPO:-Templates}/releases/download/catalog/catalog.json" 2>/dev/null; then
+    warn "could not download the published template catalog to compare it with templates/catalog.json"
+  else
+    published=$(catalog_sequence "$published_file")
+    if [ -z "$vendored" ] || [ -z "$published" ]; then
+      fail "could not read the sequence of templates/catalog.json (${vendored:-none}) or of the published catalog (${published:-none})"
+    elif [ "$published" -gt "$vendored" ]; then
+      fail "the published template catalog (sequence $published) is newer than templates/catalog.json ($vendored); run make sync-templates and commit the result"
+    fi
+  fi
+  rm -f "$published_file"
 fi
 
 if [ -n "${BRAND_OAUTH_CLIENT_ID:-}" ] && placeholder "$BRAND_OAUTH_CLIENT_ID"; then

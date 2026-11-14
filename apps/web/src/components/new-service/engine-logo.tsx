@@ -1,7 +1,7 @@
 // A database engine's logo for the New database form, on the light logo
 // tile the template catalog uses, the same size as the letter badge it
 // replaces. Logos are bundled from ./logos (dashboard-icons at the commit
-// in templates/NOTICE); KeyDB and Dragonfly have none there, so they keep
+// in ../docker-hub/logos/NOTICE); KeyDB and Dragonfly have none there, so they keep
 // their letter badge.
 
 import type { databases } from "@seylo/ops";

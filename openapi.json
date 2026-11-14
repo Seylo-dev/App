@@ -93018,6 +93018,393 @@
         "x-mcp": false
       }
     },
+    "/api/v1/templates.catalogStatus": {
+      "get": {
+        "operationId": "templates.catalogStatus",
+        "summary": "Get the template catalog's status",
+        "description": "Says where the template catalog comes from: the official catalog (the copy that ships with the panel or a newer signed download), its date and commit, the last check and its error, the owner's private catalog if any, which templates are new, and how many need a newer panel. added in 0.2.17",
+        "tags": [
+          "templates"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "official",
+                    "extra",
+                    "newSlugs",
+                    "needNewerPanel",
+                    "skipped",
+                    "canRefresh",
+                    "canChangeSource",
+                    "source"
+                  ],
+                  "properties": {
+                    "official": {
+                      "type": "object",
+                      "required": [
+                        "origin",
+                        "sequence",
+                        "commit",
+                        "generatedAt",
+                        "templates",
+                        "fetchedAt",
+                        "lastTriedAt",
+                        "lastError",
+                        "enabled",
+                        "signingKey",
+                        "bundledWith"
+                      ],
+                      "properties": {
+                        "origin": {
+                          "anyOf": [
+                            {
+                              "anyOf": [
+                                {
+                                  "const": "bundled",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "downloaded",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "commit": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generatedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "templates": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "fetchedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastTriedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "signingKey": {
+                          "type": "boolean"
+                        },
+                        "bundledWith": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "extra": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "origin",
+                            "sequence",
+                            "commit",
+                            "generatedAt",
+                            "templates",
+                            "fetchedAt",
+                            "lastTriedAt",
+                            "lastError",
+                            "host",
+                            "signed"
+                          ],
+                          "properties": {
+                            "origin": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "const": "bundled",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "downloaded",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "sequence": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "commit": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "generatedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "templates": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "fetchedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastTriedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastError": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "signed": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "newSlugs": {
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "pattern": "^[a-z0-9][a-z0-9-]*$",
+                        "type": "string"
+                      }
+                    },
+                    "needNewerPanel": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "slug",
+                          "catalog",
+                          "reason"
+                        ],
+                        "properties": {
+                          "slug": {
+                            "type": "string"
+                          },
+                          "catalog": {
+                            "anyOf": [
+                              {
+                                "const": "official",
+                                "type": "string"
+                              },
+                              {
+                                "const": "private",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "canRefresh": {
+                      "type": "boolean"
+                    },
+                    "canChangeSource": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "official",
+                            "extra"
+                          ],
+                          "properties": {
+                            "official": {
+                              "type": "boolean"
+                            },
+                            "extra": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "url",
+                                    "publicKey",
+                                    "allowUnsigned"
+                                  ],
+                                  "properties": {
+                                    "url": {
+                                      "minLength": 9,
+                                      "maxLength": 2000,
+                                      "pattern": "^https://\\S+$",
+                                      "type": "string"
+                                    },
+                                    "publicKey": {
+                                      "anyOf": [
+                                        {
+                                          "maxLength": 100,
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "allowUnsigned": {
+                                      "type": "boolean"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
     "/api/v1/templates.create": {
       "post": {
         "operationId": "templates.create",
@@ -93658,6 +94045,8 @@
                     "logoUrl",
                     "creates",
                     "builtIn",
+                    "catalog",
+                    "unsigned",
                     "body",
                     "links",
                     "fields"
@@ -93698,6 +94087,25 @@
                       "type": "string"
                     },
                     "builtIn": {
+                      "type": "boolean"
+                    },
+                    "catalog": {
+                      "anyOf": [
+                        {
+                          "const": "official",
+                          "type": "string"
+                        },
+                        {
+                          "const": "private",
+                          "type": "string"
+                        },
+                        {
+                          "const": "custom",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "unsigned": {
                       "type": "boolean"
                     },
                     "body": {
@@ -93900,7 +94308,9 @@
                           "tags",
                           "logoUrl",
                           "creates",
-                          "builtIn"
+                          "builtIn",
+                          "catalog",
+                          "unsigned"
                         ],
                         "properties": {
                           "slug": {
@@ -93939,6 +94349,25 @@
                           },
                           "builtIn": {
                             "type": "boolean"
+                          },
+                          "catalog": {
+                            "anyOf": [
+                              {
+                                "const": "official",
+                                "type": "string"
+                              },
+                              {
+                                "const": "private",
+                                "type": "string"
+                              },
+                              {
+                                "const": "custom",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "unsigned": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -93961,6 +94390,55 @@
         "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": true
+      }
+    },
+    "/api/v1/templates.markCatalogSeen": {
+      "post": {
+        "operationId": "templates.markCatalogSeen",
+        "summary": "Mark new templates as seen",
+        "description": "Clears the New tag of the templates a catalog update brought. The Templates page calls it when someone with templates.manage opens it. added in 0.2.17",
+        "tags": [
+          "templates"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "templates.manage",
+        "x-mcp": false
       }
     },
     "/api/v1/templates.preview": {
@@ -94203,6 +94681,403 @@
         "x-mcp": true
       }
     },
+    "/api/v1/templates.refreshCatalog": {
+      "post": {
+        "operationId": "templates.refreshCatalog",
+        "summary": "Check for new templates",
+        "description": "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. One check runs at a time. added in 0.2.17",
+        "tags": [
+          "templates"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "official",
+                    "extra",
+                    "newSlugs",
+                    "needNewerPanel",
+                    "skipped",
+                    "canRefresh",
+                    "canChangeSource",
+                    "source"
+                  ],
+                  "properties": {
+                    "official": {
+                      "type": "object",
+                      "required": [
+                        "origin",
+                        "sequence",
+                        "commit",
+                        "generatedAt",
+                        "templates",
+                        "fetchedAt",
+                        "lastTriedAt",
+                        "lastError",
+                        "enabled",
+                        "signingKey",
+                        "bundledWith"
+                      ],
+                      "properties": {
+                        "origin": {
+                          "anyOf": [
+                            {
+                              "anyOf": [
+                                {
+                                  "const": "bundled",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "downloaded",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "commit": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generatedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "templates": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "fetchedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastTriedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "signingKey": {
+                          "type": "boolean"
+                        },
+                        "bundledWith": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "extra": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "origin",
+                            "sequence",
+                            "commit",
+                            "generatedAt",
+                            "templates",
+                            "fetchedAt",
+                            "lastTriedAt",
+                            "lastError",
+                            "host",
+                            "signed"
+                          ],
+                          "properties": {
+                            "origin": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "const": "bundled",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "downloaded",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "sequence": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "commit": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "generatedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "templates": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "fetchedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastTriedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastError": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "signed": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "newSlugs": {
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "pattern": "^[a-z0-9][a-z0-9-]*$",
+                        "type": "string"
+                      }
+                    },
+                    "needNewerPanel": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "slug",
+                          "catalog",
+                          "reason"
+                        ],
+                        "properties": {
+                          "slug": {
+                            "type": "string"
+                          },
+                          "catalog": {
+                            "anyOf": [
+                              {
+                                "const": "official",
+                                "type": "string"
+                              },
+                              {
+                                "const": "private",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "canRefresh": {
+                      "type": "boolean"
+                    },
+                    "canChangeSource": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "official",
+                            "extra"
+                          ],
+                          "properties": {
+                            "official": {
+                              "type": "boolean"
+                            },
+                            "extra": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "url",
+                                    "publicKey",
+                                    "allowUnsigned"
+                                  ],
+                                  "properties": {
+                                    "url": {
+                                      "minLength": 9,
+                                      "maxLength": 2000,
+                                      "pattern": "^https://\\S+$",
+                                      "type": "string"
+                                    },
+                                    "publicKey": {
+                                      "anyOf": [
+                                        {
+                                          "maxLength": 100,
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "allowUnsigned": {
+                                      "type": "boolean"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "templates.manage",
+        "x-mcp": false
+      }
+    },
     "/api/v1/templates.saveCustom": {
       "post": {
         "operationId": "templates.saveCustom",
@@ -94269,6 +95144,8 @@
                     "logoUrl",
                     "creates",
                     "builtIn",
+                    "catalog",
+                    "unsigned",
                     "body",
                     "links",
                     "fields"
@@ -94309,6 +95186,25 @@
                       "type": "string"
                     },
                     "builtIn": {
+                      "type": "boolean"
+                    },
+                    "catalog": {
+                      "anyOf": [
+                        {
+                          "const": "official",
+                          "type": "string"
+                        },
+                        {
+                          "const": "private",
+                          "type": "string"
+                        },
+                        {
+                          "const": "custom",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "unsigned": {
                       "type": "boolean"
                     },
                     "body": {
@@ -94435,6 +95331,448 @@
                           }
                         }
                       }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "templates.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/templates.setCatalogSource": {
+      "post": {
+        "operationId": "templates.setCatalogSource",
+        "summary": "Set where templates come from",
+        "description": "Owner only. Turns the official catalog's downloads on or off (off: only the copy that ships with the panel) and sets or removes a private catalog that is added to the official one, signed with its own minisign key or, when allowed, unsigned. A changed private catalog is fetched right away. added in 0.2.17",
+        "tags": [
+          "templates"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "official",
+                  "extra"
+                ],
+                "properties": {
+                  "official": {
+                    "type": "boolean"
+                  },
+                  "extra": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "url",
+                          "publicKey",
+                          "allowUnsigned"
+                        ],
+                        "properties": {
+                          "url": {
+                            "minLength": 9,
+                            "maxLength": 2000,
+                            "pattern": "^https://\\S+$",
+                            "type": "string"
+                          },
+                          "publicKey": {
+                            "anyOf": [
+                              {
+                                "maxLength": 100,
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "allowUnsigned": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "official",
+                    "extra",
+                    "newSlugs",
+                    "needNewerPanel",
+                    "skipped",
+                    "canRefresh",
+                    "canChangeSource",
+                    "source"
+                  ],
+                  "properties": {
+                    "official": {
+                      "type": "object",
+                      "required": [
+                        "origin",
+                        "sequence",
+                        "commit",
+                        "generatedAt",
+                        "templates",
+                        "fetchedAt",
+                        "lastTriedAt",
+                        "lastError",
+                        "enabled",
+                        "signingKey",
+                        "bundledWith"
+                      ],
+                      "properties": {
+                        "origin": {
+                          "anyOf": [
+                            {
+                              "anyOf": [
+                                {
+                                  "const": "bundled",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "downloaded",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sequence": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "commit": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generatedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "templates": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "fetchedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastTriedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "signingKey": {
+                          "type": "boolean"
+                        },
+                        "bundledWith": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "extra": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "origin",
+                            "sequence",
+                            "commit",
+                            "generatedAt",
+                            "templates",
+                            "fetchedAt",
+                            "lastTriedAt",
+                            "lastError",
+                            "host",
+                            "signed"
+                          ],
+                          "properties": {
+                            "origin": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "const": "bundled",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "downloaded",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "sequence": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "commit": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "generatedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "templates": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "fetchedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastTriedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastError": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "signed": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "newSlugs": {
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "pattern": "^[a-z0-9][a-z0-9-]*$",
+                        "type": "string"
+                      }
+                    },
+                    "needNewerPanel": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "slug",
+                          "catalog",
+                          "reason"
+                        ],
+                        "properties": {
+                          "slug": {
+                            "type": "string"
+                          },
+                          "catalog": {
+                            "anyOf": [
+                              {
+                                "const": "official",
+                                "type": "string"
+                              },
+                              {
+                                "const": "private",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "canRefresh": {
+                      "type": "boolean"
+                    },
+                    "canChangeSource": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "official",
+                            "extra"
+                          ],
+                          "properties": {
+                            "official": {
+                              "type": "boolean"
+                            },
+                            "extra": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "url",
+                                    "publicKey",
+                                    "allowUnsigned"
+                                  ],
+                                  "properties": {
+                                    "url": {
+                                      "minLength": 9,
+                                      "maxLength": 2000,
+                                      "pattern": "^https://\\S+$",
+                                      "type": "string"
+                                    },
+                                    "publicKey": {
+                                      "anyOf": [
+                                        {
+                                          "maxLength": 100,
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "allowUnsigned": {
+                                      "type": "boolean"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }

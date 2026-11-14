@@ -14,9 +14,9 @@
 // highest version (semver order, so 0.2.0-rc.1 < 0.2.0-rc.2 < 0.2.0) of the
 // listed releases, whose manifest must name that version.
 
-import { createHash, createPublicKey, verify } from "node:crypto";
 import { githubOrg, githubRepo, isPlaceholder, minisignPublicKey, slug } from "@seylo/brand";
 import { compareVersions, parseVersion, type SemVer } from "../../agent-hub/version";
+import { MinisignError, verifyMinisign as verifyMinisignFile } from "../../crypto/minisign";
 
 export interface ReleaseManifest {
   version: string;
@@ -68,31 +68,16 @@ export class ReleaseError extends Error {
 
 /**
  * Verifies a minisign signature (legacy "Ed" or prehashed "ED") and its
- * trusted comment. Returns the trusted comment.
+ * trusted comment, as a ReleaseError. Returns the trusted comment. The check
+ * itself is crypto/minisign.ts, shared with the template catalog.
  */
 export function verifyMinisign(publicKeyBase64: string, message: Uint8Array, signatureFile: string): string {
-  const pk = Buffer.from(publicKeyBase64.trim(), "base64");
-  if (pk.length !== 42 || pk.subarray(0, 2).toString() !== "Ed") throw new ReleaseError("The release signing key is malformed.");
-  const lines = signatureFile.trim().split(/\r?\n/);
-  const sigLine = lines[1];
-  const trustedLine = lines[2];
-  const globalLine = lines[3];
-  if (!sigLine || !trustedLine?.startsWith("trusted comment: ") || !globalLine)
-    throw new ReleaseError("The release signature is malformed.");
-  const sig = Buffer.from(sigLine, "base64");
-  if (sig.length !== 74) throw new ReleaseError("The release signature is malformed.");
-  const algorithm = sig.subarray(0, 2).toString();
-  if (!sig.subarray(2, 10).equals(pk.subarray(2, 10))) throw new ReleaseError("The release was signed with a different key.");
-  const key = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: pk.subarray(10).toString("base64url") }, format: "jwk" });
-  const signed = algorithm === "ED" ? createHash("blake2b512").update(message).digest() : algorithm === "Ed" ? Buffer.from(message) : null;
-  if (!signed) throw new ReleaseError("The release signature uses an unknown algorithm.");
-  if (!verify(null, signed, key, sig.subarray(10))) throw new ReleaseError("The release signature does not match.");
-  const trusted = trustedLine.slice("trusted comment: ".length);
-  const global = Buffer.from(globalLine, "base64");
-  if (!verify(null, Buffer.concat([sig.subarray(10), Buffer.from(trusted)]), key, global)) {
-    throw new ReleaseError("The release signature's trusted comment does not match.");
+  try {
+    return verifyMinisignFile(publicKeyBase64, message, signatureFile, "release");
+  } catch (error) {
+    if (error instanceof MinisignError) throw new ReleaseError(error.message);
+    throw error;
   }
-  return trusted;
 }
 
 export function parseManifest(bytes: Uint8Array): ReleaseManifest {

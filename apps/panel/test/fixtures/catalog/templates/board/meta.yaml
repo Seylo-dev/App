@@ -1,0 +1,26 @@
+name: "Board"
+description: "Test template: a required field without a default and a select."
+category: "Productivity"
+tags: ["whiteboard"]
+creates: "App"
+body: |
+  Test fixture for the panel's template tests (apps/panel/test).
+schema:
+  type: object
+  required: ["image", "email"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      default: "example/board:2.0.1@sha256:0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
+    email:
+      type: "string"
+      title: "Admin email"
+    plan:
+      type: "string"
+      title: "Plan"
+      enum: ["small", "large"]
+    password:
+      type: "string"
+      format: "password"
+      title: "Admin password"

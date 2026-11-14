@@ -1,9 +1,12 @@
-// App logos on the Templates page, against the panel run.sh started (its
-// real catalog and logo route, no demo data): a template that ships a logo
-// shows it as an <img> on the neutral tile, one without keeps its letter
-// tile, and so does one whose logo fails to load. The popular images row
-// gets the same tiles from the logos bundled with the web app. Screenshots
-// in every preset go to $SHOTS_DIR/template-logos/<preset>.png.
+// App logos on the Templates page, against the panel run.sh started (the
+// catalog it ships in templates/catalog.json and its logo route, no demo
+// data): a template that has a logo shows it as an <img> on the neutral
+// tile, one without keeps its letter tile, and so does one whose logo fails
+// to load. The popular images row gets the same tiles from the logos
+// bundled with the web app. The catalog line under the title says where the
+// templates come from; the owner checks for new ones and changes the source
+// there. Screenshots in every preset go to $SHOTS_DIR/template-logos/<preset>.png,
+// the source dialog to catalog-source.png.
 
 import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
@@ -46,9 +49,9 @@ test("templates and popular images show their logos, the rest their letter tile"
 
   await expectLogo(templateCard(page, "Grafana", "Monitoring"), "Grafana");
   await expectLogo(templateCard(page, "Uptime Kuma", "Monitoring"), "Uptime Kuma");
-  // No SVG upstream: the panel serves a small WebP.
+  // No SVG upstream: the panel serves a small WebP, its URL versioned by the file's hash.
   await expectLogo(templateCard(page, "Ghost", "CMS"), "Ghost");
-  await expect(templateCard(page, "Ghost", "CMS").locator("img")).toHaveAttribute("src", "/api/templates/ghost/logo.webp");
+  await expect(templateCard(page, "Ghost", "CMS").locator("img")).toHaveAttribute("src", /^\/api\/templates\/ghost\/logo\.webp\?v=[0-9a-f]{8}$/);
   // dashboard-icons has no Appsmith or Redis Insight logo.
   await expectLetter(templateCard(page, "Appsmith", "Developer tools"), "A");
   await expectLetter(templateCard(page, "Redis Insight", "Databases"), "R");
@@ -87,9 +90,67 @@ test("a popular image's logo is in its dialog's header", async ({ page }) => {
 });
 
 test("a logo that does not load falls back to the letter tile", async ({ page }) => {
-  await page.route("**/api/templates/grafana/logo.svg", (route) => route.fulfill({ status: 404, contentType: "text/plain", body: "Not found" }));
+  await page.route(/\/api\/templates\/grafana\/logo\.svg(\?|$)/, (route) =>
+    route.fulfill({ status: 404, contentType: "text/plain", body: "Not found" }),
+  );
   await page.goto("/templates");
   await expectLetter(templateCard(page, "Grafana", "Monitoring"), "G");
   // The others still load.
   await expectLogo(templateCard(page, "Uptime Kuma", "Monitoring"), "Uptime Kuma");
+});
+
+test("the catalog line: the shipped copy, Check for new templates, and the owner's source dialog", async ({ page }) => {
+  mkdirSync(shots, { recursive: true });
+  await page.goto("/templates");
+  const line = page.getByTestId("catalog-status");
+  // This panel has no catalog key (a development build): it lists the copy it ships and never downloads.
+  await expect(line).toContainText(/^Catalog bundled with \S+ \S+\./);
+  const notifications = page.getByRole("region", { name: "Notifications" });
+  await line.getByRole("button", { name: "Check for new templates" }).click();
+  await expect(notifications.getByText("No new templates.")).toBeVisible();
+
+  await line.getByRole("button", { name: "Catalog source" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Catalog source" })).toBeVisible();
+  const official = dialog.getByRole("switch", { name: "Official catalog" });
+  await expect(official).toBeChecked();
+  // A private catalog without a key: saving waits for "Allow it without a signature", which shows the warning.
+  await dialog.getByRole("button", { name: "Add a private catalog" }).click();
+  await dialog.getByLabel("Catalog URL").fill("https://templates.example.com/catalog.json");
+  const save = dialog.getByRole("button", { name: "Save" });
+  await expect(save).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: "Allow it without a signature" }).click();
+  await expect(dialog.getByText("Without a signature, anyone who can change the file")).toBeVisible();
+  await expect(save).toBeEnabled();
+  await page.screenshot({ path: `${shots}/catalog-source.png` });
+  // Nothing leaves this test: take the private catalog out again and turn downloads off.
+  await dialog.getByRole("button", { name: "Remove" }).click();
+  await expect(dialog.getByLabel("Catalog URL")).toHaveCount(0);
+  await official.click();
+  await save.click();
+  await expect(dialog).toBeHidden();
+  await expect(line).toContainText("Downloads are off.");
+
+  // And back on.
+  await line.getByRole("button", { name: "Catalog source" }).click();
+  await page.getByRole("dialog").getByRole("switch", { name: "Official catalog" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(line).not.toContainText("Downloads are off.");
+});
+
+test("templates a catalog update brought carry a New tag; templates for a newer panel are counted", async ({ page }) => {
+  // The panel's own status with two new slugs and one template left out, as a viewer without templates.manage sees it.
+  await page.route("**/api/v1/templates.catalogStatus*", async (route) => {
+    const status = await (await route.fetch()).json();
+    await route.fulfill({
+      json: { ...status, newSlugs: ["grafana", "n8n"], needNewerPanel: 3, canRefresh: false, canChangeSource: false, source: null },
+    });
+  });
+  await page.goto("/templates");
+  const line = page.getByTestId("catalog-status");
+  await expect(line).toContainText("2 new.");
+  await expect(line.getByRole("link", { name: /^3 templates need a newer / })).toHaveAttribute("href", "/settings/updates");
+  await expect(line.getByRole("button")).toHaveCount(0);
+  await expect(templateCard(page, "Grafana", "Monitoring").getByText("New", { exact: true })).toBeVisible();
+  await expect(templateCard(page, "Uptime Kuma", "Monitoring").getByText("New", { exact: true })).toHaveCount(0);
 });

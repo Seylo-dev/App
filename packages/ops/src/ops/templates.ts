@@ -3,11 +3,18 @@
 // its output is validated and shown as the list of services it creates
 // before anything is made. The result is normal services people can
 // change afterwards.
+//
+// The official templates come from a signed catalog the Templates
+// repository (<githubOrg>/<templatesRepo>, release "catalog") publishes,
+// which the panel checks for every few hours and keeps on disk; a copy
+// ships with the panel for panels without internet access. The owner can
+// add one private catalog next to it (setCatalogSource).
 
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
-import { Id } from "../schemas";
+import { Empty, Id, Timestamp } from "../schemas";
+import { Nullable } from "./nodes";
 import { ServiceKind, ServiceName, ServiceSummary } from "./services";
 
 export const TemplateSlug = Type.String({ minLength: 1, maxLength: 60, pattern: "^[a-z0-9][a-z0-9-]*$" });
@@ -20,12 +27,16 @@ export const TemplateSummary = Type.Object({
   /** "Automation", "Analytics", "Monitoring", "Storage", "CMS", "Developer tools", ... */
   category: Type.String(),
   tags: Type.Array(Type.String()),
-  /** The app's logo, served by the panel (`/api/templates/<slug>/logo.svg`, `.webp` or `.png`) for built-in templates that ship one; null otherwise (the web shows a letter tile). */
+  /** The app's logo, served by the panel (`/api/templates/<slug>/logo.svg`, `.webp` or `.png`, with `?v=` from its sha256 since 0.2.17) for catalog templates that have one; null otherwise (the web shows a letter tile). */
   logoUrl: Type.Union([Type.String(), Type.Null()]),
   /** What installing creates, for the card: "App + Postgres", "Compose · 3 services". */
   creates: Type.String(),
-  /** Shipped with the panel (true) or added on this panel (false). */
+  /** From a catalog, read only (true: the official one or the owner's private one), or added on this panel (false). */
   builtIn: Type.Boolean(),
+  /** Where it comes from: the official catalog, the owner's private catalog, or added on this panel. added in 0.2.17 */
+  catalog: Type.Union([Type.Literal("official"), Type.Literal("private"), Type.Literal("custom")]),
+  /** From a private catalog the panel takes without a signature. added in 0.2.17 */
+  unsigned: Type.Boolean(),
 });
 
 /** A value a person fills in on the install form. Values are strings, numbers or booleans. */
@@ -180,6 +191,136 @@ export const deleteCustom = defineOp({
   description: "Deletes a template added on this panel. Services created from it stay.",
   input: Type.Object({ slug: TemplateSlug }),
   output: Type.Object({}),
+  permission: permission.global("templates.manage"),
+  mcp: false,
+  audit: true,
+});
+
+/** Where the catalog comes from (setCatalogSource, owner only). added in 0.2.17 */
+export const CatalogSource = Type.Object({
+  /** Check the official catalog on GitHub. false: only the copy that ships with the panel (panels without internet access). */
+  official: Type.Boolean(),
+  /**
+   * One more catalog in the same format, added to the official one (an
+   * official slug wins over one of its own). The panel fetches `url` and
+   * `url` + ".minisig" and checks the signature with publicKey; without a
+   * key it takes the catalog only with allowUnsigned.
+   */
+  extra: Nullable(
+    Type.Object({
+      url: Type.String({ minLength: 9, maxLength: 2000, pattern: "^https://\\S+$" }),
+      /** minisign public key (the "RW..." line), or null for an unsigned catalog. */
+      publicKey: Nullable(Type.String({ maxLength: 100 })),
+      allowUnsigned: Type.Boolean(),
+    }),
+  ),
+});
+
+/** One catalog as the panel holds it. added in 0.2.17 */
+export const CatalogInfo = Type.Object({
+  /** The copy in use: the one that ships with this panel ("bundled"), one downloaded since ("downloaded"), or none yet (null). */
+  origin: Nullable(Type.Union([Type.Literal("bundled"), Type.Literal("downloaded")])),
+  /** Grows with every publish; the panel never goes back to a lower one. */
+  sequence: Nullable(Type.Integer({ minimum: 0 })),
+  /** Commit of the catalog's repository it was built from. */
+  commit: Nullable(Type.String()),
+  generatedAt: Nullable(Timestamp),
+  /** Templates from it that this panel lists. */
+  templates: Type.Integer({ minimum: 0 }),
+  /** Last successful download (null: never). */
+  fetchedAt: Nullable(Timestamp),
+  lastTriedAt: Nullable(Timestamp),
+  /** Why the last try failed, safe to show; null when it worked. The panel keeps the catalog it had. */
+  lastError: Nullable(Type.String()),
+});
+
+export const CatalogStatus = Type.Object({
+  official: Type.Object({
+    ...CatalogInfo.properties,
+    /** The owner's switch (CatalogSource.official). */
+    enabled: Type.Boolean(),
+    /** This build has the catalog's signing key; without it the panel only uses the copy it ships with. */
+    signingKey: Type.Boolean(),
+    /** The panel version whose copy ships here. */
+    bundledWith: Type.String(),
+  }),
+  /** The private catalog, when the owner set one. */
+  extra: Nullable(
+    Type.Object({
+      ...CatalogInfo.properties,
+      /** Host of its URL (the full URL is in `source`, for the owner). */
+      host: Type.String(),
+      /** Checked against a public key; false when the owner allowed it unsigned. */
+      signed: Type.Boolean(),
+    }),
+  ),
+  /** Slugs a catalog update brought since someone with templates.manage last opened the Templates page. */
+  newSlugs: Type.Array(TemplateSlug),
+  /** Templates left out because they need a newer panel (their minPanel). */
+  needNewerPanel: Type.Integer({ minimum: 0 }),
+  /** Templates a catalog has but this panel could not read, each left out alone. */
+  skipped: Type.Array(
+    Type.Object({
+      slug: Type.String(),
+      catalog: Type.Union([Type.Literal("official"), Type.Literal("private")]),
+      reason: Type.String(),
+    }),
+  ),
+  /** The caller holds templates.manage ("Check for new templates"). */
+  canRefresh: Type.Boolean(),
+  /** The caller is the owner and may change the source. */
+  canChangeSource: Type.Boolean(),
+  /** The source setting, for the owner; null for everyone else. */
+  source: Nullable(CatalogSource),
+});
+
+export const catalogStatus = defineOp({
+  id: "templates.catalogStatus",
+  kind: "query",
+  summary: "Get the template catalog's status",
+  description:
+    "Says where the template catalog comes from: the official catalog (the copy that ships with the panel or a newer signed download), its date and commit, the last check and its error, the owner's private catalog if any, which templates are new, and how many need a newer panel. added in 0.2.17",
+  input: Empty,
+  output: CatalogStatus,
+  permission: permission.signedIn(),
+  mcp: true,
+  audit: false,
+});
+
+export const refreshCatalog = defineOp({
+  id: "templates.refreshCatalog",
+  kind: "mutation",
+  summary: "Check for new templates",
+  description:
+    "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. One check runs at a time. added in 0.2.17",
+  input: Empty,
+  output: CatalogStatus,
+  permission: permission.global("templates.manage"),
+  mcp: false,
+  audit: true,
+});
+
+export const setCatalogSource = defineOp({
+  id: "templates.setCatalogSource",
+  kind: "mutation",
+  summary: "Set where templates come from",
+  description:
+    "Owner only. Turns the official catalog's downloads on or off (off: only the copy that ships with the panel) and sets or removes a private catalog that is added to the official one, signed with its own minisign key or, when allowed, unsigned. A changed private catalog is fetched right away. added in 0.2.17",
+  input: CatalogSource,
+  output: CatalogStatus,
+  permission: permission.global("templates.manage"),
+  mcp: false,
+  audit: true,
+});
+
+export const markCatalogSeen = defineOp({
+  id: "templates.markCatalogSeen",
+  kind: "mutation",
+  summary: "Mark new templates as seen",
+  description:
+    "Clears the New tag of the templates a catalog update brought. The Templates page calls it when someone with templates.manage opens it. added in 0.2.17",
+  input: Empty,
+  output: Empty,
   permission: permission.global("templates.manage"),
   mcp: false,
   audit: true,

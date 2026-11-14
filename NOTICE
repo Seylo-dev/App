@@ -43,9 +43,12 @@ SOFTWARE.
 dashboard-icons (https://github.com/homarr-labs/dashboard-icons), Apache
 License 2.0
 
-Copied: the app logos in templates/*/logo.* and
-apps/web/src/components/docker-hub/logos/. templates/NOTICE lists each file,
-the upstream commit and what was changed; the license text is
+Copied: the logos in apps/web/src/components/docker-hub/logos/ and
+apps/web/src/components/new-service/logos/. The NOTICE file in the first
+folder lists each file, the upstream commit and what was changed; the
+license text is LICENSE.dashboard-icons next to it. The template catalog
+that ships in templates/catalog.json carries app logos from the same set,
+credited in templates/NOTICE (written from the catalog) under
 templates/LICENSE.dashboard-icons. The logos are trademarks of their owners.
 
 Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and Homarr Labs
