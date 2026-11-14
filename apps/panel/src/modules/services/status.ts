@@ -1,5 +1,7 @@
 // A service's live status, from the agents' reports in memory
 // (deps.agents.state) plus the deploy in progress. Nothing here is stored.
+// serviceStatus is what the service says (a deploy in progress first);
+// runtimeStatus is what runs meanwhile, which the screens' status dot shows.
 
 import type { services as serviceOps } from "@seylo/ops";
 import { type ServiceStatus as AgentServiceStatus, HealthState, InstanceState, ServicePhase } from "@seylo/proto";
@@ -45,9 +47,42 @@ export function phaseStatus(status: AgentServiceStatus): ServiceStatus {
   }
 }
 
+/**
+ * The node's phase for runtimeStatus: as phaseStatus, except DEPLOYING (the
+ * agent rolls a new version out next to the one that runs): the state of
+ * the containers that run, so a live version that serves through a deploy
+ * reads running. With nothing running it stays "deploying".
+ */
+export function runtimePhaseStatus(status: AgentServiceStatus): ServiceStatus {
+  if (status.phase !== ServicePhase.DEPLOYING) return phaseStatus(status);
+  const running = status.instances.filter((i) => i.state === InstanceState.RUNNING);
+  if (running.length === 0) return "deploying";
+  return running.some((i) => i.health !== HealthState.UNHEALTHY) ? "running" : "unhealthy";
+}
+
+/** What the service says: a deploy in progress ("building" while queued or building, "deploying" while it rolls out), else what runs. */
 export function serviceStatus(agents: AgentHub, input: StatusInput): ServiceStatus {
   if (input.activeDeploy === "queued" || input.activeDeploy === "building") return "building";
   if (input.activeDeploy === "deploying") return "deploying";
+  return statusOfNodes(agents, input, phaseStatus);
+}
+
+/**
+ * What runs now, whatever a deploy in progress does
+ * (ServiceSummary.runtimeStatus): serviceStatus without the deploy's
+ * "building" and "deploying", and a node that rolls a new version out next
+ * to the one that runs reads as that one. "idle" while nothing was deployed
+ * (a first deploy that has not reached its nodes yet).
+ */
+export function runtimeStatus(agents: AgentHub, input: Omit<StatusInput, "activeDeploy">): ServiceStatus {
+  return statusOfNodes(agents, input, runtimePhaseStatus);
+}
+
+function statusOfNodes(
+  agents: AgentHub,
+  input: Omit<StatusInput, "activeDeploy">,
+  phase: (status: AgentServiceStatus) => ServiceStatus,
+): ServiceStatus {
   if (input.kind === "compose") return "idle";
   if (!input.deployed) return "idle";
   if (input.stopped) return "stopped";
@@ -57,7 +92,7 @@ export function serviceStatus(agents: AgentHub, input: StatusInput): ServiceStat
   const perNode: ServiceStatus[] = input.nodeIds.map((nodeId) => {
     if (!agents.isOnline(nodeId)) return "unknown";
     const status = reported.get(nodeId);
-    return status ? phaseStatus(status) : "starting";
+    return status ? phase(status) : "starting";
   });
   return combine(perNode);
 }

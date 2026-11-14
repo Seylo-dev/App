@@ -41,7 +41,9 @@ export const ServiceKind = Type.Union(
 /**
  * Live state from the agents' reports, not stored. "idle" = never
  * deployed; "unknown" = its node is offline; "partial" = some replicas or
- * nodes are down while others serve.
+ * nodes are down while others serve. In ServiceSummary.status a deploy in
+ * progress wins ("building" while queued or building, "deploying" while it
+ * rolls out); ServiceSummary.runtimeStatus is what runs meanwhile.
  */
 export const ServiceStatus = Type.Union([
   Type.Literal("idle"),
@@ -301,6 +303,17 @@ export const ServiceSummary = Type.Object({
    * slot of its node's Builds at once (Deployment.buildWait). Added in 0.2.15.
    */
   buildWaiting: Type.Boolean(),
+  /**
+   * What runs now, whatever a deploy in progress does: status without the
+   * deploy's "building" and "deploying" (the live version's running,
+   * partial, unhealthy, crashed, stopped or unknown; "idle" before anything
+   * was deployed), and on a node that rolls a new version out next to the
+   * one that serves, the state of that one. The same as status while no
+   * deploy runs. Screens show it as the status dot while a live version
+   * exists; status and buildWaiting say what the deploy does. Added in
+   * 0.2.17.
+   */
+  runtimeStatus: ServiceStatus,
   source: SourceSummary,
   /** Main domain, or the internal "name:port" when it has none; null without ports. */
   address: Type.Union([Type.String(), Type.Null()]),
@@ -432,6 +445,10 @@ export const ServiceDetail = Type.Object({
       status: ServiceStatus,
       /** As ServiceSummary.buildWaiting. Added in 0.2.15. */
       buildWaiting: Type.Boolean(),
+      /** As ServiceSummary.runtimeStatus. Added in 0.2.17. */
+      runtimeStatus: ServiceStatus,
+      /** As ServiceSummary.liveDeployment: whether a live version exists for runtimeStatus to describe. Added in 0.2.17. */
+      liveDeployment: Type.Union([LiveDeployment, Type.Null()]),
     }),
   ),
   volumes: Type.Array(Volume),

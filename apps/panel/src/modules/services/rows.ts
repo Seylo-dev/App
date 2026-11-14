@@ -15,7 +15,7 @@ import { appPort } from "../domains/lookup";
 import { latestCopy, latestTransfer } from "./copies";
 import { displaySource } from "./git-url";
 import { readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
-import { serviceStatus, serviceUsage } from "./status";
+import { runtimeStatus, serviceStatus, serviceUsage } from "./status";
 
 export type ServiceRow = typeof services.$inferSelect;
 export type ServiceSummary = Static<typeof serviceOps.ServiceSummary>;
@@ -182,21 +182,22 @@ function summarize(agents: AgentHub, row: ServiceRow, ctx: Context): ServiceSumm
   const live = ctx.live.get(row.id) ?? null;
   const firstPort = spec.ports[0];
   const usage = serviceUsage(agents, row.id);
+  const runs = {
+    serviceId: row.id,
+    kind: row.kind,
+    stopped: row.stopped,
+    deployed: row.targetDeploymentId !== null,
+    nodeIds: placements.map((p) => p.nodeId),
+  };
   return {
     id: row.id,
     projectId: row.projectId,
     name: row.name,
     kind: row.kind,
     parentId: row.parentId,
-    status: serviceStatus(agents, {
-      serviceId: row.id,
-      kind: row.kind,
-      stopped: row.stopped,
-      deployed: row.targetDeploymentId !== null,
-      activeDeploy: ctx.activeDeploy.get(row.id) ?? null,
-      nodeIds: placements.map((p) => p.nodeId),
-    }),
+    status: serviceStatus(agents, { ...runs, activeDeploy: ctx.activeDeploy.get(row.id) ?? null }),
     buildWaiting: ctx.activeDeploy.get(row.id) === "building" && ctx.buildWaiting.has(row.id),
+    runtimeStatus: runtimeStatus(agents, runs),
     source: sourceSummary(row, spec),
     address: ctx.primaryHosts.get(row.id) ?? (firstPort ? `${row.name}:${firstPort.containerPort}` : null),
     placements,
@@ -245,7 +246,14 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     stickySessions: spec.stickySessions,
     entryNodeId: entryNodeOf(spec.entryNodeId, summary.placements),
     notes: row.notes,
-    members: all.slice(1).map((m) => ({ id: m.id, name: m.name, status: m.status, buildWaiting: m.buildWaiting })),
+    members: all.slice(1).map((m) => ({
+      id: m.id,
+      name: m.name,
+      status: m.status,
+      buildWaiting: m.buildWaiting,
+      runtimeStatus: m.runtimeStatus,
+      liveDeployment: m.liveDeployment,
+    })),
     volumes: volumesOf(db, row.id),
     watchPaths: spec.watchPaths,
     dataCopy: latestCopy(db, row.id),

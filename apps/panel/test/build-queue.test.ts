@@ -211,6 +211,9 @@ test("waiting builds show their place in line per node, and move up when a build
   expect((await callOp(panel, serviceOps.get, { serviceId: b }, { cookie })).body).toMatchObject({
     status: "building",
     buildWaiting: true,
+    // A first deploy: nothing runs yet (0.2.17), which the web app shows as a pending dot.
+    runtimeStatus: "idle",
+    liveDeployment: null,
   });
   expect((await callOp(panel, serviceOps.get, { serviceId: a }, { cookie })).body).toMatchObject({
     status: "building",
