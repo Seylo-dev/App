@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # The e2e checklist against the three VMs. One function per check
-# (check_01 .. check_44); each prints its sub-results with evidence and ends
+# (check_01 .. check_45); each prints its sub-results with evidence and ends
 # PASS, FAIL, BLOCKED (a precondition is missing, with the reason) or SKIP.
 # Results are kept per check in dist/e2e/state/results and RESULTS.md (next
 # to this file) is rewritten from them after every run, so a single check
 # can be rerun alone.
 #
-# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..44, then 31)
+# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..45, then 31)
 #        test/e2e-colima/checks.sh report      rewrite RESULTS.md only
 #
 # Panel calls go through the REST op routes (/api/v1/<op id>) with the API
@@ -70,12 +70,13 @@ TITLES=(
   "Export whoami with its volume and a Postgres with its data from e2e-exports on B, import both into e2e-imports on C: env, cron job, the volume's file, the rows, basic auth; refusals"
   "Database version: patch update and a MongoDB major upgrade keep the data"
   "Move a Postgres with rows B -> C: rows, stored password, TLS exposure on C with the same allowed IPs, an app on C reconnects, backup on C, B drops its copy"
+  "DNS cache on B: ACTIVE, an app gets it first with fallbacks, hits count, lookups through an agent restart, off and a redeploy drop it"
 )
 # The highest check number. Check 31 gives the panel a domain and puts
 # everything back afterwards; it runs last (after 32..41) so a failed
 # cleanup cannot spoil the others. Checks 39, 40 and 41 put back what they
 # change too.
-LAST=44
+LAST=45
 DOMAIN_CHECK=31
 
 CUR=
@@ -4766,6 +4767,195 @@ check_44() {
 
   delete_service e2e-dbmove pgmove-app
   delete_service e2e-dbmove pgmove
+}
+
+# Check 45 (0.2.17): the node DNS cache on B (nodes.setDnsCache,
+# nodes.dnsCacheStatus). Turned on, it becomes ACTIVE (or the check is
+# BLOCKED with the cache's reason and fix hint); its address is on B's
+# <slug>-dns interface and only that address listens on port 53. A busybox
+# app deployed on B after that gets HostConfig.Dns = the cache, then the
+# status's fallbacks, and the <slug>.dns-cache label; on its project
+# network resolv.conf keeps nameserver 127.0.0.11 with "# ExtServers:
+# [<cache> <fallbacks>]". From inside it the cache answers (a name of the
+# cache's own probe zone, and a real one), the container's own resolver
+# works, the status lists it as a user, and the second lookup of a name
+# raises the hit counter. B's agent restarts while the container looks a
+# name up twice a second through its own resolver: no lookup fails before,
+# during or after, and the cache is ACTIVE and answering again. Turned
+# off it drains: the container keeps it (nothing is recreated) until a
+# redeploy, whose new container has neither the cache nor the label; with
+# no user left the state is off and the interface is gone. A firewall on B
+# (ufw, or an input chain that drops by default) is covered when there is
+# one: the installer's three ufw rules, and ACTIVE means the cache's test
+# container got through. The e2e VMs have neither (Colima's VM and Ubuntu
+# 24.04 as Lima starts it): the evidence says so.
+P45_NAME=github.com
+P45_SOURCES="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+check_45() {
+  need_key || return 3
+  local nb out st state addr fw rules src svc c c2 dns label resolv ext h1 h2 t0 t1 lines failed during after fallbacks
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  op_is_query nodes.dnsCacheStatus || { blocked "this build has no nodes.dnsCacheStatus"; return 3; }
+  # p45_status: B's DNS cache status; p45_state_is <state...>: it is one of them.
+  p45_status() { api nodes.dnsCacheStatus "{\"nodeId\":\"$nb\"}"; }
+  p45_state_is() { p45_status | jq -e --arg s "$*" '.state as $st | ($s | split(" ") | index($st)) != null' >/dev/null; }
+  p45_off() { api nodes.setDnsCache "{\"nodeId\":\"$nb\",\"enabled\":false}" >/dev/null 2>&1 || true; }
+  # p45_container <service>: its running container on B.
+  p45_container() { on_node b "docker ps -q --filter label=$SLUG.service=$1 | head -1"; }
+  # p45_in <command>: runs it in the app's container on B.
+  p45_in() { on_node b "docker exec $c sh -c '$1'"; }
+  # p45_answers <server or ""> <name> [address]: one busybox nslookup in the container gets an answer (that address).
+  p45_answers() {
+    local o
+    o=$(p45_in "nslookup $2 $1 2>&1") || true
+    grep -q '^Name:' <<<"$o" && grep -q "^Address:* *${3:-[0-9a-f]}" <<<"$o"
+  }
+  delete_service e2e-dnscache dnsapp
+
+  # B's firewall, before anything changes.
+  fw=$(on_node b "if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then echo ufw
+    elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -Eq 'hook input .*policy drop'; then echo nftables
+    elif iptables -S INPUT 2>/dev/null | grep -q '^-P INPUT DROP'; then echo iptables
+    else echo none; fi" 2>/dev/null || echo unknown)
+
+  out=$(api nodes.setDnsCache "{\"nodeId\":\"$nb\",\"enabled\":true}" 2>&1) || {
+    printf '%s\n' "$out" >>"$RES/$CUR.log"
+    if printf '%s' "$out" | grep -q agentTooOld; then
+      blocked "B's agent does not have the DNS cache (agentTooOld: it needs 0.2.17)"
+      return 3
+    fi
+    bad "nodes.setDnsCache on B failed: $(printf '%s' "$out" | tail -1)"
+    return 1
+  }
+  expect "nodes.setDnsCache turned it on (dnsCache true)" jq_ok "$out" '.dnsCache == true'
+  wait_for 180 "B's DNS cache active or blocked" p45_state_is active blocked || true
+  out=$(p45_status)
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  ev "status: $(printf '%s' "$out" | jq -c '{state, reason, fixHint, address, upstreams, fallbacks, checkPassed, checkedAt}')"
+  state=$(printf '%s' "$out" | jq -r .state)
+  addr=$(printf '%s' "$out" | jq -r '.address // empty')
+  [ -n "$addr" ] || addr=169.254.53.53
+  fallbacks=$(printf '%s' "$out" | jq -c '.fallbacks // []')
+
+  case $fw in
+  ufw)
+    rules=$(on_node b "ufw status" 2>/dev/null | grep -F "$addr 53" || true)
+    ev "B runs ufw: $(printf '%s' "$rules" | tr -s ' ' | tr '\n' ';')"
+    for src in $P45_SOURCES; do
+      expect "the installer's ufw rule lets $src reach $addr port 53" grep -qF "$src" <<<"$rules"
+    done
+    ;;
+  nftables | iptables) ev "B's input chain drops by default ($fw): the cache's own test container has to get through it" ;;
+  none) ev "note: B runs no ufw and no input chain that drops by default (only Docker's own rules), so the installer's ufw rules and a firewall that drops the cache's port are not exercised here (extra-installs.sh's ufw VM has ufw)" ;;
+  *) ev "note: could not read B's firewall ($fw)" ;;
+  esac
+
+  case $state in
+  active) good "B's DNS cache is ACTIVE at $addr (upstreams $(printf '%s' "$out" | jq -c .upstreams), fallbacks $fallbacks)${fw:+, firewall: $fw}" ;;
+  blocked)
+    blocked "B's DNS cache is BLOCKED: $(printf '%s' "$out" | jq -r .reason) (fix: $(printf '%s' "$out" | jq -r .fixHint))"
+    p45_off
+    return 3
+    ;;
+  *)
+    bad "B's DNS cache did not become ACTIVE in 180s (state $state, reason $(printf '%s' "$out" | jq -r .reason))"
+    p45_off
+    return 1
+    ;;
+  esac
+  expect "$addr is on B's $SLUG-dns interface" on_node b "ip -4 addr show dev $SLUG-dns | grep -q 'inet $addr/32'"
+  expect "the cache listens on $addr:53 over UDP and TCP" on_node b "ss -lnuH 'sport = :53' | grep -qF '$addr:53' && ss -lntH 'sport = :53' | grep -qF '$addr:53'"
+  expect "and on no wildcard address" fails on_node b "ss -lnupH 'sport = :53' | grep -F '\"$SLUG\"' | grep -qvF '$addr:53'"
+
+  # A small app on B, created while the cache is ACTIVE.
+  svc=$(image_service e2e-dnscache dnsapp b busybox:1.37 "" '{"container":{"command":["sh","-c","sleep 86400"]}}') ||
+    { bad "services.create dnsapp failed"; p45_off; return 1; }
+  st=$(wait_deploy "$svc" 300)
+  [ "$st" = live ] || { bad "dnsapp's deploy on B ended $st"; p45_off; delete_service e2e-dnscache dnsapp; return 1; }
+  c=$(p45_container "$svc")
+  dns=$(on_node b "docker inspect -f '{{json .HostConfig.Dns}}' $c")
+  label=$(on_node b "docker inspect -f '{{index .Config.Labels \"$SLUG.dns-cache\"}}' $c")
+  resolv=$(p45_in "cat /etc/resolv.conf")
+  ext=$(printf '%s\n' "$resolv" | sed -n 's/^# ExtServers: \[\(.*\)\]/\1/p' | head -1)
+  ev "dnsapp's container $c: HostConfig.Dns $dns, label $SLUG.dns-cache=$label, resolv.conf: $(printf '%s' "$resolv" | grep -v '^$' | tr '\n' '|')"
+  expect "HostConfig.Dns is the cache, then the fallbacks $fallbacks" jq_ok "$dns" --arg a "$addr" --argjson f "$fallbacks" '.[0] == $a and length >= 2 and .[1:] == $f'
+  expect "the container carries $SLUG.dns-cache=$addr" test "$label" = "$addr"
+  expect "on its project network resolv.conf keeps Docker's embedded DNS (127.0.0.11)" grep -q '^nameserver 127.0.0.11' <<<"$resolv"
+  expect "ExtServers has the cache first, then fallbacks ($ext)" sh -c "set -- \$(printf '%s' '$ext' | tr -d '()' | sed 's/host//g'); [ \"\$1\" = '$addr' ] && [ \$# -ge 2 ]"
+
+  # The cache answers from inside: a name of its own probe zone (only it answers that) and a real one.
+  expect "from the container, $addr answers its probe zone (192.0.2.53)" p45_answers "$addr" "probe-e2e45.dnscache.$SLUG.internal" 192.0.2.53
+  expect "from the container, $addr resolves $P45_NAME" p45_answers "$addr" "$P45_NAME"
+  expect "the container's own resolver resolves $P45_NAME" p45_answers "" "$P45_NAME"
+  out=$(p45_status)
+  expect "the status lists dnsapp's container as using the cache" jq_ok "$out" --arg s "$svc" '[.containers[] | select(.serviceId == $s and .usesCache)] | length == 1'
+  # The same name twice: the second answer comes from the cache.
+  p45_answers "$addr" "$P45_NAME" || true
+  h1=$(p45_status | jq -r .hits)
+  p45_answers "$addr" "$P45_NAME" || true
+  out=$(p45_status)
+  h2=$(printf '%s' "$out" | jq -r .hits)
+  ev "counters after the second lookup: $(printf '%s' "$out" | jq -c '{queries, hits, stale, upstreamQueries, upstreamFailures, entries, hitRate}')"
+  expect "resolving $P45_NAME again raised the hit counter ($h1 -> $h2)" test "$h2" -gt "$h1"
+
+  # B's agent restarts while the container looks the name up twice a second through its own resolver
+  # (Docker's embedded DNS: the cache, else the fallbacks). Each line: the time on B and ok or fail.
+  printf '%s\n' "i=0; while [ \$i -lt 200 ]; do if nslookup $P45_NAME 2>&1 | grep -q '^Name:'; then echo \"\$(date +%s) ok\"; else echo \"\$(date +%s) fail\"; fi; i=\$((i + 1)); sleep 0.5; done" |
+    on_node b "cat >/root/e2e-p45-lookups.sh && rm -f /root/e2e-p45-loop.txt && systemctl reset-failed e2e-p45-loop >/dev/null 2>&1; systemd-run --unit=e2e-p45-loop --collect bash -c 'docker exec -i $c sh -s </root/e2e-p45-lookups.sh >/root/e2e-p45-loop.txt 2>&1' >/dev/null" ||
+    bad "could not start the lookup loop on B"
+  sleep 10
+  t0=$(on_node b "date +%s")
+  on_node b "systemctl restart $SLUG.service"
+  wait_for 120 "B's agent connected" p31_connected b || bad "B's agent did not reconnect"
+  t1=$(on_node b "date +%s")
+  if wait_for 240 "B's DNS cache active again" p45_state_is active; then
+    good "after the restart B's DNS cache is ACTIVE again in $(($(on_node b "date +%s") - t0))s"
+  else
+    bad "B's DNS cache is not ACTIVE after the agent restart: $(p45_status | jq -c '{state, reason}')"
+  fi
+  wait_for 150 "the lookup loop" fails on_node b "systemctl is-active --quiet e2e-p45-loop" || true
+  lines=$(on_node b "cat /root/e2e-p45-loop.txt" 2>/dev/null || true)
+  printf 'agent restart at %s, connected at %s\n%s\n' "$t0" "$t1" "$lines" >>"$RES/$CUR.log"
+  failed=$(printf '%s\n' "$lines" | grep -c ' fail$' || true)
+  during=$(printf '%s\n' "$lines" | awk -v a="$t0" -v b="$t1" '$2 == "ok" && $1 >= a && $1 <= b' | grep -c . || true)
+  after=$(printf '%s\n' "$lines" | awk -v b="$t1" '$2 == "ok" && $1 > b' | grep -c . || true)
+  expect "lookups kept working: $(printf '%s\n' "$lines" | grep -c ' ok$' || true) answered ($during while the agent restarted, $after after), $failed failed" \
+    test "$failed" = 0 -a "$during" -ge 1 -a "$after" -ge 10
+  expect "after the restart $addr answers from the container again" p45_answers "$addr" "$P45_NAME"
+  h1=$(p45_status | jq -r .hits)
+  p45_answers "$addr" "$P45_NAME" || true
+  h2=$(p45_status | jq -r .hits)
+  expect "and counts hits again ($h1 -> $h2)" test "$h2" -gt "$h1"
+
+  # Off: it drains, the container keeps it until a redeploy, whose new container goes without it.
+  out=$(api nodes.setDnsCache "{\"nodeId\":\"$nb\",\"enabled\":false}") || bad "nodes.setDnsCache off failed"
+  expect "nodes.setDnsCache turned it off (dnsCache false)" jq_ok "$out" '.dnsCache == false'
+  wait_for 60 "B's DNS cache draining" p45_state_is draining || true
+  expect "while dnsapp still has it the cache drains (state $(p45_status | jq -r .state))" p45_state_is draining
+  expect "turning it off recreated nothing (dnsapp still runs $c)" test "$(p45_container "$svc")" = "$c"
+  expect "and the container still asks the cache" p45_answers "$addr" "$P45_NAME"
+  out=$(api deployments.deploy "{\"serviceId\":\"$svc\"}") || bad "redeploying dnsapp failed"
+  st=$(wait_deploy "$svc" 300 "$(printf '%s' "$out" | jq -r '.deployment.id // .id // empty')")
+  expect "dnsapp redeployed (status $st)" test "$st" = live
+  c2=$(p45_container "$svc")
+  expect "the redeploy made a new container ($c -> $c2)" test -n "$c2" -a "$c2" != "$c"
+  dns=$(on_node b "docker inspect -f '{{json .HostConfig.Dns}}' $c2")
+  label=$(on_node b "docker inspect -f '{{index .Config.Labels \"$SLUG.dns-cache\"}}' $c2")
+  c=$c2
+  resolv=$(p45_in "cat /etc/resolv.conf")
+  ev "after the redeploy, container $c2: HostConfig.Dns $dns, label '$label', ExtServers $(printf '%s\n' "$resolv" | sed -n 's/^# ExtServers: //p')"
+  expect "its HostConfig.Dns no longer has $addr" jq_ok "$dns" --arg a "$addr" '(. // []) | index($a) == null'
+  expect "it has no $SLUG.dns-cache label" test -z "$label"
+  expect "its ExtServers no longer have $addr" fails grep -qF "$addr" <<<"$(printf '%s\n' "$resolv" | grep '^# ExtServers')"
+  expect "its own resolver still resolves $P45_NAME" p45_answers "" "$P45_NAME"
+  wait_for 120 "B's DNS cache off" p45_state_is off || true
+  out=$(p45_status)
+  expect "with no container using it the cache is off (state $(printf '%s' "$out" | jq -r .state), containers using it: $(printf '%s' "$out" | jq -c '[.containers[] | select(.usesCache) | .name]'))" jq_ok "$out" '.state == "off"'
+  expect "and B's $SLUG-dns interface is gone" fails on_node b "ip link show $SLUG-dns"
+
+  on_node b "rm -f /root/e2e-p45-lookups.sh /root/e2e-p45-loop.txt" || true
+  delete_service e2e-dnscache dnsapp
 }
 
 main() {

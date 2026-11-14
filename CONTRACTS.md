@@ -471,10 +471,17 @@ resolved); the panel's text says so.
   address, upstreams, fallbacks, names held, totals (questions, hits,
   stale, upstream questions and failures), the last 60 one-minute
   buckets, the last test, and our running containers that can use it
-  (`uses_cache`) with the stopped ones that still use it. Not built: Release B (build workers through
-  buildkitd.toml, re-creating idle builders; Traefik), and the e2e on
-  Ubuntu 22.04/24.04 with ufw, Debian 12, Rocky 9 with firewalld and
-  Docker 28 (the VM tests ran on Ubuntu 24.04, Docker 29.5, nftables).
+  (`uses_cache`) with the stopped ones that still use it. e2e check 45
+  (`test/e2e-colima/checks.sh`, written, not run yet) turns it on for node
+  B and checks ACTIVE (or reports BLOCKED with the reason), an app's
+  `HostConfig.Dns`, label and `# ExtServers:`, answers from inside it, the
+  hit counter, lookups through an agent restart, and off plus a redeploy
+  dropping it; the e2e VMs run no ufw and no default-deny input chain, so
+  it covers the installer's ufw rules only on a B that has ufw. Not built:
+  Release B (build workers through buildkitd.toml, re-creating idle
+  builders; Traefik), and the e2e on Ubuntu 22.04/24.04 with ufw, Debian
+  12, Rocky 9 with firewalld and Docker 28 (the VM tests ran on Ubuntu
+  24.04, Docker 29.5, nftables).
 
 Find every unfinished feature with:
 

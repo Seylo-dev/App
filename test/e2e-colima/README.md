@@ -1,7 +1,7 @@
 # End-to-end harness (three VMs)
 
 `make e2e` (or `test/e2e-colima/run.sh`) builds test releases, installs Seylo on
-three VMs with the real installer and runs the 44-check checklist. Results go to
+three VMs with the real installer and runs the 45-check checklist. Results go to
 `RESULTS.md` here (PASS / FAIL / BLOCKED with evidence per check).
 
 | VM | What | Role |
@@ -42,7 +42,7 @@ test/e2e-colima/build.sh       # agents panel release git base (any subset)
 test/e2e-colima/publish.sh 0.2.1   # make a built release "latest"
 test/e2e-colima/checks.sh 7 8  # rerun some checks (make e2e-checks CHECKS="7 8")
 test/e2e-colima/refresh.sh     # put the working tree on the kept VMs (make e2e-refresh)
-test/e2e-colima/extra-installs.sh [deb] [ufw]  # install.sh on Debian 12 and on Ubuntu with ufw (not one of the 44)
+test/e2e-colima/extra-installs.sh [deb] [ufw]  # install.sh on Debian 12 and on Ubuntu with ufw (not one of the 45)
 test/e2e-colima/down.sh        # delete the VMs and ~/.cache/seylo-e2e
 ```
 
@@ -84,7 +84,7 @@ refreshed version instead of N.
   another server is refused without `--insecure`.
 - The first-run port closes 24 h after its domain is live; check 4 moves that stored time into the past
   (one SQLite write in the panel container) and waits for the panel's minute sweep to close it.
-- The default order is 1..30, 32..44, then 31.
+- The default order is 1..30, 32..45, then 31.
 - Check 3 joins C without `--yes`: the installer installs the missing Docker by itself and waits for the
   agent's first connection ("Connected: the node shows up in the panel now."). B and C join with the default
   join command, so they build images (canBuild), and check 6's inline and uploaded builds run on B, their own
@@ -131,6 +131,15 @@ refreshed version instead of N.
   reopens, `seylo panel tailscale off` / `on` remove and restore the entry. It cleans up: Serve off, IP access
   open, tailscaled removed from A and C, the Headscale nodes deleted. HTTPS mode and the real
   login.tailscale.com sign-in link stay a manual check.
+- Check 45 turns B's DNS cache on (0.2.17) and expects it ACTIVE, or reports BLOCKED with the cache's
+  reason and fix hint. A busybox app on B (`dnsapp` in `e2e-dnscache`) must get the cache first with the
+  status's fallbacks (`HostConfig.Dns`, the label, `# ExtServers:` in its resolv.conf), get answers from it
+  (its probe zone and `github.com`) and raise the hit counter on a second lookup. B's agent restarts while
+  the container looks `github.com` up twice a second through its own resolver (a `systemd-run` loop on B,
+  `e2e-p45-loop`): none may fail. Turned off, the cache drains until a redeploy of the app, whose new
+  container goes without it, then turns off and removes its interface. A, B and C run no ufw and no input
+  chain that drops by default, so the check only notes the firewall; on a B with ufw it expects the
+  installer's three rules (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 to the cache's port 53).
 - Check 31 (panel domain) runs last and puts everything back: it gives the panel a new
   `panel<time>.<A dashed>.sslip.io` name each run (so a certificate from an earlier Pebble never
   gets in the way), points A's ACME client at Pebble, adds Pebble's root (from its management port,
