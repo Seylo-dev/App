@@ -366,8 +366,13 @@ expect_fail "an answer that ends early stops with how to join by hand" "join --p
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --pin "sha256:$(printf '%064d' 1)" --binary "$T/local-binary"
 expect_ok "a join behind ufw allows 5757 from the panel's IPv4 address" \
   "+ ufw allow from 192.0.2.10 to any port 5757 proto tcp" "ufw allow <port>/tcp"
-# The node's DNS cache: containers reach it on its link-local address, port 53.
-expect_ok "a join behind ufw allows DNS to the node's DNS cache" "+ ufw allow to 169.254.53.53 port 53 comment $SLUG dns"
+# The node's DNS cache: containers reach it on its link-local address, port 53,
+# from the private ranges Docker's bridges use only.
+expect_ok "a join behind ufw allows DNS to the node's DNS cache from private ranges" \
+  "+ ufw allow from 10.0.0.0/8 to 169.254.53.53 port 53 comment $SLUG dns" \
+  "+ ufw allow from 172.16.0.0/12 to 169.254.53.53 port 53 comment $SLUG dns" \
+  "+ ufw allow from 192.168.0.0/16 to 169.254.53.53 port 53 comment $SLUG dns"
+has "ufw allow to 169.254.53.53" && flunk "the DNS cache's rule allows any source" "$OUT" || pass "no DNS cache rule for any source"
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'https://[2001:db8::7]:3443' --token t --binary "$T/local-binary"
 expect_ok "a join behind ufw allows 5757 from the panel's IPv6 address" "+ ufw allow from 2001:db8::7 to any port 5757 proto tcp"
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
@@ -607,6 +612,23 @@ expect_fail "re-running a join on a node with a newer agent stops" "this node's 
 case $(installed) in *" $NEWER "*) pass "a refused join downgrade keeps the agent" ;; *) flunk "a refused join downgrade replaced the agent" "$(installed)" ;; esac
 PRESEED=$T/seed-newer-join run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
 expect_ok "a --binary is installed as given" "Already joined to https://192.0.2.10:3443"
+# A node whose config.yml moves the cache gets the rules for its address.
+seed_node "$T/seed-dns-address" "$V" https://192.0.2.10:3443
+printf 'dns_cache_address: "169.254.20.10"\n' >>"$T/seed-dns-address$BRAND_DATA_DIR/config.yml"
+FAKE_UFW=1 PRESEED=$T/seed-dns-address run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a re-run behind ufw allows DNS to config.yml's dns_cache_address" \
+  "+ ufw allow from 10.0.0.0/8 to 169.254.20.10 port 53 comment $SLUG dns" \
+  "+ ufw allow from 192.168.0.0/16 to 169.254.20.10 port 53 comment $SLUG dns"
+has "to 169.254.53.53 port 53" && flunk "a moved cache still got the default address's rules" "$OUT" || pass "a moved cache gets no rules for the default address"
+# uninstall --purge deletes them (config.yml read before the data folder goes);
+# a plain uninstall keeps them for containers that keep running.
+PRESEED=$T/seed-dns-address run_installer none "$PLACEHOLDER_INSTALLER" uninstall --purge
+expect_ok "uninstall --purge deletes the DNS cache's ufw rules" \
+  "+ ufw delete allow from 10.0.0.0/8 to 169.254.20.10 port 53" \
+  "+ ufw delete allow from 172.16.0.0/12 to 169.254.20.10 port 53" \
+  "+ ufw delete allow from 192.168.0.0/16 to 169.254.20.10 port 53"
+PRESEED=$T/seed-dns-address run_installer none "$PLACEHOLDER_INSTALLER" uninstall
+has "ufw delete" && flunk "a plain uninstall deleted the DNS cache's rules" "$OUT" || pass "a plain uninstall keeps the DNS cache's ufw rules"
 # rerun_join <error> [<node's panel_pin> [<command's --pin>]]: the join command again on a node
 # joined to https://192.0.2.10:3443 whose seylo status says rejected with this error.
 rerun_join() {
@@ -757,7 +779,7 @@ PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --vers
 expect_ok "re-running the panel installer with the panel's id free" "Already installed"
 # An upgrade behind ufw adds the DNS cache's rule too.
 FAKE_UFW=1 PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
-expect_ok "an upgrade behind ufw allows DNS to the node's DNS cache" "Already installed" "+ ufw allow to 169.254.53.53 port 53 comment $SLUG dns"
+expect_ok "an upgrade behind ufw allows DNS to the node's DNS cache" "Already installed" "+ ufw allow from 172.16.0.0/12 to 169.254.53.53 port 53 comment $SLUG dns"
 has "the panel's user" && flunk "a free panel uid got a warning on a re-run" "$OUT" || pass "a re-run with a free panel uid gets no warning"
 rm -rf "$seed/var/lib/$SLUG/panel"
 FAKE_GETENT_passwd=olduser PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"

@@ -1199,11 +1199,14 @@ panel_ip() {
 
 # open_firewall adds the rules a node needs when ufw or firewalld is
 # active: 80 and 443 for domains, the agent's edge listener (5756) for
-# Traefik on the seylo-edge bridge, DNS to the node's DNS cache
-# (DNS_CACHE_ADDRESS port 53, UDP and TCP; harmless while the cache is off,
-# and its own address only, so it opens nothing else), and the panel's
-# port and the agents' TLS port on the panel node. firewalld needs no rule
-# for the cache: Docker's bridges are in its docker zone, which accepts.
+# Traefik on the seylo-edge bridge, DNS to the node's DNS cache (its
+# address port 53, UDP and TCP, from the private ranges Docker's bridges
+# use only, so the provider's network cannot reach it; added whatever the
+# cache's setting, which lives in the panel, and harmless while it is off:
+# nothing listens there then), and the panel's port and the agents' TLS
+# port on the panel node. firewalld needs no rule for the cache: Docker's
+# bridges are in its docker zone, which accepts. uninstall --purge deletes
+# the cache's rules (close_dns_cache_firewall).
 # Port 5757 (load balancing between nodes, mutual TLS once the panel
 # issues LB certificates) should be open between nodes only: a joining
 # node allows it from the panel's address when that is an IP, the other
@@ -1211,9 +1214,37 @@ panel_ip() {
 # (first-run access, timed expose, exposed databases) are served by the
 # agent itself, so the firewall applies to them as well.
 # DNS_CACHE_ADDRESS is the node DNS cache's default address (the agent's
-# dnscache.DefaultAddress; config.yml dns_cache_address moves it, and the
-# agent's health check then names the rule for that address).
+# dnscache.DefaultAddress; config.yml dns_cache_address moves it, see
+# dns_cache_address). DNS_CACHE_SOURCES are the ranges its rules allow
+# (dnscache.PrivateSources).
 DNS_CACHE_ADDRESS=169.254.53.53
+DNS_CACHE_SOURCES="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+
+# dns_cache_address prints the DNS cache's address: config.yml's
+# dns_cache_address on a node that set one (a re-run after the change
+# adds the rules for it; the old address's rules stay), else
+# DNS_CACHE_ADDRESS.
+dns_cache_address() {
+	a=
+	[ ! -f "$DATA/config.yml" ] || a=$(sed -n 's/^dns_cache_address: *//p' "$DATA/config.yml" | head -1 | tr -d "\"' ")
+	case $a in
+	'' | *[!0-9.]*) printf '%s\n' "$DNS_CACHE_ADDRESS" ;;
+	*) printf '%s\n' "$a" ;;
+	esac
+}
+
+# close_dns_cache_firewall deletes the DNS cache's ufw rules (uninstall
+# --purge, after which no container of ours is left to use the cache).
+# A plain uninstall keeps them: containers that keep running may still
+# ask the cache's address, and with the rule a closed port fails over at
+# once, where a dropped packet waits 4 seconds.
+close_dns_cache_firewall() {
+	command -v ufw >/dev/null 2>&1 || return 0
+	dns=$(dns_cache_address)
+	for src in $DNS_CACHE_SOURCES; do
+		run ufw delete allow from "$src" to "$dns" port 53 || true
+	done
+}
 
 open_firewall() {
 	ip=
@@ -1223,7 +1254,10 @@ open_firewall() {
 		run ufw allow 80/tcp comment "$SLUG http"
 		run ufw allow 443/tcp comment "$SLUG https"
 		run ufw allow in on "$SLUG-edge" to any port 5756 proto tcp comment "$SLUG edge"
-		run ufw allow to "$DNS_CACHE_ADDRESS" port 53 comment "$SLUG dns"
+		dns=$(dns_cache_address)
+		for src in $DNS_CACHE_SOURCES; do
+			run ufw allow from "$src" to "$dns" port 53 comment "$SLUG dns"
+		done
 		[ "$MODE" != panel ] || run ufw allow "$PORT/tcp" comment "$SLUG panel"
 		[ "$MODE" != panel ] || [ "$AGENT_TLS_PORT" = 0 ] || run ufw allow "$AGENT_TLS_PORT/tcp" comment "$SLUG agents"
 		[ -z "$ip" ] || run ufw allow from "$ip" to any port 5757 proto tcp comment "$SLUG load balancing"
@@ -1682,6 +1716,8 @@ uninstall() {
 		else
 			trace "docker rm/network rm/volume rm everything labeled $SLUG.managed=true"
 		fi
+		# Before $DATA goes: config.yml may move the cache's address.
+		close_dns_cache_firewall
 		if can_write; then rm -rf "$DATA"; else trace "rm -rf $DATA"; fi
 		# Drop-ins for our units (for example an environment override) go too.
 		if can_write; then
