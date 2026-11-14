@@ -344,7 +344,15 @@ resolved); the panel's text says so.
   subnet of the node (`Moby.BridgeSubnets`, the default bridge included;
   an unknown source lists them again, at most every 2 s) and the address
   itself. A bind that fails (another program on 0.0.0.0:53, named from
-  `ss -lunp`) or a missing `ip` is BLOCKED with the reason.
+  `ss -lunp`) or a missing `ip` is BLOCKED with the reason. After a bind
+  that failed with EADDRINUSE the agent does not bind again by itself,
+  neither on its 15 s pass nor in wiring after a restart (the file
+  `<datadir>/network/dns-cache-port-taken` keeps the reason), so when
+  that program restarts its wildcard bind still works (a specific bind
+  of ours in the gap would make it fail, and the node's own DNS with
+  it). Turning the cache on again (off, then on), Run checks now
+  (`RunHealthCheck`, `Manager.CheckByHand`; not the hourly checks or
+  troubleshoot) and the cache going fully off remove the file.
 - Cache: opcode QUERY with one question, keyed by lowercased name, type,
   class and the DO and CD bits; anything else is relayed as it is with a
   fresh id. Positive answers for their lowest TTL (at most 1 h, no floor,
@@ -390,9 +398,13 @@ resolved); the panel's text says so.
   in about 20 ms). Search domains and options are untouched. Outside
   `SpecHash`: turning it on or off recreates nothing. A deploy (a
   generation the worker has not finished, a redeploy of the same spec
-  included) creates a container again when its DNS differs from what a
-  container gets now (`worker.dnsOutdated`), so "redeploy to apply"
-  holds; a resync, Restart or the setting alone never do. Build workers
+  included) creates a container again when it lacks the cache while the
+  cache is ACTIVE, or has it while the setting is off
+  (`worker.dnsOutdated`, from `ContainerDNS.Servers` and
+  `ContainerDNS.CacheOn`), so "redeploy to apply" holds; while the
+  setting is on but the cache is STARTING (every agent start until the
+  test passed) or BLOCKED, a deploy leaves each container's DNS as it is.
+  A resync, Restart or the setting alone never recreate. Build workers
   do not get it yet (release B: buildkitd.toml `[dns]`).
 - Gate: containers get the cache only while the state is ACTIVE: on, the
   address and listener up, and the last test passed. The test
@@ -407,26 +419,45 @@ resolved); the panel's text says so.
   container and the container printed 192.0.2.53, so it proves the
   firewall path whatever the upstreams do. It runs when the setting turns
   on, again 10 minutes after a failure, hourly with the health checks and
-  on Run checks now.
+  on Run checks now (which also tries a taken port again).
 - States (`DnsCacheState`): OFF, STARTING (on, not proven yet), ACTIVE,
   BLOCKED (reason and fix hint: the port, `ip`, the test), DRAINING (off
-  while a running container carries the label: it keeps answering).
-  The listener closes and the interface goes only when no running
-  container has the label; a marker file (`<datadir>/network/
+  while a container carries the label: it keeps answering).
+  The listener closes and the interface goes only when no container
+  with the label exists, running or not (dead ones aside): an exited one
+  in a crash backoff, or one not started yet after a reboot, starts
+  again as the same container; the status lists such stopped users with
+  the running containers. A marker file (`<datadir>/network/
   dns-cache-in-use`, written while containers get it, removed after)
   brings the address and the listener up in wiring, before reconcile
   starts containers after a reboot. When the agent stops (an update) the
   address stays and the port closes: lookups fail over at once.
 - Firewall: firewalld puts Docker's bridges in its `docker` zone, which
-  accepts, so no rule. ufw with default-deny input needs `ufw allow to
-  169.254.53.53 port 53 comment "seylo dns"`, which the installer adds
-  next to the 5756 rule on install and upgrade (harmless while off). The
-  agent never edits the firewall; a failed test's hint names the ufw
-  command and the iptables rules (`-d <address> -p udp|tcp --dport 53 -j
-  ACCEPT` in INPUT). While running containers use a cache the test cannot
-  reach, the agent raises `NODE_ALERT_KIND_DNS_CACHE` with that hint once
-  and resolves it when the test passes or none uses it (the panel maps it
-  to `node_health_check_failed`); the health memory leaves
+  accepts, so no rule. ufw with default-deny input needs `ufw allow from
+  <range> to 169.254.53.53 port 53 comment "seylo dns"` for each of
+  10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16
+  (`dnscache.PrivateSources`, the ranges Docker's bridges use, so the
+  provider's network cannot reach the address), which the installer adds
+  next to the 5756 rule on install and upgrade, for config.yml's
+  `dns_cache_address` when a node set one. The installer cannot see the
+  setting (it is the panel's), so the rules exist whether the cache is on
+  or off, by design: nothing listens on the address while it is off.
+  `uninstall --purge` deletes them (`ufw delete allow from <range> to
+  <address> port 53`, after the containers, before the data folder); a
+  plain uninstall keeps them, since containers that keep running may
+  still ask the address and a closed port fails over at once where a
+  dropped packet waits 4 s. The agent never edits the firewall. The fix
+  hint follows the failure (`Report.FixHint`, the same in the health
+  check, the status and the alert): the bind's own hint for a taken port
+  or a missing `ip`, the upstream servers (`dig @<server>`) when the host
+  test gets no answer, an image to pull when no test container could
+  run, and the ufw command (a loop over the three ranges) and the
+  iptables rules (`-s <ranges> -d <address> -p udp|tcp --dport 53 -j
+  ACCEPT` in INPUT) only when a test container got no answer. While
+  containers use a cache the test cannot reach, the agent raises
+  `NODE_ALERT_KIND_DNS_CACHE` with that hint once and resolves it when
+  the test passes or none uses it (the panel maps it to
+  `node_health_check_failed`); the health memory leaves
   `docker.dnscache` to it. `--purge` uninstalls delete the interface after
   the containers; a plain uninstall leaves it.
 - Check `docker.dnscache` ("DNS cache"): skipped while off and unused
@@ -440,7 +471,7 @@ resolved); the panel's text says so.
   address, upstreams, fallbacks, names held, totals (questions, hits,
   stale, upstream questions and failures), the last 60 one-minute
   buckets, the last test, and our running containers that can use it
-  (`uses_cache`). Not built: Release B (build workers through
+  (`uses_cache`) with the stopped ones that still use it. Not built: Release B (build workers through
   buildkitd.toml, re-creating idle builders; Traefik), and the e2e on
   Ubuntu 22.04/24.04 with ufw, Debian 12, Rocky 9 with firewalld and
   Docker 28 (the VM tests ran on Ubuntu 24.04, Docker 29.5, nftables).
@@ -1338,8 +1369,8 @@ local API, join and resume. The areas:
 - Containers created while the node's DNS cache is ACTIVE carry
   `seylo.dns-cache=<address>` and `HostConfig.Dns` = the cache plus its
   fallbacks (see "Node DNS cache"); the host has a dummy interface
-  `seylo-dns` with that address while any running container carries the
-  label.
+  `seylo-dns` with that address while any container (running or
+  stopped, not dead) carries the label.
 - Every container gets `traefik.enable=false` and `--cgroup-parent=seylo.slice`
   and Docker restart policy `no`. Service containers and cron runs also
   get `--init` by their spec's `ContainerConfig.init` (since 0.2.15, see
