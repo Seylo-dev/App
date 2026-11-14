@@ -207,3 +207,83 @@ test("a 0.2.15 panel.db updates through 0021-0025 at start and keeps its rows", 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The update from 0.2.16: its panel.db has the migrations up to
+// 0025_domain_origin_unknown_since, and 0.2.17 adds 0026_node_dns_cache
+// (cut on its own branch). Its journal time must be later than 0025's (or
+// the migrator skips it, see above) and its snapshot must follow 0025's,
+// so the next `db:generate` diffs against it. Every row stays as it was,
+// and every node's DNS cache starts off.
+test("a 0.2.16 panel.db updates through 0026 at start and keeps its rows", () => {
+  const migrations = loadConfig({}, join(import.meta.dir, "..")).migrationsDir;
+  const journal = journalOf(join(migrations, "panel"));
+  const v0216Entries = journal.entries.slice(0, 26);
+  expect(v0216Entries.at(-1)?.tag).toBe("0025_domain_origin_unknown_since");
+  const next = journal.entries[26];
+  expect(next?.tag).toBe("0026_node_dns_cache");
+  expect(next?.when).toBeGreaterThan(v0216Entries.at(-1)?.when ?? Number.POSITIVE_INFINITY);
+  const snapshot = (n: string) =>
+    JSON.parse(readFileSync(join(migrations, `panel/meta/${n}_snapshot.json`), "utf8")) as { id: string; prevId: string };
+  expect(snapshot("0026").prevId).toBe(snapshot("0025").id);
+
+  const dir = mkdtempSync(join(tmpdir(), "seylo-upgrade-0216-"));
+  try {
+    // The migrations 0.2.16 shipped (0000..0025), as a migrations folder of their own.
+    const old = join(dir, "migrations-0.2.16");
+    cpSync(join(migrations, "panel"), join(old, "panel"), { recursive: true });
+    cpSync(join(migrations, "metrics"), join(old, "metrics"), { recursive: true });
+    writeFileSync(join(old, "panel/meta/_journal.json"), JSON.stringify({ ...journal, entries: v0216Entries }));
+    const files = { panelPath: join(dir, "panel.db"), metricsPath: join(dir, "metrics.db") };
+
+    const v0216 = openDatabases({ ...files, migrationsDir: old });
+    const applied = (db: typeof v0216.db) =>
+      db.all<{ created_at: number }>(sql`select created_at from __drizzle_migrations order by created_at`).map((r) => Number(r.created_at));
+    expect(applied(v0216.db)).toEqual(v0216Entries.map((e) => e.when));
+    const columns = (db: typeof v0216.db, table: string) =>
+      db.all<{ name: string }>(sql.raw(`select name from pragma_table_info('${table}')`)).map((c) => c.name);
+    expect(columns(v0216.db, "nodes")).not.toContain("dns_cache");
+    const at = 1_794_000_000_000;
+    for (const statement of [
+      `insert into users (id, email, created_at, updated_at) values ('usr000000000001', 'owner@example.test', ${at}, ${at})`,
+      `insert into projects (id, name, name_key, created_at, updated_at) values ('prj000000000001', 'acme', 'acme', ${at}, ${at})`,
+      `insert into services (id, project_id, name, name_key, kind, spec, created_at, updated_at) values ('svc000000000001', 'prj000000000001', 'api', 'api', 'app', '{}', ${at}, ${at}), ('svc000000000002', 'prj000000000001', 'db', 'db', 'postgres', '{}', ${at}, ${at})`,
+      `insert into project_prefs (user_id, project_id, collapsed, dashboard_collapsed, position, updated_at) values ('usr000000000001', 'prj000000000001', 1, 0, 0, ${at})`,
+      // Two nodes: the panel's own one with games-first CPU on, and a build node.
+      `insert into nodes (id, name, public_key, agent_version, is_panel_node, games_first_cpu, created_at, updated_at) values ('nod000000000001', 'de-fsn-1', 'example-public-key-1', '0.2.16', 1, 1, ${at}, ${at}), ('nod000000000002', 'de-fsn-2', 'example-public-key-2', '0.2.16', 0, 0, ${at + 1_000}, ${at + 1_000})`,
+      `insert into deployments (id, service_id, generation, status, trigger, image_ref, commit_sha, no_cache, move_copying, port_move, error, started_at, finished_at, created_at) values ('dep000000000001', 'svc000000000001', 7, 'live', 'push', 'registry.example.test/acme/api:7', 'b2d0f3e', 0, 0, null, null, ${at}, ${at + 42_000}, ${at})`,
+      `insert into port_exposures (id, service_id, node_id, kind, listen_port, target_port, allowed_cidrs, tls, allow_plain, created_by, created_at) values ('pex000000000001', 'svc000000000002', 'nod000000000002', 'database', 15432, 5432, '["203.0.113.0/24"]', 1, 1, 'usr000000000001', ${at})`,
+      `insert into domains (id, service_id, host, target_port, dns_status, dns_checked_at, origin_status, origin_checked_at, origin_unknown_since, cert_status, live_at, created_at, updated_at) values ('dom000000000001', 'svc000000000001', 'example.com', 3000, 'proxied', ${at}, 'unknown', ${at}, ${at - 60_000}, 'valid', ${at}, ${at}, ${at})`,
+    ])
+      v0216.db.run(sql.raw(statement));
+    const tables = ["users", "projects", "services", "project_prefs", "nodes", "deployments", "port_exposures", "domains"];
+    const dump = (db: typeof v0216.db, table: string) => db.all<Record<string, unknown>>(sql.raw(`select * from ${table} order by rowid`));
+    const before = Object.fromEntries(tables.map((table) => [table, dump(v0216.db, table)]));
+    expect(before.nodes).toHaveLength(2);
+    v0216.close();
+
+    // 0.2.17 starts on the same files.
+    const v0217 = openDatabases({ ...files, migrationsDir: migrations });
+    try {
+      expect(applied(v0217.db)).toEqual(journal.entries.map((e) => e.when));
+      for (const table of tables) {
+        const want = (before[table] ?? []).map((row) => (table === "nodes" ? { ...row, dns_cache: 0 } : row));
+        expect({ table, rows: dump(v0217.db, table) }).toEqual({ table, rows: want });
+      }
+      expect(
+        v0217.db.select({ id: schema.nodes.id, dnsCache: schema.nodes.dnsCache }).from(schema.nodes).orderBy(asc(schema.nodes.id)).all(),
+      ).toEqual([
+        { id: "nod000000000001", dnsCache: false },
+        { id: "nod000000000002", dnsCache: false },
+      ]);
+      expect(v0217.db.all(sql`pragma foreign_key_check`)).toEqual([]);
+    } finally {
+      v0217.close();
+    }
+
+    const again = openDatabases({ ...files, migrationsDir: migrations });
+    expect(applied(again.db)).toHaveLength(journal.entries.length);
+    again.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
