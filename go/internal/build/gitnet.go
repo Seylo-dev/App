@@ -22,6 +22,15 @@ import (
 // connections. Everything else keeps ErrFetch's "check the address, the
 // branch and the credentials".
 //
+// Two network failures are what a wrong address gives as well: a name
+// that does not exist (Go's "no such host", "Name or service not known",
+// and curl's "Could not resolve host", which does not tell it from a DNS
+// server that did not answer) and a refused connection (a wrong port).
+// Their message asks to check the address first, then names the Health
+// check (GitNetworkError.MaybeAddress); only the others (timeouts, a DNS
+// server that failed, no route, a reset, a proxy's error, TLS) say "not
+// the address".
+//
 // The first error is the fetch proxy's when it could not connect (it
 // records that, gitProxy.connFailed: "dial tcp 192.0.2.10:443: i/o
 // timeout", "dial tcp: lookup github.com ...: server misbehaving", the
@@ -61,6 +70,10 @@ func (k GitNetworkKind) String() string {
 // errors.Is(err, ErrFetch) holds.
 type GitNetworkError struct {
 	Kind GitNetworkKind
+	// MaybeAddress: a failure a wrong address gives as well (a name that
+	// does not exist, a refused connection), so the message asks to
+	// check the address before the node's Health check.
+	MaybeAddress bool
 	// Target is what the node tried: host:port, or the host for a name
 	// that did not resolve.
 	Target string
@@ -88,15 +101,19 @@ func (e *GitNetworkError) Error() string {
 	default:
 		what = "could not connect to " + e.Target
 	}
-	problem := "a network problem on the node"
-	if e.Kind == GitTLS {
-		problem += " (or a certificate it does not trust)"
-	}
 	exit := ""
 	if e.Exit != "" {
 		exit = " (" + e.Exit + ")"
 	}
-	return fmt.Sprintf("%s: %s %s - %s, not the address, the branch or the credentials: %s%s. %s",
+	if e.MaybeAddress {
+		return fmt.Sprintf("%s: %s %s - check the address: %s%s. %s the node's %s",
+			ErrFetch, node, what, e.Line, exit, gitAddressRight, gitHealthHint)
+	}
+	problem := "a network problem on the node"
+	if e.Kind == GitTLS {
+		problem += " (or a certificate it does not trust)"
+	}
+	return fmt.Sprintf("%s: %s %s - %s, not the address, the branch or the credentials: %s%s. The node's %s",
 		ErrFetch, node, what, problem, e.Line, exit, gitHealthHint)
 }
 
@@ -104,8 +121,13 @@ func (e *GitNetworkError) Error() string {
 func (e *GitNetworkError) Is(target error) bool { return target == ErrFetch }
 
 // gitHealthHint points at the node check that tests what such a fetch
-// needs (nodecheck's DNS resolution, Container DNS and Panel connection).
-const gitHealthHint = "The node's Health check (its Health tab, or `" + brand.Slug + " health` on the node) tests its DNS and connections"
+// needs (nodecheck's DNS resolution, Container DNS and Panel connection),
+// after "the node's".
+const gitHealthHint = "Health check (its Health tab, or `" + brand.Slug + " health` on the node) tests its DNS and connections"
+
+// gitAddressRight leads the Health check in a MaybeAddress message; the
+// web app's hint looks for it (private-repo-hint.tsx).
+const gitAddressRight = "If the address is right,"
 
 // NameNode puts the node's name into a GitNetworkError in err.
 func NameNode(err error, name string) {
@@ -153,6 +175,18 @@ var gitNetPatterns = []gitNetPattern{
 		`Couldn't connect to server|i/o timeout|Empty reply from server|Recv failure|Send failure|RPC failed; curl (?:7|28|52|55|56) |the git server could not be reached`)},
 }
 
+// addressLikeRe is a failure a wrong address gives as well: a name that
+// does not exist (Go, getaddrinfo's EAI_NONAME and EAI_NODATA on Linux
+// and macOS, curl's "Could not resolve host", which says the same for a
+// DNS server that did not answer) or a refused connection (curl 8 says
+// "Couldn't connect to server" for that, and for a timeout).
+var addressLikeRe = regexp.MustCompile(`(?i)no such host|Name or service not known|nodename nor servname provided|No address associated with hostname|` +
+	`Could not resolve host:|Connection refused|Couldn't connect to server`)
+
+// viaProxyRe is a failure on the way to or through a proxy, the node's
+// own setting: never the address, whatever the proxy's error says.
+var viaProxyRe = regexp.MustCompile(`the agent's proxy|Could not resolve proxy|from proxy after CONNECT|CONNECT tunnel failed|Proxy CONNECT aborted`)
+
 // accessRe is git's "unable to access '<url>'": the address it tried
 // when the error line names no host.
 var accessRe = regexp.MustCompile(`unable to access '([^']+)'`)
@@ -161,9 +195,10 @@ var accessRe = regexp.MustCompile(`unable to access '([^']+)'`)
 var userinfoRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s']+@`)
 
 // classifyGitNetwork reads one failure, the fetch proxy's or git's
-// stderr: the first line that names a network failure, what kind, and
-// the host it names (else the one git's "unable to access" names, else
-// fallback, the source's host:port). nil when no line does.
+// stderr: the first line that names a network failure, what kind, whether
+// a wrong address gives it as well (addressLikeRe), and the host it names
+// (else the one git's "unable to access" names, else fallback, the
+// source's host:port). nil when no line does.
 func classifyGitNetwork(text, fallback string) *GitNetworkError {
 	var access string
 	if m := accessRe.FindStringSubmatch(text); m != nil {
@@ -200,7 +235,8 @@ func classifyGitNetwork(text, fallback string) *GitNetworkError {
 					target = host
 				}
 			}
-			return &GitNetworkError{Kind: p.kind, Target: target, Line: cleanGitLine(line)}
+			maybeAddress := (p.kind == GitDNS || p.kind == GitConnect) && addressLikeRe.MatchString(line) && !viaProxyRe.MatchString(line)
+			return &GitNetworkError{Kind: p.kind, MaybeAddress: maybeAddress, Target: target, Line: cleanGitLine(line)}
 		}
 	}
 	return nil

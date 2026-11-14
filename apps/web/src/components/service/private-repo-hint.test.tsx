@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { auth } from "@seylo/ops";
 import { type Answer, renderStatic } from "../../test/render";
 import type { Deployment } from "./deploy-steps";
-import { CloneNetworkHint, cloneNetworkFailed, gitUrlHost, PrivateRepoHint, privateRepoProvider } from "./private-repo-hint";
+import { CloneNetworkHint, cloneNetworkFailure, gitUrlHost, PrivateRepoHint, privateRepoProvider } from "./private-repo-hint";
 import type { ServiceDetail } from "./use-service";
 
 const cloneFailed = {
@@ -105,7 +105,7 @@ const viewer = (role: "owner" | "admin" | "member"): Answer => [
 ];
 
 test("a clone that failed on the node's network: no private-repo hint, the node's Health check instead", async () => {
-  expect(cloneNetworkFailed(cloneNetwork)).toBe(true);
+  expect(cloneNetworkFailure(cloneNetwork)).toBe("network");
   expect(privateRepoProvider(cloneNetwork, git("https://github.com/acme/private-api.git"))).toBeNull();
   for (const role of ["owner", "admin"] as const) {
     const out = await renderStatic(() => <CloneNetworkHint d={cloneNetwork} />, [viewer(role)]);
@@ -124,7 +124,7 @@ test("a clone that failed on the node's network: no private-repo hint, the node'
 
 test("the network hint shows only for a clone that failed on the network", async () => {
   // The private-repo case and every other failure keep their own hint, or none.
-  expect(cloneNetworkFailed(cloneFailed)).toBe(false);
+  expect(cloneNetworkFailure(cloneFailed)).toBeNull();
   const privateOut = await renderStatic(() => <CloneNetworkHint d={{ ...cloneFailed, builtOn: de }} />, [viewer("owner")]);
   expect(privateOut).not.toContain("clone-network-hint");
   const built = {
@@ -134,6 +134,43 @@ test("the network hint shows only for a clone that failed on the network", async
       { ...cloneNetwork.steps[1], status: "failed" },
     ],
   } as typeof cloneNetwork;
-  expect(cloneNetworkFailed(built)).toBe(false);
-  expect(cloneNetworkFailed({ ...cloneNetwork, status: "cancelled" as never })).toBe(false);
+  expect(cloneNetworkFailure(built)).toBeNull();
+  expect(cloneNetworkFailure({ ...cloneNetwork, status: "cancelled" as never })).toBeNull();
+});
+
+// A name that does not exist or a refused connection (GitNetworkError.MaybeAddress): a mistyped host or a wrong
+// port gives it as well, so the agent asks to check the address first, and so does the hint, never "not the
+// repository's address".
+const typoError =
+  "fetching the source failed: node de-fsn-1 could not resolve gihub.com - check the address: dial tcp: lookup gihub.com: no such host " +
+  "(git exited with code 128). If the address is right, the node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
+const refusedError =
+  "fetching the source failed: node de-fsn-1 could not connect to github.com:443 - check the address: dial tcp 140.82.121.4:443: connect: connection refused " +
+  "(git exited with code 128). If the address is right, the node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
+const failedWith = (message: string) => ({
+  ...cloneNetwork,
+  error: `The build failed: ${message}`,
+  steps: cloneNetwork.steps.map((s) => (s.key === "clone" ? { ...s, detail: message } : s)),
+});
+
+test("a clone a wrong address may have failed: check the address, then the node's Health check", async () => {
+  for (const message of [typoError, refusedError]) {
+    const d = failedWith(message);
+    expect(cloneNetworkFailure(d)).toBe("address");
+    // A refused connection to github.com is no private repository either.
+    expect(privateRepoProvider(d, git("https://github.com/acme/private-api.git"))).toBeNull();
+    const out = await renderStatic(() => <CloneNetworkHint d={d} />, [viewer("owner")]);
+    expect(out).toContain('data-slot="clone-network-hint"');
+    expect(out).toContain(
+      "The clone could not reach the repository&#x27;s host from de-fsn-1. Check the address; if it is right, the node&#x27;s ",
+    );
+    expect(out).toMatch(/<a [^>]*href="\/nodes\?node=nodedefsn1000001&amp;view=health"[^>]*>Health check<\/a>/);
+    expect(out).toContain(" tests its DNS and connections.");
+    expect(out).not.toContain("not the repository");
+    const member = await renderStatic(() => <CloneNetworkHint d={d} />, [viewer("member")]);
+    expect(member).toContain(
+      "The clone could not reach the repository&#x27;s host from de-fsn-1. Check the address; if it is right, an admin can run the node&#x27;s Health check.",
+    );
+    expect(member).not.toContain("<a ");
+  }
 });

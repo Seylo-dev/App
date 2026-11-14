@@ -607,17 +607,33 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (TLS: or a certificate it does not trust), not the address, the branch
   or the credentials: <first error line> (<git's exit>). The node's
   Health check (its Health tab, or `seylo health` on the node) tests its
-  DNS and connections". The first error line is the proxy's error, else
-  git's line, with any `user:password@` in an address replaced by
-  `***@`, at most 300 bytes; the host is the one git asked the proxy for
-  (not the address it resolved to), else the one the line names, else the
-  source's. The node's name is its panel name from the desired state's
+  DNS and connections". Two of them a wrong address gives as well
+  (`GitNetworkError.MaybeAddress`): a name that does not exist (Go's "no
+  such host", getaddrinfo's "Name or service not known", "nodename nor
+  servname provided", "No address associated with hostname", and curl's
+  "Could not resolve host", which says the same for a DNS server that did
+  not answer) and a refused connection ("Connection refused", curl 8's
+  "Couldn't connect to server"), unless the line is about a proxy (the
+  agent's, "Could not resolve proxy", a CONNECT error). Their message asks
+  for the address first and never says "not the address": "fetching the
+  source failed: node <name> could not resolve <host> (could not connect
+  to <host:port>) - check the address: <first error line> (<git's exit>).
+  If the address is right, the node's Health check (its Health tab, or
+  `seylo health` on the node) tests its DNS and connections". Timeouts, a
+  DNS server that failed ("server misbehaving", "Temporary failure in name
+  resolution", a lookup that timed out), no route, a reset, a proxy's
+  error and TLS keep "not the address". The first error line is the
+  proxy's error, else git's line, with any `user:password@` in an address
+  replaced by `***@`, at most 300 bytes; the host is the one git asked the
+  proxy for (not the address it resolved to), else the one the line names,
+  else the source's. The node's name is its panel name from the desired state's
   node settings (`build.Options.NodeName`; "this node" before the first
   desired state). It applies to build clones (fetch, the commit-by-id
   retry, which a network failure skips, checkout, submodules) and to
   FetchGitFile. Wrong credentials, a missing branch, commit or repository
-  and a refused address keep their messages. The web app shows such a
-  deploy with `CloneNetworkHint` (below), never the private-repo hint.
+  and an address the fetch's policy refused keep their messages. The web
+  app shows such a deploy with `CloneNetworkHint` (below), never the
+  private-repo hint.
 - `WatchMetricsRequest.light` and `lease` (added after 0.2.4, no new
   capability: WatchMetrics is `metrics.read.v1`): `light` asks for node
   samples with only CPU, memory and the network counters (no disks, load
@@ -6702,7 +6718,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   Its Health check tests the node's DNS and connections.", <node> the
   clone step's node (else `builtOn`), "Health check" a link to
   `/nodes?node=<id>&view=health` for owners and admins; members (no Nodes
-  page) read that an admin can run the node's Health check.
+  page) read that an admin can run the node's Health check. One a wrong
+  address gives as well (a name that does not exist, a refused
+  connection: the agent's "If the address is right, the node's Health
+  check", `GitNetworkError.MaybeAddress`) gets it too, worded with the
+  address first: "The clone could not reach the repository's host from
+  <node>. Check the address; if it is right, the node's Health check
+  tests its DNS and connections." (members: "..., an admin can run the
+  node's Health check."), and no private-repo hint either
+  (`cloneNetworkFailure`: "network", "address" or null).
 - New app source tabs (0.2.2, `components/new-service/`): Docker image |
   GitHub | Git repository | Set up later, under a visible Source label (the
   track hugs its items and scrolls sideways on a phone, as every kit

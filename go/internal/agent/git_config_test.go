@@ -115,7 +115,8 @@ func TestGitProxyResolvesFromConfig(t *testing.T) {
 
 // A fetch that fails on the node's network names the node as the panel
 // does, also after a rename, and points at its Health check, not at the
-// credentials.
+// credentials (a refused connection, which a wrong port gives too: the
+// address first).
 func TestGitNetworkFailureNamesTheNode(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -156,8 +157,8 @@ func TestGitNetworkFailureNamesTheNode(t *testing.T) {
 			who = "node " + name
 		}
 		err := fetch()
-		if err == nil || !strings.Contains(err.Error(), who+" could not connect to "+closed+" - a network problem on the node, not the address, the branch or the credentials") ||
-			!strings.Contains(err.Error(), "Health check") {
+		if err == nil || !strings.Contains(err.Error(), who+" could not connect to "+closed+" - check the address: dial tcp "+closed+": connect: connection refused") ||
+			!strings.Contains(err.Error(), "If the address is right, the node's Health check") || strings.Contains(err.Error(), "the credentials") {
 			t.Fatalf("named %q: %v", name, err)
 		}
 	}

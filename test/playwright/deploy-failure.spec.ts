@@ -9,7 +9,8 @@
 // and tunnel on the old main port follow a port typed in (with the next
 // deploy when a version is live, else on save). A clone that failed on
 // the node's network (0.2.17) names the node and links its Health check
-// instead of the private-repo hint. Screenshots go to
+// instead of the private-repo hint; one a wrong address gives as well (a
+// refused connection) asks to check the address first. Screenshots go to
 // $SHOTS_DIR/deploy-failure.
 
 import { mkdirSync } from "node:fs";
@@ -196,19 +197,23 @@ const networkError =
   "fetching the source failed: node de-fsn-1 could not connect to github.com:443 - a network problem on the node, not the address, " +
   "the branch or the credentials: dial tcp 140.82.121.4:443: i/o timeout (git exited with code 128). " +
   "The node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
-const networkDeploy = {
-  ...privateApiDeploy,
-  error: `The build failed: ${networkError}`,
-  steps: privateApiDeploy.steps.map((s) => (s.key === "clone" ? { ...s, detail: networkError } : s)),
+/** private-api's only deploy, its clone failed with the agent's message. */
+const cloneFailedWith = (message: string) => {
+  const deploy = {
+    ...privateApiDeploy,
+    error: `The build failed: ${message}`,
+    steps: privateApiDeploy.steps.map((s) => (s.key === "clone" ? { ...s, detail: message } : s)),
+  };
+  return {
+    "deployments.list": (input: Input) =>
+      input.serviceId === svc.privateApi
+        ? { deployments: input.active === true || input.active === "true" ? [] : [deploy], nextCursor: null, keptImages: 0 }
+        : handlers["deployments.list"]?.(input),
+    "deployments.get": (input: Input) =>
+      input.deploymentId === deploy.id ? { deployment: deploy, logTopic: `deployment:${input.deploymentId}` } : handlers["deployments.get"]?.(input),
+  };
 };
-const networkFailed = {
-  "deployments.list": (input: Input) =>
-    input.serviceId === svc.privateApi
-      ? { deployments: input.active === true || input.active === "true" ? [] : [networkDeploy], nextCursor: null, keptImages: 0 }
-      : handlers["deployments.list"]?.(input),
-  "deployments.get": (input: Input) =>
-    input.deploymentId === networkDeploy.id ? { deployment: networkDeploy, logTopic: `deployment:${input.deploymentId}` } : handlers["deployments.get"]?.(input),
-};
+const networkFailed = cloneFailedWith(networkError);
 
 test("a clone that failed on the node's network names the node and links its Health check, not the private-repo hint", async ({ page }) => {
   await installDemo(page, { overrides: networkFailed });
@@ -226,6 +231,25 @@ test("a clone that failed on the node's network names the node and links its Hea
   await expect(history.locator('[data-slot="clone-network-hint"]')).toHaveText(hintText);
   await expect(history.locator('[data-slot="private-repo-hint"]')).toHaveCount(0);
   await page.screenshot({ path: `${shots}/clone-network-deployments.png` });
+  await history.getByRole("link", { name: "Health check" }).click();
+  await expect(page).toHaveURL(new RegExp(`/nodes\\?node=${ids.de}&view=health$`));
+});
+
+/** A refused connection, which a wrong port gives as well (GitNetworkError.MaybeAddress): the address first. */
+const refusedError =
+  "fetching the source failed: node de-fsn-1 could not connect to github.com:443 - check the address: dial tcp 140.82.121.4:443: connect: connection refused " +
+  "(git exited with code 128). If the address is right, the node's Health check (its Health tab, or `seylo health` on the node) tests its DNS and connections";
+
+test("a clone a wrong address may have failed asks to check the address, then links the node's Health check", async ({ page }) => {
+  await installDemo(page, { overrides: cloneFailedWith(refusedError) });
+  const hintText =
+    "The clone could not reach the repository's host from de-fsn-1. Check the address; if it is right, the node's Health check tests its DNS and connections.";
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}/deployments`);
+  const history = page.getByRole("region", { name: "History" });
+  await expect(history.getByText("connect: connection refused", { exact: false })).toBeVisible();
+  await expect(history.locator('[data-slot="clone-network-hint"]')).toHaveText(hintText);
+  await expect(history.locator('[data-slot="private-repo-hint"]')).toHaveCount(0);
+  await page.screenshot({ path: `${shots}/clone-address-deployments.png` });
   await history.getByRole("link", { name: "Health check" }).click();
   await expect(page).toHaveURL(new RegExp(`/nodes\\?node=${ids.de}&view=health$`));
 });
