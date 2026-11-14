@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,8 +41,9 @@ var gitStderrSamples = []struct {
 	{name: "ssh refused", kind: GitConnect, target: "github.com:22",
 		text: "ssh: connect to host github.com port 22: Connection refused\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n",
 		line: "ssh: connect to host github.com port 22: Connection refused"},
-	{name: "git-dial through the fetch proxy (ssh)", kind: GitConnect, target: "github.com:443",
-		text: "the git server could not be reached\nConnection closed by UNKNOWN port 65535\nfatal: Could not read from remote repository.\n",
+	{name: "ssh through git-dial and the fetch proxy (here)", kind: GitConnect, target: "github.com:443",
+		text: "the git server could not be reached\ngit-dial: 502 Bad Gateway\nConnection closed by UNKNOWN port 65535\nfatal: Could not read from remote repository.\n\n" +
+			"Please make sure you have the correct access rights\nand the repository exists.\n",
 		line: "the git server could not be reached"},
 	{name: "the fetch proxy timed out", kind: GitConnect, target: "140.82.121.4:443",
 		text: "dial tcp 140.82.121.4:443: i/o timeout", line: "dial tcp 140.82.121.4:443: i/o timeout"},
@@ -176,13 +178,13 @@ func closedPort(t *testing.T) string {
 // git's. A wrong token and a missing branch keep today's message.
 func TestGitNetworkFailures(t *testing.T) {
 	setProxyEnv(t, "", "", "")
-	fetch := func(t *testing.T, run Runner, src *agentv1.GitSource) (error, string) {
+	fetch := func(t *testing.T, run Runner, src *agentv1.GitSource) (string, error) {
 		t.Helper()
 		work := t.TempDir()
 		var log bytes.Buffer
 		_, err := fetchGit(context.Background(), run, &log, src, filepath.Join(work, "src"), work, false)
 		t.Logf("%v\n%s", err, log.String())
-		return err, log.String()
+		return log.String(), err
 	}
 	asNetwork := func(t *testing.T, err error, kind GitNetworkKind, target, line string) {
 		t.Helper()
@@ -200,7 +202,7 @@ func TestGitNetworkFailures(t *testing.T) {
 
 	t.Run("connection refused", func(t *testing.T) {
 		port := closedPort(t)
-		err, log := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "https://127.0.0.1:" + port + "/acme/api.git", Ref: "main", AllowInternalHost: true})
+		log, err := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "https://127.0.0.1:" + port + "/acme/api.git", Ref: "main", AllowInternalHost: true})
 		asNetwork(t, err, GitConnect, "127.0.0.1:"+port, "dial tcp 127.0.0.1:"+port+": connect: connection refused")
 		// git itself only saw the proxy's 502; the log has why, first.
 		proxyLine := strings.Index(log, "The git connection to 127.0.0.1:"+port+" failed: dial tcp")
@@ -223,21 +225,37 @@ func TestGitNetworkFailures(t *testing.T) {
 		if addrs, err := net.DefaultResolver.LookupHost(context.Background(), "nonexistent.invalid"); err == nil {
 			t.Skipf("this machine's DNS answers for .invalid: %v", addrs)
 		}
-		err, _ := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "https://nonexistent.invalid/acme/api.git", Ref: "main"})
+		_, err := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "https://nonexistent.invalid/acme/api.git", Ref: "main"})
 		asNetwork(t, err, GitDNS, "nonexistent.invalid", "lookup nonexistent.invalid")
+	})
+
+	// ssh's ProxyCommand (git-dial, this test binary: TestMain) asks the
+	// same proxy, which records the connection; git only says it could not
+	// read from the remote repository.
+	t.Run("ssh through git-dial, connection refused", func(t *testing.T) {
+		if _, err := exec.LookPath("ssh"); err != nil {
+			t.Skip("ssh is not installed")
+		}
+		port := closedPort(t)
+		log, err := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "ssh://git@127.0.0.1:" + port + "/acme/api.git", Ref: "main", AllowInternalHost: true,
+			SshPrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----", SshKnownHosts: "[127.0.0.1]:" + port + " ssh-ed25519 AAAA"})
+		asNetwork(t, err, GitConnect, "127.0.0.1:"+port, "dial tcp 127.0.0.1:"+port+": connect: connection refused")
+		if !strings.Contains(log, "the git server could not be reached") {
+			t.Fatalf("git-dial's line is not in the log:\n%s", log)
+		}
 	})
 
 	t.Run("the agent's proxy answers 502", func(t *testing.T) {
 		nodeDNS(t, map[string]string{"git.proxied.test": "93.184.216.34"})
 		up := startFakeUpstream(t, map[string]string{"git.proxied.test:443": "127.0.0.1:" + closedPort(t)}, false)
 		setProxyEnv(t, "http://"+up.addr, "", "")
-		err, _ := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "https://git.proxied.test/acme/api.git", Ref: "main"})
+		_, err := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "https://git.proxied.test/acme/api.git", Ref: "main"})
 		asNetwork(t, err, GitProxy, "git.proxied.test:443", "through the agent's proxy http://"+up.addr+": the proxy answered 502 Bad Gateway")
 	})
 
 	t.Run("a certificate the node does not trust", func(t *testing.T) {
 		srv, _ := testTLSServer(t, http.NotFoundHandler())
-		err, _ := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: srv.URL + "/repo.git", Ref: "main", AllowInternalHost: true})
+		_, err := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: srv.URL + "/repo.git", Ref: "main", AllowInternalHost: true})
 		var ne *GitNetworkError
 		if !errors.As(err, &ne) {
 			t.Fatalf("not a network failure: %v", err)
@@ -252,7 +270,7 @@ func TestGitNetworkFailures(t *testing.T) {
 			{Url: private, Ref: "main", Token: "wrong", AllowInternalHost: true},
 			{Url: public, Ref: "mian", AllowInternalHost: true},
 		} {
-			err, _ := fetch(t, run, src)
+			_, err := fetch(t, run, src)
 			var ne *GitNetworkError
 			if errors.As(err, &ne) || !errors.Is(err, ErrFetch) ||
 				!strings.Contains(err.Error(), "could not fetch "+src.GetRef()+" - check the address, the branch and the credentials") {
