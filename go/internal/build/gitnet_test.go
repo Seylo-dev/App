@@ -362,7 +362,7 @@ func TestGitNetworkFailures(t *testing.T) {
 		}
 		port := closedPort(t)
 		log, err := fetch(t, ExecRunner{}, &agentv1.GitSource{Url: "ssh://git@127.0.0.1:" + port + "/acme/api.git", Ref: "main", AllowInternalHost: true,
-			SshPrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----", SshKnownHosts: "[127.0.0.1]:" + port + " ssh-ed25519 AAAA"})
+			SshPrivateKey: "placeholder: ssh warns about a key it cannot load and connects anyway", SshKnownHosts: "[127.0.0.1]:" + port + " ssh-ed25519 AAAA"})
 		asNetwork(t, err, GitConnect, true, "127.0.0.1:"+port, "dial tcp 127.0.0.1:"+port+": connect: connection refused")
 		if !strings.Contains(log, "the git server could not be reached") {
 			t.Fatalf("git-dial's line is not in the log:\n%s", log)
