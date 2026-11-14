@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -54,7 +55,7 @@ type ProbeFunc func(ctx context.Context, addr netip.Addr, zone string) (runs []P
 // ManagerOptions configure the Manager. Every func may be nil in tests.
 type ManagerOptions struct {
 	// Address is the cache's address (DefaultAddress unless config.yml
-	// says otherwise); Port 0 means 53.
+	// says otherwise); Port 0 means 53, below 0 any free port (tests).
 	Address netip.Addr
 	Port    int
 	Link    Link
@@ -97,6 +98,9 @@ type Manager struct {
 	opts ManagerOptions
 	srv  *Server
 	wake chan struct{}
+	// port is the listener's port: opts.Port, or what a free-port bind
+	// got (tests).
+	port atomic.Int32
 
 	checkMu sync.Mutex // one test at a time
 
@@ -150,6 +154,7 @@ func NewManager(opts ManagerOptions) *Manager {
 		opts.RetryCheck = 10 * time.Minute
 	}
 	m := &Manager{opts: opts, wake: make(chan struct{}, 1)}
+	m.port.Store(int32(max(opts.Port, 0)))
 	m.srv = NewServer(ServerOptions{
 		Upstreams: func() []string {
 			m.mu.Lock()
@@ -290,19 +295,20 @@ func (m *Manager) up(ctx context.Context) {
 	}
 	udp, tcp, err := m.listen()
 	if err != nil {
-		reason := fmt.Sprintf("the cache cannot listen on %s: %v", net.JoinHostPort(m.opts.Address.String(), fmt.Sprint(m.opts.Port)), err)
+		port := m.port.Load()
+		reason := fmt.Sprintf("the cache cannot listen on %s: %v", net.JoinHostPort(m.opts.Address.String(), fmt.Sprint(port)), err)
 		hint := ""
 		if errors.Is(err, syscall.EADDRINUSE) {
 			holder := ""
 			if m.opts.Holder != nil {
-				holder = m.opts.Holder(ctx, m.opts.Port)
+				holder = m.opts.Holder(ctx, int(port))
 			}
 			if holder != "" {
-				reason = fmt.Sprintf("%s holds port %d on every address, so the cache cannot listen on %s", holder, m.opts.Port, m.opts.Address)
+				reason = fmt.Sprintf("%s holds port %d on every address, so the cache cannot listen on %s", holder, port, m.opts.Address)
 			} else {
-				reason = fmt.Sprintf("another program holds port %d on every address, so the cache cannot listen on %s", m.opts.Port, m.opts.Address)
+				reason = fmt.Sprintf("another program holds port %d on every address, so the cache cannot listen on %s", port, m.opts.Address)
 			}
-			hint = fmt.Sprintf("Make that program listen on the addresses it needs only (for dnsmasq: bind-interfaces with listen-address), or leave the DNS cache off on this node. `ss -lunp 'sport = :%d'` shows who holds the port.", m.opts.Port)
+			hint = fmt.Sprintf("Make that program listen on the addresses it needs only (for dnsmasq: bind-interfaces with listen-address), or leave the DNS cache off on this node. `ss -lunp 'sport = :%d'` shows who holds the port.", port)
 		}
 		m.setBlocked(reason, hint)
 		return
@@ -313,7 +319,7 @@ func (m *Manager) up(ctx context.Context) {
 	m.listening, m.stopServe, m.served = true, cancel, done
 	m.mu.Unlock()
 	m.setBlocked("", "")
-	m.opts.Logger.Info("DNS cache listening", "address", m.opts.Address.String(), "port", m.opts.Port)
+	m.opts.Logger.Info("DNS cache listening", "address", m.opts.Address.String(), "port", m.port.Load())
 	go func() {
 		defer close(done)
 		err := m.srv.Serve(serveCtx, udp, tcp)
@@ -331,16 +337,28 @@ func (m *Manager) up(ctx context.Context) {
 
 func (m *Manager) listen() (*net.UDPConn, *net.TCPListener, error) {
 	ip := net.IP(m.opts.Address.AsSlice())
-	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: m.opts.Port})
-	if err != nil {
-		return nil, nil, err
+	tries := 1
+	if m.opts.Port < 0 {
+		// Any free port (tests): UDP picks it, TCP may find it taken.
+		tries = 20
 	}
-	tcp, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: ip, Port: m.opts.Port})
-	if err != nil {
+	var err error
+	for range tries {
+		var udp *net.UDPConn
+		udp, err = net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: max(m.opts.Port, 0)})
+		if err != nil {
+			return nil, nil, err
+		}
+		port := udp.LocalAddr().(*net.UDPAddr).Port
+		var tcp *net.TCPListener
+		tcp, err = net.ListenTCP("tcp4", &net.TCPAddr{IP: ip, Port: port})
+		if err == nil {
+			m.port.Store(int32(port))
+			return udp, tcp, nil
+		}
 		_ = udp.Close()
-		return nil, nil, err
 	}
-	return udp, tcp, nil
+	return nil, nil, err
 }
 
 func (m *Manager) setBlocked(reason, hint string) {
@@ -611,7 +629,7 @@ func (m *Manager) hostTest(ctx context.Context) (name, failure string) {
 	if len(names) == 0 {
 		names = []string{"github.com"}
 	}
-	addr := net.JoinHostPort(m.opts.Address.String(), fmt.Sprint(m.opts.Port))
+	addr := net.JoinHostPort(m.opts.Address.String(), fmt.Sprint(m.port.Load()))
 	var last string
 	for _, n := range names {
 		err := askOnce(ctx, addr, n)

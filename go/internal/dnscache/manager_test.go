@@ -37,23 +37,18 @@ type managerRig struct {
 
 var loopback = netip.MustParseAddr("127.0.0.1")
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := pc.LocalAddr().(*net.UDPAddr).Port
-	_ = pc.Close()
-	return port
+func newManagerRig(t *testing.T) *managerRig {
+	return newManagerRigOn(t, -1)
 }
 
-func newManagerRig(t *testing.T) *managerRig {
+// newManagerRigOn listens on port (below 0: any free one, so parallel
+// test runs never meet).
+func newManagerRigOn(t *testing.T, port int) *managerRig {
 	t.Helper()
 	r := &managerRig{t: t, ip: &fakeIP{}, up: newFakeUpstream(t), probeOK: true, marker: filepath.Join(t.TempDir(), "dns-cache-in-use")}
 	r.m = NewManager(ManagerOptions{
 		Address: loopback,
-		Port:    freePort(t),
+		Port:    port,
 		Link:    Link{Run: r.ip.run},
 		Subnets: func(context.Context) ([]netip.Prefix, error) {
 			return []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16")}, nil
@@ -239,6 +234,9 @@ func TestManagerDrainsBeforeRemovingTheAddress(t *testing.T) {
 	defer r.m.closeListener()
 	r.m.SetEnabled(true)
 	r.m.step(ctx)
+	if st := r.m.Status(ctx); st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_ACTIVE {
+		t.Fatalf("on: %s %s", st.GetState(), st.GetReason())
+	}
 	r.setContainers(Container{Name: "seylo-web-1", UsesCache: true}, Container{Name: "seylo-cron-1", Kind: "cron"})
 
 	r.m.SetEnabled(false)
@@ -280,13 +278,13 @@ func TestManagerPrepareFromMarker(t *testing.T) {
 
 // Another program on the port: BLOCKED with its name, nothing handed out.
 func TestManagerPortTaken(t *testing.T) {
-	r := newManagerRig(t)
-	ctx := context.Background()
-	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: r.m.opts.Port})
+	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer holder.Close()
+	r := newManagerRigOn(t, holder.LocalAddr().(*net.UDPAddr).Port)
+	ctx := context.Background()
 	r.m.opts.Holder = func(context.Context, int) string { return "dnsmasq" }
 	r.m.SetEnabled(true)
 	r.m.step(ctx)

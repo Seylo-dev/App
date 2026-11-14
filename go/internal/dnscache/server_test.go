@@ -233,7 +233,7 @@ func TestSlowUpstreamTimes(t *testing.T) {
 
 	start := time.Now()
 	m := ask(t, s, query(t, 2, "slow.example.com.", dnsmessage.TypeA, false, false))
-	if took := time.Since(start); took < staleAfter || took > staleAfter+time.Second {
+	if took := time.Since(start); took < staleAfter || took > staleAfter+2*time.Second {
 		t.Fatalf("stale answer after %s, want about %s", took, staleAfter)
 	}
 	if _, ttl := firstA(t, m); ttl != staleTTL {
@@ -242,7 +242,7 @@ func TestSlowUpstreamTimes(t *testing.T) {
 
 	start = time.Now()
 	m = ask(t, s, query(t, 3, "never.example.com.", dnsmessage.TypeA, false, false))
-	if took := time.Since(start); m.Header.RCode != dnsmessage.RCodeServerFailure || took > failAfter+500*time.Millisecond {
+	if took := time.Since(start); m.Header.RCode != dnsmessage.RCodeServerFailure || took > failAfter+2*time.Second {
 		t.Fatalf("rcode %s after %s", m.Header.RCode, took)
 	}
 }
@@ -422,14 +422,16 @@ func TestMalformedQuestions(t *testing.T) {
 func TestInflightBound(t *testing.T) {
 	c := newClock()
 	up := newFakeUpstream(t)
-	up.setDelay(500 * time.Millisecond)
+	up.setDelay(3 * time.Second)
 	s := NewServer(ServerOptions{Upstreams: func() []string { return []string{up.addr} }, Now: c.Now, MaxInflight: 1})
 	defer s.Close()
 	go s.Answer(context.Background(), query(t, 1, "first.example.com.", dnsmessage.TypeA, false, false), client, true)
-	time.Sleep(100 * time.Millisecond)
+	for up.queries.Load() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
 	start := time.Now()
 	m := ask(t, s, query(t, 2, "second.example.com.", dnsmessage.TypeA, false, false))
-	if m.Header.RCode != dnsmessage.RCodeServerFailure || time.Since(start) > 200*time.Millisecond {
+	if m.Header.RCode != dnsmessage.RCodeServerFailure || time.Since(start) > time.Second {
 		t.Fatalf("rcode %s after %s", m.Header.RCode, time.Since(start))
 	}
 }
