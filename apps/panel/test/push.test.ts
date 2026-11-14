@@ -13,7 +13,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createDecipheriv, createECDH, createHmac } from "node:crypto";
 import { push, system } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { alertMutes, pushDevices, sessions, settings } from "../src/db/schema";
+import { alertMutes, pushDevices, services, sessions, settings } from "../src/db/schema";
 import { createProxyTrust } from "../src/http/proxy-trust";
 import { endpointHash, forgetOtherOrigins, forgetStaleDevices } from "../src/modules/push/devices";
 import { pngSize, shortName } from "../src/modules/push/http";
@@ -279,6 +279,22 @@ test("an alert reaches the devices of people who chose it and may see it, encryp
   panel.deps.alerts.raise({ event: "node_offline", key: "node-offline:n1:1", title: "node is offline" });
   await runJobs();
   expect(sent).toHaveLength(1);
+});
+
+test("a push about a service moved to another project since the alert opens the service where it is now", async () => {
+  activeDomain();
+  const owner = await createUser(panel, "owner");
+  await turnOn(owner);
+  const project = seedProject(panel);
+  const service = seedService(panel, project.id);
+  const device = await addDevice(owner);
+  panel.deps.alerts.raise({ event: "crash", key: `crash:${service.id}:1`, title: "api crashed", serviceId: service.id });
+  // Moved before the send job ran: the alert keeps its project, its stored link names the old one.
+  const moved = seedProject(panel);
+  panel.deps.db.update(services).set({ projectId: moved.id }).where(eq(services.id, service.id)).run();
+  await runJobs();
+  expect(sent).toHaveLength(1);
+  expect(openAsBrowser(device.sub.endpoint, sent[0]?.body as Buffer)).toMatchObject({ url: `/p/${moved.id}/s/${service.id}` });
 });
 
 test("a gone device is removed, a failing one after 5 failures, a busy service is retried; bursts are capped", async () => {

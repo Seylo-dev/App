@@ -111,12 +111,13 @@ export function AlertsCard() {
             key={alert.id}
             tone={severityTone[alert.severity] ?? "info"}
             // The title as raised: since 0.2.18 one about a service starts with "<project> / <service>"
-            // (older ones and renames keep their text). It opens the service, by its ids.
+            // (older ones and renames keep their text). It opens the service where it is now: a service
+            // moved to another project since is under serviceProjectId, not the alert's projectId.
             title={
-              alert.projectId && alert.serviceId ? (
+              alert.serviceProjectId && alert.serviceId ? (
                 <Link
                   to="/p/$projectId/s/$serviceId"
-                  params={{ projectId: alert.projectId, serviceId: alert.serviceId }}
+                  params={{ projectId: alert.serviceProjectId, serviceId: alert.serviceId }}
                   className="text-foreground hover:text-foreground"
                 >
                   {alert.title}

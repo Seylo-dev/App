@@ -2407,6 +2407,16 @@ never type the ids by hand.
   when the alert has no link of its own (cron_failed has none), as does
   Web Push (`push/send.ts` `alertMessage`). The dashboard's Alerts card
   links an alert about a service to the service page, by its ids.
+  A service moved to another project keeps its id and the alert keeps
+  the `projectId` it was raised with (the project it happened in), so
+  links go by where the service is now: `alerts.list` adds
+  `serviceProjectId` (the service's project now; the alert's `projectId`
+  when the service is gone; null when not about a service), which the
+  Alerts card links with, and the alert's `link`, when it is one of the
+  service's pages (`/p/<projectId>/s/<serviceId>` and below), is moved to
+  that project in `alerts.list`, the channels' notice and Web Push
+  (`alerts/subject.ts` `serviceProjectIdOf`, `currentAlertLink`). The
+  stored row keeps the link it was raised with.
 - Email: `deps.notify.sendEmail({ to, subject, text, html? })` returns
   `"sent" | "noChannel" | "failed"` through the panel's SMTP channel.
 - Running ops for someone: `deps.ops.execute(call)` is the pipeline;

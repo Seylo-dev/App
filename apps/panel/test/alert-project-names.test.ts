@@ -5,7 +5,9 @@
 // they were. alerts.list carries the current names of the ids
 // (projectName, serviceName, stackName), while a title keeps the names it
 // was raised with when a project or service is renamed later. Web Push
-// opens the service of an alert that has no link of its own.
+// opens the service of an alert that has no link of its own. A service
+// moved to another project is linked where it is now (serviceProjectId),
+// while the alert keeps the project it happened in.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -39,8 +41,10 @@ import {
   services,
   uptimeChecks,
 } from "../src/db/schema";
+import { currentAlertLink, serviceProjectIdOf } from "../src/modules/alerts/subject";
 import { sweepStaleBackups } from "../src/modules/backups/runs";
 import { applyRouteStatus } from "../src/modules/domains/tracking";
+import { alertNotice } from "../src/modules/notifications/deliver";
 import { alertMessage } from "../src/modules/push/send";
 import { applyResult } from "../src/modules/uptime/checks";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
@@ -225,4 +229,66 @@ test("a push about a service without a link of its own opens the service; its ti
   // An absolute link the service worker may not open, or no service at all: the dashboard, as before.
   expect(alertMessage({ ...row, link: "https://example.com/x" }).url).toBe("/");
   expect(alertMessage({ ...row, link: null, serviceId: null, projectId: null }).url).toBe("/");
+});
+
+test("a service moved to another project is linked where it is now; the alert keeps the project it happened in", async () => {
+  crash(api, 1, CrashAction.RESTARTING, Date.now() - 60_000);
+  const ops = panel.deps.db.insert(projects).values({ name: "ops", nameKey: "ops" }).returning().get().id;
+  panel.deps.db.update(services).set({ projectId: ops }).where(eq(services.id, api)).run();
+
+  const listed = (await callOp(panel, alertOps.list, { serviceId: api }, { cookie })).body.alerts;
+  expect(listed).toMatchObject([
+    {
+      title: "acme-shop / api crashed",
+      projectId,
+      projectName: "acme-shop",
+      serviceProjectId: ops,
+      link: `/p/${ops}/s/${api}`,
+    },
+  ]);
+  // A service that stayed: serviceProjectId is its project, the link as stored.
+  crash(member, 1, CrashAction.RESTARTING, Date.now() - 60_000);
+  const stayed = (await callOp(panel, alertOps.list, { serviceId: member }, { cookie })).body.alerts;
+  expect(stayed).toMatchObject([{ projectId, serviceProjectId: projectId, link: `/p/${projectId}/s/${member}` }]);
+  // A node alert is about no service.
+  emit({ case: "nodeAlert", value: create(NodeAlertSchema, { kind: NodeAlertKind.DISK_LOW, message: "Disk / is 91% full" }) });
+  expect((await callOp(panel, alertOps.list, { nodeId }, { cookie })).body.alerts[0]).toMatchObject({
+    serviceProjectId: null,
+    link: "/nodes",
+  });
+
+  // The stored row is left as it was raised; channels and pushes link the service where it is now.
+  const row = panel.deps.db.select().from(alerts).where(eq(alerts.serviceId, api)).get();
+  if (!row) throw new Error("no crash alert");
+  expect(row.link).toBe(`/p/${projectId}/s/${api}`);
+  const notice = alertNotice(panel.deps, row);
+  expect(notice.link).toEndWith(`/p/${ops}/s/${api}`);
+  expect(notice.serviceUrl).toEndWith(`/p/${ops}/s/${api}`);
+  expect(notice.projectName).toBe("acme-shop");
+  expect(alertMessage(row, ops).url).toBe(`/p/${ops}/s/${api}`);
+  expect(alertMessage({ ...row, link: null }, ops).url).toBe(`/p/${ops}/s/${api}`);
+});
+
+test("the current link: only a link to the alert's service's pages moves, and only when the service did", () => {
+  const row = { projectId: "projold000000001", serviceId: "svcapi0000000001", link: "/p/projold000000001/s/svcapi0000000001" };
+  const now = "projnew000000001";
+  expect(currentAlertLink(row, now)).toBe(`/p/${now}/s/svcapi0000000001`);
+  // A page under the service, with its query and hash.
+  expect(currentAlertLink({ ...row, link: `${row.link}/deployments?d=x#log` }, now)).toBe(
+    `/p/${now}/s/svcapi0000000001/deployments?d=x#log`,
+  );
+  // Not the service's pages: another service whose id starts the same, another page, an absolute link.
+  expect(currentAlertLink({ ...row, link: `${row.link}2` }, now)).toBe(`${row.link}2`);
+  expect(currentAlertLink({ ...row, link: "/settings/security" }, now)).toBe("/settings/security");
+  expect(currentAlertLink({ ...row, link: "https://example.com/x" }, now)).toBe("https://example.com/x");
+  // Not moved, no link, no service: as stored.
+  expect(currentAlertLink(row, row.projectId)).toBe(row.link);
+  expect(currentAlertLink({ ...row, link: null }, now)).toBeNull();
+  expect(currentAlertLink({ ...row, serviceId: null }, now)).toBe(row.link);
+
+  // The service's project now; the alert's own when the service is gone; null when it is about no service.
+  const services = new Map([["svcapi0000000001", { projectId: now } as never]]);
+  expect(serviceProjectIdOf(row, services)).toBe(now);
+  expect(serviceProjectIdOf(row, new Map())).toBe(row.projectId);
+  expect(serviceProjectIdOf({ projectId: null, serviceId: null }, services)).toBeNull();
 });

@@ -382,7 +382,8 @@ export const recentDeployments = {
 };
 
 // Alerts about a service name its project first ("acme-shop / worker crashed", since 0.2.18) and
-// carry the current names of their ids; node alerts name the node only.
+// carry the current names of their ids and the project the service is in now (serviceProjectId);
+// node alerts name the node only.
 export const alerts = {
   alerts: [
     {
@@ -397,6 +398,7 @@ export const alerts = {
       projectName: "acme-shop",
       serviceName: "worker",
       stackName: null,
+      serviceProjectId: ids.acme,
       link: `/p/${ids.acme}/s/${ids.worker}`,
       resolvedAt: null,
       muted: false,
@@ -414,6 +416,7 @@ export const alerts = {
       projectName: "acme-shop",
       serviceName: "web",
       stackName: null,
+      serviceProjectId: ids.acme,
       link: `/p/${ids.acme}/s/${ids.web}`,
       resolvedAt: null,
       muted: false,
@@ -431,6 +434,7 @@ export const alerts = {
       projectName: null,
       serviceName: null,
       stackName: null,
+      serviceProjectId: null,
       link: "/nodes",
       resolvedAt: iso(5 * hour),
       muted: false,

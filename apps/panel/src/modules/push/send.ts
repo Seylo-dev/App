@@ -26,6 +26,7 @@ import { defineJob } from "../../jobs/queue";
 import { parseInput } from "../../ops/validate";
 import { deleteSetting, getSetting } from "../../settings";
 import { alertVisibility } from "../alerts/feed";
+import { currentAlertLink, serviceSubject } from "../alerts/subject";
 import { canSee, opById, openInput } from "../approvals/queue";
 import { checkTarget, type TargetCheck } from "../uptime/targets";
 import { eventsOf, forgetStaleDevices, notAwaitingRevoke, openTarget, type PushDeviceRow } from "./devices";
@@ -101,13 +102,16 @@ const urgencyOf: Record<alertOps.AlertSeverity, PushUrgency> = { error: "high", 
  * The message for an alert, cut to fit one push. The title names a
  * service with its project ("acme-shop / api crashed", alerts/subject.ts);
  * an alert about a service without a link of its own opens the service.
+ * serviceProjectId is the project the service is in now (serviceProjectIdOf):
+ * a service moved since opens under its new project.
  */
-export function alertMessage(alert: AlertRow): PushMessage {
-  const servicePage = alert.serviceId && alert.projectId ? `/p/${alert.projectId}/s/${alert.serviceId}` : "/";
+export function alertMessage(alert: AlertRow, serviceProjectId: string | null = alert.projectId): PushMessage {
+  const servicePage = alert.serviceId && serviceProjectId ? `/p/${serviceProjectId}/s/${alert.serviceId}` : "/";
+  const link = currentAlertLink(alert, serviceProjectId);
   const message: PushMessage = {
     title: alert.title,
     body: alert.message.slice(0, 600),
-    url: alert.link?.startsWith("/") ? alert.link : alert.link === null ? servicePage : "/",
+    url: link?.startsWith("/") ? link : link === null ? servicePage : "/",
     tag: topicOf(alert.eventKey),
     at: alert.createdAt.getTime(),
   };
@@ -357,7 +361,8 @@ export const sendJob = defineJob<SendPayload>({
         .run();
       return;
     }
-    const result = await sendToDevice(ctx, target, alertMessage(alert), {
+    const here = alert.serviceId ? serviceSubject(ctx.db, alert.serviceId) : undefined;
+    const result = await sendToDevice(ctx, target, alertMessage(alert, here?.projectId ?? alert.projectId), {
       urgency: urgencyOf[alert.severity],
       ttlSeconds: 24 * 3600,
       topic: topicOf(alert.eventKey),

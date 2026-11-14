@@ -89,7 +89,21 @@ export const Alert = Type.Object({
   stackName: Type.Union([Type.String(), Type.Null()], {
     description: "When the service is a member of a compose stack, the stack's current name; null otherwise.",
   }),
-  /** Where "open" goes in the web app, for example the crash report or the deploy. */
+  /**
+   * Since 0.2.18: the project the service is in now, where its page is
+   * (/p/<serviceProjectId>/s/<serviceId>). It differs from projectId once
+   * the service moved to another project; the alert's projectId when the
+   * service is gone; null when the alert is not about a service.
+   */
+  serviceProjectId: Type.Union([Id, Type.Null()], {
+    description:
+      "For an alert about a service: the project the service is in now, so its page is /p/<serviceProjectId>/s/<serviceId> (projectId stays the project the alert happened in, which differs once the service moved). The alert's projectId when the service is gone; null when the alert is not about a service.",
+  }),
+  /**
+   * Where "open" goes in the web app, for example the crash report or the
+   * deploy. A link to the service's pages follows the service to the
+   * project it is in now.
+   */
   link: Type.Union([Type.String(), Type.Null()]),
   /** Set when a later event closed the incident (node back online, uptime up). */
   resolvedAt: Type.Union([Timestamp, Type.Null()]),
@@ -104,7 +118,7 @@ export const list = defineOp({
   kind: "query",
   summary: "List recent alerts",
   description:
-    "Lists alerts newest first, limited to the projects, services and nodes the caller can see. Filter by project, service or node; page with the nextCursor of the previous call. An alert about a service carries its project and service ids and their current names (projectName, serviceName, stackName for a compose member); its title names them as they were when it was raised.",
+    "Lists alerts newest first, limited to the projects, services and nodes the caller can see. Filter by project, service or node; page with the nextCursor of the previous call. An alert about a service carries its project and service ids and their current names (projectName, serviceName, stackName for a compose member); its title names them as they were when it was raised. serviceProjectId is the project the service is in now (its page), which differs from projectId once the service moved.",
   input: Type.Object({
     projectId: Type.Optional(Id),
     serviceId: Type.Optional(Id),

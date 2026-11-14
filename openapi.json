@@ -2254,7 +2254,7 @@
       "get": {
         "operationId": "alerts.list",
         "summary": "List recent alerts",
-        "description": "Lists alerts newest first, limited to the projects, services and nodes the caller can see. Filter by project, service or node; page with the nextCursor of the previous call. An alert about a service carries its project and service ids and their current names (projectName, serviceName, stackName for a compose member); its title names them as they were when it was raised.",
+        "description": "Lists alerts newest first, limited to the projects, services and nodes the caller can see. Filter by project, service or node; page with the nextCursor of the previous call. An alert about a service carries its project and service ids and their current names (projectName, serviceName, stackName for a compose member); its title names them as they were when it was raised. serviceProjectId is the project the service is in now (its page), which differs from projectId once the service moved.",
         "tags": [
           "alerts"
         ],
@@ -2355,6 +2355,7 @@
                           "projectName",
                           "serviceName",
                           "stackName",
+                          "serviceProjectId",
                           "link",
                           "resolvedAt",
                           "muted",
@@ -2550,6 +2551,19 @@
                             "description": "When the service is a member of a compose stack, the stack's current name; null otherwise.",
                             "anyOf": [
                               {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "serviceProjectId": {
+                            "description": "For an alert about a service: the project the service is in now, so its page is /p/<serviceProjectId>/s/<serviceId> (projectId stays the project the alert happened in, which differs once the service moved). The alert's projectId when the service is gone; null when the alert is not about a service.",
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
                                 "type": "string"
                               },
                               {

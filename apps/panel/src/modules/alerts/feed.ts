@@ -1,13 +1,14 @@
 // alerts.list (filtered to what the caller can see) and the mute ops. The
 // title is the text as it was raised; projectName, serviceName and
-// stackName name the alert's ids as they are now, like the other lists.
+// stackName name the alert's ids as they are now, like the other lists, and
+// serviceProjectId and the link point at the service where it is now.
 
 import { alerts as alertOps, OpError } from "@seylo/ops";
 import { and, desc, eq, gt, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { Access } from "../../auth/access";
 import { alertMutes, alerts } from "../../db/schema";
 import { implement } from "../../ops/implement";
-import { type AlertNames, alertNames } from "./subject";
+import { type AlertNames, alertNames, currentAlertLink, serviceProjectIdOf } from "./subject";
 
 type AlertRow = typeof alerts.$inferSelect;
 
@@ -55,6 +56,7 @@ export function alertVisibility(access: Access) {
 
 export function toAlert(row: AlertRow, names: AlertNames) {
   const service = row.serviceId ? names.services.get(row.serviceId) : undefined;
+  const serviceProjectId = serviceProjectIdOf(row, names.services);
   return {
     id: row.id,
     event: row.event,
@@ -68,7 +70,9 @@ export function toAlert(row: AlertRow, names: AlertNames) {
     projectName: row.projectId ? (names.projects.get(row.projectId) ?? null) : null,
     serviceName: service?.serviceName ?? null,
     stackName: service?.stackName ?? null,
-    link: row.link,
+    // The service's page is under the project it is in now (moved since: not the alert's projectId).
+    serviceProjectId,
+    link: currentAlertLink(row, serviceProjectId),
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
     muted: row.muted,
     createdAt: row.createdAt.toISOString(),

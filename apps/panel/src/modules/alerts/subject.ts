@@ -8,7 +8,9 @@
 //
 // Titles are written once, when the alert is raised: a project or service
 // renamed later keeps the text of alerts already sent. alerts.list and the
-// notification fields name the ids as they are now (serviceSubjects).
+// notification fields name the ids as they are now (serviceSubjects), and
+// link a service where it is now (serviceProjectIdOf, currentAlertLink): a
+// service moved to another project keeps its id, its page moves.
 
 import { eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -89,6 +91,40 @@ export function projectNames(db: PanelDb, projectIds: Iterable<string>): Map<str
 export interface AlertNames {
   services: Map<string, ServiceSubject>;
   projects: Map<string, string>;
+}
+
+/**
+ * The project an alert's service is in now, where its page is: a service
+ * moved to another project since the alert was raised lives under the new
+ * one, while the alert's projectId stays the project it happened in. The
+ * alert's own projectId when the service is gone; null when the alert is
+ * not about a service.
+ */
+export function serviceProjectIdOf(
+  row: { projectId: string | null; serviceId: string | null },
+  services: ReadonlyMap<string, ServiceSubject>,
+): string | null {
+  if (!row.serviceId) return null;
+  return services.get(row.serviceId)?.projectId ?? row.projectId;
+}
+
+/**
+ * The alert's link, with a link to its service's pages ("/p/<project>/s/<service>",
+ * the default for an alert about a service, and anything under it) moved to
+ * the project the service is in now. Links are stored when the alert is
+ * raised; every other link is left as it is.
+ */
+export function currentAlertLink(
+  row: { link: string | null; projectId: string | null; serviceId: string | null },
+  serviceProjectId: string | null,
+): string | null {
+  const { link, projectId, serviceId } = row;
+  if (!link || !projectId || !serviceId || !serviceProjectId || serviceProjectId === projectId) return link;
+  const page = `/p/${projectId}/s/${serviceId}`;
+  if (!link.startsWith(page)) return link;
+  const rest = link.slice(page.length);
+  if (rest !== "" && !/^[/?#]/.test(rest)) return link;
+  return `/p/${serviceProjectId}/s/${serviceId}${rest}`;
 }
 
 /** The current names of the services and projects some alerts are about (two queries at most). */

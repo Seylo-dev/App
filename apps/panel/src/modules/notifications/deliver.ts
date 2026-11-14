@@ -8,7 +8,7 @@ import { alerts, notificationDeliveries } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { type DeliverPayload, deliverJobType } from "../alerts/sink";
-import { alertNames } from "../alerts/subject";
+import { alertNames, currentAlertLink, serviceProjectIdOf } from "../alerts/subject";
 import { readPanelName } from "../settings/keys";
 import { panelLink, panelPublicUrl } from "../settings/public-url";
 import { getChannelRow, openConfig } from "./channels";
@@ -24,7 +24,8 @@ export function recordDelivery(
 /**
  * The notice for an alert. The title is the alert's own (its project and
  * service as they were named when it was raised); the fields name the ids
- * as they are now, as alerts.list does, and link the service where it is now.
+ * as they are now, as alerts.list does, and link the service where it is now
+ * (the alert's own link too, when it is one of the service's pages).
  */
 export function alertNotice(deps: Pick<Deps, "db" | "config">, alert: typeof alerts.$inferSelect): Notice {
   const { services, projects } = alertNames(deps.db, [alert]);
@@ -35,7 +36,7 @@ export function alertNotice(deps: Pick<Deps, "db" | "config">, alert: typeof ale
     severity: alert.severity,
     title: alert.title,
     message: alert.message,
-    link: panelLink(deps, alert.link),
+    link: panelLink(deps, currentAlertLink(alert, serviceProjectIdOf(alert, services))),
     panelName: readPanelName(deps.db),
     panelUrl: panelPublicUrl(deps),
     at: alert.createdAt,
