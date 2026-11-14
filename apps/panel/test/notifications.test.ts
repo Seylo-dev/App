@@ -9,10 +9,19 @@ import { nodes, notificationChannels, notificationDeliveries, projects, services
 import {
   DeliveryError,
   deliver,
+  discordBody,
+  emailMessage,
+  gotifyBody,
   type MailMessage,
   type Notice,
+  ntfyBody,
+  plainText,
+  pushoverForm,
   resetNotifyIo,
   setNotifyIo,
+  slackBody,
+  telegramBody,
+  webhookBody,
   webhookSignature,
 } from "../src/modules/notifications/senders";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
@@ -60,23 +69,39 @@ const notice: Notice = {
   type: "alert",
   event: "crash",
   severity: "error",
-  title: "api crashed",
+  title: "acme-shop / api crashed",
   message: "Exit code 137 <oom> & co",
   link: "https://panel.example.com/p/a/s/b",
   panelName: "Acme",
   panelUrl: "https://panel.example.com",
   at: new Date("2026-11-05T10:00:00Z"),
   alertId: "a".repeat(16),
-  projectId: null,
+  projectId: "c".repeat(16),
   serviceId: "b".repeat(16),
   nodeId: null,
+  projectName: "acme-shop",
+  stackName: null,
+  serviceName: "api",
+  serviceUrl: "https://panel.example.com/p/a/s/b",
 };
 
 test("webhook: JSON body, timestamp and HMAC signature over timestamp.body", async () => {
   await deliver({ kind: "webhook", url: `${base()}/hook`, signingSecret: "s3cret" }, notice);
   const [request] = received;
   const body = JSON.parse(request!.body);
-  expect(body).toMatchObject({ type: "alert", event: "crash", severity: "error", title: "api crashed", panel: { name: "Acme" } });
+  expect(body).toMatchObject({
+    type: "alert",
+    event: "crash",
+    severity: "error",
+    title: "acme-shop / api crashed",
+    panel: { name: "Acme" },
+    // Since 0.2.18: the project and service by name, and the service's page.
+    projectId: "c".repeat(16),
+    projectName: "acme-shop",
+    stackName: null,
+    serviceName: "api",
+    serviceUrl: "https://panel.example.com/p/a/s/b",
+  });
   const timestamp = request!.headers.get("x-seylo-timestamp")!;
   expect(timestamp).toBe(String(notice.at.getTime() / 1000));
   expect(request!.headers.get("x-seylo-signature")).toBe(webhookSignature("s3cret", timestamp, request!.body));
@@ -89,13 +114,23 @@ test("discord, slack, ntfy and gotify bodies", async () => {
   await deliver({ kind: "gotify", serverUrl: `${base()}/`, appToken: "gt" }, notice);
   const [discord, slack, ntfy, gotify] = received.map((r) => ({ ...r, json: JSON.parse(r.body) }));
 
-  expect(discord!.json.embeds[0]).toMatchObject({ title: "api crashed", color: 0xdc2626, url: notice.link });
+  expect(discord!.json.embeds[0]).toMatchObject({ title: "acme-shop / api crashed", color: 0xdc2626, url: notice.link });
+  // The project as a field, the service linked to its page.
+  expect(discord!.json.embeds[0].fields).toEqual([
+    { name: "Project", value: "acme-shop", inline: true },
+    { name: "Service", value: "[api](https://panel.example.com/p/a/s/b)", inline: true },
+  ]);
   expect(discord!.json.allowed_mentions).toEqual({ parse: [] });
   expect(slack!.json.blocks[0].text.text).toContain("Exit code 137 &lt;oom&gt; &amp; co");
-  expect(slack!.json.text).toContain("api crashed");
+  expect(slack!.json.text).toContain("acme-shop / api crashed");
+  expect(slack!.json.blocks[0].fields).toEqual([
+    { type: "mrkdwn", text: "*Project*\nacme-shop" },
+    { type: "mrkdwn", text: "*Service*\n<https://panel.example.com/p/a/s/b|api>" },
+  ]);
   expect(ntfy!.path).toBe("/");
   expect(ntfy!.headers.get("authorization")).toBe("Bearer tk");
-  expect(ntfy!.json).toMatchObject({ topic: "ops", title: "api crashed", priority: 5, click: notice.link });
+  expect(ntfy!.json).toMatchObject({ topic: "ops", title: "acme-shop / api crashed", priority: 5, click: notice.link });
+  expect(gotify!.json.title).toBe("acme-shop / api crashed");
   expect(gotify!.path).toBe("/message");
   expect(gotify!.headers.get("x-gotify-key")).toBe("gt");
   expect(gotify!.json.priority).toBe(8);
@@ -114,10 +149,70 @@ test("telegram and pushover go to their fixed APIs", async () => {
   expect(calls[0]!.url).toBe("https://api.telegram.org/bot123:abc/sendMessage");
   const telegram = JSON.parse(calls[0]!.body);
   expect(telegram).toMatchObject({ chat_id: "-100", parse_mode: "HTML" });
-  expect(telegram.text).toContain("<b>Error: api crashed</b>");
+  expect(telegram.text).toContain("<b>Error: acme-shop / api crashed</b>");
   expect(telegram.text).toContain("&lt;oom&gt;");
+  expect(telegram.text).toContain('\nProject: acme-shop\nService: <a href="https://panel.example.com/p/a/s/b">api</a>\n');
   expect(calls[1]!.url).toBe("https://api.pushover.net/1/messages.json");
   expect(new URLSearchParams(calls[1]!.body).get("priority")).toBe("1");
+  expect(new URLSearchParams(calls[1]!.body).get("title")).toBe("acme-shop / api crashed");
+});
+
+test("a compose member's notice names its stack too; a node's has no project fields", async () => {
+  const member: Notice = {
+    ...notice,
+    title: "acme-shop / shop / shop-web crashed",
+    projectName: "my_shop (old)",
+    stackName: "shop",
+    serviceName: "shop-web",
+  };
+  const discord = discordBody(member).embeds[0];
+  expect(discord?.fields).toEqual([
+    // Markdown in names stays text.
+    { name: "Project", value: "my\\_shop \\(old\\)", inline: true },
+    { name: "Stack", value: "shop", inline: true },
+    { name: "Service", value: "[shop-web](https://panel.example.com/p/a/s/b)", inline: true },
+  ]);
+  expect(slackBody(member).blocks[0]).toMatchObject({
+    fields: [
+      { text: "*Project*\nmy_shop (old)" },
+      { text: "*Stack*\nshop" },
+      { text: "*Service*\n<https://panel.example.com/p/a/s/b|shop-web>" },
+    ],
+  });
+  expect(webhookBody(member)).toMatchObject({ projectName: "my_shop (old)", stackName: "shop", serviceName: "shop-web" });
+  expect(plainText(member)).toContain("\nProject: my_shop (old)\nStack: shop\nService: shop-web (https://panel.example.com/p/a/s/b)\n");
+
+  const node: Notice = {
+    ...notice,
+    title: "de-1 is offline",
+    link: "https://panel.example.com/nodes",
+    projectId: null,
+    serviceId: null,
+    nodeId: "n".repeat(16),
+    projectName: null,
+    stackName: null,
+    serviceName: null,
+    serviceUrl: null,
+  };
+  expect(discordBody(node).embeds[0]).not.toHaveProperty("fields");
+  expect(slackBody(node).blocks[0]).not.toHaveProperty("fields");
+  expect(telegramBody(node, "1").text).not.toContain("Project:");
+  expect(emailMessage(node, "a@x.io", ["b@x.io"]).html).not.toContain("Project:");
+  expect(webhookBody(node)).toMatchObject({ projectName: null, serviceName: null, stackName: null, serviceUrl: null });
+});
+
+test("an alert without a link of its own opens its service on ntfy, Pushover and Gotify", () => {
+  const unlinked: Notice = { ...notice, link: null, serviceUrl: "https://panel.example.com/p/c/s/d" };
+  expect(ntfyBody(unlinked, "ops")).toMatchObject({ click: "https://panel.example.com/p/c/s/d" });
+  expect(pushoverForm(unlinked, "t", "u").get("url")).toBe("https://panel.example.com/p/c/s/d");
+  expect(gotifyBody(unlinked)).toMatchObject({
+    extras: { "client::notification": { click: { url: "https://panel.example.com/p/c/s/d" } } },
+  });
+  // Nothing to open: no click at all, as before.
+  const nothing: Notice = { ...unlinked, serviceUrl: null };
+  expect(ntfyBody(nothing, "ops")).not.toHaveProperty("click");
+  expect(pushoverForm(nothing, "t", "u").has("url")).toBe(false);
+  expect(gotifyBody(nothing)).not.toHaveProperty("extras");
 });
 
 test("smtp builds a text and HTML mail", async () => {
@@ -136,8 +231,10 @@ test("smtp builds a text and HTML mail", async () => {
     },
     notice,
   );
-  expect(sent[0]).toMatchObject({ from: "panel@x.io", to: ["ops@x.io"], subject: "[Acme] api crashed" });
+  expect(sent[0]).toMatchObject({ from: "panel@x.io", to: ["ops@x.io"], subject: "[Acme] acme-shop / api crashed" });
   expect(sent[0]!.html).toContain("&lt;oom&gt;");
+  expect(sent[0]!.html).toContain('<p>Project: acme-shop<br>Service: <a href="https://panel.example.com/p/a/s/b">api</a></p>');
+  expect(sent[0]!.text).toContain("\nProject: acme-shop\nService: api (https://panel.example.com/p/a/s/b)\n");
 });
 
 test("a refused delivery says what the receiver answered, without the URL", async () => {
@@ -215,7 +312,7 @@ function seedService() {
 
 test("alerts: raised once per key, delivered to the rule's channels, muted ones only recorded", async () => {
   const { cookie } = await createUser(panel, "owner");
-  const { service } = seedService();
+  const { project, service } = seedService();
   const channel = await callOp(
     panel,
     notifications.createChannel,
@@ -224,16 +321,22 @@ test("alerts: raised once per key, delivered to the rule's channels, muted ones 
   );
 
   // Before anyone saved defaults, problem events go to the default channel.
-  const first = panel.deps.alerts.raise({ event: "crash", key: "crash:x:1", title: "api crashed", serviceId: service.id });
+  const first = panel.deps.alerts.raise({ event: "crash", key: "crash:x:1", title: "Shop / api crashed", serviceId: service.id });
   expect(first).not.toBeNull();
   expect(panel.deps.alerts.raise({ event: "crash", key: "crash:x:1", title: "again" })).toBeNull();
   await panel.runner.runDue(panel.deps);
   const delivered = received.filter((r) => r.path === "/alerts");
   expect(delivered).toHaveLength(1);
   expect(JSON.parse(delivered[0]!.body)).toMatchObject({
-    title: "api crashed",
+    title: "Shop / api crashed",
     serviceId: service.id,
     link: expect.stringContaining(`/s/${service.id}`),
+    // The delivery job fills the names and the service's page from the alert's ids.
+    projectId: project.id,
+    projectName: "Shop",
+    serviceName: "api",
+    stackName: null,
+    serviceUrl: expect.stringMatching(new RegExp(`/p/${project.id}/s/${service.id}$`)),
   });
   const deliveries = panel.deps.db.select().from(notificationDeliveries).where(eq(notificationDeliveries.alertId, first!)).all();
   expect(deliveries).toMatchObject([{ status: "sent", channelId: channel.body.id }]);
@@ -378,7 +481,7 @@ test("smtp through the real nodemailer transport to a local SMTP server", async 
     );
     expect(lines).toContain("MAIL FROM:<panel@x.io>");
     expect(lines).toContain("RCPT TO:<ops@x.io>");
-    expect(lines.some((l) => l.startsWith("Subject: [Acme] api crashed"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("Subject: [Acme] acme-shop / api crashed"))).toBe(true);
   } finally {
     smtp.stop(true);
   }

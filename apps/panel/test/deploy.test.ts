@@ -401,6 +401,8 @@ describe("deploys", () => {
     const raised = panel.deps.db.select().from(alerts).all();
     // Nothing was built or shipped: it is a build failure.
     expect(raised.map((a) => [a.event, a.serviceId])).toEqual([["build_failed", id]]);
+    // Named with its project (0.2.18).
+    expect(raised[0]).toMatchObject({ title: "shop / api failed to build", projectId });
   });
 
   test("a build the agent fails alerts once, as build_failed", async () => {
@@ -412,5 +414,6 @@ describe("deploys", () => {
     const raised = panel.deps.db.select().from(alerts).all();
     expect(raised.map((a) => a.event)).toEqual(["build_failed"]);
     expect(raised[0]?.eventKey).toStartWith("build-failed:");
+    expect(raised[0]?.title).toBe("shop / api failed to build");
   });
 });

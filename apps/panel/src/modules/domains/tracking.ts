@@ -20,6 +20,7 @@ import { RouteState, type ServiceStatus } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
 import { domains } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { serviceSubject } from "../alerts/subject";
 import { applyDomainLive } from "../exposures/logic";
 import { acmeHeld } from "./acme-hold";
 import { invalidateService } from "./lookup";
@@ -79,12 +80,15 @@ export function applyRouteStatus(
         if (row.https === "acme" && route.message && row.certError !== route.message) set.certError = route.message.slice(0, 1000);
         // One alert per failure streak; an ACTIVE report resolves it.
         if (row.https === "acme" && !deps.alerts.isOpen(`certificate:${row.id}:`)) {
+          // "acme-shop / web: no certificate for shop.example.com" (alerts/subject.ts).
+          const service = serviceSubject(deps.db, status.serviceId);
           deps.alerts.raise({
             event: "certificate_failed",
             key: `certificate:${row.id}:${now.getTime()}`,
-            title: `No certificate for ${row.host}`,
+            title: service ? `${service.label}: no certificate for ${row.host}` : `No certificate for ${row.host}`,
             message: route.message.slice(0, 300) || "Let's Encrypt could not issue a certificate. Check that DNS points at the node.",
             serviceId: status.serviceId,
+            projectId: service?.projectId,
           });
         }
         break;

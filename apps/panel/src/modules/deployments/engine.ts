@@ -50,6 +50,7 @@ import {
 } from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { RefusedSpec } from "../../desired";
+import { serviceSubject } from "../alerts/subject";
 import { checkWaitingDomains } from "../domains/no-route";
 import { sealDeploymentEnv } from "../env/desired";
 import { recordBuiltCommit, reusedImageOf, withReusedCommit } from "../env/git-sha";
@@ -929,15 +930,16 @@ export function recordRefusedSpec(s: Pick<EngineState, "deps">, nodeId: string, 
     .run();
   appendLog(s.deps, d.serviceId, d.id, "ship", [`${name}: ${message}`], true);
   publishDeploymentChange(s.deps, d.serviceId, d.id);
-  const service = db.select({ name: services.name }).from(services).where(eq(services.id, d.serviceId)).get();
+  const service = serviceSubject(db, d.serviceId);
   if (service) {
     // The key the alerts module uses for an agent's DeployProgress FAILED, so one failure alerts once.
     s.deps.alerts.raise({
       event: "deploy_failed",
       key: `deploy-failed:${d.serviceId}:${d.generation}:${nodeId}`,
-      title: `Deploy of ${service.name} failed`,
+      title: `${service.label} failed to deploy`,
       message: `${name}: ${message} The previous version stayed live.`,
       serviceId: d.serviceId,
+      projectId: service.projectId,
       nodeId,
     });
   }
@@ -1211,8 +1213,8 @@ export function finish(
   if (lastBuild) publishBuildQueue(s.deps, lastBuild.nodeId);
   // Failures the panel itself saw (no builder, source, timeouts); the alerts module covers what agents report.
   if (outcome === "failed" && options.alert !== false) {
-    const name = s.deps.db.select({ name: services.name }).from(services).where(eq(services.id, d.serviceId)).get()?.name;
-    if (name && (d.status === "queued" || d.status === "building")) {
+    const service = serviceSubject(s.deps.db, d.serviceId);
+    if (service && (d.status === "queued" || d.status === "building")) {
       // Before anything shipped it is a build failure. The key matches the one the alerts module
       // uses for the agent's BuildProgress FAILED, so a build the agent also reports alerts once.
       const build = s.deps.db
@@ -1224,17 +1226,19 @@ export function finish(
       s.deps.alerts.raise({
         event: "build_failed",
         key: build ? `build-failed:${build.id}` : `build-failed:deployment:${d.id}`,
-        title: `Build of ${name} failed`,
+        title: `${service.label} failed to build`,
         message,
         serviceId: d.serviceId,
+        projectId: service.projectId,
       });
-    } else if (name) {
+    } else if (service) {
       s.deps.alerts.raise({
         event: "deploy_failed",
         key: `deploy-failed:${d.serviceId}:${d.generation}:panel`,
-        title: `${name} failed to deploy`,
+        title: `${service.label} failed to deploy`,
         message,
         serviceId: d.serviceId,
+        projectId: service.projectId,
       });
     }
   }

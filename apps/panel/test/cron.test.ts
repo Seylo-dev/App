@@ -238,7 +238,7 @@ test("a job the node cannot schedule is a failed run with the node's reason, sto
   expect(runs).toMatchObject([{ result: "failed", exitCode: -1, manual: false }]);
   const alerts = (await callOp(panel, alertOps.list, { serviceId: service.id }, { cookie })).body.alerts;
   expect(alerts).toHaveLength(1);
-  expect(alerts[0]).toMatchObject({ event: "cron_failed", title: "Cron job weekly on worker failed", message: `${reason}.` });
+  expect(alerts[0]).toMatchObject({ event: "cron_failed", title: "Shop / worker: cron job weekly failed", message: `${reason}.` });
 });
 
 test("members need services.cron to change cron jobs and logs.view to read a run's output", async () => {

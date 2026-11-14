@@ -2378,6 +2378,35 @@ never type the ids by hand.
   raises one. Only that newest row counts, so the prune (a service's newest
   200 crashes) does not break it, and a report the node's daily budget
   dropped breaks it at one crash, not for the rest of the streak.
+- Alert titles about a service (since 0.2.18, `modules/alerts/subject.ts`)
+  start with its label `<project> / <service>`, for a compose member
+  `<project> / <stack> / <member>` (the member page's breadcrumb), and set
+  `projectId`: "acme-shop / api crashed", "... was stopped after N
+  crashes", "... failed to deploy" (the agent's DeployProgress FAILED, the
+  engine's refused spec and its own failures, before 0.2.18 "Deploy of api
+  failed"), "... deployed", "... failed to build" (was "Build of api
+  failed"), "... is unhealthy", "... is healthy again"; what is about a
+  part of the service follows a colon: "acme-shop / db: backup failed",
+  "acme-shop / worker: cron job weekly failed" (or "timed out"; "Cron job
+  weekly on worker failed" before), "acme-shop / web: Homepage is down" /
+  "is up again" (the uptime check's name), "acme-shop / web: no
+  certificate for shop.example.com". Node, panel and security alerts keep
+  their titles (a node's name, no project). A title is written once: a
+  project or service renamed later leaves the alerts already raised as
+  they were, the next alert uses the new name. `alerts.list` adds
+  `projectName`, `serviceName` and `stackName` (null when not about one),
+  the current names of the alert's `projectId` and `serviceId` (so a
+  service moved since names the project the alert happened in). The
+  delivery job does the same for channels (`notifications/deliver.ts`
+  `alertNotice`): the webhook JSON adds `projectName`, `stackName`,
+  `serviceName` and `serviceUrl` (the service's page where it is now);
+  Discord embeds get inline fields Project, Stack (members) and Service
+  (linked to the page), Slack the same as section fields, Telegram and
+  email lines "Project: ..." and "Service: ..." (linked); ntfy, Pushover
+  and Gotify, which show a title and a text only, open the service page
+  when the alert has no link of its own (cron_failed has none), as does
+  Web Push (`push/send.ts` `alertMessage`). The dashboard's Alerts card
+  links an alert about a service to the service page, by its ids.
 - Email: `deps.notify.sendEmail({ to, subject, text, html? })` returns
   `"sent" | "noChannel" | "failed"` through the panel's SMTP channel.
 - Running ops for someone: `deps.ops.execute(call)` is the pipeline;

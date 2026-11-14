@@ -65,13 +65,30 @@ export const Alert = Type.Object({
   id: Id,
   event: AlertEvent,
   severity: AlertSeverity,
-  /** Short line, for example "worker crashed". */
+  /**
+   * Short line, for example "acme-shop / worker crashed". Since 0.2.18 one
+   * about a service starts with "<project> / <service>" ("<project> /
+   * <stack> / <member>" for a compose member), as it was named when the
+   * alert was raised: renames later leave the text as it was.
+   */
   title: Type.String(),
   /** One line of detail, for example "Exit 137, out of memory - restarted after 5s". */
   message: Type.String(),
   projectId: Type.Union([Id, Type.Null()]),
   serviceId: Type.Union([Id, Type.Null()]),
   nodeId: Type.Union([Id, Type.Null()]),
+  /** Since 0.2.18: the project's name now (projectId); null when the alert is not about a project. */
+  projectName: Type.Union([Type.String(), Type.Null()], {
+    description: "The current name of the project the alert is about (projectId); null when it is not about one.",
+  }),
+  /** Since 0.2.18: the service's name now (serviceId); null when the alert is not about a service. */
+  serviceName: Type.Union([Type.String(), Type.Null()], {
+    description: "The current name of the service the alert is about (serviceId); null when it is not about one.",
+  }),
+  /** Since 0.2.18: for a compose member, its stack's name now; null otherwise. */
+  stackName: Type.Union([Type.String(), Type.Null()], {
+    description: "When the service is a member of a compose stack, the stack's current name; null otherwise.",
+  }),
   /** Where "open" goes in the web app, for example the crash report or the deploy. */
   link: Type.Union([Type.String(), Type.Null()]),
   /** Set when a later event closed the incident (node back online, uptime up). */
@@ -87,7 +104,7 @@ export const list = defineOp({
   kind: "query",
   summary: "List recent alerts",
   description:
-    "Lists alerts newest first, limited to the projects, services and nodes the caller can see. Filter by project, service or node; page with the nextCursor of the previous call.",
+    "Lists alerts newest first, limited to the projects, services and nodes the caller can see. Filter by project, service or node; page with the nextCursor of the previous call. An alert about a service carries its project and service ids and their current names (projectName, serviceName, stackName for a compose member); its title names them as they were when it was raised.",
   input: Type.Object({
     projectId: Type.Optional(Id),
     serviceId: Type.Optional(Id),

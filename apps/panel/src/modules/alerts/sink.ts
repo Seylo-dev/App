@@ -4,12 +4,13 @@
 // open incident and can record the good news as a feed-only alert;
 // reopen() opens a closed one again, silently, when it turns out to go on.
 //
-//   deps.alerts.raise({ event: "backup_failed", key: `backup:${runId}`, title: "Backup of db failed", serviceId })
+//   deps.alerts.raise({ event: "backup_failed", key: `backup:${runId}`, title: "acme-shop / db: backup failed", serviceId })
 //   deps.alerts.resolve(`uptime-down:${checkId}:`, { event: "uptime_up", key: `uptime-up:${checkId}:${now}`, title: ... })
 //
 // Keys are "<incident kind>:<subject>:<start>" so the next incident of the
 // same subject gets a new row; resolve() and isOpen() take the prefix
-// without the start.
+// without the start. A title about a service starts with its label,
+// "<project> / <service>" (subject.ts), so "api" says which project's.
 
 import { type alerts as alertOps, push as pushOps } from "@seylo/ops";
 import { and, eq, gt, gte, isNotNull, isNull, lt, or } from "drizzle-orm";
@@ -28,6 +29,7 @@ export interface RaiseAlert {
   event: AlertEventName;
   /** Identifies the incident; a second raise with the same key is ignored. */
   key: string;
+  /** About a service: starts with its label, "acme-shop / api crashed" (subject.ts). Kept as written. */
   title: string;
   message?: string;
   /** Defaults by event (crash is error, node_online is ok, ...). */

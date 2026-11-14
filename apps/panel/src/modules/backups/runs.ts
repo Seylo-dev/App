@@ -9,9 +9,10 @@ import type { Static } from "@sinclair/typebox";
 import { Cron } from "croner";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { backupDestinations, backupPolicies, backupRuns, services, volumes } from "../../db/schema";
+import { backupDestinations, backupPolicies, backupRuns, volumes } from "../../db/schema";
 import type { BackupContents, BackupSelection } from "../../db/schema/backups";
 import type { Deps } from "../../deps";
+import { serviceSubject } from "../alerts/subject";
 import { findDatabase } from "../databases/info";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
 import { activeMove } from "../services/copies";
@@ -464,13 +465,15 @@ export function sweepStaleBackups(deps: Pick<Deps, "db" | "live" | "alerts">, no
     .all();
   for (const run of stale) {
     deps.db.update(backupRuns).set({ status: "failed", error: noResultError, finishedAt: now }).where(eq(backupRuns.id, run.id)).run();
-    const name = deps.db.select({ name: services.name }).from(services).where(eq(services.id, run.serviceId)).get()?.name ?? "a service";
+    // As alerts/events.ts words a failed result: "acme-shop / db: backup failed".
+    const subject = serviceSubject(deps.db, run.serviceId);
     deps.alerts.raise({
       event: "backup_failed",
       key: `backup-failed:${run.id}`,
-      title: `Backup of ${name} failed`,
+      title: `${subject?.label ?? "A service"}: backup failed`,
       message: noResultError,
       serviceId: run.serviceId,
+      projectId: subject?.projectId,
       nodeId: run.nodeId,
     });
     invalidateService(deps, run.serviceId, [backupOps.listRuns.id]);

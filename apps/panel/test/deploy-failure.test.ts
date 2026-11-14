@@ -597,6 +597,13 @@ describe("placements and running deploys", () => {
     expect(failed?.error).toBe(
       "start-app no longer runs this service: its nodes changed after this deploy started, so nothing rolls it out there. Deploy again to roll it out on il-ra.",
     );
+    // The panel's own deploy_failed names the project too (0.2.18).
+    const alert = panel.deps.db.select().from(alerts).where(eq(alerts.event, "deploy_failed")).get();
+    expect(alert).toMatchObject({
+      title: "csspanel / trust-api failed to deploy",
+      projectId,
+      eventKey: `deploy-failed:${id}:${d.generation}:panel`,
+    });
   });
 
   test("the watchdog: no progress from a node for the health timeout and a margin fails the rollout", async () => {

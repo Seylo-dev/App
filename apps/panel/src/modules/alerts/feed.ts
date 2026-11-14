@@ -1,10 +1,13 @@
-// alerts.list (filtered to what the caller can see) and the mute ops.
+// alerts.list (filtered to what the caller can see) and the mute ops. The
+// title is the text as it was raised; projectName, serviceName and
+// stackName name the alert's ids as they are now, like the other lists.
 
 import { alerts as alertOps, OpError } from "@seylo/ops";
 import { and, desc, eq, gt, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { Access } from "../../auth/access";
 import { alertMutes, alerts } from "../../db/schema";
 import { implement } from "../../ops/implement";
+import { type AlertNames, alertNames } from "./subject";
 
 type AlertRow = typeof alerts.$inferSelect;
 
@@ -50,7 +53,8 @@ export function alertVisibility(access: Access) {
   };
 }
 
-export function toAlert(row: AlertRow) {
+export function toAlert(row: AlertRow, names: AlertNames) {
+  const service = row.serviceId ? names.services.get(row.serviceId) : undefined;
   return {
     id: row.id,
     event: row.event,
@@ -60,6 +64,10 @@ export function toAlert(row: AlertRow) {
     projectId: row.projectId,
     serviceId: row.serviceId,
     nodeId: row.nodeId,
+    // The project of the alert's projectId (where it happened; a service moved since names the old one).
+    projectName: row.projectId ? (names.projects.get(row.projectId) ?? null) : null,
+    serviceName: service?.serviceName ?? null,
+    stackName: service?.stackName ?? null,
     link: row.link,
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
     muted: row.muted,
@@ -109,7 +117,8 @@ export const list = implement(alertOps.list, (input, ctx) => {
   const pageRows = out.slice(0, limit);
   const more = out.length > limit || !exhausted;
   const lastRow = pageRows.at(-1);
-  return { alerts: pageRows.map(toAlert), nextCursor: more && lastRow ? cursorOf(lastRow) : null };
+  const names = alertNames(ctx.db, pageRows);
+  return { alerts: pageRows.map((row) => toAlert(row, names)), nextCursor: more && lastRow ? cursorOf(lastRow) : null };
 });
 
 function toMute(row: typeof alertMutes.$inferSelect) {

@@ -97,12 +97,17 @@ export function topicOf(eventKey: string): string {
 
 const urgencyOf: Record<alertOps.AlertSeverity, PushUrgency> = { error: "high", warning: "normal", info: "low", ok: "low" };
 
-/** The message for an alert, cut to fit one push. */
+/**
+ * The message for an alert, cut to fit one push. The title names a
+ * service with its project ("acme-shop / api crashed", alerts/subject.ts);
+ * an alert about a service without a link of its own opens the service.
+ */
 export function alertMessage(alert: AlertRow): PushMessage {
+  const servicePage = alert.serviceId && alert.projectId ? `/p/${alert.projectId}/s/${alert.serviceId}` : "/";
   const message: PushMessage = {
     title: alert.title,
     body: alert.message.slice(0, 600),
-    url: alert.link?.startsWith("/") ? alert.link : "/",
+    url: alert.link?.startsWith("/") ? alert.link : alert.link === null ? servicePage : "/",
     tag: topicOf(alert.eventKey),
     at: alert.createdAt.getTime(),
   };

@@ -9,6 +9,7 @@ import { uptimeSamples } from "../../db/metrics/schema";
 import { services, uptimeChecks } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
+import { serviceSubject } from "../alerts/subject";
 import { type ProbeFetch, type ProbeResult, probe } from "./probe";
 import { blockedMessage, checkTarget } from "./targets";
 
@@ -114,22 +115,28 @@ export function applyResult(deps: Deps, row: CheckRow, result: ProbeResult, now 
     .returning()
     .get();
 
+  // The check's service by its label: "acme-shop / web: Homepage is down" (alerts/subject.ts).
+  const subject = () => serviceSubject(deps.db, row.serviceId);
   if (state === "down" && row.state !== "down") {
+    const service = subject();
     deps.alerts.raise({
       event: "uptime_down",
       key: `${downKey(row.id)}${now.getTime()}`,
-      title: `${row.name} is down`,
+      title: service ? `${service.label}: ${row.name} is down` : `${row.name} is down`,
       message: `${row.url}: ${result.error ?? "no answer"} (${failures} failed checks in a row).`,
       serviceId: row.serviceId,
+      projectId: service?.projectId,
     });
   } else if (state === "up" && row.state === "down") {
     const minutes = row.stateSince ? Math.max(1, Math.round((now.getTime() - row.stateSince.getTime()) / 60_000)) : null;
+    const service = subject();
     deps.alerts.resolve(downKey(row.id), {
       event: "uptime_up",
       key: `uptime-up:${row.id}:${now.getTime()}`,
-      title: `${row.name} is up again`,
+      title: service ? `${service.label}: ${row.name} is up again` : `${row.name} is up again`,
       message: minutes ? `It was down for about ${minutes} minute${minutes === 1 ? "" : "s"}.` : "",
       serviceId: row.serviceId,
+      projectId: service?.projectId,
     });
   }
   if (state !== row.state || row.state === "pending") {

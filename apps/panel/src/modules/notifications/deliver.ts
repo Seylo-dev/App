@@ -8,6 +8,7 @@ import { alerts, notificationDeliveries } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { type DeliverPayload, deliverJobType } from "../alerts/sink";
+import { alertNames } from "../alerts/subject";
 import { readPanelName } from "../settings/keys";
 import { panelLink, panelPublicUrl } from "../settings/public-url";
 import { getChannelRow, openConfig } from "./channels";
@@ -20,7 +21,14 @@ export function recordDelivery(
   db.insert(notificationDeliveries).values(row).run();
 }
 
+/**
+ * The notice for an alert. The title is the alert's own (its project and
+ * service as they were named when it was raised); the fields name the ids
+ * as they are now, as alerts.list does, and link the service where it is now.
+ */
 export function alertNotice(deps: Pick<Deps, "db" | "config">, alert: typeof alerts.$inferSelect): Notice {
+  const { services, projects } = alertNames(deps.db, [alert]);
+  const service = alert.serviceId ? services.get(alert.serviceId) : undefined;
   return {
     type: "alert",
     event: alert.event,
@@ -35,6 +43,10 @@ export function alertNotice(deps: Pick<Deps, "db" | "config">, alert: typeof ale
     projectId: alert.projectId,
     serviceId: alert.serviceId,
     nodeId: alert.nodeId,
+    projectName: alert.projectId ? (projects.get(alert.projectId) ?? null) : null,
+    stackName: service?.stackName ?? null,
+    serviceName: service?.serviceName ?? null,
+    serviceUrl: service ? panelLink(deps, `/p/${service.projectId}/s/${service.serviceId}`) : null,
   };
 }
 
@@ -55,6 +67,10 @@ export function testNotice(deps: Pick<Deps, "db" | "config">, now = new Date()):
     projectId: null,
     serviceId: null,
     nodeId: null,
+    projectName: null,
+    stackName: null,
+    serviceName: null,
+    serviceUrl: null,
   };
 }
 

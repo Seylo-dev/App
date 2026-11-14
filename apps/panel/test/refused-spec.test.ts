@@ -92,7 +92,7 @@ test("an ApplyService the agent refuses fails the deploy with the agent's reason
   expect(panel.deps.db.select().from(services).where(eq(services.id, bad.id)).get()?.targetDeploymentId).toBe(live ?? null);
   const raised = deployAlerts(bad.id);
   expect(raised).toHaveLength(1);
-  expect(raised[0]).toMatchObject({ nodeId: agent.nodeId, title: "Deploy of bad failed" });
+  expect(raised[0]).toMatchObject({ nodeId: agent.nodeId, title: `${project.name} / bad failed to deploy`, projectId: project.id });
   expect(raised[0]?.message).toContain(reason);
 
   // Refusing the same spec again (a resync) changes nothing and alerts no more.

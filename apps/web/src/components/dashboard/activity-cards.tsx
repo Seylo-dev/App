@@ -1,6 +1,6 @@
 // The two cards under the projects on the dashboard (Main.dc.html):
 // recent deploys (deployments.recent, failed ones included) and alerts
-// (alerts.list).
+// (alerts.list), each linking to its service.
 
 import { alerts, deployments } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -110,7 +110,21 @@ export function AlertsCard() {
           <FeedRow
             key={alert.id}
             tone={severityTone[alert.severity] ?? "info"}
-            title={alert.title}
+            // The title as raised: since 0.2.18 one about a service starts with "<project> / <service>"
+            // (older ones and renames keep their text). It opens the service, by its ids.
+            title={
+              alert.projectId && alert.serviceId ? (
+                <Link
+                  to="/p/$projectId/s/$serviceId"
+                  params={{ projectId: alert.projectId, serviceId: alert.serviceId }}
+                  className="text-foreground hover:text-foreground"
+                >
+                  {alert.title}
+                </Link>
+              ) : (
+                alert.title
+              )
+            }
             text={alert.message}
             // Relative like the deploys next to it; the exact time on hover.
             when={formatAgo(alert.createdAt)}

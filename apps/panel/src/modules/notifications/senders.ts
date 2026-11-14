@@ -2,6 +2,13 @@
 // Notice for its service (Discord embed, Slack blocks, Telegram HTML, ...).
 // Errors are short and safe to show: they never contain the channel's URL
 // or token, only what the receiving service answered.
+//
+// An alert about a service has its project in the title ("acme-shop / api
+// crashed"). Kinds that show more than a title and a text (webhook JSON,
+// Discord embed fields, Slack fields, Telegram, email) also get the project,
+// the stack of a compose member and the service as fields, the service
+// linked to its page; ntfy, Pushover and Gotify open the service page when
+// the alert has no link of its own.
 
 import { createHmac } from "node:crypto";
 import { slug } from "@seylo/brand";
@@ -27,7 +34,25 @@ export interface Notice {
   projectId: string | null;
   serviceId: string | null;
   nodeId: string | null;
+  /** The current names of the alert's project, a compose member's stack and service; null when it is not about one. */
+  projectName: string | null;
+  stackName: string | null;
+  serviceName: string | null;
+  /** Absolute URL of the service's page, or null. */
+  serviceUrl: string | null;
 }
+
+/** The project, stack and service as labelled fields, the service linked to its page. */
+export function subjectFields(notice: Notice): { name: string; value: string; url: string | null }[] {
+  const fields: { name: string; value: string; url: string | null }[] = [];
+  if (notice.projectName) fields.push({ name: "Project", value: notice.projectName, url: null });
+  if (notice.stackName) fields.push({ name: "Stack", value: notice.stackName, url: null });
+  if (notice.serviceName) fields.push({ name: "Service", value: notice.serviceName, url: notice.serviceUrl });
+  return fields;
+}
+
+/** Where a click goes: the alert's own link, else its service's page. */
+const clickUrl = (notice: Notice) => notice.link ?? notice.serviceUrl;
 
 export interface MailMessage {
   from: string;
@@ -104,6 +129,7 @@ export function subjectLine(notice: Notice): string {
 export function plainText(notice: Notice): string {
   const lines = [notice.title];
   if (notice.message) lines.push(notice.message);
+  for (const field of subjectFields(notice)) lines.push(`${field.name}: ${field.value}${field.url ? ` (${field.url})` : ""}`);
   if (notice.link) lines.push(notice.link);
   lines.push(`${notice.panelName} - ${notice.at.toISOString()}`);
   return lines.join("\n");
@@ -118,7 +144,12 @@ function escapeSlack(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-/** The JSON body every webhook channel receives. Documented, so keep it stable. */
+/** Discord markdown: a backslash before the characters that format ("my_shop" stays "my_shop", not italic). */
+function escapeDiscord(text: string): string {
+  return text.replace(/[\\*_~`|>[\]()#]/g, "\\$&");
+}
+
+/** The JSON body every webhook channel receives. Documented, so keep it stable: add fields, never rename one. */
 export function webhookBody(notice: Notice) {
   return {
     type: notice.type,
@@ -131,12 +162,22 @@ export function webhookBody(notice: Notice) {
     projectId: notice.projectId,
     serviceId: notice.serviceId,
     nodeId: notice.nodeId,
+    // Since 0.2.18.
+    projectName: notice.projectName,
+    stackName: notice.stackName,
+    serviceName: notice.serviceName,
+    serviceUrl: notice.serviceUrl,
     panel: { name: notice.panelName, url: notice.panelUrl },
     createdAt: notice.at.toISOString(),
   };
 }
 
 export function discordBody(notice: Notice) {
+  const fields = subjectFields(notice).map((field) => ({
+    name: field.name,
+    value: (field.url ? `[${escapeDiscord(field.value)}](${field.url})` : escapeDiscord(field.value)).slice(0, 1024),
+    inline: true,
+  }));
   return {
     username: notice.panelName.slice(0, 80),
     embeds: [
@@ -145,6 +186,7 @@ export function discordBody(notice: Notice) {
         description: notice.message.slice(0, 4000),
         color: severityColor[notice.severity],
         ...(notice.link ? { url: notice.link } : {}),
+        ...(fields.length > 0 ? { fields } : {}),
         timestamp: notice.at.toISOString(),
         footer: { text: notice.panelName.slice(0, 2048) },
       },
@@ -157,10 +199,14 @@ export function slackBody(notice: Notice) {
   const head = `*${severityLabel[notice.severity]}: ${escapeSlack(notice.title)}*`;
   const body = notice.message ? `\n${escapeSlack(notice.message)}` : "";
   const link = notice.link ? `\n<${notice.link}|Open in ${escapeSlack(notice.panelName)}>` : "";
+  const fields = subjectFields(notice).map((field) => ({
+    type: "mrkdwn",
+    text: `*${field.name}*\n${field.url ? `<${field.url}|${escapeSlack(field.value)}>` : escapeSlack(field.value)}`,
+  }));
   return {
     text: `${notice.title}${notice.message ? ` - ${notice.message}` : ""}`,
     blocks: [
-      { type: "section", text: { type: "mrkdwn", text: `${head}${body}${link}`.slice(0, 3000) } },
+      { type: "section", text: { type: "mrkdwn", text: `${head}${body}${link}`.slice(0, 3000) }, ...(fields.length > 0 ? { fields } : {}) },
       { type: "context", elements: [{ type: "mrkdwn", text: `${escapeSlack(notice.panelName)} · ${notice.at.toISOString()}` }] },
     ],
   };
@@ -169,6 +215,10 @@ export function slackBody(notice: Notice) {
 export function telegramBody(notice: Notice, chatId: string) {
   const parts = [`<b>${severityLabel[notice.severity]}: ${escapeHtml(notice.title)}</b>`];
   if (notice.message) parts.push(escapeHtml(notice.message));
+  for (const field of subjectFields(notice)) {
+    const value = field.url ? `<a href="${escapeHtml(field.url)}">${escapeHtml(field.value)}</a>` : escapeHtml(field.value);
+    parts.push(`${field.name}: ${value}`);
+  }
   if (notice.link) parts.push(`<a href="${escapeHtml(notice.link)}">Open in ${escapeHtml(notice.panelName)}</a>`);
   return { chat_id: chatId, text: parts.join("\n").slice(0, 4096), parse_mode: "HTML", disable_web_page_preview: true };
 }
@@ -188,7 +238,7 @@ export function ntfyBody(notice: Notice, topic: string) {
     message: notice.message || notice.title,
     priority: ntfyPriority[notice.severity],
     tags: [ntfyTags[notice.severity]],
-    ...(notice.link ? { click: notice.link } : {}),
+    ...(clickUrl(notice) ? { click: clickUrl(notice) } : {}),
   };
 }
 
@@ -202,8 +252,9 @@ export function pushoverForm(notice: Notice, appToken: string, userKey: string):
     message: (notice.message || notice.title).slice(0, 1024),
     priority: pushoverPriority[notice.severity],
   });
-  if (notice.link) {
-    form.set("url", notice.link);
+  const url = clickUrl(notice);
+  if (url) {
+    form.set("url", url);
     form.set("url_title", `Open in ${notice.panelName}`.slice(0, 100));
   }
   return form;
@@ -212,16 +263,21 @@ export function pushoverForm(notice: Notice, appToken: string, userKey: string):
 const gotifyPriority: Record<Notice["severity"], number> = { error: 8, warning: 5, info: 3, ok: 2 };
 
 export function gotifyBody(notice: Notice) {
+  const url = clickUrl(notice);
   return {
     title: notice.title,
     message: notice.message || notice.title,
     priority: gotifyPriority[notice.severity],
-    ...(notice.link ? { extras: { "client::notification": { click: { url: notice.link } } } } : {}),
+    ...(url ? { extras: { "client::notification": { click: { url } } } } : {}),
   };
 }
 
 export function emailMessage(notice: Notice, from: string, to: string[]): MailMessage {
   const linkHtml = notice.link ? `<p><a href="${escapeHtml(notice.link)}">Open in ${escapeHtml(notice.panelName)}</a></p>` : "";
+  const fields = subjectFields(notice).map(
+    (field) =>
+      `${escapeHtml(field.name)}: ${field.url ? `<a href="${escapeHtml(field.url)}">${escapeHtml(field.value)}</a>` : escapeHtml(field.value)}`,
+  );
   return {
     from,
     to,
@@ -230,6 +286,7 @@ export function emailMessage(notice: Notice, from: string, to: string[]): MailMe
     html:
       `<p><strong>${escapeHtml(notice.title)}</strong></p>` +
       (notice.message ? `<p>${escapeHtml(notice.message)}</p>` : "") +
+      (fields.length > 0 ? `<p>${fields.join("<br>")}</p>` : "") +
       linkHtml +
       `<p style="color:#64748b;font-size:12px">${escapeHtml(notice.panelName)} - ${notice.at.toISOString()}</p>`,
   };

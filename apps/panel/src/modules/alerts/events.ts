@@ -8,13 +8,14 @@ import { timestampMs } from "@bufbuild/protobuf/wkt";
 import { BuildStage, CrashAction, type CrashReport, DeployStage, type Event, HealthState, NodeAlertKind, UpdateTarget } from "@seylo/proto";
 import { and, desc, eq, lte, ne } from "drizzle-orm";
 import { inspectedKeyMark } from "../../agent-hub/panel-address";
-import { alerts, backupRuns, builds, crashReports, deployments, nodes, services } from "../../db/schema";
+import { alerts, backupRuns, builds, crashReports, deployments, nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { getSetting } from "../../settings";
 import { splitLastOutput } from "../deployments/failure";
 import { arrivalGraceMs } from "../panelMove/keys";
 import { keyStartsWith, type RaiseAlert } from "./sink";
+import { type ServiceSubject, serviceSubject } from "./subject";
 
 /** Grace period before a disconnected node counts as offline. */
 export const nodeOfflineGraceMs = 60_000;
@@ -23,13 +24,14 @@ export const nodeOfflineJobType = "alerts.nodeOffline";
 
 const nodeName = (deps: Deps, nodeId: string) => deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name;
 
-const serviceName = (deps: Deps, serviceId: string) =>
-  deps.db.select({ name: services.name }).from(services).where(eq(services.id, serviceId)).get()?.name;
-
-/** Only alert about services the panel knows; a removed service's late events are dropped. */
-function forService(deps: Deps, serviceId: string, build: (name: string) => RaiseAlert): void {
-  const name = serviceName(deps, serviceId);
-  if (name !== undefined) deps.alerts.raise(build(name));
+/**
+ * Only alert about services the panel knows; a removed service's late events
+ * are dropped. Titles name the service by its label ("acme-shop / api",
+ * subject.ts).
+ */
+function forService(deps: Deps, serviceId: string, build: (service: ServiceSubject) => RaiseAlert): void {
+  const subject = serviceSubject(deps.db, serviceId);
+  if (subject) deps.alerts.raise({ projectId: subject.projectId, ...build(subject) });
 }
 
 export const nodeOfflineJob = defineJob<{ nodeId: string; since: string }>({
@@ -139,10 +141,10 @@ export function recordCrash(deps: Deps, nodeId: string, report: CrashReport, cra
         : "left stopped";
   const prefix = crashPrefix(serviceId);
   const raise = () =>
-    forService(deps, serviceId, (name) => ({
+    forService(deps, serviceId, (service) => ({
       event: "crash",
       key: `${prefix}${at}`,
-      title: `${name} crashed`,
+      title: `${service.label} crashed`,
       message: `${cause[0]?.toUpperCase()}${cause.slice(1)}, ${after}.`,
       serviceId,
       nodeId,
@@ -155,10 +157,10 @@ export function recordCrash(deps: Deps, nodeId: string, report: CrashReport, cra
     if (!key || !deps.alerts.reopen(key)) raise();
   }
   if (report.action === CrashAction.GAVE_UP) {
-    forService(deps, serviceId, (name) => ({
+    forService(deps, serviceId, (service) => ({
       event: "crash_limit",
       key: `crash-limit:${serviceId}:${at}`,
-      title: `${name} was stopped after ${report.streak} crashes`,
+      title: `${service.label} was stopped after ${report.streak} crashes`,
       message: `Last exit: ${cause}. Fix the problem and start or redeploy the service.`,
       serviceId,
       nodeId,
@@ -204,10 +206,10 @@ export function subscribeAgentEvents(deps: Deps): void {
   agents.onEvent("deployProgress", (nodeId, progress, event) => {
     const { serviceId, generation } = progress;
     if (progress.stage === DeployStage.FAILED) {
-      forService(deps, serviceId, (name) => ({
+      forService(deps, serviceId, (service) => ({
         event: "deploy_failed",
         key: `deploy-failed:${serviceId}:${generation}:${nodeId}`,
-        title: `Deploy of ${name} failed`,
+        title: `${service.label} failed to deploy`,
         // The reason alone: an agent before 0.2.16 appends the new container's output after "last output:".
         message: splitLastOutput(progress.message).reason || "The new version never became healthy. The previous version is still serving.",
         serviceId,
@@ -215,10 +217,10 @@ export function subscribeAgentEvents(deps: Deps): void {
       }));
     } else if (progress.stage === DeployStage.SUCCEEDED) {
       resolveCrashes(deps, serviceId, happenedAt(event), Number(generation));
-      forService(deps, serviceId, (name) => ({
+      forService(deps, serviceId, (service) => ({
         event: "deploy_succeeded",
         key: `deploy-ok:${serviceId}:${generation}:${nodeId}`,
-        title: `${name} deployed`,
+        title: `${service.label} deployed`,
         message: progress.message,
         serviceId,
         nodeId,
@@ -235,10 +237,10 @@ export function subscribeAgentEvents(deps: Deps): void {
       .where(eq(builds.id, progress.buildId))
       .get();
     if (!row) return;
-    forService(deps, row.serviceId, (name) => ({
+    forService(deps, row.serviceId, (service) => ({
       event: "build_failed",
       key: `build-failed:${progress.buildId}`,
-      title: `Build of ${name} failed`,
+      title: `${service.label} failed to build`,
       message: progress.message || "See the deploy log for the build output.",
       serviceId: row.serviceId,
       nodeId,
@@ -249,10 +251,10 @@ export function subscribeAgentEvents(deps: Deps): void {
     const { serviceId } = change;
     if (change.current === HealthState.UNHEALTHY && change.previous !== HealthState.UNHEALTHY) {
       if (deps.alerts.isOpen(`health:${serviceId}:`)) return;
-      forService(deps, serviceId, (name) => ({
+      forService(deps, serviceId, (service) => ({
         event: "health_unhealthy",
         key: `health:${serviceId}:${Date.now()}`,
-        title: `${name} is unhealthy`,
+        title: `${service.label} is unhealthy`,
         message:
           change.probeOutput
             .split("\n")
@@ -262,14 +264,15 @@ export function subscribeAgentEvents(deps: Deps): void {
         nodeId,
       }));
     } else if (change.current === HealthState.HEALTHY) {
-      const name = serviceName(deps, serviceId);
-      if (name === undefined) return;
+      const service = serviceSubject(deps.db, serviceId);
+      if (!service) return;
       resolveCrashes(deps, serviceId, happenedAt(event));
       deps.alerts.resolve(`health:${serviceId}:`, {
         event: "health_recovered",
         key: `health-ok:${serviceId}:${Date.now()}`,
-        title: `${name} is healthy again`,
+        title: `${service.label} is healthy again`,
         serviceId,
+        projectId: service.projectId,
         nodeId,
       });
     }
@@ -279,10 +282,10 @@ export function subscribeAgentEvents(deps: Deps): void {
     if (result.success) return;
     const run = deps.db.select({ serviceId: backupRuns.serviceId }).from(backupRuns).where(eq(backupRuns.id, result.runId)).get();
     if (!run) return;
-    forService(deps, run.serviceId, (name) => ({
+    forService(deps, run.serviceId, (service) => ({
       event: "backup_failed",
       key: `backup-failed:${result.runId}`,
-      title: `Backup of ${name} failed`,
+      title: `${service.label}: backup failed`,
       message: result.error.slice(0, 500),
       serviceId: run.serviceId,
       nodeId,
