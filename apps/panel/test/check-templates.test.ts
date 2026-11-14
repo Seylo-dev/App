@@ -145,6 +145,27 @@ describe("check-templates", () => {
     expect(oldest.passed.map((c) => c.slug).sort()).toEqual(["board", "flows"]);
   });
 
+  test("the run against panel.json's oldest: newer templates are left out before their meta.yaml is read, and the d.ts is not compared", async () => {
+    const dir = repo();
+    edit(dir, "panel.json", () => '{ "check": "v0.3.0", "oldest": "v0.2.17" }\n');
+    // Say 0.3.0 reads links written as one URL and adds a util; the d.ts follows it (panel.json's check), not 0.2.17.
+    edit(dir, "templates/metrics/meta.yaml", (t) =>
+      t
+        .replace('creates: "App"', 'creates: "App"\nminPanel: "0.3.0"')
+        .replace(/links:\n( {4}.*\n| {2}- .*\n)+/, 'links: "https://docs.example.com/metrics"\n'),
+    );
+    edit(dir, "types/templates-utils.d.ts", (t) =>
+      t.replace("  export const PRIMARY_DOMAIN", "  export function slugify(text: string): string;\n  export const PRIMARY_DOMAIN"),
+    );
+    const oldest = await checkTemplates(readRepo(dir), { skipNewerThan: "v0.2.17" });
+    expect(formatProblems(oldest.problems)).toEqual([]);
+    expect(oldest.skipped).toEqual(["metrics"]);
+    // This panel is not 0.3.0: run as the check, both are problems.
+    const out = await problems(dir);
+    expect(out).toContain("templates/metrics/meta.yaml: links must be a list.");
+    expect(out.some((l) => l.startsWith("types/templates-utils.d.ts: Declares") && l.includes("slugify"))).toBe(true);
+  });
+
   test("the command line: one line per problem with GitHub annotations, exit 1; --only; --emit writes a catalog the panel reads", () => {
     const dir = repo();
     edit(dir, "templates/metrics/meta.yaml", (t) => t.replace('default: "example/metrics:3.1.0"', 'default: "example/metrics"'));

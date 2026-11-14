@@ -21,7 +21,13 @@
 // what it had. A catalog that passes but has a template this panel cannot
 // read (a meta.yaml it does not understand, a missing file) loses only that
 // template, listed in the status as skipped. Templates whose minPanel is
-// newer than this panel are left out and counted.
+// newer than this panel are left out and counted, before the rest of their
+// meta.yaml is read (a newer panel may read shapes this one does not).
+//
+// A catalog never stops the panel from starting: a download is read the
+// way the next start reads it before it is kept, and a kept or shipped copy
+// this panel fails to read is passed over (logged; for the shipped one the
+// status says so too).
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -135,17 +141,17 @@ function toLoaded(file: CatalogFile, kind: Kind, unsigned: boolean, origin: Load
     }
     const metaYaml = decode(meta);
     let detail: Template["detail"];
-    let minPanel: string | null;
     try {
-      minPanel = metaMinPanel(slug, metaYaml);
+      // minPanel first: a template for a newer panel may use a meta.yaml shape this panel does not know; it is hidden, not skipped.
+      const minPanel = metaMinPanel(slug, metaYaml);
+      if (minPanel && needsNewerPanel(minPanel, context.version)) {
+        hidden++;
+        continue;
+      }
       detail = parseMeta(slug, metaYaml, catalog, unsigned);
     } catch (error) {
       if (!(error instanceof CatalogError)) throw error;
       skipped.push({ slug, reason: error.message });
-      continue;
-    }
-    if (minPanel && needsNewerPanel(minPanel, context.version)) {
-      hidden++;
       continue;
     }
     const logoFile = logoFiles.find((f) => entry.files.has(f)) ?? null;
@@ -196,8 +202,10 @@ function loadBundled(): Loaded | string {
     if (file.source !== officialSource) throw new CatalogFetchError(`It is from ${file.source}, not ${officialSource}.`);
     value = toLoaded(file, "official", false, "bundled");
   } catch (error) {
-    if (!(error instanceof CatalogFetchError)) throw error;
-    value = `The catalog that ships with this panel was not used: ${error.message}`;
+    // Anything else is this panel failing to read it: the panel still starts, without these templates.
+    if (!(error instanceof CatalogFetchError))
+      context.logger?.error({ err: error }, "could not read the template catalog that ships with the panel");
+    value = `The catalog that ships with this panel was not used: ${error instanceof CatalogFetchError ? error.message : "this panel could not read it."}`;
   }
   bundledMemo = { key, value };
   return value;
@@ -288,11 +296,13 @@ function loadOfficial(db: PanelDb | null): void {
       if (file.sequence >= floor && (!active || file.sequence >= active.file.sequence))
         active = toLoaded(file, "official", false, "downloaded");
     } catch (error) {
-      if (!(error instanceof CatalogFetchError)) throw error;
-      context.logger?.warn(
-        { reason: error.message },
-        "the downloaded template catalog does not verify; using the one that ships with the panel",
-      );
+      // Whatever goes wrong with the kept copy, the panel starts with the one that ships with it.
+      if (error instanceof CatalogFetchError)
+        context.logger?.warn(
+          { reason: error.message },
+          "the downloaded template catalog does not verify; using the one that ships with the panel",
+        );
+      else context.logger?.error({ err: error }, "could not read the downloaded template catalog; using the one that ships with the panel");
     }
   }
   official = active;
@@ -310,8 +320,9 @@ function loadExtra(db: PanelDb | null): void {
     const file = verified(stored, setting.publicKey, "The private catalog");
     if (file.sequence >= (track.sequence ?? 0)) extra = toLoaded(file, "private", setting.publicKey === null, "downloaded");
   } catch (error) {
-    if (!(error instanceof CatalogFetchError)) throw error;
-    context.logger?.warn({ reason: error.message }, "the private template catalog on disk does not verify");
+    if (error instanceof CatalogFetchError)
+      context.logger?.warn({ reason: error.message }, "the private template catalog on disk does not verify");
+    else context.logger?.error({ err: error }, "could not read the private template catalog on disk; it is left out");
   }
 }
 
@@ -388,6 +399,8 @@ async function refresh(deps: Pick<Deps, "db" | "logger">, which: { official: boo
           `The downloaded catalog (number ${fetched.file.sequence}) is older than the one this panel has (${floor}); keeping that one.`,
         );
       }
+      // Read first, as the next start reads it: one this panel cannot read is not kept and does not raise the sequence floor.
+      toLoaded(fetched.file, "official", false, "downloaded");
       keep("official", fetched);
       writeState(deps.db, (s) => ({
         ...s,
@@ -420,6 +433,7 @@ async function refresh(deps: Pick<Deps, "db" | "logger">, which: { official: boo
           `The private catalog (number ${fetched.file.sequence}) is older than the one this panel has (${track.sequence}); keeping that one.`,
         );
       }
+      toLoaded(fetched.file, "private", extraSetting.publicKey === null, "downloaded");
       keep("private", fetched);
       writeState(deps.db, (s) => ({
         ...s,

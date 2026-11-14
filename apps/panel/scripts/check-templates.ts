@@ -16,7 +16,9 @@
 // NOTICE, LICENSE.* (the logos' licenses), panel.json ({"check","oldest"}:
 // the App tags its CI checks against) and types/templates-utils.d.ts.
 // --skip-newer-than leaves out templates whose minPanel is above that
-// version (the check against the oldest supported panel). --emit writes the
+// version (the check against the oldest supported panel), and does not
+// compare types/templates-utils.d.ts with this panel's ~templates-utils:
+// the d.ts follows panel.json's "check", a newer panel. --emit writes the
 // catalog of everything checked (format: src/modules/templates/catalog-file.ts),
 // only when nothing failed; commit and sequence default to the repository's
 // HEAD and its commit count. --catalog checks a built catalog instead.
@@ -289,24 +291,31 @@ export async function checkTemplates(set: TemplateSet, options: CheckOptions = {
     const code = text("index.ts");
     if (metaText === null || code === null) continue;
 
-    // meta.yaml: the panel's parser, then the strict shape.
+    // meta.yaml: minPanel first (the panel hides a template for a newer panel before reading the rest), the panel's parser, then the strict shape.
     let fields: FormField[];
     let meta: Meta;
     let minPanel: string | null;
-    try {
-      minPanel = metaMinPanel(slug, metaText);
-      fields = parseMeta(slug, metaText, "official").fields;
-      meta = parseYaml(metaText) as Meta;
-    } catch (error) {
+    const metaProblem = (error: unknown) =>
       add(
         slug,
         at("meta.yaml"),
         error instanceof CatalogError ? error.message.replace(`${slug}/meta.yaml`, "").replace(/^:?\s*/, "") : String(error),
       );
+    try {
+      minPanel = metaMinPanel(slug, metaText);
+    } catch (error) {
+      metaProblem(error);
       continue;
     }
     if (minPanel && options.skipNewerThan && needsNewerPanel(minPanel, bare(options.skipNewerThan))) {
       skipped.push(slug);
+      continue;
+    }
+    try {
+      fields = parseMeta(slug, metaText, "official").fields;
+      meta = parseYaml(metaText) as Meta;
+    } catch (error) {
+      metaProblem(error);
       continue;
     }
     if (!Value.Check(MetaSchema, meta)) {
@@ -405,7 +414,8 @@ export async function checkTemplates(set: TemplateSet, options: CheckOptions = {
   const present = set.present ?? new Set(set.candidates.flatMap((c) => [...c.files.keys()].map((f) => `templates/${c.slug}/${f}`)));
   for (const match of set.notice.matchAll(/templates\/([A-Za-z0-9-]+)\/(logo\.[a-z]+)/g))
     if (!present.has(match[0])) add(null, "NOTICE", `Lists ${match[0]}, which does not exist.`);
-  if (set.typesDts !== null) {
+  // The d.ts matches the panel panel.json's "check" names; the run against "oldest" (--skip-newer-than) is an older panel whose utils may differ.
+  if (set.typesDts !== null && !options.skipNewerThan) {
     const exported = (source: string, pattern: RegExp) => [...source.matchAll(pattern)].map((m) => m[1] as string).sort();
     const runtime = exported(utilsSource, /export (?:function|const) (\w+)/g);
     const types = exported(set.typesDts, /export (?:declare )?(?:function|const) (\w+)/g);

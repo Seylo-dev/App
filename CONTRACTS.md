@@ -3103,8 +3103,13 @@ never type the ids by hand.
     files one after the other). Any failure refuses the whole catalog, keeps
     the current one and records the reason (`lastError`). A catalog that
     passes but has a template this panel cannot read (meta.yaml it does not
-    understand, a missing file, a bad slug) loses only that template
-    (`catalogStatus.skipped`).
+    understand or with a value of the wrong kind, a missing file, a bad
+    slug) loses only that template (`catalogStatus.skipped`). A download is
+    read the way the next start reads it before it is kept: one this panel
+    fails to read is refused (not kept, no new sequence floor). A shipped
+    or kept copy this panel fails to read is passed over (logged, and the
+    shipped one's reason is in `lastError`), so a catalog never stops the
+    panel from starting.
   - Copies: the panel ships `templates/catalog.json` (+ `.minisig`), verified
     with the same key at load (skipped while the key is the brand
     placeholder: development builds, which then never download). Downloads
@@ -3121,8 +3126,10 @@ never type the ids by hand.
     `invalidate` for templates.list/get/source/catalogStatus.
   - `minPanel` (optional in meta.yaml, "0.2.17"): a template whose minPanel
     is above the panel's version is left out and counted
-    (`needNewerPanel`); a pre-release counts as its release, a development
-    build (no version, 0.0.0) lists everything.
+    (`needNewerPanel`) before the rest of its meta.yaml is read, so a newer
+    meta.yaml shape is hidden on older panels, not skipped; a pre-release
+    counts as its release, a development build (no version, 0.0.0) lists
+    everything.
   - Source setting `templatesCatalog` (`templates.setCatalogSource`, owner
     only, audited with `extraHost` and `unsigned`): `official` false = the
     shipped copy only (no downloads, a download on disk is not used);
@@ -3152,7 +3159,10 @@ never type the ids by hand.
     latest/stable/main/nightly/edge, or a digest), install (preview and
     create on an in-memory panel with a fake node), logos, NOTICE lines,
     and `types/templates-utils.d.ts` declaring what `~templates-utils`
-    exports. `vendored-catalog.test.ts` runs it on the shipped copy.
+    exports (not compared on the run against panel.json `oldest`,
+    `--skip-newer-than`, which also leaves newer templates out before
+    reading the rest of their meta.yaml: the d.ts follows `check`).
+    `vendored-catalog.test.ts` runs it on the shipped copy.
   - Template domains (since 0.2.17): a custom `host` must match
     `domains.Hostname` and `path` `domains.PathPrefix` in the output
     schema, since installing adds domains through domains.add's code, which

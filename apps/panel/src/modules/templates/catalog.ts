@@ -28,26 +28,8 @@ export interface Template {
 export const logoFiles = ["logo.svg", "logo.webp", "logo.png"] as const;
 export type LogoFile = (typeof logoFiles)[number];
 
-interface MetaProperty {
-  type?: string;
-  title?: string;
-  description?: string;
-  default?: unknown;
-  enum?: unknown[];
-  format?: string;
-}
-
-interface MetaYaml {
-  name?: string;
-  description?: string;
-  category?: string;
-  tags?: string[];
-  creates?: string;
-  links?: { label?: string; url?: string }[];
-  body?: string;
-  minPanel?: unknown;
-  schema?: { required?: string[]; properties?: Record<string, MetaProperty> };
-}
+type Mapping = Record<string, unknown>;
+const isMapping = (value: unknown): value is Mapping => typeof value === "object" && value !== null && !Array.isArray(value);
 
 export class CatalogError extends Error {
   override name = "CatalogError";
@@ -75,11 +57,11 @@ export function catalogDir(): string | null {
 const fieldKey = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /** The YAML of a meta.yaml; throws CatalogError when it is not YAML. */
-export function readMetaYaml(slug: string, text: string): MetaYaml {
+export function readMetaYaml(slug: string, text: string): Mapping {
   try {
-    const value = parseYaml(text) ?? {};
-    if (typeof value !== "object" || Array.isArray(value)) throw new Error("it is not a mapping");
-    return value as MetaYaml;
+    const value: unknown = parseYaml(text) ?? {};
+    if (!isMapping(value)) throw new Error("it is not a mapping");
+    return value;
   } catch (error) {
     throw new CatalogError(`${slug}/meta.yaml is not valid YAML: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -96,55 +78,102 @@ export function metaMinPanel(slug: string, text: string): string | null {
 }
 
 /**
- * Reads meta.yaml text into the op shape; throws CatalogError on anything a
- * form could not show. `origin` says where the template comes from
- * (catalog templates are read only).
+ * Reads the values parseMeta uses, each checked for its kind, so a value of
+ * another kind (a list where text goes, a field that is not a mapping) is a
+ * CatalogError and never a crash. A missing or empty value is left out;
+ * numbers and true/false where text goes are read as text.
+ */
+function metaReader(slug: string) {
+  const wrong = (what: string, kind: string) => new CatalogError(`${slug}/meta.yaml: ${what} must be ${kind}.`);
+  return {
+    text(value: unknown, what: string): string | undefined {
+      if (value === undefined || value === null) return undefined;
+      if (typeof value === "string") return value;
+      if (typeof value === "number" || typeof value === "boolean") return String(value);
+      throw wrong(what, "text");
+    },
+    list(value: unknown, what: string): unknown[] {
+      if (value === undefined || value === null) return [];
+      if (!Array.isArray(value)) throw wrong(what, "a list");
+      return value;
+    },
+    mapping(value: unknown, what: string): Mapping {
+      if (value === undefined || value === null) return {};
+      if (!isMapping(value)) throw wrong(what, "a mapping");
+      return value;
+    },
+  };
+}
+
+/**
+ * Reads meta.yaml text into the op shape; throws CatalogError (and nothing
+ * else) on anything a form could not show. `origin` says where the template
+ * comes from (catalog templates are read only).
  */
 export function parseMeta(slug: string, text: string, origin: TemplateOrigin, unsigned = false): TemplateDetail {
   const meta = readMetaYaml(slug, text);
-  if (!meta.name || !meta.description) throw new CatalogError(`${slug}/meta.yaml needs name and description.`);
-  const required = new Set(meta.schema?.required ?? []);
-  const fields: FormField[] = Object.entries(meta.schema?.properties ?? {}).map(([key, p]) => {
+  const read = metaReader(slug);
+  const name = read.text(meta.name, "name");
+  const description = read.text(meta.description, "description");
+  if (!name || !description) throw new CatalogError(`${slug}/meta.yaml needs name and description.`);
+  const schema = read.mapping(meta.schema, "schema");
+  const required = new Set(read.list(schema.required, "schema.required"));
+  const fields: FormField[] = Object.entries(read.mapping(schema.properties, "schema.properties")).map(([key, value]) => {
     if (!fieldKey.test(key)) throw new CatalogError(`${slug}/meta.yaml: field ${key} must be letters, digits and _.`);
     if (key === "serviceName" || key === "projectName") throw new CatalogError(`${slug}/meta.yaml: ${key} is filled in by the panel.`);
-    const options = (p.enum ?? []).map((v) => ({ value: String(v), label: String(v) }));
-    const type: FormField["type"] =
+    const at = `schema.properties.${key}`;
+    // "key:" with nothing under it is a plain text field.
+    const p = read.mapping(value, at);
+    const options = read.list(p.enum, `${at}.enum`).map((v, i) => {
+      if (typeof v === "object" && v !== null) throw new CatalogError(`${slug}/meta.yaml: ${at}.enum[${i}] must be text or a number.`);
+      return { value: String(v), label: String(v) };
+    });
+    const type = read.text(p.type, `${at}.type`);
+    const format = read.text(p.format, `${at}.format`);
+    const fieldType: FormField["type"] =
       options.length > 0
         ? "select"
-        : p.type === "boolean"
+        : type === "boolean"
           ? "boolean"
-          : p.type === "number" || p.type === "integer"
+          : type === "number" || type === "integer"
             ? "number"
-            : p.format === "password"
+            : format === "password"
               ? "password"
-              : p.format === "domain"
+              : format === "domain"
                 ? "domain"
                 : "string";
     const def = p.default;
     return {
       key,
-      label: p.title ?? key,
-      description: p.description ?? null,
-      type,
+      label: read.text(p.title, `${at}.title`) ?? key,
+      description: read.text(p.description, `${at}.description`) ?? null,
+      type: fieldType,
       required: required.has(key),
       default: typeof def === "string" || typeof def === "number" || typeof def === "boolean" ? def : null,
       options,
     };
   });
+  const tags = read.list(meta.tags, "tags").flatMap((tag, i) => read.text(tag, `tags[${i}]`) ?? []);
+  const links = read.list(meta.links, "links").flatMap((value, i) => {
+    const link = read.mapping(value, `links[${i}]`);
+    const label = read.text(link.label, `links[${i}].label`);
+    const url = read.text(link.url, `links[${i}].url`);
+    return label && url ? [{ label, url }] : [];
+  });
   return {
     slug,
-    name: meta.name,
-    description: meta.description,
-    category: meta.category ?? "Other",
-    tags: meta.tags ?? [],
+    name,
+    description,
+    category: read.text(meta.category, "category") ?? "Other",
+    tags,
     // The store sets it for catalog templates that have a logo; custom templates have none.
     logoUrl: null,
-    creates: meta.creates ?? "",
+    creates: read.text(meta.creates, "creates") ?? "",
     builtIn: origin !== "custom",
     catalog: origin,
     unsigned,
-    body: meta.body ?? "",
-    links: (meta.links ?? []).filter((l) => l.label && l.url).map((l) => ({ label: l.label as string, url: l.url as string })),
+    body: read.text(meta.body, "body") ?? "",
+    links,
     fields,
   };
 }

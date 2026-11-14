@@ -9,12 +9,14 @@
 // catalog that passes but has a template this panel cannot read loses only
 // that template.
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { templates } from "@seylo/ops";
 import { auditLog } from "../src/db/schema";
+import * as catalogModule from "../src/modules/templates/catalog";
+import { CatalogError, parseMeta } from "../src/modules/templates/catalog";
 import { catalogSource } from "../src/modules/templates/remote";
 import { catalogHooks } from "../src/modules/templates/store";
 import { catalogKey, fixtureCatalog, resetCatalogs, serveCatalogs, simpleTemplate } from "./catalog-fakes";
@@ -23,12 +25,30 @@ import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 const officialUrl = catalogSource.officialUrl;
 const panels: TestPanel[] = [];
 const dirs: string[] = [];
+const restores: (() => void)[] = [];
 
 afterEach(() => {
+  for (const restore of restores.splice(0)) restore();
   for (const p of panels.splice(0)) p.close();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   resetCatalogs();
 });
+
+/** One template's files whose meta.yaml has `extra` after the usual fields (a value of a kind parseMeta does not take, say). */
+function oddTemplate(name: string, extra: string) {
+  const files = simpleTemplate(name);
+  return { ...files, "meta.yaml": files["meta.yaml"].replace("schema:", `${extra}\nschema:`) };
+}
+
+/** parseMeta failing the way a bug in this panel would (not a CatalogError) for these slugs. */
+function breakParseMeta(...slugs: string[]) {
+  const real = catalogModule.parseMeta;
+  const spy = spyOn(catalogModule, "parseMeta").mockImplementation((slug, ...rest) => {
+    if (slugs.includes(slug)) throw new TypeError(`cannot read ${slug}`);
+    return real(slug, ...rest);
+  });
+  restores.push(() => spy.mockRestore());
+}
 
 /** A panel whose shipped catalog is the fixture one, signed with `key` (or trusted when no key). */
 async function start(
@@ -197,6 +217,49 @@ describe("downloading the official catalog", () => {
     expect(after.official).toMatchObject({ origin: "downloaded", sequence: 7, templates: 4, lastError: null });
     expect(after.skipped).toEqual([{ slug: "broken", catalog: "official", reason: "broken/meta.yaml needs name and description." }]);
     expect(await slugs(panel, owner)).toEqual(["board", "flows", "metrics", "notes"]);
+  });
+
+  test("a template whose meta.yaml has a value of the wrong kind is skipped, in the download and at the next start", async () => {
+    const key = catalogKey();
+    const dataDir = tempDir();
+    const panelPath = join(dataDir, "panel.db");
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const first = await start({ key, dataDir, panelPath, masterKey });
+    const next = fixtureCatalog({
+      sequence: 7,
+      add: {
+        notes: simpleTemplate("Notes"),
+        links: oddTemplate("Links", 'links: "https://example.com"'),
+        fields: { ...simpleTemplate("Fields"), "meta.yaml": 'name: "Fields"\ndescription: "x"\nschema:\n  properties:\n    a: "x"\n' },
+      },
+    });
+    serveCatalogs({ [officialUrl]: { catalog: next, signature: key.sign(next) } });
+    const after = await refresh(first.panel, first.owner);
+    expect(after.official).toMatchObject({ origin: "downloaded", sequence: 7, templates: 4, lastError: null });
+    expect(after.skipped).toEqual([
+      { slug: "fields", catalog: "official", reason: "fields/meta.yaml: schema.properties.a must be a mapping." },
+      { slug: "links", catalog: "official", reason: "links/meta.yaml: links must be a list." },
+    ]);
+    first.panel.close();
+    panels.splice(panels.indexOf(first.panel), 1);
+
+    serveCatalogs({});
+    const second = await start({ key, dataDir, panelPath, masterKey });
+    expect((await status(second.panel, second.owner)).official).toMatchObject({ origin: "downloaded", sequence: 7, templates: 4 });
+    expect(await slugs(second.panel, second.owner)).toEqual(["board", "flows", "metrics", "notes"]);
+  });
+
+  test("a template for a newer panel is hidden before the rest of its meta.yaml is read", async () => {
+    // Say 9.9.9 takes links as one URL: this panel does not, and must neither fail to start nor list it as broken.
+    const bundle = fixtureCatalog({ add: { future: oddTemplate("Future", 'minPanel: "9.9.9"\nlinks: "https://example.com"') } });
+    const released = await start({ bundle, version: "0.2.17" });
+    expect(await slugs(released.panel, released.owner)).toEqual(["board", "flows", "metrics"]);
+    expect(await status(released.panel, released.owner)).toMatchObject({ needNewerPanel: 1, skipped: [] });
+    // A development build reads every template, so there it is skipped.
+    const dev = await start({ bundle });
+    expect((await status(dev.panel, dev.owner)).skipped).toEqual([
+      { slug: "future", catalog: "official", reason: "future/meta.yaml: links must be a list." },
+    ]);
   });
 
   test("a build without the catalog key never downloads, and the owner can turn downloads off", async () => {
@@ -393,6 +456,35 @@ describe("a private catalog", () => {
     expect(await slugs(panel, owner)).not.toContain("tools");
   });
 
+  test("a template whose meta.yaml has a value of the wrong kind is skipped; the rest is kept and read again at the next start", async () => {
+    const dataDir = tempDir();
+    const panelPath = join(dataDir, "panel.db");
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const first = await start({ dataDir, panelPath, masterKey });
+    const extra = fixtureCatalog({
+      source: "acme/templates",
+      drop: ["board", "flows", "metrics"],
+      add: { tools: simpleTemplate("Tools"), odd: oddTemplate("Odd", 'links: "https://example.com"') },
+    });
+    serveCatalogs({ [extraUrl]: { catalog: extra } });
+    const res = await callOp(
+      first.panel,
+      templates.setCatalogSource,
+      { official: true, extra: { url: extraUrl, publicKey: null, allowUnsigned: true } },
+      { cookie: first.owner },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.extra).toMatchObject({ origin: "downloaded", templates: 1, lastError: null });
+    expect(res.body.skipped).toEqual([{ slug: "odd", catalog: "private", reason: "odd/meta.yaml: links must be a list." }]);
+    first.panel.close();
+    panels.splice(panels.indexOf(first.panel), 1);
+
+    serveCatalogs({});
+    const second = await start({ dataDir, panelPath, masterKey });
+    expect((await status(second.panel, second.owner)).extra).toMatchObject({ origin: "downloaded", templates: 1 });
+    expect(await slugs(second.panel, second.owner)).toContain("tools");
+  });
+
   test("a private catalog the owner replaced while it downloaded does not take the new one's place", async () => {
     const { panel, owner } = await start();
     const oldUrl = "https://old.example.com/catalog.json";
@@ -457,5 +549,142 @@ describe("a private catalog", () => {
         .all()
         .some((row) => row.opId === "templates.refreshCatalog" && row.outcome === "ok"),
     ).toBe(true);
+  });
+});
+
+describe("meta.yaml shapes", () => {
+  test("a value of the wrong kind is a CatalogError, never a crash", () => {
+    const base = 'name: "A"\ndescription: "A test."\n';
+    const cases: [string, string][] = [
+      ['links: "https://example.com"', "links must be a list."],
+      ["links:\n  - https://example.com", "links[0] must be a mapping."],
+      ['links:\n  - label: ["Docs"]\n    url: "https://example.com"', "links[0].label must be text."],
+      ['tags: "a, b"', "tags must be a list."],
+      ["tags:\n  - { a: 1 }", "tags[0] must be text."],
+      ["category: { a: 1 }", "category must be text."],
+      ["body: [a]", "body must be text."],
+      ['schema: "object"', "schema must be a mapping."],
+      ['schema:\n  required: "a"', "schema.required must be a list."],
+      ["schema:\n  properties: [a]", "schema.properties must be a mapping."],
+      ['schema:\n  properties:\n    a: "text"', "schema.properties.a must be a mapping."],
+      ["schema:\n  properties:\n    a:\n      enum: one", "schema.properties.a.enum must be a list."],
+      ["schema:\n  properties:\n    a:\n      enum: [{ x: 1 }]", "schema.properties.a.enum[0] must be text or a number."],
+      ["schema:\n  properties:\n    a:\n      title: [A]", "schema.properties.a.title must be text."],
+      ["schema:\n  properties:\n    a:\n      type: { a: 1 }", "schema.properties.a.type must be text."],
+    ];
+    for (const [yaml, message] of cases) {
+      let thrown: unknown = null;
+      try {
+        parseMeta("a", `${base}${yaml}\n`, "official");
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(CatalogError);
+      expect((thrown as Error).message).toBe(`a/meta.yaml: ${message}`);
+    }
+    expect(() => parseMeta("a", "name: [A]\ndescription: x\n", "custom")).toThrow("a/meta.yaml: name must be text.");
+  });
+
+  test("missing and empty values are left out, a field with nothing under it is a text field, numbers are text", () => {
+    const meta = parseMeta(
+      "a",
+      'name: 2048\ndescription: "A test."\ncategory:\ntags: [games, 1]\nlinks:\n  - label: "No URL"\n  - label: "Site"\n    url: "https://example.com"\nschema:\n  required: [a]\n  properties:\n    a:\n',
+      "official",
+    );
+    expect(meta).toMatchObject({
+      name: "2048",
+      category: "Other",
+      tags: ["games", "1"],
+      links: [{ label: "Site", url: "https://example.com" }],
+      fields: [{ key: "a", label: "a", type: "string", required: true, default: null, options: [] }],
+    });
+  });
+
+  test("saving a custom template with one is a bad request on metaYaml", async () => {
+    const { panel, owner } = await start();
+    const res = await callOp(
+      panel,
+      templates.saveCustom,
+      { slug: "odd", metaYaml: 'name: "Odd"\ndescription: "x"\nlinks: "https://example.com"\n', source: simpleTemplate("Odd")["index.ts"] },
+      { cookie: owner },
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "odd/meta.yaml: links must be a list.",
+      details: { field: "metaYaml" },
+    });
+  });
+});
+
+describe("a catalog this panel fails to read", () => {
+  // A bug in this panel's reading of a template, not a template it can say is broken: never a panel that cannot start.
+  const extraUrl = "https://templates.example.com/catalog.json";
+  const privateCatalog = () =>
+    fixtureCatalog({ source: "acme/templates", drop: ["board", "flows", "metrics"], add: { tools: simpleTemplate("Tools") } });
+  const usePrivate = (panel: TestPanel, cookie: string) =>
+    callOp(
+      panel,
+      templates.setCatalogSource,
+      { official: true, extra: { url: extraUrl, publicKey: null, allowUnsigned: true } },
+      { cookie },
+    );
+
+  test("a download is not kept and does not raise the sequence floor", async () => {
+    const key = catalogKey();
+    const dataDir = tempDir();
+    const { panel, owner } = await start({
+      key,
+      dataDir,
+      panelPath: join(dataDir, "panel.db"),
+      masterKey: crypto.getRandomValues(new Uint8Array(32)),
+    });
+    const next = fixtureCatalog({ sequence: 7, add: { notes: simpleTemplate("Notes") } });
+    serveCatalogs({ [officialUrl]: { catalog: next, signature: key.sign(next) }, [extraUrl]: { catalog: privateCatalog() } });
+    breakParseMeta("notes", "tools");
+    const after = await refresh(panel, owner);
+    expect(after.official).toMatchObject({ origin: "bundled", sequence: 1, lastError: "Checking for new templates failed." });
+    expect(existsSync(join(dataDir, "templates", "official", "catalog.json"))).toBe(false);
+    const extra = await usePrivate(panel, owner);
+    expect(extra.status).toBe(200);
+    expect(extra.body.extra).toMatchObject({ origin: null, templates: 0, lastError: "Checking for new templates failed." });
+    expect(existsSync(join(dataDir, "templates", "extra", "catalog.json"))).toBe(false);
+
+    // Once it reads them again (a panel update, say), a lower number than the one refused is still taken.
+    for (const restore of restores.splice(0)) restore();
+    const five = fixtureCatalog({ sequence: 5, add: { notes: simpleTemplate("Notes") } });
+    serveCatalogs({ [officialUrl]: { catalog: five, signature: key.sign(five) } });
+    expect((await refresh(panel, owner)).official).toMatchObject({ origin: "downloaded", sequence: 5, lastError: null });
+  });
+
+  test("a kept copy is passed over at the next start", async () => {
+    const key = catalogKey();
+    const dataDir = tempDir();
+    const panelPath = join(dataDir, "panel.db");
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const first = await start({ key, dataDir, panelPath, masterKey });
+    const next = fixtureCatalog({ sequence: 7, add: { notes: simpleTemplate("Notes") } });
+    serveCatalogs({ [officialUrl]: { catalog: next, signature: key.sign(next) }, [extraUrl]: { catalog: privateCatalog() } });
+    await refresh(first.panel, first.owner);
+    expect((await usePrivate(first.panel, first.owner)).body.extra).toMatchObject({ origin: "downloaded", templates: 1 });
+    first.panel.close();
+    panels.splice(panels.indexOf(first.panel), 1);
+
+    breakParseMeta("notes", "tools");
+    serveCatalogs({});
+    const second = await start({ key, dataDir, panelPath, masterKey });
+    const after = await status(second.panel, second.owner);
+    expect(after.official).toMatchObject({ origin: "bundled", sequence: 1 });
+    expect(after.extra).toMatchObject({ origin: null, templates: 0 });
+    expect(await slugs(second.panel, second.owner)).toEqual(["board", "flows", "metrics"]);
+  });
+
+  test("the shipped copy: the panel starts without it and says so", async () => {
+    breakParseMeta("board");
+    const { panel, owner } = await start();
+    expect(await slugs(panel, owner)).toEqual([]);
+    expect((await status(panel, owner)).official.lastError).toBe(
+      "The catalog that ships with this panel was not used: this panel could not read it.",
+    );
   });
 });
