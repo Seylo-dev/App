@@ -484,7 +484,8 @@ func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writ
 		return err
 	}
 	if res.ExitCode != 0 {
-		return fmt.Errorf("the dump exited with code %d: %s", res.ExitCode, lastLine(errTail))
+		line := lastLine(errTail)
+		return fmt.Errorf("the dump exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, true))
 	}
 	if gz != nil {
 		return gz.Close()
@@ -696,7 +697,8 @@ func (l *Local) restoreDump(ctx context.Context, store Store, key string, spec *
 		return nil, err
 	}
 	if res.ExitCode != 0 {
-		return nil, fmt.Errorf("the restore exited with code %d: %s", res.ExitCode, restoreLine(tail))
+		line := restoreLine(tail)
+		return nil, fmt.Errorf("the restore exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, false))
 	}
 	return &agentv1.RestoreBackupResponse{RestoredBytes: uint64(counter.n)}, nil
 }
@@ -820,7 +822,8 @@ func (l *Local) restoreMember(ctx context.Context, spec *agentv1.ServiceSpec, t 
 		return src.err
 	}
 	if res.ExitCode != 0 {
-		return fmt.Errorf("the restore exited with code %d: %s", res.ExitCode, restoreLine(tail))
+		line := restoreLine(tail)
+		return fmt.Errorf("the restore exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, false))
 	}
 	return br.drain()
 }
