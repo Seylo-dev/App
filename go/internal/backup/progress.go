@@ -8,10 +8,9 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 )
 
-// progressWriter counts bytes on their way to the store and reports
-// them at most once per interval.
+// progressWriter counts the bytes the store took and reports them at most
+// once per interval.
 type progressWriter struct {
-	w        io.Writer
 	emit     func(*agentv1.BackupProgress)
 	req      *agentv1.RunBackupRequest
 	interval time.Duration
@@ -27,8 +26,25 @@ func newProgress(emit func(*agentv1.BackupProgress), req *agentv1.RunBackupReque
 	return &progressWriter{emit: emit, req: req, interval: interval}
 }
 
-func (p *progressWriter) Write(b []byte) (int, error) {
-	n, err := p.w.Write(b)
+// reader counts what the store reads from r: the bytes uploaded (or in the
+// part being uploaded), not the ones the producer wrote ahead into the
+// spool.
+func (p *progressWriter) reader(r io.Reader) io.Reader { return progressReader{r: r, p: p} }
+
+type progressReader struct {
+	r io.Reader
+	p *progressWriter
+}
+
+func (pr progressReader) Read(b []byte) (int, error) {
+	n, err := pr.r.Read(b)
+	if n > 0 {
+		pr.p.add(n)
+	}
+	return n, err
+}
+
+func (p *progressWriter) add(n int) {
 	p.mu.Lock()
 	p.n += uint64(n)
 	p.dirty = true
@@ -37,7 +53,6 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	if send {
 		p.flush()
 	}
-	return n, err
 }
 
 // phase records a phase change and reports it right away.

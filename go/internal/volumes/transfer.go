@@ -155,7 +155,7 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 	if opts.MaxBytes > 0 {
 		space := t.Space
 		if space == nil {
-			space = diskSpace
+			space = DiskSpace
 		}
 		if free, total, ok := space(dir); ok && free < opts.MaxBytes+FreeFloor(total) {
 			return 0, fmt.Errorf("%w: it may need %d bytes and %d must stay free, %d are", ErrNoSpace, opts.MaxBytes, FreeFloor(total), free)

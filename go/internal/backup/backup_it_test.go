@@ -59,12 +59,26 @@ type rig struct {
 	specs  map[string]*agentv1.ServiceSpec
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T) *rig { return newRigWith(t, nil) }
+
+// newRigWith is newRig with every store the runner opens wrapped by wrap
+// (nil: as opened).
+func newRigWith(t *testing.T, wrap func(backup.Store) backup.Store) *rig {
 	e := itest.New(t)
 	r := &rig{e: e, specs: map[string]*agentv1.ServiceSpec{}}
 	r.dest = startMinIO(e)
+	var open func(*agentv1.BackupDestination) (backup.Store, error)
+	if wrap != nil {
+		open = func(d *agentv1.BackupDestination) (backup.Store, error) {
+			s, err := backup.OpenS3(d)
+			if err != nil {
+				return nil, err
+			}
+			return wrap(s), nil
+		}
+	}
 	r.runner = backup.NewLocal(backup.Options{
-		Docker: e.D, Layout: e.Layout,
+		Docker: e.D, Layout: e.Layout, OpenStore: open,
 		Spec: func(id string) *agentv1.ServiceSpec { r.mu.Lock(); defer r.mu.Unlock(); return r.specs[id] },
 		// Stands in for reconcile's SetSleeping: stop and start the
 		// service's container.
@@ -91,6 +105,16 @@ func (r *rig) add(s *agentv1.ServiceSpec) {
 
 func (r *rig) backup(e *itest.Env, subject *agentv1.BackupSubject, runID string, keep uint32, stop bool) *agentv1.BackupResult {
 	e.T.Helper()
+	res := r.tryBackup(e, subject, runID, keep, stop)
+	if !res.GetSuccess() {
+		e.T.Fatalf("backup %s failed: %s", runID, res.GetError())
+	}
+	return res
+}
+
+// tryBackup runs a backup and returns its result, failed or not.
+func (r *rig) tryBackup(e *itest.Env, subject *agentv1.BackupSubject, runID string, keep uint32, stop bool) *agentv1.BackupResult {
+	e.T.Helper()
 	ctx := e.Ctx(10 * time.Minute)
 	got := make(chan *agentv1.BackupResult, 1)
 	if err := r.runner.Start(ctx, &agentv1.RunBackupRequest{BackupId: "pol1", RunId: runID, Subject: subject,
@@ -99,9 +123,6 @@ func (r *rig) backup(e *itest.Env, subject *agentv1.BackupSubject, runID string,
 	}
 	select {
 	case res := <-got:
-		if !res.GetSuccess() {
-			e.T.Fatalf("backup %s failed: %s", runID, res.GetError())
-		}
 		return res
 	case <-ctx.Done():
 		e.T.Fatalf("backup %s timed out", runID)
@@ -111,13 +132,22 @@ func (r *rig) backup(e *itest.Env, subject *agentv1.BackupSubject, runID string,
 
 func (r *rig) restore(e *itest.Env, subject *agentv1.BackupSubject, key string) {
 	e.T.Helper()
-	resp, err := r.runner.Restore(e.Ctx(10*time.Minute), &agentv1.RestoreBackupRequest{Subject: subject, Destination: r.dest, ObjectKey: key})
-	if err != nil {
+	if err := r.tryRestore(e, subject, key); err != nil {
 		e.T.Fatalf("restore %s: %v", key, err)
 	}
-	if resp.GetRestoredBytes() == 0 {
-		e.T.Fatalf("restore %s read 0 bytes", key)
+}
+
+// tryRestore restores key and returns what failed.
+func (r *rig) tryRestore(e *itest.Env, subject *agentv1.BackupSubject, key string) error {
+	e.T.Helper()
+	resp, err := r.runner.Restore(e.Ctx(10*time.Minute), &agentv1.RestoreBackupRequest{Subject: subject, Destination: r.dest, ObjectKey: key})
+	if err != nil {
+		return err
 	}
+	if resp.GetRestoredBytes() == 0 {
+		return fmt.Errorf("restore %s read 0 bytes", key)
+	}
+	return nil
 }
 
 type engineCase struct {

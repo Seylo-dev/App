@@ -4,9 +4,9 @@ package volumes
 
 import "syscall"
 
-// diskSpace is the space available to unprivileged writers under dir and
-// the size of its filesystem.
-func diskSpace(dir string) (free, total uint64, ok bool) {
+// DiskSpace is the space available to unprivileged writers under dir and
+// the size of its filesystem; ok is false when they cannot be read.
+func DiskSpace(dir string) (free, total uint64, ok bool) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(dir, &st); err != nil {
 		return 0, 0, false

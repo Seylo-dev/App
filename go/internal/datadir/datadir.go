@@ -52,6 +52,11 @@ func (l Layout) BuildsDir() string { return filepath.Join(l.root, "builds") }
 // with it too, so they see what builds see.
 func (l Layout) BuildsDockerConfig() string { return filepath.Join(l.BuildsDir(), "docker") }
 
+// BackupSpoolDir holds what a backup's upload has not taken yet
+// (internal/backup spool): files removed from the folder as soon as they
+// are created, so it is normally empty; the agent empties it at start.
+func (l Layout) BackupSpoolDir() string { return filepath.Join(l.root, "backup-spool") }
+
 // ToolsDir holds pinned helper binaries (Railpack, Nixpacks).
 func (l Layout) ToolsDir() string { return filepath.Join(l.root, "tools") }
 

@@ -67,6 +67,9 @@ type Options struct {
 	Now    func() time.Time
 	// MaxParallel backups at once; more wait. 0 means 2.
 	MaxParallel int
+	// SpoolDir holds what an upload has not taken yet (see spool); empty
+	// means Layout.BackupSpoolDir().
+	SpoolDir string
 }
 
 // Local is the agent's Runner.
@@ -103,6 +106,9 @@ func NewLocal(opts Options) *Local {
 	if opts.MaxParallel <= 0 {
 		opts.MaxParallel = 2
 	}
+	if opts.SpoolDir == "" {
+		opts.SpoolDir = opts.Layout.BackupSpoolDir()
+	}
 	return &Local{opts: opts, log: opts.Logger, sem: make(chan struct{}, opts.MaxParallel), running: map[string]bool{}}
 }
 
@@ -117,6 +123,11 @@ func (l *Local) SetSuspend(fn SuspendFunc) {
 // Run lets the runner accept backups until ctx ends, then waits for the
 // ones in progress (they are cancelled and reported as failed).
 func (l *Local) Run(ctx context.Context) error {
+	// Spool files of a previous run (normally none: their names are
+	// removed as soon as they are made).
+	if err := clearSpoolDir(l.opts.SpoolDir); err != nil {
+		l.log.Warn("emptying the backup spool folder", "dir", l.opts.SpoolDir, "err", err)
+	}
 	l.mu.Lock()
 	l.base = ctx
 	l.mu.Unlock()
@@ -308,6 +319,8 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 					if err := resume(context.WithoutCancel(ctx)); err != nil {
 						l.log.Error("starting the service after a backup", "service_id", p.spec.GetId(), "err", err)
 					}
+					// The upload of what the spool holds goes on.
+					progress.phase(agentv1.BackupPhase_BACKUP_PHASE_UPLOADING)
 				}()
 			}
 			if _, err := os.Stat(p.vol); errors.Is(err, os.ErrNotExist) {
@@ -326,7 +339,10 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 		return err
 	}
 	progress.phase(agentv1.BackupPhase_BACKUP_PHASE_UPLOADING)
-	n, err := upload(ctx, p.store, key, progress, produce)
+	// A volume archive waits for the upload when the spool has no room; a
+	// dump fails instead, since its database would drop it.
+	sp := newSpool(l.opts.SpoolDir, p.db == nil)
+	n, err := upload(ctx, p.store, key, sp, progress, produce)
 	if err != nil {
 		return err
 	}
@@ -347,29 +363,28 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 	return nil
 }
 
-// upload runs produce into a pipe that the store reads, so nothing is
-// buffered on disk. A producer failure deletes whatever was uploaded.
-func upload(ctx context.Context, store Store, key string, progress *progressWriter, produce func(io.Writer) error) (int64, error) {
-	pr, pw := io.Pipe()
+// upload runs produce into sp, which the store reads: the producer never
+// waits for a part to upload (see spool). Progress counts the bytes the
+// store took. A producer failure deletes whatever was uploaded.
+func upload(ctx context.Context, store Store, key string, sp *spool, progress *progressWriter, produce func(io.Writer) error) (int64, error) {
 	type result struct {
 		n   int64
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		n, err := store.Put(ctx, key, pr)
+		n, err := store.Put(ctx, key, progress.reader(sp))
 		if err != nil {
-			pr.CloseWithError(err)
+			sp.CloseRead(err)
 		} else {
-			// Drain anything the producer still writes (there should be
+			// Refuse anything the producer still writes (there should be
 			// nothing); a stuck producer must not block forever.
-			pr.CloseWithError(errors.New("upload finished early"))
+			sp.CloseRead(errors.New("upload finished early"))
 		}
 		done <- result{n, err}
 	}()
-	progress.w = pw
-	perr := produce(progress)
-	pw.CloseWithError(perr) // nil: the store sees EOF and completes
+	perr := produce(sp)
+	sp.CloseWrite(perr) // nil: the store reads the rest, then EOF, and completes
 	up := <-done
 	progress.flush()
 	switch {

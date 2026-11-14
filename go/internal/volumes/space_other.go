@@ -2,5 +2,5 @@
 
 package volumes
 
-// diskSpace is not known here; imports skip the free space check.
-func diskSpace(string) (free, total uint64, ok bool) { return 0, 0, false }
+// DiskSpace is not known here; callers skip their free space checks.
+func DiskSpace(string) (free, total uint64, ok bool) { return 0, 0, false }
