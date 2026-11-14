@@ -497,6 +497,7 @@ func (m *Moby) CreateContainer(ctx context.Context, spec ContainerSpec) (string,
 			spec.Network: {Aliases: spec.Aliases},
 		}}
 	}
+	spec.DNS.Apply(host, labels)
 	res, err := m.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:             spec.Name,
 		Config:           cfg,

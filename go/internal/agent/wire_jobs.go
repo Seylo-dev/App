@@ -54,6 +54,11 @@ func provideJobs(d *Deps) error {
 	if err != nil {
 		return err
 	}
+	// Cron runs, backup and database helpers and the tunnel get the node's
+	// DNS cache like service containers (provided before this area).
+	if d.DNSCache != nil {
+		dk.DNS = d.DNSCache.ContainerDNS
+	}
 	spec := func(id string) *agentv1.ServiceSpec { return findService(d.Feed.Current(), id) }
 	p := &jobsParts{
 		log:        log,

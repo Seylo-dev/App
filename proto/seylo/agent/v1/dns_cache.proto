@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// The node's DNS cache (NodeSettings.dns_cache). The agent answers DNS on
+// one link-local address of the host (169.254.53.53:53 on a dummy
+// interface named seylo-dns; config.yml dns_cache_address overrides the
+// address), forwards what it does not hold to the servers Docker's
+// containers use without it, and gives every container it creates while
+// the cache is proven from inside containers that address first, then up
+// to two fallbacks: the servers Docker would give the container without
+// it. Added in 0.2.17.
+
+message GetDnsCacheStatusRequest {}
+
+enum DnsCacheState {
+  DNS_CACHE_STATE_UNSPECIFIED = 0;
+  // Turned off and no running container uses it: no address, no listener.
+  DNS_CACHE_STATE_OFF = 1;
+  // Turned on and listening, not proven from inside containers yet: new
+  // containers do not get it yet.
+  DNS_CACHE_STATE_STARTING = 2;
+  // Turned on and proven: new containers get it.
+  DNS_CACHE_STATE_ACTIVE = 3;
+  // Turned on but it cannot work here (the port is taken, iproute2 is
+  // missing, a firewall drops it): reason and fix_hint say why. New
+  // containers do not get it.
+  DNS_CACHE_STATE_BLOCKED = 4;
+  // Turned off, but running containers still use it: it keeps answering
+  // until they are recreated (a redeploy) or gone.
+  DNS_CACHE_STATE_DRAINING = 5;
+}
+
+message GetDnsCacheStatusResponse {
+  DnsCacheState state = 1;
+  // Why it is BLOCKED or STARTING, empty otherwise.
+  string reason = 2;
+  // What the owner can do, for example the ufw command.
+  string fix_hint = 3;
+  // The cache's address, for example "169.254.53.53".
+  string address = 4;
+  // The servers the cache asks, in order ("127.0.0.53" is the host's
+  // systemd-resolved).
+  repeated string upstreams = 5;
+  // The servers containers get after the cache.
+  repeated string fallbacks = 6;
+  // Names held now.
+  uint32 entries = 7;
+  // Since the agent started: questions answered, answered from the cache
+  // while fresh, answered from an expired entry because no upstream
+  // answered, questions sent upstream, and upstream questions that failed.
+  uint64 queries_total = 8;
+  uint64 hits_total = 9;
+  uint64 stale_total = 10;
+  uint64 upstream_queries_total = 11;
+  uint64 upstream_failures_total = 12;
+  // The last 60 minutes, oldest first, one per minute (the last one is the
+  // minute now running).
+  repeated DnsCacheMinute minutes = 13;
+  // Our running containers and whether each uses the cache.
+  repeated DnsCacheContainer containers = 14;
+  // When the last check from inside containers ran (unset: never since the
+  // agent started), and whether it passed.
+  google.protobuf.Timestamp checked_at = 15;
+  bool check_passed = 16;
+}
+
+message DnsCacheMinute {
+  uint32 queries = 1;
+  uint32 upstream = 2;
+}
+
+message DnsCacheContainer {
+  string name = 1;
+  // The service the container belongs to, empty for the agent's own.
+  string service_id = 2;
+  // What it is: the seylo.role label ("cron", "backup", ...) or "service".
+  string kind = 3;
+  // Created with the cache as its first server (label seylo.dns-cache).
+  bool uses_cache = 4;
+  google.protobuf.Timestamp created = 5;
+}

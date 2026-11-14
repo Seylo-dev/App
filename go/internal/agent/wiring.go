@@ -21,6 +21,7 @@ type owner struct {
 // provides the Docker engine everything else uses.
 var owners = []owner{
 	{"runtime", provideRuntime, wireRuntime},
+	{"dnscache", provideDNSCache, wireDNSCache},
 	{"observe", provideObserve, wireObserve},
 	{"network", provideNetwork, wireNetwork},
 	{"build", provideBuild, wireBuild},

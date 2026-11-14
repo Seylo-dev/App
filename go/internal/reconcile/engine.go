@@ -145,6 +145,11 @@ type Options struct {
 	Gate       PortReporter
 	Cloudflare Cloudflare
 	Logs       LogSource
+	// DNS gives each service container the DNS servers it is created with
+	// (the node's DNS cache first, since 0.2.17); the protected panel
+	// never gets it. Nil keeps Docker's. Decided at create time, outside
+	// SpecHash, so turning it on or off recreates nothing.
+	DNS docker.DNSSource
 
 	// Scope labels are added to everything the runtime creates and to
 	// every listing, so it only sees its own resources. Production leaves

@@ -19,7 +19,7 @@ var (
 	}
 	// Kept unless --name or --can-build is given.
 	joinKeepsUnlessFlagged = []string{"node_name", "can_build"}
-	joinKeeps              = []string{"acme_ca", "acme_ca_certificates", "acme_ca_server_name", "no_host_shell", "git_proxy_resolves", "no_tailnet", "tailscale_socket"}
+	joinKeeps              = []string{"acme_ca", "acme_ca_certificates", "acme_ca_server_name", "no_host_shell", "git_proxy_resolves", "no_tailnet", "tailscale_socket", "dns_cache_address"}
 )
 
 // A field added to FileConfig must be sorted into one of the lists above,
@@ -59,6 +59,7 @@ git_proxy_resolves: true
 # The owner keeps the panel off this server's tailnet.
 no_tailnet: true
 tailscale_socket: /run/tailscale/tailscaled.sock
+dns_cache_address: 169.254.53.54
 future_setting: 42 # a key a newer agent reads
 `
 

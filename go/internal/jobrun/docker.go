@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"sort"
 	"strings"
@@ -94,6 +95,10 @@ type Container struct {
 type Docker struct {
 	cli *client.Client
 	log *slog.Logger
+	// DNS gives each container the DNS servers it is created with (the
+	// node's DNS cache first, since 0.2.17); nil or a zero value keeps
+	// Docker's. Set before the first create.
+	DNS docker.DNSSource
 	// pulls dedupes concurrent pulls of one image.
 	pullMu sync.Mutex
 	pulls  map[string]*pull
@@ -235,6 +240,11 @@ func (d *Docker) create(ctx context.Context, spec Spec, stdin bool) (string, err
 		netCfg = &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{
 			spec.Network: {Aliases: spec.Aliases},
 		}}
+	}
+	if d.DNS != nil {
+		// The labels are the caller's map: the cache's label goes on a copy.
+		cfg.Labels = maps.Clone(spec.Labels)
+		d.DNS().Apply(host, cfg.Labels)
 	}
 	res, err := d.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: spec.Name, Config: cfg, HostConfig: host, NetworkingConfig: netCfg,

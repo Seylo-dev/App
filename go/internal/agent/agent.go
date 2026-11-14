@@ -217,6 +217,7 @@ func newDaemon(ctx context.Context, layout datadir.Layout, logger *slog.Logger) 
 		Components: &Components{},
 	}
 	d.Config.NoTailnet, d.Config.TailscaleSocket = cfg.NoTailnet, cfg.TailscaleSocket
+	d.Config.DNSCacheAddress = cfg.DNSCacheAddress
 	d.Facts.Update(func(f *agentv1.NodeFacts) {
 		collectMachineFacts(f, layout.Root())
 		f.CanBuild = cfg.CanBuild

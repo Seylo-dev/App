@@ -607,6 +607,9 @@ func (w *worker) createInstances(ctx context.Context, spec *agentv1.ServiceSpec,
 	for _, rep := range reps {
 		cs := containerSpec(spec, image, gen, rep, hash, binds, mounts)
 		cs.Init = initOn
+		if w.r.o.DNS != nil && !docker.IsPanelService(spec.GetId(), spec.GetProtected()) {
+			cs.DNS = w.r.o.DNS()
+		}
 		cs.Name += suffix
 		cs.Labels = w.r.scoped(cs.Labels)
 		id, err := w.r.o.Docker.CreateContainer(ctx, cs)

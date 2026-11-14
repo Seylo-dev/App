@@ -9,6 +9,7 @@ export * from "./seylo/agent/v1/compose_pb";
 export * from "./seylo/agent/v1/cron_pb";
 export * from "./seylo/agent/v1/database_pb";
 export * from "./seylo/agent/v1/desired_pb";
+export * from "./seylo/agent/v1/dns_cache_pb";
 export * from "./seylo/agent/v1/envelope_pb";
 export * from "./seylo/agent/v1/events_pb";
 export * from "./seylo/agent/v1/exec_pb";

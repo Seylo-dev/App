@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
+
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
 )
@@ -353,6 +355,10 @@ func (f *Fake) CreateContainer(ctx context.Context, spec docker.ContainerSpec) (
 	}
 	spec.Labels[docker.LabelManaged] = "true"
 	spec.Labels[docker.LabelTraefikEnable] = "false"
+	// Like Moby: the DNS cache's label goes on with its servers.
+	var host container.HostConfig
+	host.NetworkMode = container.NetworkMode(spec.Network)
+	spec.DNS.Apply(&host, spec.Labels)
 	c := &Container{ID: id, Spec: spec, Created: f.now(), Networks: map[string]string{}}
 	if spec.Network != "" {
 		c.Networks[spec.Network] = ""

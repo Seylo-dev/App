@@ -181,6 +181,9 @@ type ContainerSpec struct {
 	PidsLimit uint32
 	// ExtraHosts are "host:ip" entries for /etc/hosts.
 	ExtraHosts []string
+	// DNS replaces Docker's DNS servers (the node's DNS cache first); the
+	// zero value keeps Docker's. Not part of the spec hash.
+	DNS ContainerDNS
 	// Publish binds container TCP ports on the host through Docker. Only
 	// the protected panel service uses it (it must answer while the agent
 	// restarts); everything else goes through the agent's portgate.

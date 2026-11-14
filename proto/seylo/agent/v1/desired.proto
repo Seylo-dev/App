@@ -64,6 +64,20 @@ message NodeSettings {
   // while the agent is connected (HelloAccepted.node_name has it at each
   // connect). Empty from older panels. Added in 0.2.15.
   string node_name = 12;
+  // The node's DNS cache for containers (dns_cache.proto). Unset (older
+  // panels) means off. Added in 0.2.17.
+  DnsCache dns_cache = 13;
+}
+
+// DnsCache is the per-node DNS cache: a forwarding cache in the agent on
+// one link-local address (169.254.53.53:53 unless config.yml's
+// dns_cache_address says otherwise) that new containers get as their first
+// DNS server, with the servers Docker would give them as fallbacks. It
+// cuts repeated lookups of one name; it is no hard cap on outbound DNS.
+// Turning it off stops giving it to new containers; the agent keeps
+// serving until no running container uses it. Added in 0.2.17.
+message DnsCache {
+  bool enabled = 1;
 }
 
 // CleanupSchedule is when and what the agent cleans up by itself. It only

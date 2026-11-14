@@ -21,6 +21,7 @@ import (
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/build"
+	"github.com/seylo-dev/app/go/internal/dnscache"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/nodecheck"
@@ -462,6 +463,10 @@ func nodeChecks(d *Deps) []nodecheck.Check {
 	if svc, ok := d.Builder.(*build.Service); ok {
 		env.RestartWorkers = svc.RestartStaleWorkers
 	}
+	// The DNS cache check runs the cache's own test (also its gate).
+	if m, ok := d.DNSCache.(*dnscache.Manager); ok {
+		env.DNSCache = m.Check
+	}
 	return nodecheck.Default(env)
 }
 
@@ -515,6 +520,11 @@ func (h *healthMemory) alerts(ctx context.Context, d *Deps, results []*agentv1.N
 	h.mu.Lock()
 	var events []*agentv1.Event
 	for _, r := range results {
+		if r.GetId() == dnsCacheCheckID {
+			// The DNS cache raises its own alert (NODE_ALERT_KIND_DNS_CACHE)
+			// while containers use it, with the fix in it.
+			continue
+		}
 		prev, seen := h.last[r.GetId()]
 		h.last[r.GetId()] = r.GetStatus()
 		switch {
@@ -534,6 +544,10 @@ func (h *healthMemory) alerts(ctx context.Context, d *Deps, results []*agentv1.N
 		}
 	}
 }
+
+// dnsCacheCheckID is the DNS cache check, which healthMemory leaves to the
+// cache's own alert.
+const dnsCacheCheckID = "docker.dnscache"
 
 func healthAlert(r *agentv1.NodeCheckResult, resolved bool) *agentv1.Event {
 	msg := fmt.Sprintf("%s: %s", r.GetTitle(), r.GetDetail())

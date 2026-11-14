@@ -284,6 +284,13 @@ enum NodeAlertKind {
   // and keeps dialing its current one; the message says why. Resolved once
   // a later move succeeds.
   NODE_ALERT_KIND_PANEL_MOVE_FAILED = 9;
+  // Containers use the node's DNS cache (NodeSettings.dns_cache) but the
+  // cache does not answer them (a firewall drops its port, the address or
+  // the listener is gone): each of their lookups can wait about 4 seconds
+  // before Docker tries the fallback. The message names the fix. Resolved
+  // once the cache answers containers again or none uses it. Added in
+  // 0.2.17.
+  NODE_ALERT_KIND_DNS_CACHE = 10;
 }
 
 // UpdateResult is the durable outcome of UpdateAgent, UpdatePanel or

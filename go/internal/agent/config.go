@@ -119,6 +119,12 @@ type FileConfig struct {
 	// before 0.2.15 never answers it, and on a resume the panel would take
 	// it for `seylo set-panel`. Added in 0.2.15.
 	StayOnAddress bool `yaml:"stay_on_address,omitempty"`
+	// DNSCacheAddress is where the node's DNS cache listens (port 53) when
+	// 169.254.53.53 clashes with something on this server, for example a
+	// provider's link-local service. An IPv4 address that is not loopback,
+	// unspecified or multicast; a link-local one (169.254.0.0/16) is
+	// best, since it is valid from every Docker network. Added in 0.2.17.
+	DNSCacheAddress string `yaml:"dns_cache_address,omitempty"`
 }
 
 // PanelAddress is one way to reach the panel, as config.yml stores it.
@@ -288,6 +294,11 @@ func (c *FileConfig) Validate() error {
 	}
 	if c.TailscaleSocket != "" && !filepath.IsAbs(c.TailscaleSocket) {
 		return fmt.Errorf("tailscale_socket %q must be an absolute path", c.TailscaleSocket)
+	}
+	if c.DNSCacheAddress != "" {
+		if _, err := dnsCacheAddress(c.DNSCacheAddress); err != nil {
+			return fmt.Errorf("dns_cache_address: %w", err)
+		}
 	}
 	if c.PanelKey != "" {
 		if _, err := decodePanelKey(c.PanelKey); err != nil {

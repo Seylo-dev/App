@@ -72,6 +72,9 @@ func wireRuntime(reg *Registry, d *Deps) error {
 	if d.Logs != nil {
 		opts.Logs = d.Logs
 	}
+	if d.DNSCache != nil {
+		opts.DNS = d.DNSCache.ContainerDNS
+	}
 	rt, err := reconcile.New(opts)
 	if err != nil {
 		return err

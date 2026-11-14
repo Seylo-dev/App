@@ -60,6 +60,9 @@ type Config struct {
 	// TailscaleSocket is config.yml's tailscale_socket; empty is
 	// tailscaled's default socket.
 	TailscaleSocket string
+	// DNSCacheAddress is config.yml's dns_cache_address; empty is
+	// dnscache.DefaultAddress (wire_dnscache.go).
+	DNSCacheAddress string
 }
 
 // Deps is everything the wiring functions share. The agent fills the
@@ -127,6 +130,11 @@ type Deps struct {
 	// Reconcile is set in wireRuntime (phase 2), because it needs other
 	// owners' components; wire functions after it may use it.
 	Reconcile reconcile.Engine
+
+	// DNS cache (wire_dnscache.go): the node's DNS cache for containers.
+	// Reconcile and jobrun ask it for each container's DNS at create time.
+
+	DNSCache DNSCache
 
 	// Network (wire_network.go).
 

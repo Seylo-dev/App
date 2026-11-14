@@ -8,6 +8,7 @@ import "seylo/agent/v1/certificate.proto";
 import "seylo/agent/v1/compose.proto";
 import "seylo/agent/v1/cron.proto";
 import "seylo/agent/v1/desired.proto";
+import "seylo/agent/v1/dns_cache.proto";
 import "seylo/agent/v1/exec.proto";
 import "seylo/agent/v1/fs.proto";
 import "seylo/agent/v1/logs.proto";
@@ -161,6 +162,11 @@ service AgentService {
   }
   rpc UpdatePanel(UpdatePanelRequest) returns (UpdatePanelResponse) {
     option (capability) = "node.panel-update.v1";
+  }
+  // The node's DNS cache (NodeSettings.dns_cache): state, counters and
+  // which containers use it. Added in 0.2.17.
+  rpc GetDnsCacheStatus(GetDnsCacheStatusRequest) returns (GetDnsCacheStatusResponse) {
+    option (capability) = "node.dns-cache.v1";
   }
   // The agent's own log (its systemd journal), redacted like troubleshoot.
   rpc AgentLogs(AgentLogsRequest) returns (AgentLogsResponse) {

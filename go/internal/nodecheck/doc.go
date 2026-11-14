@@ -23,6 +23,11 @@
 //	                  Docker's embedded DNS (works, slow, fails, bounded in
 //	                  time); in the agent's run it restarts our build
 //	                  workers that lost theirs (Env.RestartWorkers)
+//	docker.dnscache   with the node's DNS cache on (or still used):
+//	                  containers on the default bridge and a project
+//	                  network reach it and it answers through its
+//	                  upstreams (Env.DNSCache runs the agent's test, which
+//	                  is also the gate before containers get the cache)
 //	network.firewall  ufw or firewalld allow 80 and 443
 //	time.sync         NTP state and skew against the panel's clock
 //	panel.reachable   GET <panel>/api/health and its latency
@@ -44,4 +49,7 @@
 //   - WorkerDNS (NewWorkerDNS): the Container DNS check's reading of one
 //     build worker, which the build service (build.Options.WorkerDNS) asks
 //     before a build uses the worker.
+//   - DockerDNSSetting and ProbeDNSCache: Docker's "dns" setting and the
+//     test from inside containers, for the agent's DNS cache
+//     (dnscache.Manager's Sources and Probe).
 package nodecheck

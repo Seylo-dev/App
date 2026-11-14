@@ -339,21 +339,29 @@ const (
 	// and keeps dialing its current one; the message says why. Resolved once
 	// a later move succeeds.
 	NodeAlertKind_NODE_ALERT_KIND_PANEL_MOVE_FAILED NodeAlertKind = 9
+	// Containers use the node's DNS cache (NodeSettings.dns_cache) but the
+	// cache does not answer them (a firewall drops its port, the address or
+	// the listener is gone): each of their lookups can wait about 4 seconds
+	// before Docker tries the fallback. The message names the fix. Resolved
+	// once the cache answers containers again or none uses it. Added in
+	// 0.2.17.
+	NodeAlertKind_NODE_ALERT_KIND_DNS_CACHE NodeAlertKind = 10
 )
 
 // Enum value maps for NodeAlertKind.
 var (
 	NodeAlertKind_name = map[int32]string{
-		0: "NODE_ALERT_KIND_UNSPECIFIED",
-		1: "NODE_ALERT_KIND_DISK_LOW",
-		2: "NODE_ALERT_KIND_MEMORY_LOW",
-		3: "NODE_ALERT_KIND_DOCKER_DOWN",
-		4: "NODE_ALERT_KIND_TRAEFIK_DOWN",
-		5: "NODE_ALERT_KIND_CLOCK_SKEW",
-		6: "NODE_ALERT_KIND_CERTIFICATE_EXPIRING",
-		7: "NODE_ALERT_KIND_UPDATE_FAILED",
-		8: "NODE_ALERT_KIND_HEALTH_CHECK_FAILED",
-		9: "NODE_ALERT_KIND_PANEL_MOVE_FAILED",
+		0:  "NODE_ALERT_KIND_UNSPECIFIED",
+		1:  "NODE_ALERT_KIND_DISK_LOW",
+		2:  "NODE_ALERT_KIND_MEMORY_LOW",
+		3:  "NODE_ALERT_KIND_DOCKER_DOWN",
+		4:  "NODE_ALERT_KIND_TRAEFIK_DOWN",
+		5:  "NODE_ALERT_KIND_CLOCK_SKEW",
+		6:  "NODE_ALERT_KIND_CERTIFICATE_EXPIRING",
+		7:  "NODE_ALERT_KIND_UPDATE_FAILED",
+		8:  "NODE_ALERT_KIND_HEALTH_CHECK_FAILED",
+		9:  "NODE_ALERT_KIND_PANEL_MOVE_FAILED",
+		10: "NODE_ALERT_KIND_DNS_CACHE",
 	}
 	NodeAlertKind_value = map[string]int32{
 		"NODE_ALERT_KIND_UNSPECIFIED":          0,
@@ -366,6 +374,7 @@ var (
 		"NODE_ALERT_KIND_UPDATE_FAILED":        7,
 		"NODE_ALERT_KIND_HEALTH_CHECK_FAILED":  8,
 		"NODE_ALERT_KIND_PANEL_MOVE_FAILED":    9,
+		"NODE_ALERT_KIND_DNS_CACHE":            10,
 	}
 )
 
@@ -2038,7 +2047,7 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\x19CRON_RUN_RESULT_SUCCEEDED\x10\x01\x12\x1a\n" +
 	"\x16CRON_RUN_RESULT_FAILED\x10\x02\x12\x1d\n" +
 	"\x19CRON_RUN_RESULT_TIMED_OUT\x10\x03\x12\x1b\n" +
-	"\x17CRON_RUN_RESULT_SKIPPED\x10\x04*\xee\x02\n" +
+	"\x17CRON_RUN_RESULT_SKIPPED\x10\x04*\x8d\x03\n" +
 	"\rNodeAlertKind\x12\x1f\n" +
 	"\x1bNODE_ALERT_KIND_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18NODE_ALERT_KIND_DISK_LOW\x10\x01\x12\x1e\n" +
@@ -2049,7 +2058,9 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"$NODE_ALERT_KIND_CERTIFICATE_EXPIRING\x10\x06\x12!\n" +
 	"\x1dNODE_ALERT_KIND_UPDATE_FAILED\x10\a\x12'\n" +
 	"#NODE_ALERT_KIND_HEALTH_CHECK_FAILED\x10\b\x12%\n" +
-	"!NODE_ALERT_KIND_PANEL_MOVE_FAILED\x10\t*y\n" +
+	"!NODE_ALERT_KIND_PANEL_MOVE_FAILED\x10\t\x12\x1d\n" +
+	"\x19NODE_ALERT_KIND_DNS_CACHE\x10\n" +
+	"*y\n" +
 	"\fUpdateTarget\x12\x1d\n" +
 	"\x19UPDATE_TARGET_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13UPDATE_TARGET_AGENT\x10\x01\x12\x17\n" +

@@ -296,6 +296,8 @@ type harness struct {
 	done    chan error
 	// drain is Options.ReattachDrain from the next start (default 1ms).
 	drain time.Duration
+	// dns is Options.DNS from the next start.
+	dns docker.DNSSource
 	// etc is Options.EtcDir (an empty folder unless a test writes to it).
 	etc string
 	// proc is Options.ProcDir (fakeProber.setListening writes into it).
@@ -380,6 +382,7 @@ func (h *harness) start() {
 		Logs:          h.logs,
 		EtcDir:        h.etc,
 		ProcDir:       h.proc,
+		DNS:           h.dns,
 	})
 	if err != nil {
 		h.t.Fatal(err)
