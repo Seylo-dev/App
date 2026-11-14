@@ -1001,8 +1001,11 @@ check_08() {
   ev "crash reports in the panel: $(printf '%s' "$reports" | jq -c 'length') ($(printf '%s' "$reports" | jq -c '[.[] | {streak, action, exit_code}] | .[0:4]'))"
   expect "a crash report carries the last log lines (crash-line)" sh -c "printf '%s' '$(printf '%s' "$reports" | jq -c '[.[].last_lines]')' | grep -q crash-line"
   alerts=$(api alerts.list "{\"serviceId\":\"$svc\"}" | jq -c '[.alerts[] | select(.event=="crash")]')
-  ev "crash alerts: $(printf '%s' "$alerts" | jq -c '[.[] | {title, message}]')"
+  ev "crash alerts: $(printf '%s' "$alerts" | jq -c '[.[] | {title, message, projectName, serviceName}]')"
   expect "one alert for the whole streak ($crashes crashes)" test "$(printf '%s' "$alerts" | jq length)" = 1
+  # Since 0.2.18 an alert about a service starts with "<project> / <service>" (before: "crasher crashed").
+  expect "the crash alert is titled \"e2e / crasher crashed\" and names its project and service" \
+    json_ok "$alerts" '.[0] | .title == "e2e / crasher crashed" and .projectName == "e2e" and .serviceName == "crasher"'
 
   # Stop after N crashes in a row.
   api services.setCrashPolicy "{\"serviceId\":\"$svc\",\"restart\":true,\"stopAfterCrashes\":2}" >/dev/null
@@ -1015,6 +1018,10 @@ check_08() {
   ev "stopAfterCrashes=2: status $st, $crashes starts in the 20s after"
   expect "the service stays stopped after the crash limit" sh -c "[ '$st' = crashed -o '$st' = stopped ] && [ $crashes = 0 ]"
   expect "a crash_limit alert was raised" has_alert "$svc" crash_limit
+  alerts=$(api alerts.list "{\"serviceId\":\"$svc\"}" | jq -c '[.alerts[] | select(.event=="crash_limit") | .title]')
+  ev "crash_limit alerts: $alerts"
+  expect "it is titled \"e2e / crasher was stopped after N crashes\"" \
+    json_ok "$alerts" 'length >= 1 and all(.[]; test("^e2e / crasher was stopped after [0-9]+ crashes$"))'
 
   # Restart off: the first crash leaves it stopped.
   api services.setCrashPolicy "{\"serviceId\":\"$svc\",\"restart\":false,\"stopAfterCrashes\":0}" >/dev/null
