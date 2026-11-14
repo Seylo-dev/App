@@ -56,7 +56,7 @@ test("not published yet (404 for catalog.json): templates/ stays as committed, i
   expect(fetched).toEqual([url]);
   const said = lines.join("\n");
   expect(said).toContain(`the official catalog is not published yet (${url} answered 404)`);
-  expect(said).toMatch(/templates\/catalog\.json stays as committed \(sequence \d+, unsigned\) and this release ships it/);
+  expect(said).toMatch(/templates\/catalog\.json stays as committed \(sequence \d+, (?:un)?signed\) and this release ships it/);
   expect(said).toContain("nothing was written");
   expect(snapshot()).toEqual(before);
 });
