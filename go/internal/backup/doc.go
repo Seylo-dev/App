@@ -15,16 +15,20 @@
 //     object behind. keep_last retention deletes older objects of the same
 //     backup after a success. Between the dump and the upload a spool
 //     (spool.go) takes what the upload has not taken yet, 16 MiB in memory
-//     and the rest in unnamed files in the data dir's backup-spool folder,
-//     so a part that uploads slowly never stops the dump: databases drop a
-//     client that stops reading (MariaDB's net_write_timeout, Redis's
-//     repl-timeout). A dump whose spool would take the space the node
-//     keeps free (volumes.FreeFloor) fails; a volume archive waits.
+//     and, for the dumps whose database drops a client that stops reading
+//     (MySQL/MariaDB net_write_timeout, Redis repl-timeout) and volume
+//     archives that stop their service, up to 4 GiB in unnamed files in
+//     the data dir's backup-spool folder, never below the free space the
+//     node's disk check warns at (15% and 10 GiB). So a part that uploads
+//     slowly does not stop the dump. Without room the producer waits, as
+//     with a pipe; a dump its database dropped then says so.
 //   - Restore sessions raise the server's idle timeouts for themselves
 //     (MySQL/MariaDB wait_timeout and net timeouts through --init-command,
 //     Postgres idle_session_timeout through PGOPTIONS on 14+), since the
-//     client waits as long as the download does. A dump or restore that
-//     lost its connection says so (failures.go).
+//     client waits as long as the download does; so do the dumps of
+//     mysqldump 8.4 and later, the only dump tool that takes an init
+//     command. A dump or restore that lost its connection says so
+//     (failures.go).
 //   - Restores download, unpack into a staging folder and swap (volumes,
 //     the RDB of Redis, Valkey, KeyDB and Dragonfly) or pipe into
 //     pg_restore/psql/mysql/mongorestore, or into a ClickHouse helper that

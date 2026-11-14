@@ -35,7 +35,7 @@ func fakeTool(t *testing.T, dir, name, body string) {
 
 // TestMySQLRestoreSessionTimeouts: the restore client raises wait_timeout
 // and the net timeouts for its own session, on the command line; the dump
-// tools are not given the option (mysqldump 5.7 and 8.0 and mariadb-dump
+// tools are not given that option (mysqldump 5.7 and 8.0 and mariadb-dump
 // refuse init-command).
 func TestMySQLRestoreSessionTimeouts(t *testing.T) {
 	bin, dir := t.TempDir(), t.TempDir()
@@ -54,8 +54,62 @@ func TestMySQLRestoreSessionTimeouts(t *testing.T) {
 	}
 	dump, err := dumpJob(tgt, "run1")
 	must(t, err)
-	if strings.Contains(dump.script, "init-command") {
+	if strings.Contains(dump.script, "--init-command=SET") {
 		t.Fatalf("dump script passes init-command:\n%s", dump.script)
+	}
+}
+
+// TestMySQLDumpSessionTimeouts: a dump tool that takes an init command
+// (mysqldump 8.4+) raises wait_timeout and the net timeouts for its session
+// through a [mysqldump] group of the option file; mysqldump 8.0 and 5.7 and
+// mariadb-dump, which stop on an init-command they do not know, get none.
+// Every MySQL dump script does this, the restore and listing ones not.
+func TestMySQLDumpSessionTimeouts(t *testing.T) {
+	const help84 = "  --init-command=name Single SQL Command to execute when connecting to MySQL"
+	const help80 = "  -M, --network-timeout \n                      (Defaults to on; use --skip-network-timeout to disable.)"
+	// The fake dump prints its option file.
+	tool := `case "$1" in --help) printf '%b\n' "$FAKE_HELP"; exit 0 ;; esac
+for a in "$@"; do case "$a" in --defaults-extra-file=*) cat "${a#--defaults-extra-file=}" ;; esac; done
+`
+	mysqlBin, mariaBin := t.TempDir(), t.TempDir()
+	fakeTool(t, mysqlBin, "mysqldump", tool)
+	fakeTool(t, mariaBin, "mariadb-dump", tool)
+	tgt := dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, host: "db", port: 3306, user: "root", password: "pw", database: "app"}
+	dump, err := dumpJob(tgt, "run1")
+	must(t, err)
+	group := "[mysqldump]\ninit-command=\"SET SESSION wait_timeout = 86400, net_read_timeout = 86400, net_write_timeout = 86400\"\n"
+	for _, c := range []struct {
+		bin, help string
+		group     bool
+	}{
+		{mysqlBin, help84, true},
+		{mysqlBin, help80, false},
+		{mariaBin, help80, false},
+	} {
+		got := runScript(t, dump, c.bin, t.TempDir(), "FAKE_HELP="+c.help)
+		if !strings.HasPrefix(got, "[client]\npassword=\"pw\"\n") || strings.Contains(got, "[mysqldump]") != c.group || (c.group && !strings.HasSuffix(got, group)) {
+			t.Errorf("%s with help %q: option file\n%s", filepath.Base(c.bin), c.help, got)
+		}
+	}
+	db := &liveDatabase{Name: "app", Listed: true, Tables: []liveTable{{Schema: "app", Name: "t1"}}}
+	tables, err := selectionPlan(tgt, []chosen{{db: db, tables: db.Tables}})
+	must(t, err)
+	whole, err := selectionPlan(tgt, []chosen{{db: db}, {db: &liveDatabase{Name: "shop", Listed: true}}})
+	must(t, err)
+	restore, err := restoreJob(tgt, extSQL, "run1")
+	must(t, err)
+	listing, err := inspectJob(tgt)
+	must(t, err)
+	for name, c := range map[string]struct {
+		script string
+		want   bool
+	}{
+		"dump": {dump.script, true}, "tables": {tables.jobs[0].script, true}, "databases": {whole.jobs[0].script, true},
+		"restore": {restore.script, false}, "listing": {listing.script, false},
+	} {
+		if strings.Contains(c.script, "[mysqldump]") != c.want {
+			t.Errorf("%s script:\n%s", name, c.script)
+		}
 	}
 }
 

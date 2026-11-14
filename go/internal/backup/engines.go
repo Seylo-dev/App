@@ -111,6 +111,23 @@ printf '[client]\npassword="%s"\n' "$DB_PASSWORD_CNF" > /tmp/.backup.cnf
 if command -v mariadb-dump >/dev/null 2>&1; then DUMP=mariadb-dump; CLIENT=mariadb; else DUMP=mysqldump; CLIENT=mysql; fi
 `
 
+// mysqlDumpPrelude is mysqlPrelude for a dump. Where the dump tool takes
+// an init command (mysqldump 8.4 and later list --init-command in --help)
+// it raises wait_timeout, and the net timeouts, for the dump's own session:
+// while the upload is slow the dump stops reading, and once the server has
+// sent a table it waits for the next statement, so a short wait_timeout
+// ends the session ("disconnected by the server because of inactivity";
+// mysqldump 8.4 then exits 2 without a message), although mysqldump's
+// --network-timeout already set both net timeouts to 86400. The command
+// goes in a [mysqldump] group of the option file, which the mysql client
+// does not read: mysqldump 5.7 and 8.0 and mariadb-dump (it reads that
+// group too) stop with "unknown variable" on init-command, so they get no
+// group, and the spool covers them.
+const mysqlDumpPrelude = mysqlPrelude + `if $DUMP --help 2>/dev/null | grep -q -- '--init-command='; then
+  printf '[mysqldump]\ninit-command="SET SESSION wait_timeout = 86400, net_read_timeout = 86400, net_write_timeout = 86400"\n' >> /tmp/.backup.cnf
+fi
+`
+
 // mysqlRestoreSession raises, for the restore's own session only, the
 // timeouts a server drops a quiet client by: while the download is slow the
 // client waits between two statements (wait_timeout, 8 hours by default
@@ -356,7 +373,7 @@ func dumpJob(t dbTarget, run string) (dbJob, error) {
 		if t.database != "" {
 			which = `--databases "$DB_NAME"`
 		}
-		j.script = mysqlPrelude + `exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --single-transaction --routines --triggers --events --hex-blob ` + which
+		j.script = mysqlDumpPrelude + `exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --single-transaction --routines --triggers --events --hex-blob ` + which
 		j.ext, j.gzip = extSQL, true
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
 		if t.database != "" {

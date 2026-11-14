@@ -62,8 +62,8 @@ type rig struct {
 func newRig(t *testing.T) *rig { return newRigWith(t, nil) }
 
 // newRigWith is newRig with every store the runner opens wrapped by wrap
-// (nil: as opened).
-func newRigWith(t *testing.T, wrap func(backup.Store) backup.Store) *rig {
+// (nil: as opened) and the runner's options changed by opts.
+func newRigWith(t *testing.T, wrap func(backup.Store) backup.Store, opts ...func(*backup.Options)) *rig {
 	e := itest.New(t)
 	r := &rig{e: e, specs: map[string]*agentv1.ServiceSpec{}}
 	r.dest = startMinIO(e)
@@ -77,7 +77,7 @@ func newRigWith(t *testing.T, wrap func(backup.Store) backup.Store) *rig {
 			return wrap(s), nil
 		}
 	}
-	r.runner = backup.NewLocal(backup.Options{
+	o := backup.Options{
 		Docker: e.D, Layout: e.Layout, OpenStore: open,
 		Spec: func(id string) *agentv1.ServiceSpec { r.mu.Lock(); defer r.mu.Unlock(); return r.specs[id] },
 		// Stands in for reconcile's SetSleeping: stop and start the
@@ -89,7 +89,11 @@ func newRigWith(t *testing.T, wrap func(backup.Store) backup.Store) *rig {
 			}
 			return func(ctx context.Context) error { return e.D.Start(ctx, name) }, nil
 		},
-	})
+	}
+	for _, f := range opts {
+		f(&o)
+	}
+	r.runner = backup.NewLocal(o)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = r.runner.Run(ctx); close(done) }()

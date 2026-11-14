@@ -134,46 +134,8 @@ func TestMySQLDumpRestoreSurviveStalls(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			e := r.e.With(t)
-			spec := e.Spec("st"+name, "st-"+name, c.image)
-			spec.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
-			spec.Env = []*agentv1.EnvVar{{Name: c.env, Value: pw}}
-			// The server's own short timeouts (the entrypoints pass
-			// arguments starting with - to the server).
-			spec.Container = &agentv1.ContainerConfig{Command: []string{"--net-write-timeout=2", "--net-read-timeout=2", "--wait-timeout=4"}}
-			spec.Volumes = []*agentv1.VolumeMount{{Name: "data", ContainerPath: "/var/lib/mysql"}}
-			spec.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{Engine: c.engine,
-				Credentials: &agentv1.DatabaseCredentials{AdminUser: "root", AdminPassword: pw, Database: "app"}}}
-			r.add(spec)
-			cont := e.StartService(spec).Name
-			q := sqlQ(c.engine)
-			// The image restarts its server once after the first start.
-			e.Eventually(name+" ready", 4*time.Minute, func() bool {
-				_, code := q(e, cont, "mysql", "CREATE DATABASE IF NOT EXISTS app")
-				return code == 0
-			})
-			time.Sleep(3 * time.Second)
-			e.Eventually(name+" ready again", 2*time.Minute, func() bool { _, code := q(e, cont, "app", "SELECT 1"); return code == 0 })
-			fill := []string{"CREATE TABLE PlayerStage (id INT AUTO_INCREMENT PRIMARY KEY, a CHAR(64) NOT NULL, b CHAR(64) NOT NULL, c CHAR(64) NOT NULL)",
-				"INSERT INTO PlayerStage (a, b, c) VALUES (SHA2(RAND(), 256), SHA2(RAND(), 256), SHA2(RAND(), 256))"}
-			for range 18 {
-				fill = append(fill, "INSERT INTO PlayerStage (a, b, c) SELECT SHA2(RAND(), 256), SHA2(RAND(), 256), SHA2(RAND(), 256) FROM PlayerStage")
-			}
-			for _, stmt := range fill {
-				if out, code := q(e, cont, "app", stmt); code != 0 {
-					t.Fatalf("%s: %s", stmt, out)
-				}
-			}
-			measure := func() string {
-				out, code := q(e, cont, "app", "SELECT COUNT(*), SUM(CRC32(CONCAT(a, b, c))) FROM PlayerStage")
-				if code != 0 {
-					t.Fatalf("measuring: %s", out)
-				}
-				return out
-			}
+			spec, cont, q, measure := playerStage(t, r, e, "st"+name, c.engine, c.image, c.env)
 			want := measure()
-			if !strings.HasPrefix(want, "262144\t") {
-				t.Fatalf("table = %q, want 262144 rows", want)
-			}
 			subject := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: "app"}}}
 
 			st.set(spec.GetId(), true, false)
@@ -202,6 +164,126 @@ func TestMySQLDumpRestoreSurviveStalls(t *testing.T) {
 			if err != nil {
 				logs, _ := exec.Command("docker", "logs", "--tail", "10", cont).CombinedOutput()
 				t.Fatalf("restore with a stalled download failed: %v\nserver log:\n%s", err, logs)
+			}
+			if got := measure(); got != want {
+				t.Fatalf("after the restore: %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// playerStage starts a MySQL or MariaDB server named name whose
+// net_write_timeout and net_read_timeout are 2 s and wait_timeout 4 s,
+// with a PlayerStage table of 262,144 rows (about 30 MB compressed) in the
+// app database; q runs a statement in a database and measure returns the
+// table's row count and checksum.
+func playerStage(t *testing.T, r *rig, e *itest.Env, name string, engine agentv1.DatabaseEngine, image, env string) (
+	spec *agentv1.ServiceSpec, cont string, q func(e *itest.Env, cont, db, stmt string) (string, int), measure func() string,
+) {
+	spec = e.Spec(name, name, image)
+	spec.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
+	spec.Env = []*agentv1.EnvVar{{Name: env, Value: pw}}
+	// The server's own short timeouts (the entrypoints pass arguments
+	// starting with - to the server).
+	spec.Container = &agentv1.ContainerConfig{Command: []string{"--net-write-timeout=2", "--net-read-timeout=2", "--wait-timeout=4"}}
+	spec.Volumes = []*agentv1.VolumeMount{{Name: "data", ContainerPath: "/var/lib/mysql"}}
+	spec.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{Engine: engine,
+		Credentials: &agentv1.DatabaseCredentials{AdminUser: "root", AdminPassword: pw, Database: "app"}}}
+	r.add(spec)
+	cont = e.StartService(spec).Name
+	q = sqlQ(engine)
+	// The image restarts its server once after the first start.
+	e.Eventually(name+" ready", 4*time.Minute, func() bool {
+		_, code := q(e, cont, "mysql", "CREATE DATABASE IF NOT EXISTS app")
+		return code == 0
+	})
+	time.Sleep(3 * time.Second)
+	e.Eventually(name+" ready again", 2*time.Minute, func() bool { _, code := q(e, cont, "app", "SELECT 1"); return code == 0 })
+	fill := []string{"CREATE TABLE PlayerStage (id INT AUTO_INCREMENT PRIMARY KEY, a CHAR(64) NOT NULL, b CHAR(64) NOT NULL, c CHAR(64) NOT NULL)",
+		"INSERT INTO PlayerStage (a, b, c) VALUES (SHA2(RAND(), 256), SHA2(RAND(), 256), SHA2(RAND(), 256))"}
+	for range 18 {
+		fill = append(fill, "INSERT INTO PlayerStage (a, b, c) SELECT SHA2(RAND(), 256), SHA2(RAND(), 256), SHA2(RAND(), 256) FROM PlayerStage")
+	}
+	for _, stmt := range fill {
+		if out, code := q(e, cont, "app", stmt); code != 0 {
+			t.Fatalf("%s: %s", stmt, out)
+		}
+	}
+	measure = func() string {
+		out, code := q(e, cont, "app", "SELECT COUNT(*), SUM(CRC32(CONCAT(a, b, c))) FROM PlayerStage")
+		if code != 0 {
+			t.Fatalf("measuring: %s", out)
+		}
+		return out
+	}
+	if got := measure(); !strings.HasPrefix(got, "262144\t") {
+		t.Fatalf("table = %q, want 262144 rows", got)
+	}
+	return spec, cont, q, measure
+}
+
+// TestDumpWithoutSpoolRoom: on a node whose free space is under the line
+// the disk check warns at, the spool keeps to memory and a dump waits for a
+// slow upload, as before 0.2.17, instead of failing. The servers run with
+// net_write_timeout 2 s and wait_timeout 4 s. mysqldump 8.4 raises both for
+// its session (its own --network-timeout and our init-command), so its
+// dump outlasts the stalls and round-trips. MariaDB 11.4 drops mariadb-dump
+// after net_write_timeout while it waits, and MySQL 8.0 drops mysqldump
+// 8.0 after wait_timeout once a table is sent (mysqldump then exits 2
+// without a word): both backups say the upload fell behind and the node had
+// no room to hold it.
+func TestDumpWithoutSpoolRoom(t *testing.T) {
+	st := newStalls(2<<20, 6*time.Second)
+	r := newRigWith(t, func(s backup.Store) backup.Store { return slowStore{Store: s, s: st} }, func(o *backup.Options) {
+		// 1 GiB free of 100 GiB.
+		o.SpoolSpace = func(string) (uint64, uint64, bool) { return 1 << 30, 100 << 30, true }
+	})
+	const room = "s for the upload: the upload fell behind the dump by more than 16.8 MB and the node has no room to hold it"
+	cases := map[string]struct {
+		engine     agentv1.DatabaseEngine
+		image, env string
+		// want: what the error holds; none means the backup succeeds.
+		want []string
+	}{
+		"mariadb114": {agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, "mariadb:11.4", "MARIADB_ROOT_PASSWORD",
+			[]string{"mariadb-dump: Error 2013: Lost connection", ". The database closed the connection after the dump waited ", room}},
+		"mysql80": {agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, "mysql:8.0.43", "MYSQL_ROOT_PASSWORD",
+			[]string{"the dump exited with code 2: no output. The dump stopped without a message right after it waited ", room}},
+		"mysql84": {agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, "mysql:8.4", "MYSQL_ROOT_PASSWORD", nil},
+	}
+	r.e.Pull("mariadb:11.4", "mysql:8.0.43", "mysql:8.4")
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := r.e.With(t)
+			spec, cont, q, measure := playerStage(t, r, e, "stfull"+name, c.engine, c.image, c.env)
+			want := measure()
+			subject := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: "app"}}}
+			st.set(spec.GetId(), true, false)
+			start := time.Now()
+			res := r.tryBackup(e, subject, "full-"+name, 0, false)
+			t.Logf("backup without spool room: %s, success %v, %d bytes, error %q", time.Since(start).Round(time.Second), res.GetSuccess(), res.GetSizeBytes(), res.GetError())
+			if c.want != nil {
+				ok := !res.GetSuccess()
+				for _, w := range c.want {
+					ok = ok && strings.Contains(res.GetError(), w)
+				}
+				if !ok {
+					logs, _ := exec.Command("docker", "logs", "--tail", "10", cont).CombinedOutput()
+					t.Fatalf("result = %v, want an error with %q\nserver log:\n%s", res, c.want, logs)
+				}
+				return
+			}
+			if !res.GetSuccess() {
+				logs, _ := exec.Command("docker", "logs", "--tail", "10", cont).CombinedOutput()
+				t.Fatalf("backup without spool room failed: %s\nserver log:\n%s", res.GetError(), logs)
+			}
+			if out, code := q(e, cont, "app", "DELETE FROM PlayerStage WHERE id % 3 = 0"); code != 0 {
+				t.Fatalf("delete: %s", out)
+			}
+			st.set(spec.GetId(), false, false)
+			if err := r.tryRestore(e, subject, res.GetObjectKey()); err != nil {
+				t.Fatal(err)
 			}
 			if got := measure(); got != want {
 				t.Fatalf("after the restore: %q, want %q", got, want)

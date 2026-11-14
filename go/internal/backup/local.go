@@ -70,6 +70,9 @@ type Options struct {
 	// SpoolDir holds what an upload has not taken yet (see spool); empty
 	// means Layout.BackupSpoolDir().
 	SpoolDir string
+	// SpoolSpace reports the free and total bytes of the filesystem
+	// holding SpoolDir; nil reads them with statfs. Tests replace it.
+	SpoolSpace func(dir string) (free, total uint64, ok bool)
 }
 
 // Local is the agent's Runner.
@@ -208,6 +211,8 @@ type backupPlan struct {
 	volName string
 	db      *dbTarget
 	store   Store
+	// spool takes the dump or archive on its way to the store (backup).
+	spool *spool
 }
 
 func (l *Local) planBackup(req *agentv1.RunBackupRequest) (*backupPlan, error) {
@@ -339,10 +344,11 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 		return err
 	}
 	progress.phase(agentv1.BackupPhase_BACKUP_PHASE_UPLOADING)
-	// A volume archive waits for the upload when the spool has no room; a
-	// dump fails instead, since its database would drop it.
-	sp := newSpool(l.opts.SpoolDir, p.db == nil)
-	n, err := upload(ctx, p.store, key, sp, progress, produce)
+	p.spool = newSpool(l.opts.SpoolDir, spoolsToDisk(p))
+	if l.opts.SpoolSpace != nil {
+		p.spool.space = l.opts.SpoolSpace
+	}
+	n, err := upload(ctx, p.store, key, p.spool, progress, produce)
 	if err != nil {
 		return err
 	}
@@ -363,9 +369,35 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 	return nil
 }
 
-// upload runs produce into sp, which the store reads: the producer never
-// waits for a part to upload (see spool). Progress counts the bytes the
-// store took. A producer failure deletes whatever was uploaded.
+// spoolsToDisk says whether a backup's spool may use disk: for the dumps
+// whose database drops a client that stops reading, and for a volume
+// archive that stopped its service (it starts again once the archive is
+// spooled). MySQL and MariaDB drop a dump that stops reading after
+// net_write_timeout, or one that idles between two statements after
+// wait_timeout (mysqldump 8.0+ raises the net timeouts for its session and
+// 8.4+ wait_timeout too, mariadb-dump and mysqldump 5.7 neither, and the
+// helper only knows which tool the image has when it runs); Redis, Valkey
+// and KeyDB drop a replica (redis-cli --rdb) after repl-timeout. Every
+// other dump (pg_dump, mongodump, the ClickHouse and Dragonfly helpers that
+// read a file the server wrote) and archive loses nothing when it waits for
+// the upload, so it keeps to the spool's memory and its bytes are not
+// written to the node's disk once more.
+func spoolsToDisk(p *backupPlan) bool {
+	if p.db == nil {
+		return p.req.GetStopService()
+	}
+	switch p.db.engine {
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB:
+		return true
+	}
+	return false
+}
+
+// upload runs produce into sp, which the store reads: the producer does
+// not wait for a part to upload while the spool has room. Progress counts
+// the bytes the store took. A producer failure deletes whatever was uploaded.
 func upload(ctx context.Context, store Store, key string, sp *spool, progress *progressWriter, produce func(io.Writer) error) (int64, error) {
 	type result struct {
 		n   int64
@@ -500,7 +532,7 @@ func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writ
 	}
 	if res.ExitCode != 0 {
 		line := lastLine(errTail)
-		return fmt.Errorf("the dump exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, true))
+		return fmt.Errorf("the dump exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, true, p.spool.recentHold()))
 	}
 	if gz != nil {
 		return gz.Close()
@@ -515,7 +547,7 @@ func lastLine(t *jobrun.Tail) string {
 			return s
 		}
 	}
-	return "no output"
+	return noOutput
 }
 
 // restoreLine is lastLine of a restore, except that pg_restore ends a
@@ -713,7 +745,7 @@ func (l *Local) restoreDump(ctx context.Context, store Store, key string, spec *
 	}
 	if res.ExitCode != 0 {
 		line := restoreLine(tail)
-		return nil, fmt.Errorf("the restore exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, false))
+		return nil, fmt.Errorf("the restore exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, false, nil))
 	}
 	return &agentv1.RestoreBackupResponse{RestoredBytes: uint64(counter.n)}, nil
 }
@@ -838,7 +870,7 @@ func (l *Local) restoreMember(ctx context.Context, spec *agentv1.ServiceSpec, t 
 	}
 	if res.ExitCode != 0 {
 		line := restoreLine(tail)
-		return fmt.Errorf("the restore exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, false))
+		return fmt.Errorf("the restore exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, false, nil))
 	}
 	return br.drain()
 }

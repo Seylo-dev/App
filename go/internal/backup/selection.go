@@ -236,7 +236,7 @@ func selectionPlan(t dbTarget, picked []chosen) (dumpPlan, error) {
 				"DB_HEADER=CREATE DATABASE IF NOT EXISTS "+mysqlIdent(p.db.Name)+";\nUSE "+mysqlIdent(p.db.Name)+";\n")}
 			// No --routines or --events: they would bring every routine of
 			// the database, not only what the tables need.
-			j.script = mysqlPrelude + `printf '%s' "$DB_HEADER"
+			j.script = mysqlDumpPrelude + `printf '%s' "$DB_HEADER"
 exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --single-transaction --triggers --hex-blob -- "$DB_NAME" "$@"`
 			for _, tab := range p.tables {
 				j.args = append(j.args, tab.Name)
@@ -245,7 +245,7 @@ exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_
 			return dumpPlan{jobs: []dbJob{j}, ext: extSQL}, nil
 		}
 		j := dbJob{env: t.baseEnv()}
-		j.script = mysqlPrelude + `exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --single-transaction --routines --triggers --events --hex-blob --databases -- "$@"`
+		j.script = mysqlDumpPrelude + `exec $DUMP --defaults-extra-file=/tmp/.backup.cnf --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --single-transaction --routines --triggers --events --hex-blob --databases -- "$@"`
 		for _, p := range picked {
 			j.args = append(j.args, p.db.Name)
 		}
