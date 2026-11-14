@@ -279,7 +279,7 @@ func (p *Probes) WaitHealthy(ctx context.Context, target Target, check *agentv1.
 			return nil
 		}
 		last = r.Output
-		if ctx.Err() == nil {
+		if !ended(ctx) {
 			refusedAll = refusedAll && r.refused
 			if r.refused {
 				lastRefused = r.Output
@@ -297,6 +297,18 @@ func (p *Probes) WaitHealthy(ctx context.Context, target Target, check *agentv1.
 		case <-time.After(every):
 		}
 	}
+}
+
+// ended reports whether ctx is done or its deadline has passed. A dial
+// started after the deadline fails with "i/o timeout" before ctx's own timer
+// has set ctx.Err(), so ctx.Err() alone would count that try as one that ran
+// to its end.
+func ended(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	d, ok := ctx.Deadline()
+	return ok && !time.Now().Before(d)
 }
 
 func truncate(s string) string {
