@@ -10,17 +10,19 @@ import (
 
 func validBrand() Brand {
 	return Brand{
-		DisplayName:       "Seylo",
-		Slug:              "seylo",
-		DataDir:           "/var/lib/seylo",
-		InstallURL:        "install.seylo.dev",
-		DocsURL:           "https://seylo.dev/docs",
-		SiteURL:           "https://seylo.dev",
-		GitHubOrg:         "Seylo-dev",
-		GitHubRepo:        "App",
-		Image:             "ghcr.io/seylo-dev/seylo",
-		OAuthClientID:     "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID",
-		MinisignPublicKey: "PLACEHOLDER_MINISIGN_PUBLIC_KEY",
+		DisplayName:                "Seylo",
+		Slug:                       "seylo",
+		DataDir:                    "/var/lib/seylo",
+		InstallURL:                 "install.seylo.dev",
+		DocsURL:                    "https://seylo.dev/docs",
+		SiteURL:                    "https://seylo.dev",
+		GitHubOrg:                  "Seylo-dev",
+		GitHubRepo:                 "App",
+		Image:                      "ghcr.io/seylo-dev/seylo",
+		OAuthClientID:              "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID",
+		MinisignPublicKey:          "PLACEHOLDER_MINISIGN_PUBLIC_KEY",
+		TemplatesRepo:              "Templates",
+		TemplatesMinisignPublicKey: "PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY",
 	}
 }
 
@@ -46,6 +48,8 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		"quote in name":      func(b *Brand) { b.DisplayName = `Sey"lo` },
 		"dollar in name":     func(b *Brand) { b.DisplayName = "Sey$lo" },
 		"empty client id":    func(b *Brand) { b.OAuthClientID = "" },
+		"bad templates repo": func(b *Brand) { b.TemplatesRepo = "Templates/x" },
+		"empty catalog key":  func(b *Brand) { b.TemplatesMinisignPublicKey = "" },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

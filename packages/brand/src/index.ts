@@ -36,6 +36,12 @@ export const oauthClientId = "Ov23liX9a5KSfuT6qsYI";
 /** MinisignPublicKey verifies signed release manifests. */
 export const minisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip";
 
+/** TemplatesRepo is the repository under GitHubOrg that publishes the signed template catalog. */
+export const templatesRepo = "Templates";
+
+/** TemplatesMinisignPublicKey verifies the signed template catalog (a key of its own, not the release key). */
+export const templatesMinisignPublicKey = "PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY";
+
 export const brand = {
   displayName,
   slug,
@@ -48,6 +54,8 @@ export const brand = {
   image,
   oauthClientId,
   minisignPublicKey,
+  templatesRepo,
+  templatesMinisignPublicKey,
 } as const;
 
 export type Brand = typeof brand;

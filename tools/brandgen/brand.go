@@ -25,6 +25,13 @@ type Brand struct {
 	Image             string `json:"image"`
 	OAuthClientID     string `json:"oauthClientId"`
 	MinisignPublicKey string `json:"minisignPublicKey"`
+	// TemplatesRepo is the repository under GitHubOrg that holds the
+	// template catalog and publishes it signed (release tag "catalog").
+	TemplatesRepo string `json:"templatesRepo"`
+	// TemplatesMinisignPublicKey verifies that catalog. It is a key of its
+	// own, not the release key: the catalog is signed on every merge in a
+	// repository that takes outside pull requests.
+	TemplatesMinisignPublicKey string `json:"templatesMinisignPublicKey"`
 }
 
 // PlaceholderPrefix marks values that are not set yet. Consumers
@@ -53,6 +60,8 @@ func (b Brand) fields() []field {
 		{"Image", "image", "BRAND_IMAGE", "Image is the panel container image, without a tag.", b.Image},
 		{"OAuthClientID", "oauthClientId", "BRAND_OAUTH_CLIENT_ID", "OAuthClientID is the public client id of the GitHub OAuth App used for device-flow sign-in.", b.OAuthClientID},
 		{"MinisignPublicKey", "minisignPublicKey", "BRAND_MINISIGN_PUBLIC_KEY", "MinisignPublicKey verifies signed release manifests.", b.MinisignPublicKey},
+		{"TemplatesRepo", "templatesRepo", "BRAND_TEMPLATES_REPO", "TemplatesRepo is the repository under GitHubOrg that publishes the signed template catalog.", b.TemplatesRepo},
+		{"TemplatesMinisignPublicKey", "templatesMinisignPublicKey", "BRAND_TEMPLATES_MINISIGN_PUBLIC_KEY", "TemplatesMinisignPublicKey verifies the signed template catalog (a key of its own, not the release key).", b.TemplatesMinisignPublicKey},
 	}
 }
 
@@ -98,6 +107,7 @@ func (b Brand) Validate() error {
 	check(isHTTPSURL(b.SiteURL), "siteUrl %q must be an https URL", b.SiteURL)
 	check(githubRe.MatchString(b.GitHubOrg), "githubOrg %q is not a valid GitHub name", b.GitHubOrg)
 	check(githubRe.MatchString(b.GitHubRepo), "githubRepo %q is not a valid GitHub name", b.GitHubRepo)
+	check(githubRe.MatchString(b.TemplatesRepo), "templatesRepo %q is not a valid GitHub name", b.TemplatesRepo)
 	check(imageRe.MatchString(b.Image), "image %q must be a registry/path reference without a tag", b.Image)
 
 	return errors.Join(errs...)

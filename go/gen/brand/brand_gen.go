@@ -30,4 +30,8 @@ const (
 	OAuthClientID = "Ov23liX9a5KSfuT6qsYI"
 	// MinisignPublicKey verifies signed release manifests.
 	MinisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip"
+	// TemplatesRepo is the repository under GitHubOrg that publishes the signed template catalog.
+	TemplatesRepo = "Templates"
+	// TemplatesMinisignPublicKey verifies the signed template catalog (a key of its own, not the release key).
+	TemplatesMinisignPublicKey = "PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY"
 )
