@@ -127,8 +127,10 @@ test("a clone that failed before a commit keeps the branch it tried, after the b
   expect(fleet.builds).toHaveLength(1);
 });
 
-// The web's hint under such a deploy (CloneNetworkHint) links the node it names, the build node (builtOn).
-test("a clone that failed on the node's network shows the agent's words: the node, the host, the Health check", async () => {
+// Not coverage for a change: the panel already stored a build's message verbatim and returned builtOn before
+// GitNetworkError (0.2.17). This only pins that pass-through, which the web's CloneNetworkHint relies on: it reads
+// the agent's words in the error and links the build node (builtOn).
+test("a clone that failed on the node's network keeps the agent's words and the build node", async () => {
   const id = await createApp("api", {
     type: "git",
     url: "https://gitea.lan/acme/api.git",
