@@ -409,9 +409,27 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
       const body = { error: { code: error.code, message: error.message, details: error.details } };
       return route.fulfill({ status: error.status, contentType: "application/json", body: JSON.stringify(body) });
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(answer) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(runtimeAsStatus(answer)) });
   });
   await installSockets(page, options);
+}
+
+/**
+ * Keeps the panel's rule for a service's runtimeStatus (0.2.17) in every
+ * answer: without a deploy going on (status other than building or
+ * deploying) it is the status itself. A test that overrides only the
+ * status (stopped, crashed, starting) then gets what a panel would send;
+ * one that leaves runtimeStatus out (a panel before 0.2.17) keeps it out.
+ */
+function runtimeAsStatus(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(runtimeAsStatus);
+  if (value === null || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) out[key] = runtimeAsStatus(item);
+  if ("runtimeStatus" in out && typeof out.status === "string" && out.status !== "building" && out.status !== "deploying") {
+    out.runtimeStatus = out.status;
+  }
+  return out;
 }
 
 const encode = (text: string) => Buffer.from(text, "utf8");
