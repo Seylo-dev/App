@@ -6850,8 +6850,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   tab in the same mode, just its arrow on a phone; no Console quick
   action next to it). Its first session waits for a container that runs
   or starts (`consoleRun` in `terminal/follow.ts`: `hasRunningInstance`,
-  that is running, partial, unhealthy, or a deploy on top of a live
-  version, or starting; a shell only once one runs; before that a dark
+  that is running, partial or unhealthy, or starting; while a deploy
+  builds, waits for a build slot or rolls out, since 0.2.17 that is read
+  from `runtimeStatus` (what runs meanwhile: the live version while it
+  runs, not once it crashed, stopped or its node does not answer, and a
+  first deploy's container that already runs), and from an answer without
+  it (a panel before 0.2.17) a deploy on top of a live version of a
+  service that was not stopped counts as running; a shell only once one
+  runs; before that a dark
   card with the switch and "The console opens once the app runs."); once
   shown the terminal stays until the page is left, so a crash or a
   restart keeps the output and the exit note, and a status change while

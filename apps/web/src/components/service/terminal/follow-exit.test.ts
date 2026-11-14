@@ -107,6 +107,21 @@ test("what the console can attach to, from the service's live status", () => {
   expect(["running", "starting", "unknown", "stopped"].filter((r) => consoleMayAttach(r as ConsoleRun))).toEqual(["running", "starting"]);
 });
 
+test("while a deploy goes on, the console follows what runs (runtimeStatus) when the panel sends it", () => {
+  const during = (runtimeStatus: Parameters<typeof consoleRun>[0]["status"], liveDeployment: unknown = live) =>
+    consoleRun({ status: "building", runtimeStatus, stopped: false, liveDeployment });
+  expect(during("running")).toBe("running");
+  expect(during("running", null)).toBe("running");
+  // The live version restarts or its node does not answer while the next build waits.
+  expect(during("starting")).toBe("starting");
+  expect(during("unknown")).toBe("unknown");
+  expect(during("crashed")).toBe("stopped");
+  expect(during("idle", null)).toBe("stopped");
+  // A panel before 0.2.17: the deploy's status and the live version, as before.
+  expect(consoleRun({ status: "building", stopped: false, liveDeployment: live })).toBe("running");
+  expect(consoleRun({ status: "building", stopped: false, liveDeployment: null })).toBe("stopped");
+});
+
 test("a starting app's ticket without a container opens no socket; a running app's does when clicked", () => {
   expect(nothingToAttach("starting", null)).toBe(true);
   expect(nothingToAttach("starting", "c0ffee")).toBe(false);

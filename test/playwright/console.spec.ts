@@ -9,7 +9,9 @@
 // the app runs, once a stopped or crashed app runs, a starting app once its
 // container is there, on the tab shown again, the network or the live
 // socket back after an idle close, never after a refusal, never in a hidden
-// tab; retries asking the watch ticket before the audited console, and
+// tab; while a deploy goes on, by what runs meanwhile (runtimeStatus): the
+// live version while the next build waits, not once it crashed, and a
+// first deploy's container that already runs; retries asking the watch ticket before the audited console, and
 // stopping at Reconnect after the tries an attach that is refused at once
 // came to, with one Connected line; one Reconnect click connecting though
 // the agent refuses its first attach, and a shell's refused Reconnect
@@ -40,6 +42,22 @@ function apiStatus(now: () => { status: string; stopped?: boolean }) {
     "services.get": (input: Record<string, unknown>) => {
       const service = (servicesById as Record<string, object>)[String(input.serviceId)];
       return input.serviceId === svc.api ? { ...service, stopped: false, ...now() } : service;
+    },
+  };
+}
+
+/**
+ * services.get with the api in a deploy (`now`: status, buildWaiting,
+ * runtimeStatus, liveDeployment); runtimeStatus left out as a panel before
+ * 0.2.17 does when `now` has none.
+ */
+function apiDuringDeploy(now: () => Record<string, unknown>) {
+  return {
+    "services.get": (input: Record<string, unknown>) => {
+      const service = (servicesById as Record<string, Record<string, unknown>>)[String(input.serviceId)];
+      if (input.serviceId !== svc.api || !service) return service;
+      const { runtimeStatus: _, ...rest } = service;
+      return { ...rest, stopped: false, ...now() };
     },
   };
 }
@@ -472,6 +490,56 @@ test.describe("console and shell", () => {
     await expect.poll(() => openSockets()).toEqual(["console"]);
     await expect(card.getByText(notRunningNote)).toHaveCount(0);
     expect(tickets).toEqual(["terminals.watchConsole", "terminals.watchConsole"]);
+  });
+
+  test("while a build waits for a slot the live version's console connects; once it crashed, it waits", async ({ page }) => {
+    let now: Record<string, unknown> = { status: "building", buildWaiting: true, runtimeStatus: "running" };
+    await installDemo(page, { overrides: apiDuringDeploy(() => now) });
+    const tickets = ticketRequests(page);
+    await page.goto(api);
+    const header = page.locator("main header").first();
+    await expect(header.getByText("Waiting for a build slot", { exact: true })).toBeVisible();
+    const card = page.getByRole("region", { name: "Console" });
+    await expect(card.getByText(consoleLine)).toBeVisible();
+    await expect(card.getByText(notRunningNote)).toHaveCount(0);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    await page.screenshot({ path: `${shots}/overview-console-build-waiting.png` });
+    // The Console tab too.
+    await page.goto(`${api}/console`);
+    const terminal = page.getByRole("region", { name: "Console" });
+    await expect(terminal.getByText(consoleLine)).toBeVisible();
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+
+    // The live version crashed while the build still waits: the console says so and asks for nothing.
+    now = { status: "building", buildWaiting: true, runtimeStatus: "crashed" };
+    apiChanged();
+    await expect(header.locator('[data-dot="error"]')).toBeVisible();
+    const sockets = terminalSockets.length;
+    await terminalSockets.at(-1)?.end(1);
+    await expect(terminal.getByText(notRunningNote)).toBeVisible();
+    await page.waitForTimeout(2500);
+    expect(terminalSockets).toHaveLength(sockets);
+    // It runs again: the console connects by itself.
+    now = { status: "building", buildWaiting: true, runtimeStatus: "running" };
+    apiChanged();
+    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(sockets + 1);
+    await expect(terminal.getByText(notRunningNote)).toHaveCount(0);
+    expect(tickets.every((op) => op === "terminals.watchConsole" || op === "terminals.console")).toBe(true);
+  });
+
+  test("a first deploy whose container already runs while it rolls out: the console connects", async ({ page }) => {
+    await installDemo(page, { overrides: apiDuringDeploy(() => ({ status: "deploying", runtimeStatus: "running", liveDeployment: null })) });
+    await page.goto(api);
+    const card = page.getByRole("region", { name: "Console" });
+    await expect(card.getByText(consoleLine)).toBeVisible();
+    await expect(card.getByText("The console opens once the app runs.")).toHaveCount(0);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+  });
+
+  test("a panel before 0.2.17 (no runtimeStatus): a build that waits on top of a live version still connects", async ({ page }) => {
+    await installDemo(page, { overrides: apiDuringDeploy(() => ({ status: "building", buildWaiting: true })) });
+    await page.goto(api);
+    await expect(page.getByRole("region", { name: "Console" }).getByText(consoleLine)).toBeVisible();
   });
 
   test("a starting app: the Overview card tries and attaches once its container is there, before it is healthy", async ({ page }) => {

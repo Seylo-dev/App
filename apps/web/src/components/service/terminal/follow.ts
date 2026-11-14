@@ -11,21 +11,23 @@
 
 import { OpError } from "@seylo/ops";
 import type { MessageKey } from "../../../i18n/t";
-import { hasRunningInstance, type ServiceStatus } from "../status";
+import { hasRunningInstance, type RunSource } from "../status";
 
 /**
  * What the console can attach to now. "running": a container runs (see
  * hasRunningInstance). "starting": one may be on its way, so it tries and
  * waits. "unknown": the panel cannot tell (the node does not answer).
  * "stopped": nothing runs: stopped, crashed and left by the crash policy,
- * never deployed, a first deploy with no live container yet.
+ * never deployed, a first deploy with no container yet. While a deploy goes
+ * on, what runs meanwhile (runtimeStatus, when the panel sends it).
  */
 export type ConsoleRun = "running" | "starting" | "unknown" | "stopped";
 
-export function consoleRun(service: { status: ServiceStatus; stopped: boolean; liveDeployment: unknown }): ConsoleRun {
+export function consoleRun(service: RunSource): ConsoleRun {
   if (hasRunningInstance(service)) return "running";
-  if (service.status === "starting" && !service.stopped) return "starting";
-  if (service.status === "unknown" && !service.stopped) return "unknown";
+  const now = service.runtimeStatus ?? service.status;
+  if (now === "starting" && !service.stopped) return "starting";
+  if (now === "unknown" && !service.stopped) return "unknown";
   return "stopped";
 }
 

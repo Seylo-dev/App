@@ -20,6 +20,23 @@ test("a console can attach while a container runs, and not before", () => {
   for (const status of ["idle", "starting", "crashed", "stopped", "unknown"] as const) expect(runs(status)).toBe(false);
 });
 
+test("while a deploy goes on, the console reads what runs (runtimeStatus), not the deploy's status", () => {
+  const during = (status: "building" | "deploying", runtimeStatus: ServiceStatus, liveDeployment: unknown = live) =>
+    hasRunningInstance({ status, runtimeStatus, stopped: false, liveDeployment });
+  // The live version runs while the next build waits for a slot, builds or rolls out.
+  expect(during("building", "running")).toBe(true);
+  expect(during("deploying", "partial")).toBe(true);
+  expect(during("building", "unhealthy")).toBe(true);
+  // A first deploy whose new container already runs while the rollout goes on (nothing live yet).
+  expect(during("deploying", "running", null)).toBe(true);
+  // The live version crashed, stopped, starts again or its node does not answer: nothing to attach to.
+  for (const runtime of ["crashed", "stopped", "starting", "unknown", "idle", "deploying"] as const)
+    expect(during("building", runtime)).toBe(false);
+  // Without a deploy runtimeStatus is the status itself.
+  expect(hasRunningInstance({ status: "running", runtimeStatus: "running", stopped: false, liveDeployment: live })).toBe(true);
+  expect(hasRunningInstance({ status: "crashed", runtimeStatus: "crashed", stopped: false, liveDeployment: live })).toBe(false);
+});
+
 test("a building deploy or service whose build waits for a slot says so instead of Building", () => {
   expect(t(serviceLook("building").label)).toBe("Building");
   expect(t(serviceLook("building", true).label)).toBe("Waiting for a build slot");

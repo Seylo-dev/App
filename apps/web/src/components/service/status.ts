@@ -111,13 +111,30 @@ export function deploymentLook(status: DeploymentStatus, buildWaiting = false): 
   return status === "building" && buildWaiting ? waitingForBuildLook : deploymentStatusLook[status];
 }
 
+/** What a console reads of a service: a ServiceSummary or ServiceDetail. */
+export interface RunSource {
+  status: ServiceStatus;
+  /** What runs now (ServiceSummary.runtimeStatus); panels before 0.2.17 leave it out. */
+  runtimeStatus?: ServiceStatus;
+  stopped: boolean;
+  liveDeployment: unknown;
+}
+
+/** The states in which a container of the service runs. */
+const runs = (status: ServiceStatus) => status === "running" || status === "partial" || status === "unhealthy";
+
 /**
  * Whether a container of the service runs now, so a console can attach:
- * running, partly running or failing its health check, or a deploy going on
- * while the live version still runs. Not while it starts, crashes, stops or
- * was never deployed.
+ * running, partly running or failing its health check. While a deploy
+ * builds, waits for a build slot or rolls out, that is what runs
+ * (runtimeStatus): the live version while it runs, not once it crashed or
+ * stopped, and a new container that already runs. Not while it starts,
+ * crashes, stops or was never deployed. Answers without runtimeStatus
+ * (panels before 0.2.17): a deploy going on counts as running while a live
+ * version exists and the service was not stopped.
  */
-export function hasRunningInstance(service: { status: ServiceStatus; stopped: boolean; liveDeployment: unknown }): boolean {
+export function hasRunningInstance(service: RunSource): boolean {
+  if (service.runtimeStatus !== undefined) return runs(service.runtimeStatus);
   switch (service.status) {
     case "running":
     case "partial":
