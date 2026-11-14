@@ -116,7 +116,7 @@ test.describe("node DNS cache", () => {
       extra: {
         reason: "a test container on seylo-p-projacmeshop0001 gets no answer from it (;; connection timed out; no servers could be reached)",
         fixHint:
-          'A firewall on the node probably drops DNS from containers to 169.254.53.53. With ufw: `ufw allow to 169.254.53.53 port 53 comment "seylo dns"`. Then run the health check again; until it passes, new containers do not get the cache.',
+          'A firewall on the node probably drops DNS from containers to 169.254.53.53. With ufw: `for n in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do ufw allow from $n to 169.254.53.53 port 53 comment "seylo dns"; done`. With your own iptables rules: `iptables -I INPUT -s 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 -d 169.254.53.53 -p udp --dport 53 -j ACCEPT` and the same with `-p tcp`. Then run the health check again; until it passes, new containers do not get the cache.',
         checkPassed: false,
       },
     });
@@ -124,7 +124,7 @@ test.describe("node DNS cache", () => {
     const panel = page.getByRole("dialog").getByTestId("dns-cache");
     await expect(panel.getByTestId("dns-cache-state")).toHaveText("Blocked");
     await expect(panel.getByText("gets no answer from it")).toBeVisible();
-    await expect(panel.locator("code", { hasText: 'ufw allow to 169.254.53.53 port 53 comment "seylo dns"' })).toBeVisible();
+    await expect(panel.locator("code", { hasText: 'for n in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do ufw allow from $n to 169.254.53.53 port 53 comment "seylo dns"; done' })).toBeVisible();
     await panel.screenshot({ path: `${shots}/blocked.png` });
   });
 

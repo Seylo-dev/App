@@ -26,7 +26,8 @@ type DnsCacheState int32
 
 const (
 	DnsCacheState_DNS_CACHE_STATE_UNSPECIFIED DnsCacheState = 0
-	// Turned off and no running container uses it: no address, no listener.
+	// Turned off and no container of ours (running or stopped) uses it: no
+	// address, no listener.
 	DnsCacheState_DNS_CACHE_STATE_OFF DnsCacheState = 1
 	// Turned on and listening, not proven from inside containers yet: new
 	// containers do not get it yet.
@@ -34,11 +35,14 @@ const (
 	// Turned on and proven: new containers get it.
 	DnsCacheState_DNS_CACHE_STATE_ACTIVE DnsCacheState = 3
 	// Turned on but it cannot work here (the port is taken, iproute2 is
-	// missing, a firewall drops it): reason and fix_hint say why. New
-	// containers do not get it.
+	// missing, a firewall drops it, upstream servers do not answer): reason
+	// and fix_hint say why. New containers do not get it. A taken port is
+	// not tried again until the cache is turned off and on or the health
+	// check runs by hand.
 	DnsCacheState_DNS_CACHE_STATE_BLOCKED DnsCacheState = 4
-	// Turned off, but running containers still use it: it keeps answering
-	// until they are recreated (a redeploy) or gone.
+	// Turned off, but containers still use it (running, or stopped and
+	// started again as the same container): it keeps answering until they
+	// are recreated (a redeploy) or gone.
 	DnsCacheState_DNS_CACHE_STATE_DRAINING DnsCacheState = 5
 )
 
@@ -152,7 +156,8 @@ type GetDnsCacheStatusResponse struct {
 	// The last 60 minutes, oldest first, one per minute (the last one is the
 	// minute now running).
 	Minutes []*DnsCacheMinute `protobuf:"bytes,13,rep,name=minutes,proto3" json:"minutes,omitempty"`
-	// Our running containers and whether each uses the cache.
+	// Our running containers and whether each uses the cache, and the
+	// stopped ones that still use it.
 	Containers []*DnsCacheContainer `protobuf:"bytes,14,rep,name=containers,proto3" json:"containers,omitempty"`
 	// When the last check from inside containers ran (unset: never since the
 	// agent started), and whether it passed.

@@ -117,7 +117,8 @@ export type GetDnsCacheStatusResponse = Message<"seylo.agent.v1.GetDnsCacheStatu
   minutes: DnsCacheMinute[];
 
   /**
-   * Our running containers and whether each uses the cache.
+   * Our running containers and whether each uses the cache, and the
+   * stopped ones that still use it.
    *
    * @generated from field: repeated seylo.agent.v1.DnsCacheContainer containers = 14;
    */
@@ -219,7 +220,8 @@ export enum DnsCacheState {
   UNSPECIFIED = 0,
 
   /**
-   * Turned off and no running container uses it: no address, no listener.
+   * Turned off and no container of ours (running or stopped) uses it: no
+   * address, no listener.
    *
    * @generated from enum value: DNS_CACHE_STATE_OFF = 1;
    */
@@ -242,16 +244,19 @@ export enum DnsCacheState {
 
   /**
    * Turned on but it cannot work here (the port is taken, iproute2 is
-   * missing, a firewall drops it): reason and fix_hint say why. New
-   * containers do not get it.
+   * missing, a firewall drops it, upstream servers do not answer): reason
+   * and fix_hint say why. New containers do not get it. A taken port is
+   * not tried again until the cache is turned off and on or the health
+   * check runs by hand.
    *
    * @generated from enum value: DNS_CACHE_STATE_BLOCKED = 4;
    */
   BLOCKED = 4,
 
   /**
-   * Turned off, but running containers still use it: it keeps answering
-   * until they are recreated (a redeploy) or gone.
+   * Turned off, but containers still use it (running, or stopped and
+   * started again as the same container): it keeps answering until they
+   * are recreated (a redeploy) or gone.
    *
    * @generated from enum value: DNS_CACHE_STATE_DRAINING = 5;
    */

@@ -102,14 +102,15 @@ test("blocked: the reason and the fix with its command", async () => {
     status({
       state: "blocked",
       reason: "a test container on seylo-p-0123456789abcdef gets no answer from it",
-      fixHint: 'With ufw: `ufw allow to 169.254.53.53 port 53 comment "seylo dns"`.',
+      fixHint:
+        'With ufw: `for n in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do ufw allow from $n to 169.254.53.53 port 53 comment "seylo dns"; done`.',
       checkPassed: false,
     }),
   );
   expect(out).toContain(`>${t("nodeDnsCache.state.blocked")}</span>`);
   expect(out).toContain("gets no answer from it");
   expect(out).toContain("<code");
-  expect(out).toContain("ufw allow to 169.254.53.53 port 53 comment &quot;seylo dns&quot;");
+  expect(out).toContain("ufw allow from $n to 169.254.53.53 port 53 comment &quot;seylo dns&quot;; done");
 });
 
 test("off but still used: draining, with the containers that still use it", async () => {

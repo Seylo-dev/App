@@ -208,7 +208,7 @@ func wireNode(reg *Registry, d *Deps) error {
 		return &agentv1.RebootResponse{}, nil
 	})
 	rpc.HandleUnary(reg, "RunHealthCheck", func(ctx context.Context, _ *agentv1.RunHealthCheckRequest) (*agentv1.RunHealthCheckResponse, error) {
-		results := nodecheck.Run(ctx, nodeChecks(d))
+		results := nodecheck.Run(ctx, nodeChecksFor(d, true))
 		checks.alerts(ctx, d, results)
 		return &agentv1.RunHealthCheckResponse{Results: results}, nil
 	})
@@ -445,8 +445,13 @@ func (p *panelControl) Logs(ctx context.Context, opts localapi.LogsOptions, w io
 	return p.run(ctx, w, "docker", append(args, container)...)
 }
 
-// nodeChecks builds the health checks with this node's settings.
-func nodeChecks(d *Deps) []nodecheck.Check {
+// nodeChecks builds the health checks with this node's settings, for the
+// background run and the troubleshoot report.
+func nodeChecks(d *Deps) []nodecheck.Check { return nodeChecksFor(d, false) }
+
+// nodeChecksFor builds them; byHand is Run checks now (RunHealthCheck),
+// where the DNS cache tries a port another program held once more.
+func nodeChecksFor(d *Deps, byHand bool) []nodecheck.Check {
 	panelURL, panelPin := panelAddress(d)
 	// The buildx check follows the panel's decision (it sends builds) as well as config.yml.
 	env := nodecheck.Env{DataDir: d.Layout.Root(), PanelURL: panelURL, PanelPin: panelPin, GOARCH: runtime.GOARCH,
@@ -466,6 +471,9 @@ func nodeChecks(d *Deps) []nodecheck.Check {
 	// The DNS cache check runs the cache's own test (also its gate).
 	if m, ok := d.DNSCache.(*dnscache.Manager); ok {
 		env.DNSCache = m.Check
+		if byHand {
+			env.DNSCache = m.CheckByHand
+		}
 	}
 	return nodecheck.Default(env)
 }

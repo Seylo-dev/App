@@ -57,25 +57,25 @@ func judgeDNSCache(r *dnscache.Report) *agentv1.NodeCheckResult {
 			return pass("the DNS cache is off; %s still %s it at %s until %s redeployed", users, plural(r.Users, "uses", "use"), addr, plural(r.Users, "it is", "they are"))
 		}
 		return fail(fmt.Sprintf("the DNS cache is off, but %s still %s it at %s and it does not answer them: %s; each of their lookups can wait about 4 seconds before Docker tries the next server",
-			users, plural(r.Users, "uses", "use"), addr, r.Problem()), hintFor(r)+" Or redeploy those services, which gives them Docker's own servers again.")
+			users, plural(r.Users, "uses", "use"), addr, r.Problem()), strings.TrimSpace(r.FixHint()+" Or redeploy those services, which gives them Docker's own servers again."))
 	}
 	if r.Blocked != "" {
-		return fail("the DNS cache cannot run on this node: "+r.Blocked+"; new containers keep Docker's own DNS servers", hintFor(r))
+		return fail("the DNS cache cannot run on this node: "+r.Blocked+"; new containers keep Docker's own DNS servers", r.FixHint())
 	}
 	if r.HostErr != "" {
 		detail := fmt.Sprintf("the DNS cache at %s gets no answer from its upstream servers (%s): %s; new containers keep Docker's own DNS servers until it does",
 			addr, strings.Join(r.Upstreams, ", "), r.HostErr)
-		return fail(detail+usingNote(r), "The cache asks the servers of Docker's \"dns\" setting, else the host's resolv.conf. Check that this server can reach them (`dig @<server> example.com`), then run the health check again.")
+		return fail(detail+usingNote(r), r.FixHint())
 	}
 	if len(r.Runs) == 0 {
 		return warn(fmt.Sprintf("the DNS cache at %s answers on the host, but no test container could run (%s), so whether containers reach it is not known; new containers keep Docker's own DNS servers until it is",
-			addr, r.Skipped), "The test uses an image already on the node (moby/buildkit, traefik, alpine or busybox) and never pulls one. Deploy anything once or pull busybox (`docker pull busybox`), then run the health check again.")
+			addr, r.Skipped), r.FixHint())
 	}
 	var nets []string
 	for i, run := range r.Runs {
 		if !r.RunPassed(i) {
 			return fail(fmt.Sprintf("a test container on %s gets no answer from the DNS cache at %s%s; new containers keep Docker's own DNS servers until it does",
-				run.Network, addr, runText(run))+usingNote(r), hintFor(r))
+				run.Network, addr, runText(run))+usingNote(r), r.FixHint())
 		}
 		nets = append(nets, run.Network)
 	}
@@ -86,11 +86,11 @@ func judgeDNSCache(r *dnscache.Report) *agentv1.NodeCheckResult {
 func usersText(n int) string {
 	switch {
 	case n < 0:
-		return "running containers"
+		return "containers"
 	case n == 1:
-		return "1 running container"
+		return "1 container"
 	}
-	return fmt.Sprintf("%d running containers", n)
+	return fmt.Sprintf("%d containers", n)
 }
 
 // usingNote says what a failure costs the containers that use the cache.
@@ -100,13 +100,6 @@ func usingNote(r *dnscache.Report) string {
 	}
 	return fmt.Sprintf("; %s already %s it, and each of their lookups can wait about 4 seconds before Docker tries the next server",
 		usersText(r.Users), plural(r.Users, "uses", "use"))
-}
-
-func hintFor(r *dnscache.Report) string {
-	if r.Hint != "" {
-		return r.Hint
-	}
-	return dnscache.FirewallHint(r.Address)
 }
 
 // runText is a failed test container's own words.

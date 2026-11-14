@@ -17,7 +17,8 @@ message GetDnsCacheStatusRequest {}
 
 enum DnsCacheState {
   DNS_CACHE_STATE_UNSPECIFIED = 0;
-  // Turned off and no running container uses it: no address, no listener.
+  // Turned off and no container of ours (running or stopped) uses it: no
+  // address, no listener.
   DNS_CACHE_STATE_OFF = 1;
   // Turned on and listening, not proven from inside containers yet: new
   // containers do not get it yet.
@@ -25,11 +26,14 @@ enum DnsCacheState {
   // Turned on and proven: new containers get it.
   DNS_CACHE_STATE_ACTIVE = 3;
   // Turned on but it cannot work here (the port is taken, iproute2 is
-  // missing, a firewall drops it): reason and fix_hint say why. New
-  // containers do not get it.
+  // missing, a firewall drops it, upstream servers do not answer): reason
+  // and fix_hint say why. New containers do not get it. A taken port is
+  // not tried again until the cache is turned off and on or the health
+  // check runs by hand.
   DNS_CACHE_STATE_BLOCKED = 4;
-  // Turned off, but running containers still use it: it keeps answering
-  // until they are recreated (a redeploy) or gone.
+  // Turned off, but containers still use it (running, or stopped and
+  // started again as the same container): it keeps answering until they
+  // are recreated (a redeploy) or gone.
   DNS_CACHE_STATE_DRAINING = 5;
 }
 
@@ -59,7 +63,8 @@ message GetDnsCacheStatusResponse {
   // The last 60 minutes, oldest first, one per minute (the last one is the
   // minute now running).
   repeated DnsCacheMinute minutes = 13;
-  // Our running containers and whether each uses the cache.
+  // Our running containers and whether each uses the cache, and the
+  // stopped ones that still use it.
   repeated DnsCacheContainer containers = 14;
   // When the last check from inside containers ran (unset: never since the
   // agent started), and whether it passed.

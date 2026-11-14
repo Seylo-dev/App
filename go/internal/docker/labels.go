@@ -43,7 +43,8 @@ const (
 
 	// LabelDNSCache is the node DNS cache's address on a container created
 	// with it as its first DNS server (ContainerDNS, since 0.2.17). The
-	// agent keeps the cache's address up while a running container has it.
+	// agent keeps the cache's address up while a container has it,
+	// running or stopped.
 	LabelDNSCache = LabelPrefix + "dns-cache"
 
 	// LabelTraefikEnable is set to "false" on every container we create so

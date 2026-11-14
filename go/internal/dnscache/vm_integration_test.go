@@ -180,8 +180,9 @@ func newRig(t *testing.T) *rig {
 			}
 			var out []dnscache.Container
 			for _, c := range list {
-				if c.State == agentv1.InstanceState_INSTANCE_STATE_RUNNING {
-					out = append(out, dnscache.Container{Name: c.Name, UsesCache: docker.UsesDNSCache(c.Labels)})
+				if c.State != agentv1.InstanceState_INSTANCE_STATE_DEAD {
+					out = append(out, dnscache.Container{Name: c.Name, UsesCache: docker.UsesDNSCache(c.Labels),
+						Running: c.State == agentv1.InstanceState_INSTANCE_STATE_RUNNING})
 				}
 			}
 			return out, nil
@@ -358,8 +359,9 @@ func TestITCacheOnAProjectNetwork(t *testing.T) {
 // by default for that address, like a default-deny INPUT without the
 // installer's rule): the test from inside containers fails, the cache is
 // BLOCKED with the fix, and containers keep Docker's servers. With the
-// allow rule the installer adds (ufw allow to <address> port 53, here the
-// same in nftables) the next check passes and containers get it.
+// allow rules the installer adds (ufw allow from <each private range> to
+// <address> port 53, here the same in nftables) the next check passes and
+// containers get it.
 func TestITFirewallGate(t *testing.T) {
 	r := newRig(t)
 	table := "seylo_dnsit_" + r.id
@@ -374,7 +376,7 @@ func TestITFirewallGate(t *testing.T) {
 	r.m.SetEnabled(true)
 	r.start()
 	st := r.waitState(agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED)
-	if !strings.Contains(st.GetFixHint(), "ufw allow to "+r.addr.String()+" port 53") || !strings.Contains(st.GetReason(), "gets no answer") {
+	if !strings.Contains(st.GetFixHint(), "ufw allow from $n to "+r.addr.String()+" port 53") || !strings.Contains(st.GetReason(), "gets no answer") {
 		t.Fatalf("blocked: %q / %q", st.GetReason(), st.GetFixHint())
 	}
 	if dns := r.m.ContainerDNS(); len(dns.Servers) != 0 {
@@ -385,9 +387,11 @@ func TestITFirewallGate(t *testing.T) {
 		t.Fatalf("a blocked cache was handed out:\n%s", resolv)
 	}
 
-	// The installer's rule: accept DNS to the cache's address, UDP and TCP.
-	run(t, "nft", "insert", "rule", "inet", table, "cache", "udp", "dport", "53", "accept")
-	run(t, "nft", "insert", "rule", "inet", table, "cache", "tcp", "dport", "53", "accept")
+	// The installer's rules: accept DNS to the cache's address, UDP and
+	// TCP, from the private ranges only (Docker's bridges).
+	private := "{ " + strings.Join(dnscache.PrivateSources, ", ") + " }"
+	run(t, "nft", "insert", "rule", "inet", table, "cache", "ip", "saddr", private, "udp", "dport", "53", "accept")
+	run(t, "nft", "insert", "rule", "inet", table, "cache", "ip", "saddr", private, "tcp", "dport", "53", "accept")
 	rep := r.m.Check(r.ctx)
 	if !rep.Passed() {
 		t.Fatalf("with the allow rule: %s", rep.Problem())
@@ -398,4 +402,75 @@ func TestITFirewallGate(t *testing.T) {
 		t.Fatalf("through the firewall:\n%s", out)
 	}
 	t.Logf("%s", fmt.Sprint(rep.Runs))
+}
+
+// Another program holds the cache's port on every address (a wildcard
+// UDP socket, like dnsmasq or a container publishing 0.0.0.0:53): the
+// cache is BLOCKED and then leaves the port alone, so when that program
+// restarts its wildcard bind still works. Before, the cache bound its own
+// address in the gap and the program could not start again. The health
+// check run by hand tries again. A free high port stands in for 53.
+func TestITPortTakenIsLeftToItsHolder(t *testing.T) {
+	r := newRig(t)
+	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := holder.LocalAddr().(*net.UDPAddr).Port
+	dataDir := t.TempDir()
+	m := dnscache.NewManager(dnscache.ManagerOptions{
+		Address:   r.addr,
+		Port:      port,
+		Link:      dnscache.Link{Name: "sdc" + r.id, Run: combined},
+		Subnets:   r.moby.BridgeSubnets,
+		Sources:   func(context.Context) dnscache.Sources { return dnscache.Sources{Docker: []string{r.fallback.String()}} },
+		Upstreams: []string{r.upstream.addr},
+		HostNames: func() []string { return []string{"panel.example.test"} },
+		Holder: func(ctx context.Context, port int) string {
+			out, err := combined(ctx, "ss", "-H", "-lunp", fmt.Sprintf("sport = :%d", port))
+			if err != nil {
+				return ""
+			}
+			return dnscache.WildcardHolder(out, port)
+		},
+		Marker:    filepath.Join(dataDir, "dns-cache-in-use"),
+		PortTaken: filepath.Join(dataDir, "dns-cache-port-taken"),
+		Interval:  100 * time.Millisecond,
+	})
+	m.SetEnabled(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- m.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		st := m.Status(r.ctx)
+		if st.GetState() == agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED && strings.Contains(st.GetReason(), fmt.Sprintf("holds port %d on every address", port)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("state %s (%s)", st.GetState(), st.GetReason())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// The holder restarts: its socket is gone for a second, then it binds
+	// the wildcard again.
+	_ = holder.Close()
+	time.Sleep(time.Second)
+	again, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
+	if err != nil {
+		t.Fatalf("the program on 0.0.0.0:%d could not start again: %v", port, err)
+	}
+	if st := m.Status(r.ctx); st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED {
+		t.Fatalf("state %s (%s)", st.GetState(), st.GetReason())
+	}
+
+	// It is gone for good; Run checks now takes the port.
+	_ = again.Close()
+	m.CheckByHand(r.ctx)
+	if out := run(t, "ss", "-H", "-lun", fmt.Sprintf("sport = :%d", port)); !strings.Contains(out, r.addr.String()+":"+fmt.Sprint(port)) {
+		t.Fatalf("the check by hand did not bind %s:%d:\n%s", r.addr, port, out)
+	}
 }

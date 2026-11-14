@@ -20,18 +20,23 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
 )
 
-// Container is one of our running containers as the status lists it.
+// Container is one of our containers that can use the cache.
 type Container struct {
 	Name      string
 	ServiceID string
 	// Kind is the seylo.role label, or "service" for a service instance.
 	Kind      string
 	UsesCache bool
-	Created   time.Time
+	// Running: the container runs now. One that does not (exited in a
+	// crash backoff, not started yet after a reboot) still counts as a
+	// user when it has the cache: it starts again as the same container.
+	Running bool
+	Created time.Time
 }
 
 // ProbeRun is one test from inside a container: a throwaway container on
@@ -62,7 +67,8 @@ type ManagerOptions struct {
 	// Subnets are the Docker bridge networks' subnets (the default bridge
 	// included): the only sources the cache answers, with Address itself.
 	Subnets func(ctx context.Context) ([]netip.Prefix, error)
-	// Containers are our running containers that can use the cache.
+	// Containers are our containers that can use the cache, running or
+	// not (dead ones left out).
 	Containers func(ctx context.Context) ([]Container, error)
 	// Sources reads where DNS goes on the host now.
 	Sources func(ctx context.Context) Sources
@@ -80,6 +86,13 @@ type ManagerOptions struct {
 	// Marker is a file that exists while containers may carry the cache:
 	// after a reboot the address comes up before containers start.
 	Marker string
+	// PortTaken is a file that exists while another program holds the
+	// cache's port (the last bind failed with EADDRINUSE): the agent then
+	// does not bind again by itself, not even at its next start, so that
+	// program can always take the port back when it restarts. Turning the
+	// cache on again (off, then on) or a health check run by hand
+	// (CheckByHand) removes it.
+	PortTaken string
 	// Holder names the program that holds a port ("dnsmasq"), "" when
 	// unknown.
 	Holder func(ctx context.Context, port int) string
@@ -127,6 +140,9 @@ type Manager struct {
 	// earlier run left.
 	linkMine    bool
 	downChecked bool
+	// portTaken is why the last bind failed with EADDRINUSE (the
+	// PortTaken file's reason): no bind until it is cleared.
+	portTaken string
 }
 
 // NewManager builds a Manager; Prepare and Run start it.
@@ -155,6 +171,16 @@ func NewManager(opts ManagerOptions) *Manager {
 	}
 	m := &Manager{opts: opts, wake: make(chan struct{}, 1)}
 	m.port.Store(int32(max(opts.Port, 0)))
+	if opts.PortTaken != "" {
+		if b, err := os.ReadFile(opts.PortTaken); err == nil {
+			reason, _, _ := strings.Cut(string(b), "\n")
+			if reason = strings.TrimSpace(reason); reason == "" {
+				reason = fmt.Sprintf("another program holds port %d on every address, so the cache cannot listen on %s", m.port.Load(), opts.Address)
+			}
+			m.portTaken = reason
+			m.blocked, m.blockedHint = reason, portTakenHint(int(m.port.Load()))
+		}
+	}
 	m.srv = NewServer(ServerOptions{
 		Upstreams: func() []string {
 			m.mu.Lock()
@@ -184,6 +210,10 @@ func (m *Manager) SetEnabled(on bool) {
 		m.last = nil
 	}
 	m.mu.Unlock()
+	if changed && on {
+		// The owner turned it on again: try the port once more.
+		m.clearPortTaken()
+	}
 	if changed {
 		m.poke()
 	}
@@ -199,7 +229,9 @@ func (m *Manager) poke() {
 // Prepare runs before the agent starts any container: when the cache is
 // on, or containers from before carry it (the marker), the address and the
 // listener come up first, so after a reboot their lookups have somewhere
-// to go.
+// to go. Not the listener while another program held the port at the
+// last try (PortTaken): binding first would keep that program from
+// starting.
 func (m *Manager) Prepare(ctx context.Context, enabled bool) {
 	m.mu.Lock()
 	m.enabled = enabled
@@ -249,7 +281,10 @@ func (m *Manager) step(ctx context.Context) {
 	m.alert(ctx)
 }
 
-// countUsers reads how many running containers carry the cache.
+// countUsers reads how many containers carry the cache, whatever their
+// state: one that is not running now starts again as the same container
+// (a crash backoff, the containers after a reboot), so the address stays
+// while any of them exists.
 func (m *Manager) countUsers(ctx context.Context) {
 	if m.opts.Containers == nil {
 		return
@@ -293,6 +328,16 @@ func (m *Manager) up(ctx context.Context) {
 		m.setBlocked("", "")
 		return
 	}
+	m.mu.Lock()
+	taken := m.portTaken
+	m.mu.Unlock()
+	if taken != "" {
+		// No retry by itself: if that program restarts and the cache won
+		// the port, its wildcard bind would fail and the node's own DNS
+		// with it.
+		m.setBlocked(taken, portTakenHint(int(m.port.Load())))
+		return
+	}
 	udp, tcp, err := m.listen()
 	if err != nil {
 		port := m.port.Load()
@@ -308,7 +353,8 @@ func (m *Manager) up(ctx context.Context) {
 			} else {
 				reason = fmt.Sprintf("another program holds port %d on every address, so the cache cannot listen on %s", port, m.opts.Address)
 			}
-			hint = fmt.Sprintf("Make that program listen on the addresses it needs only (for dnsmasq: bind-interfaces with listen-address), or leave the DNS cache off on this node. `ss -lunp 'sport = :%d'` shows who holds the port.", port)
+			hint = portTakenHint(int(port))
+			m.notePortTaken(reason)
 		}
 		m.setBlocked(reason, hint)
 		return
@@ -361,6 +407,53 @@ func (m *Manager) listen() (*net.UDPConn, *net.TCPListener, error) {
 	return nil, nil, err
 }
 
+// portTakenHint is what to do while another program holds port.
+func portTakenHint(port int) string {
+	return fmt.Sprintf("Make that program listen on the addresses it needs only (for dnsmasq: bind-interfaces with listen-address), or leave the DNS cache off on this node. `ss -lunp 'sport = :%d'` shows who holds the port. "+
+		"The agent does not try the port again by itself, so that program can always get it back when it restarts: after the change, run the health check or turn the DNS cache off and on.", port)
+}
+
+// notePortTaken stops further binds (up) until clearPortTaken, and keeps
+// that across agent restarts (PortTaken).
+func (m *Manager) notePortTaken(reason string) {
+	m.mu.Lock()
+	m.portTaken = reason
+	m.mu.Unlock()
+	if m.opts.PortTaken == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(m.opts.PortTaken), 0o700); err == nil {
+		err = os.WriteFile(m.opts.PortTaken, []byte(reason+"\n"), 0o600)
+		if err != nil {
+			m.opts.Logger.Warn("recording the DNS cache's taken port", "err", err)
+		}
+	}
+	m.opts.Logger.Warn("DNS cache port taken; not trying again until the cache is turned on again or the health check runs by hand", "reason", reason)
+}
+
+// clearPortTaken lets up bind again.
+func (m *Manager) clearPortTaken() {
+	m.mu.Lock()
+	had := m.portTaken != ""
+	m.portTaken = ""
+	m.mu.Unlock()
+	if m.opts.PortTaken != "" && (had || fileExists(m.opts.PortTaken)) {
+		_ = os.Remove(m.opts.PortTaken)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// CheckByHand is the health check run by hand (Run checks now): it tries
+// a port another program held once more, then runs Check.
+func (m *Manager) CheckByHand(ctx context.Context) *Report {
+	m.clearPortTaken()
+	return m.Check(ctx)
+}
+
 func (m *Manager) setBlocked(reason, hint string) {
 	m.mu.Lock()
 	m.blocked, m.blockedHint = reason, hint
@@ -398,6 +491,7 @@ func (m *Manager) down(ctx context.Context) {
 		m.opts.Logger.Info("DNS cache off: no container uses it any more")
 	}
 	m.unmark()
+	m.clearPortTaken()
 	m.mu.Lock()
 	m.last, m.blocked, m.blockedHint, m.linkMine = nil, "", "", false
 	m.mu.Unlock()
@@ -475,12 +569,13 @@ func (m *Manager) inSubnets(src netip.Addr) bool {
 
 // ContainerDNS is what a container created now gets: the cache first,
 // then the fallbacks, while the cache is on and proven; nothing (Docker's
-// own servers) otherwise. Reconcile and jobrun call it at create time.
+// own servers) otherwise, with CacheOn saying whether the setting is on.
+// Reconcile and jobrun call it at create time.
 func (m *Manager) ContainerDNS() docker.ContainerDNS {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.state() != agentv1.DnsCacheState_DNS_CACHE_STATE_ACTIVE {
-		return docker.ContainerDNS{}
+		return docker.ContainerDNS{CacheOn: m.enabled}
 	}
 	servers := []netip.Addr{m.opts.Address}
 	for _, f := range m.fallbacks {
@@ -488,7 +583,7 @@ func (m *Manager) ContainerDNS() docker.ContainerDNS {
 			servers = append(servers, a)
 		}
 	}
-	return docker.ContainerDNS{Servers: servers, Cache: m.opts.Address}
+	return docker.ContainerDNS{Servers: servers, Cache: m.opts.Address, CacheOn: true}
 }
 
 // state is the cache's state; m.mu held.
@@ -528,7 +623,8 @@ type Report struct {
 	Address netip.Addr
 	// Blocked is why the cache cannot run here, with Hint.
 	Blocked, Hint string
-	// Users is how many running containers carry the cache (-1 unknown).
+	// Users is how many containers carry the cache, running or stopped
+	// (-1 unknown).
 	Users     int
 	Upstreams []string
 	// Host is the host-side test: HostName resolved through the cache
@@ -712,7 +808,7 @@ func (m *Manager) unmark() {
 	m.mu.Unlock()
 }
 
-// alert raises the node alert while running containers use a cache that
+// alert raises the node alert while containers use a cache that
 // does not answer them, and resolves it when it does again or none uses
 // it.
 func (m *Manager) alert(ctx context.Context) {
@@ -721,15 +817,15 @@ func (m *Manager) alert(ctx context.Context) {
 	}
 	m.mu.Lock()
 	users := m.users
-	problem := ""
+	problem, hint := "", ""
 	switch {
 	case !m.usersKnown || users == 0:
 	case m.blocked != "":
-		problem = m.blocked
+		problem, hint = m.blocked, m.blockedHint
 	case !m.listening:
 		problem = "the cache is not listening on " + m.opts.Address.String()
 	case m.last != nil && !m.last.Passed():
-		problem = m.last.Problem()
+		problem, hint = m.last.Problem(), m.last.FixHint()
 	}
 	raise := problem != "" && !m.alerted
 	resolve := problem == "" && m.alerted
@@ -739,14 +835,13 @@ func (m *Manager) alert(ctx context.Context) {
 	if resolve {
 		m.alerted = false
 	}
-	hint := m.blockedHint
-	if hint == "" {
-		hint = FirewallHint(m.opts.Address)
-	}
 	m.mu.Unlock()
+	if hint != "" {
+		hint = "\n" + hint
+	}
 	switch {
 	case raise:
-		m.opts.Alert(ctx, true, fmt.Sprintf("%d running %s the DNS cache at %s, but it does not answer them: %s. Each of their lookups can wait about 4 seconds before Docker tries the next server.\n%s",
+		m.opts.Alert(ctx, true, fmt.Sprintf("%d %s the DNS cache at %s, but it does not answer them: %s. Each of their lookups can wait about 4 seconds before Docker tries the next server.%s",
 			users, plural(users, "container uses", "containers use"), m.opts.Address, problem, hint))
 	case resolve:
 		m.opts.Alert(ctx, false, "The DNS cache answers containers again")
@@ -771,6 +866,32 @@ func (r *Report) Problem() string {
 		}
 	}
 	return ""
+}
+
+// UpstreamHint is what to do when the cache gets no answer from its
+// upstream servers: the node's outbound DNS, not a firewall rule for the
+// cache.
+const UpstreamHint = "The cache asks the servers of Docker's \"dns\" setting, else the host's resolv.conf. Check that this server can reach them (`dig @<server> example.com`), then run the health check again."
+
+// NoProbeHint is what to do when no test container could run.
+const NoProbeHint = "The test uses an image already on the node (moby/buildkit, traefik, alpine or busybox) and never pulls one. Deploy anything once or pull busybox (`docker pull busybox`), then run the health check again."
+
+// FixHint says what to do about a failed test, matching Problem: the
+// blocked reason's own hint, the upstream servers (UpstreamHint), an image
+// for the test (NoProbeHint), and the firewall (FirewallHint) only when a
+// test container ran and got no answer; "" when it passed.
+func (r *Report) FixHint() string {
+	switch {
+	case r == nil || r.Passed():
+		return ""
+	case r.Blocked != "":
+		return r.Hint
+	case r.HostErr != "":
+		return UpstreamHint
+	case len(r.Runs) == 0:
+		return NoProbeHint
+	}
+	return FirewallHint(r.Address)
 }
 
 // runWhy is a failed run's own words, short, in parentheses.
@@ -799,14 +920,20 @@ func (run ProbeRun) Why() string {
 
 var spaces = regexp.MustCompile(`\s+`)
 
+// PrivateSources are the sources the firewall rules for the cache allow:
+// the private ranges Docker's bridge networks come from, so the rules do
+// not open the cache's address to the provider's network.
+var PrivateSources = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+
 // FirewallHint is how to let containers reach the cache through a host
-// firewall: the installer adds the ufw rule, the agent never edits the
+// firewall: the installer adds the ufw rules, the agent never edits the
 // firewall itself.
 func FirewallHint(addr netip.Addr) string {
 	a := addr.String()
-	return fmt.Sprintf("A firewall on the node probably drops DNS from containers to %s. With ufw: `ufw allow to %s port 53 comment \"seylo dns\"`. "+
-		"With your own iptables rules: `iptables -I INPUT -d %s -p udp --dport 53 -j ACCEPT` and the same with `-p tcp`. "+
-		"Then run the health check again; until it passes, new containers do not get the cache.", a, a, a)
+	return fmt.Sprintf("A firewall on the node probably drops DNS from containers to %s. With ufw: `for n in %s; do ufw allow from $n to %s port 53 comment \"%s dns\"; done`. "+
+		"With your own iptables rules: `iptables -I INPUT -s %s -d %s -p udp --dport 53 -j ACCEPT` and the same with `-p tcp`. "+
+		"Then run the health check again; until it passes, new containers do not get the cache.",
+		a, strings.Join(PrivateSources, " "), a, brand.Slug, strings.Join(PrivateSources, ","), a)
 }
 
 func plural(n int, one, many string) string {
@@ -816,8 +943,8 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// Status is GetDnsCacheStatus: the state, the counters and our running
-// containers.
+// Status is GetDnsCacheStatus: the state, the counters, our running
+// containers and the stopped ones that still carry the cache.
 func (m *Manager) Status(ctx context.Context) *agentv1.GetDnsCacheStatusResponse {
 	var containers []Container
 	if m.opts.Containers != nil {
@@ -842,7 +969,7 @@ func (m *Manager) Status(ctx context.Context) *agentv1.GetDnsCacheStatusResponse
 		if m.blocked != "" {
 			resp.Reason, resp.FixHint = m.blocked, m.blockedHint
 		} else {
-			resp.Reason, resp.FixHint = m.last.Problem(), FirewallHint(m.opts.Address)
+			resp.Reason, resp.FixHint = m.last.Problem(), m.last.FixHint()
 		}
 	case agentv1.DnsCacheState_DNS_CACHE_STATE_STARTING:
 		resp.Reason = "testing the cache from inside a container before new containers get it"
@@ -859,6 +986,10 @@ func (m *Manager) Status(ctx context.Context) *agentv1.GetDnsCacheStatusResponse
 		resp.Minutes = append(resp.Minutes, &agentv1.DnsCacheMinute{Queries: mc.Queries, Upstream: mc.Upstream})
 	}
 	for _, c := range containers {
+		if !c.Running && !c.UsesCache {
+			// Stopped ones are listed only while they keep the cache up.
+			continue
+		}
 		resp.Containers = append(resp.Containers, &agentv1.DnsCacheContainer{
 			Name: c.Name, ServiceId: c.ServiceID, Kind: c.Kind, UsesCache: c.UsesCache, Created: timestamppb.New(c.Created),
 		})

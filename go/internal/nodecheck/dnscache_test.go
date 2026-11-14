@@ -48,7 +48,7 @@ func passingReport(users int) *dnscache.Report {
 }
 
 func TestJudgeDNSCache(t *testing.T) {
-	ufw := "ufw allow to 169.254.53.53 port 53"
+	ufw := "ufw allow from $n to 169.254.53.53 port 53"
 	for _, tc := range []struct {
 		name   string
 		report func() *dnscache.Report
@@ -58,14 +58,14 @@ func TestJudgeDNSCache(t *testing.T) {
 	}{
 		{"off", func() *dnscache.Report { return nil }, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_SKIPPED, []string{"off"}, ""},
 		{"passes", func() *dnscache.Report { return passingReport(3) }, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS,
-			[]string{"bridge and seylo-p-0123456789abcdef", "169.254.53.53", "panel.example.com", "8.8.8.8, 1.1.1.1", "3 running containers use it", "repeated lookups", "no hard limit"}, ""},
+			[]string{"bridge and seylo-p-0123456789abcdef", "169.254.53.53", "panel.example.com", "8.8.8.8, 1.1.1.1", "3 containers use it", "repeated lookups", "no hard limit"}, ""},
 		{"firewall drops the project network", func() *dnscache.Report {
 			r := passingReport(2)
 			r.Runs[1].Err, r.Runs[1].Output = "exit status 1", ";; connection timed out; no servers could be reached"
 			r.Passes[1] = false
 			return r
 		}, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL,
-			[]string{"a test container on seylo-p-0123456789abcdef gets no answer", "connection timed out", "2 running containers already use it", "about 4 seconds"}, ufw},
+			[]string{"a test container on seylo-p-0123456789abcdef gets no answer", "connection timed out", "2 containers already use it", "about 4 seconds"}, ufw},
 		{"no upstream", func() *dnscache.Report {
 			r := passingReport(0)
 			r.HostErr = "panel.example.com: the cache answered RCodeServerFailure"
@@ -83,7 +83,13 @@ func TestJudgeDNSCache(t *testing.T) {
 			r := passingReport(1)
 			r.Enabled = false
 			return r
-		}, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS, []string{"off; 1 running container still uses it", "until it is redeployed"}, ""},
+		}, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS, []string{"off; 1 container still uses it", "until it is redeployed"}, ""},
+		{"draining, upstream down: the upstream hint, not the firewall", func() *dnscache.Report {
+			r := passingReport(1)
+			r.Enabled = false
+			r.HostErr = "panel.example.com: the cache answered RCodeServerFailure"
+			return r
+		}, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL, []string{"off, but 1 container still uses it", "no answer from its upstream servers"}, "dig @<server> example.com`), then run the health check again. Or redeploy those services"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := &Env{DNSCache: func(context.Context) *dnscache.Report { return tc.report() }}

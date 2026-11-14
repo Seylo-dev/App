@@ -72,7 +72,8 @@ func provideDNSCache(d *Deps) error {
 		Alert: func(ctx context.Context, raised bool, message string) {
 			dnsCacheAlert(ctx, d, log, raised, message)
 		},
-		Marker: filepath.Join(d.Layout.NetworkDir(), "dns-cache-in-use"),
+		Marker:    filepath.Join(d.Layout.NetworkDir(), "dns-cache-in-use"),
+		PortTaken: filepath.Join(d.Layout.NetworkDir(), "dns-cache-port-taken"),
 		Holder: func(ctx context.Context, port int) string {
 			out, err := combinedOutput(ctx, "ss", "-H", "-lunp", fmt.Sprintf("sport = :%d", port))
 			if err != nil {
@@ -132,8 +133,10 @@ func dnsCacheAddress(s string) (netip.Addr, error) {
 	return a, nil
 }
 
-// dnsCacheContainers are our running containers that can use the cache:
-// not the panel, Traefik or the registry, which keep Docker's DNS.
+// dnsCacheContainers are our containers that can use the cache, running
+// or not (an exited one with the cache starts again as the same
+// container, so it keeps the address up); not dead ones, and not the
+// panel, Traefik or the registry, which keep Docker's DNS.
 func dnsCacheContainers(ctx context.Context, eng docker.Engine) ([]dnscache.Container, error) {
 	list, err := eng.ListContainers(ctx, nil)
 	if err != nil {
@@ -141,7 +144,7 @@ func dnsCacheContainers(ctx context.Context, eng docker.Engine) ([]dnscache.Cont
 	}
 	var out []dnscache.Container
 	for _, c := range list {
-		if c.State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
+		if c.State == agentv1.InstanceState_INSTANCE_STATE_DEAD {
 			continue
 		}
 		role := c.Labels[docker.LabelRole]
@@ -154,7 +157,7 @@ func dnsCacheContainers(ctx context.Context, eng docker.Engine) ([]dnscache.Cont
 		}
 		out = append(out, dnscache.Container{
 			Name: c.Name, ServiceID: c.Labels[docker.LabelService], Kind: kind,
-			UsesCache: docker.UsesDNSCache(c.Labels), Created: c.Created,
+			UsesCache: docker.UsesDNSCache(c.Labels), Running: c.State == agentv1.InstanceState_INSTANCE_STATE_RUNNING, Created: c.Created,
 		})
 	}
 	return out, nil

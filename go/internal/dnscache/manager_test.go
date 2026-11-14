@@ -22,9 +22,12 @@ import (
 type managerRig struct {
 	t      *testing.T
 	m      *Manager
+	opts   ManagerOptions
 	ip     *fakeIP
 	up     *fakeUpstream
 	marker string
+	// portTaken is ManagerOptions.PortTaken.
+	portTaken string
 
 	mu         sync.Mutex
 	containers []Container
@@ -45,8 +48,10 @@ func newManagerRig(t *testing.T) *managerRig {
 // test runs never meet).
 func newManagerRigOn(t *testing.T, port int) *managerRig {
 	t.Helper()
-	r := &managerRig{t: t, ip: &fakeIP{}, up: newFakeUpstream(t), probeOK: true, marker: filepath.Join(t.TempDir(), "dns-cache-in-use")}
-	r.m = NewManager(ManagerOptions{
+	dir := t.TempDir()
+	r := &managerRig{t: t, ip: &fakeIP{}, up: newFakeUpstream(t), probeOK: true,
+		marker: filepath.Join(dir, "dns-cache-in-use"), portTaken: filepath.Join(dir, "dns-cache-port-taken")}
+	r.opts = ManagerOptions{
 		Address: loopback,
 		Port:    port,
 		Link:    Link{Run: r.ip.run},
@@ -72,9 +77,18 @@ func newManagerRigOn(t *testing.T, port int) *managerRig {
 			}
 			r.alerts = append(r.alerts, msg)
 		},
-		Marker: r.marker,
-	})
+		Marker:    r.marker,
+		PortTaken: r.portTaken,
+	}
+	r.m = NewManager(r.opts)
 	return r
+}
+
+// restart is the agent starting again: a new Manager with the same
+// options and files.
+func (r *managerRig) restart() {
+	r.m.closeListener()
+	r.m = NewManager(r.opts)
 }
 
 // probe is the fake test container: it asks the cache from a container
@@ -189,7 +203,7 @@ func TestManagerBlockedByFirewall(t *testing.T) {
 	r.m.SetEnabled(true)
 	r.m.step(ctx)
 	st := r.m.Status(ctx)
-	if st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED || !strings.Contains(st.GetFixHint(), "ufw allow to 127.0.0.1 port 53") {
+	if st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED || !strings.Contains(st.GetFixHint(), "ufw allow from $n to 127.0.0.1 port 53") {
 		t.Fatalf("status %s %q %q", st.GetState(), st.GetReason(), st.GetFixHint())
 	}
 	if dns := r.m.ContainerDNS(); len(dns.Servers) != 0 {
@@ -213,7 +227,7 @@ func TestManagerBlockedByFirewall(t *testing.T) {
 	if rep.Passed() {
 		t.Fatal("check passed with the firewall dropping")
 	}
-	if a := r.lastAlert(); !strings.Contains(a, "1 running container uses the DNS cache") || !strings.Contains(a, "ufw allow to 127.0.0.1 port 53") {
+	if a := r.lastAlert(); !strings.Contains(a, "1 container uses the DNS cache") || !strings.Contains(a, "ufw allow from $n to 127.0.0.1 port 53") {
 		t.Fatalf("alert %q", a)
 	}
 	if dns := r.m.ContainerDNS(); len(dns.Servers) != 0 {
@@ -294,6 +308,178 @@ func TestManagerPortTaken(t *testing.T) {
 	}
 	if dns := r.m.ContainerDNS(); len(dns.Servers) != 0 {
 		t.Fatal("blocked but handed out")
+	}
+}
+
+// While another program holds the port the agent does not bind it again
+// by itself: not on its 15 s pass, not at its next start (Prepare after a
+// reboot), so that program can always take the port back when it
+// restarts. Turning the cache on again or the health check run by hand
+// tries once more.
+func TestManagerPortTakenIsNotRetriedByItself(t *testing.T) {
+	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := holder.LocalAddr().(*net.UDPAddr).Port
+	r := newManagerRigOn(t, port)
+	r.opts.Holder = func(context.Context, int) string { return "dnsmasq" }
+	r.m.opts.Holder = r.opts.Holder
+	ctx := context.Background()
+	defer func() { r.m.closeListener() }()
+	r.m.SetEnabled(true)
+	r.m.step(ctx)
+	st := r.m.Status(ctx)
+	if st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED || !strings.Contains(st.GetFixHint(), "does not try the port again by itself") {
+		t.Fatalf("status %s %q %q", st.GetState(), st.GetReason(), st.GetFixHint())
+	}
+	if _, err := os.Stat(r.portTaken); err != nil {
+		t.Fatalf("the taken port is not recorded: %v", err)
+	}
+
+	// dnsmasq restarts: the port is free for a moment. The next passes
+	// leave it to dnsmasq.
+	_ = holder.Close()
+	r.m.step(ctx)
+	r.m.step(ctx)
+	if r.m.isListening() {
+		t.Fatal("the cache took the port back on its own pass")
+	}
+	if st := r.m.Status(ctx); st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED || !strings.Contains(st.GetReason(), "dnsmasq holds port") {
+		t.Fatalf("after the port came free: %s %q", st.GetState(), st.GetReason())
+	}
+
+	// A reboot: Prepare does not bind either, and the state says why.
+	r.restart()
+	r.m.Prepare(ctx, true)
+	if r.m.isListening() {
+		t.Fatal("Prepare took the port after a restart")
+	}
+	if st := r.m.Status(ctx); st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED || !strings.Contains(st.GetReason(), "dnsmasq holds port") {
+		t.Fatalf("after a restart: %s %q", st.GetState(), st.GetReason())
+	}
+
+	// The owner runs the health check by hand: it tries again, and with
+	// the port free it works.
+	if rep := r.m.CheckByHand(ctx); !rep.Passed() {
+		t.Fatalf("check by hand: %s", rep.Problem())
+	}
+	if _, err := os.Stat(r.portTaken); !os.IsNotExist(err) {
+		t.Fatalf("the record is left: %v", err)
+	}
+	if st := r.m.Status(ctx); st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_ACTIVE {
+		t.Fatalf("after the check by hand: %s %q", st.GetState(), st.GetReason())
+	}
+}
+
+// Turning the cache off and on again tries the port once more.
+func TestManagerPortTakenRetriedWhenTurnedOnAgain(t *testing.T) {
+	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newManagerRigOn(t, holder.LocalAddr().(*net.UDPAddr).Port)
+	ctx := context.Background()
+	defer r.m.closeListener()
+	r.m.SetEnabled(true)
+	r.m.step(ctx)
+	_ = holder.Close()
+	r.m.step(ctx)
+	if r.m.isListening() {
+		t.Fatal("took the port on its own pass")
+	}
+	r.m.SetEnabled(false)
+	r.m.SetEnabled(true)
+	r.m.step(ctx)
+	if st := r.m.Status(ctx); st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_ACTIVE || !r.m.isListening() {
+		t.Fatalf("after off and on: %s %q", st.GetState(), st.GetReason())
+	}
+}
+
+// The fix follows the failure: upstream servers that do not answer are
+// the node's outbound DNS, not a firewall rule for the cache; no test
+// container is an image to pull. Only a test container without an answer
+// gets the firewall commands (alert and status alike).
+func TestManagerHintFollowsTheFailure(t *testing.T) {
+	r := newManagerRig(t)
+	ctx := context.Background()
+	defer r.m.closeListener()
+	r.m.SetEnabled(true)
+	r.m.step(ctx)
+	r.setContainers(Container{Name: "seylo-web-1", ServiceID: "svc1", Kind: "service", UsesCache: true, Running: true})
+	r.m.step(ctx)
+
+	// Outbound DNS from the host is dropped: the upstream fails (for a
+	// name the cache does not hold yet).
+	r.up.set(rcodeOnly(dnsmessage.RCodeServerFailure))
+	r.m.opts.HostNames = func() []string { return []string{"fresh.example.com"} }
+	rep := r.m.Check(ctx)
+	if rep.HostErr == "" {
+		t.Fatalf("the host test passed with the upstream failing: %+v", rep)
+	}
+	st := r.m.Status(ctx)
+	if st.GetState() != agentv1.DnsCacheState_DNS_CACHE_STATE_BLOCKED || st.GetFixHint() != UpstreamHint {
+		t.Fatalf("status %s %q", st.GetState(), st.GetFixHint())
+	}
+	a := r.lastAlert()
+	if !strings.Contains(a, "no answer from its upstream servers") || !strings.Contains(a, "dig @") || strings.Contains(a, "ufw") || strings.Contains(a, "firewall") {
+		t.Fatalf("alert %q", a)
+	}
+
+	// The upstream answers again, but no test container can run.
+	r.up.set(answerA(netip.MustParseAddr("192.0.2.10"), 300))
+	r.m.opts.Probe = func(context.Context, netip.Addr, string) ([]ProbeRun, string) {
+		return nil, "no busybox image on this node, and the test pulls none"
+	}
+	r.m.Check(ctx)
+	if st := r.m.Status(ctx); st.GetFixHint() != NoProbeHint {
+		t.Fatalf("no test container: %q", st.GetFixHint())
+	}
+	r.m.opts.Probe = r.probe
+	r.m.Check(ctx)
+	if a := r.lastAlert(); !strings.HasPrefix(a, "resolved:") {
+		t.Fatalf("not resolved: %q", a)
+	}
+
+	// A test container gets no answer: now it is the firewall.
+	r.set(false)
+	r.m.Check(ctx)
+	if st := r.m.Status(ctx); !strings.Contains(st.GetFixHint(), "ufw allow from $n to 127.0.0.1 port 53") {
+		t.Fatalf("firewall: %q", st.GetFixHint())
+	}
+	if a := r.lastAlert(); !strings.Contains(a, "ufw allow from $n to 127.0.0.1 port 53") {
+		t.Fatalf("alert %q", a)
+	}
+}
+
+// Off, and the only container with the cache is not running (a crash
+// backoff, or the containers after a reboot): it starts again as the same
+// container, so the address and the listener stay (DRAINING) until it is
+// gone, and the status lists it.
+func TestManagerKeepsTheAddressForStoppedUsers(t *testing.T) {
+	r := newManagerRig(t)
+	ctx := context.Background()
+	defer r.m.closeListener()
+	r.m.SetEnabled(true)
+	r.m.step(ctx)
+	r.setContainers(Container{Name: "seylo-web-1", ServiceID: "svc1", Kind: "service", UsesCache: true, Running: false},
+		Container{Name: "seylo-old-1", ServiceID: "svc2", Kind: "service", Running: false})
+	r.m.SetEnabled(false)
+	r.m.step(ctx)
+	if r.state() != agentv1.DnsCacheState_DNS_CACHE_STATE_DRAINING || !r.ip.exists || !r.m.isListening() {
+		t.Fatalf("state %s link %v listening %v", r.state(), r.ip.exists, r.m.isListening())
+	}
+	var names []string
+	for _, c := range r.m.Status(ctx).GetContainers() {
+		names = append(names, c.GetName())
+	}
+	if !slices.Equal(names, []string{"seylo-web-1"}) {
+		t.Fatalf("status lists %v, want the stopped user only", names)
+	}
+	r.setContainers()
+	r.m.step(ctx)
+	if r.state() != agentv1.DnsCacheState_DNS_CACHE_STATE_OFF || r.ip.exists {
+		t.Fatalf("after it is gone: state %s link %v", r.state(), r.ip.exists)
 	}
 }
 

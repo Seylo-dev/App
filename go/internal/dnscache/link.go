@@ -129,8 +129,8 @@ func WildcardHolder(ss string, port int) string {
 }
 
 // Remove deletes the interface and with it the address. Only once no
-// running container uses the cache: without the address their lookups to
-// it would leave the host and stall.
+// container (running or stopped) uses the cache: without the address
+// their lookups to it would leave the host and stall.
 func (l Link) Remove(ctx context.Context) error {
 	if _, _, err := l.read(ctx); err != nil {
 		return nil

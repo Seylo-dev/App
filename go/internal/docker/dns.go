@@ -23,6 +23,12 @@ type ContainerDNS struct {
 	// Cache is the cache's address, recorded on the container as
 	// LabelDNSCache so which containers use it is a container list.
 	Cache netip.Addr
+	// CacheOn: the node's DNS cache setting is on. Servers stays empty
+	// while it is on but not proven (STARTING, BLOCKED); a deploy then
+	// leaves a container's DNS as it is (reconcile's dnsOutdated): it
+	// recreates one to add the cache only once Servers has it, and to
+	// remove it only once the setting is off. Apply ignores it.
+	CacheOn bool
 }
 
 // DNSSource gives the DNS of a container created now.
