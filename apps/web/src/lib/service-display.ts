@@ -4,6 +4,7 @@
 
 import { databases } from "@seylo/ops";
 import type { ChipProps } from "@seylo/ui/components/chip";
+import { type DotSource, type DotStatus, serviceDot } from "../components/service/status";
 import { t } from "../i18n/t";
 import { formatAgo } from "./format";
 import type { ServiceKind, ServiceStatus, ServiceSummary } from "./types";
@@ -11,7 +12,7 @@ import type { ServiceKind, ServiceStatus, ServiceSummary } from "./types";
 type Summary = ServiceSummary;
 type Status = ServiceStatus;
 type Tone = NonNullable<ChipProps["tone"]>;
-type Dot = "ok" | "busy" | "error" | "off";
+type Dot = DotStatus;
 
 export interface KindTag {
   label: string;
@@ -43,23 +44,29 @@ export function kindTag(service: Pick<Summary, "kind" | "templateSlug" | "protec
 
 export const databaseKinds: ReadonlySet<ServiceKind> = new Set(databases.databaseEngineIds);
 
-const statusTones: Record<Status, { tone: Tone; dot: Dot }> = {
-  idle: { tone: "gray", dot: "off" },
-  building: { tone: "amber", dot: "busy" },
-  deploying: { tone: "amber", dot: "busy" },
-  starting: { tone: "amber", dot: "busy" },
-  running: { tone: "green", dot: "ok" },
-  partial: { tone: "amber", dot: "busy" },
-  unhealthy: { tone: "red", dot: "error" },
-  crashed: { tone: "red", dot: "error" },
-  stopped: { tone: "gray", dot: "off" },
-  unknown: { tone: "gray", dot: "off" },
+const statusTones: Record<Status, Tone> = {
+  idle: "gray",
+  building: "amber",
+  deploying: "amber",
+  starting: "amber",
+  running: "green",
+  partial: "amber",
+  unhealthy: "red",
+  crashed: "red",
+  stopped: "gray",
+  unknown: "gray",
 };
 
-/** buildWaiting (ServiceSummary.buildWaiting): a building service whose build waits for a free build slot says so. */
-export function statusDisplay(status: Status, buildWaiting = false): { label: string; tone: Tone; dot: Dot } {
-  if (status === "building" && buildWaiting) return { label: t("project.status.waitingForBuild"), tone: "gray", dot: "off" };
-  return { label: t(`project.status.${status}`), ...statusTones[status] };
+/**
+ * A service's status in a list. The label and tone say what it does, a
+ * deploy in progress first (building, waiting for a build slot when
+ * buildWaiting, deploying); the dot says whether it is up (serviceDot: what
+ * runs while a live version exists).
+ */
+export function statusDisplay(service: DotSource): { label: string; tone: Tone; dot: Dot } {
+  const { dot } = serviceDot(service);
+  if (service.status === "building" && service.buildWaiting) return { label: t("project.status.waitingForBuild"), tone: "gray", dot };
+  return { label: t(`project.status.${service.status}`), tone: statusTones[service.status], dot };
 }
 
 /** Statuses that mean work in progress (the dashboard's "1 deploying"). */

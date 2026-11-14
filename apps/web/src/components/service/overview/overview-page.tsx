@@ -532,7 +532,7 @@ function StackOverview({ service }: { service: ServiceDetail }) {
           >
             <KindBadge kind={m.kind} size="sm" />
             <b className="font-semibold">{m.name}</b>
-            <ServiceStatusChip status={m.status} buildWaiting={m.buildWaiting} />
+            <ServiceStatusChip service={m} />
             {m.source && <span className="font-mono text-xs text-muted-foreground">{m.source.label}</span>}
             {m.cpuPercent != null && (
               <span className="ml-auto text-xs text-muted-foreground">

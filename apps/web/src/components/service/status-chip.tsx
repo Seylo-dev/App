@@ -1,6 +1,6 @@
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { t } from "../../i18n/t";
-import { type DeploymentStatus, deploymentLook, type ServiceStatus, type StatusLook, serviceLook } from "./status";
+import { type DeploymentStatus, type DotSource, deploymentLook, type StatusLook, serviceChipLook } from "./status";
 
 function LookChip({ look, className }: { look: StatusLook; className?: string }) {
   return (
@@ -11,17 +11,12 @@ function LookChip({ look, className }: { look: StatusLook; className?: string })
   );
 }
 
-/** buildWaiting: the deploy's build waits for a free build slot (ServiceSummary.buildWaiting). */
-export function ServiceStatusChip({
-  status,
-  buildWaiting,
-  className,
-}: {
-  status: ServiceStatus;
-  buildWaiting?: boolean;
-  className?: string;
-}) {
-  return <LookChip look={serviceLook(status, buildWaiting)} className={className} />;
+/**
+ * A service's status: the label says what a deploy does (building, waiting
+ * for a build slot, deploying), the dot whether it is up (serviceDot).
+ */
+export function ServiceStatusChip({ service, className }: { service: DotSource; className?: string }) {
+  return <LookChip look={serviceChipLook(service)} className={className} />;
 }
 
 /** buildWaiting: the build waits for a free build slot (Deployment.buildWait set). */

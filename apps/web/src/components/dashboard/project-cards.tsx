@@ -13,7 +13,7 @@
 // (menus/), in every view.
 
 import { Button } from "@seylo/ui/components/button";
-import { Chip } from "@seylo/ui/components/chip";
+import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Segmented, SegmentedItem, SegmentPill } from "@seylo/ui/components/segmented";
@@ -368,7 +368,7 @@ function ServiceRowSkeleton() {
 
 function ServiceRow({ service }: { service: ServiceSummary }) {
   const tag = kindTag(service);
-  const status = statusDisplay(service.status, service.buildWaiting);
+  const status = statusDisplay(service);
   const detail = [service.source.label, service.source.branch, placementLine(service)].filter(Boolean).join(t("format.separator"));
   const usage = formatUsage(service.cpuPercent, service.memoryBytes);
   return (
@@ -385,6 +385,8 @@ function ServiceRow({ service }: { service: ServiceSummary }) {
         </span>
         <span className="ml-auto flex shrink-0 flex-col items-end gap-[3px]">
           <Chip tone={status.tone} className="px-[7px] py-0.5 text-[11.5px]">
+            {/* As the Table's chip: the label says what a deploy does, the dot whether the app is up. */}
+            <StatusDot status={status.dot} pulse={status.dot === "busy"} />
             {status.label}
           </Chip>
           {usage && <span className="text-[11.5px] whitespace-nowrap text-muted-foreground">{usage}</span>}

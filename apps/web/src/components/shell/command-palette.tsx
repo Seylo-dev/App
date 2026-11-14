@@ -96,7 +96,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                   run(() => void navigate({ to: "/p/$projectId/s/$serviceId", params: { projectId: project.id, serviceId: service.id } }))
                 }
               >
-                <StatusDot status={statusDisplay(service.status, service.buildWaiting).dot} />
+                <StatusDot status={statusDisplay(service).dot} />
                 {service.name}
                 <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-mono text-[10.5px]">{kindTag(service).label}</span>

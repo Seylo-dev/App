@@ -1,5 +1,7 @@
 // How service and deployment states look: chip tone, status dot and label
 // key. One table per state type so every screen shows them the same way.
+// A service's dot says whether it is up and its label what a deploy does
+// (serviceDot), so a live version that runs through a deploy stays green.
 
 import { databases, type deployments, type services } from "@seylo/ops";
 import type { MessageKey } from "../../i18n/t";
@@ -9,7 +11,8 @@ export type ServiceKind = (typeof services.ServiceKind)["static"];
 export type DeploymentStatus = (typeof deployments.DeploymentStatus)["static"];
 
 export type ChipTone = "blue" | "sky" | "red" | "violet" | "gray" | "green" | "amber" | "track";
-export type DotStatus = "ok" | "busy" | "error" | "off";
+/** StatusDot's tones; "pending" is a hollow ring for a first deploy that waits for a build slot. */
+export type DotStatus = "ok" | "busy" | "error" | "off" | "pending";
 
 export interface StatusLook {
   tone: ChipTone;
@@ -60,6 +63,47 @@ export function serviceLook(status: ServiceStatus, buildWaiting = false): Status
   return status === "building" && buildWaiting
     ? { ...waitingForBuildLook, label: "service.status.waitingForBuild" }
     : serviceStatusLook[status];
+}
+
+/**
+ * What a service's status dot reads: a ServiceSummary, a ServiceDetail or
+ * one of ServiceDetail.members.
+ */
+export interface DotSource {
+  status: ServiceStatus;
+  buildWaiting?: boolean;
+  /** What runs now (ServiceSummary.runtimeStatus); panels before 0.2.17 leave it out. */
+  runtimeStatus?: ServiceStatus;
+  /** Set while a live version exists (ServiceSummary.liveDeployment). */
+  liveDeployment?: unknown;
+}
+
+type Dot = Pick<StatusLook, "dot" | "pulse">;
+
+const dotOf = (look: StatusLook): Dot => ({ dot: look.dot, pulse: look.pulse });
+
+/**
+ * The status dot says whether the app is up; the label next to it says what
+ * a deploy does. While a deploy builds, waits for a build slot or rolls out
+ * on top of a live version, the dot is what runs (runtimeStatus): green
+ * running, amber partial or starting, red crashed or unhealthy, gray
+ * stopped or unknown. A first deploy (nothing live yet) has the busy dot,
+ * or the pending ring while its build waits for a slot. Otherwise, and in
+ * answers without runtimeStatus (panels before 0.2.17), the status's own dot.
+ */
+export function serviceDot(service: DotSource): Dot {
+  const { status, runtimeStatus } = service;
+  if ((status === "building" || status === "deploying") && runtimeStatus !== undefined) {
+    if (service.liveDeployment != null && runtimeStatus !== "idle") return dotOf(serviceStatusLook[runtimeStatus]);
+    if (status === "building" && service.buildWaiting) return { dot: "pending", pulse: true };
+    return dotOf(serviceStatusLook[status]);
+  }
+  return dotOf(serviceLook(status, service.buildWaiting));
+}
+
+/** A service's chip (the header, a stack's members): serviceLook's label and tone with serviceDot's dot. */
+export function serviceChipLook(service: DotSource): StatusLook {
+  return { ...serviceLook(service.status, service.buildWaiting), ...serviceDot(service) };
 }
 
 /** How a deployment's status looks; a building one whose build waits for a slot says so. */

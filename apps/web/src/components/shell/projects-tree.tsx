@@ -253,7 +253,7 @@ function ProjectServices({ projectId, count, sortable }: { projectId: string; co
       {(ordered) => (
         <ul className="m-0 flex list-none flex-col gap-px p-0">
           {ordered.map((service) => {
-            const status = statusDisplay(service.status, service.buildWaiting);
+            const status = statusDisplay(service);
             return (
               <SortableService key={service.id} id={service.id} name={service.name}>
                 {/* The link is the menu's trigger, so the sortable item around it keeps its own handlers. */}

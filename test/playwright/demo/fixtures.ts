@@ -272,6 +272,8 @@ function service(
     parentId: null,
     status,
     buildWaiting: false,
+    // What runs while a deploy goes on (0.2.17): the live version, else nothing yet.
+    runtimeStatus: status === "building" || status === "deploying" ? (live ? "running" : "idle") : status,
     source,
     address,
     placements: [{ nodeId, nodeName: node?.name ?? "", replicas: 1 }],

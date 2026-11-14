@@ -5313,6 +5313,37 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   takes it out of the agent's queue. Of a move to another node: see
   "Cancelling a move to another node" (a move with volumes only while it
   copies, CONFLICT `reason: moveStarting` after).
+- Service status next to what runs (since 0.2.17, `services/status.ts`,
+  `services/rows.ts`): `ServiceSummary.status` puts a deploy in progress
+  first (`building` while it is queued or builds, waiting for a build slot
+  included, `deploying` while it rolls out) and only then what runs;
+  `ServiceSummary.runtimeStatus` (`runtimeStatus`) is what runs meanwhile:
+  the same reading of the agents' reports without the deploy, `idle` before
+  anything was deployed (a first deploy that has not reached its nodes),
+  and on a node whose phase is DEPLOYING (the agent rolls a new version out
+  next to the containers that run) the state of the running containers
+  (`runtimePhaseStatus`: running while one is not unhealthy, unhealthy when
+  all are, `deploying` when none runs, as in recreate mode). Without a
+  deploy the two are the same, except that an agent's DEPLOYING phase
+  without a deployment row stays `deploying` in status. Every op that
+  returns services has it: `services.list`, `services.get` and every op
+  returning a ServiceDetail, `compose.create`/`compose.get`, template
+  installs, and `ServiceDetail.members` (with `liveDeployment`, so a
+  member's dot follows the same rule). The web app's status dots (sidebar,
+  dashboard Cards, List and Table, project page, command palette, the
+  header chip, a stack's members on its Overview) use it
+  (`components/service/status.ts` `serviceDot`, `lib/service-display.ts`
+  `statusDisplay`): while a deploy goes on and a live version exists the
+  dot is `runtimeStatus` (green running, amber partial or starting, red
+  crashed or unhealthy, gray stopped or unknown) and the label and chip
+  tone keep saying Building, Waiting for a build slot or Deploying (the
+  sidebar's badge: building, waiting, deploying); a first deploy (no live
+  version, or `runtimeStatus` idle) has the busy dot, or while its build
+  waits for a slot the pending dot (`StatusDot` `pending`, a hollow busy
+  ring, not the gray of a stopped service). An answer without
+  `runtimeStatus` (a panel before 0.2.17) keeps the status's own dot, gray
+  for a waiting build. `StatusDot` carries `data-dot` with its tone for
+  tests (`test/playwright/status-dot.spec.ts`).
 - `services/desired.ts` `serviceSpecFor(db, secrets, serviceId, nodeId)`:
   the services part of the desired state (the compiler calls it).
 - `services/delete.ts` `deleteServiceTree(deps, row)`: a service with its

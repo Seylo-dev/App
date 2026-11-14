@@ -32,13 +32,18 @@ const dotTones = {
   busy: "bg-status-busy",
   error: "bg-status-error",
   off: "bg-status-off",
+  /** Waiting its turn (a first deploy whose build waits for a slot): a hollow busy ring, not the gray of something stopped. */
+  pending: "border-[1.5px] border-status-busy",
 } as const;
 
-/** A 6px status dot; `pulse` for things that are live right now. */
-export function StatusDot({ status, pulse = false, className }: { status: keyof typeof dotTones; pulse?: boolean; className?: string }) {
+export type StatusDotTone = keyof typeof dotTones;
+
+/** A 6px status dot; `pulse` for things that are live right now. data-dot names the tone, for tests. */
+export function StatusDot({ status, pulse = false, className }: { status: StatusDotTone; pulse?: boolean; className?: string }) {
   return (
     <span
       aria-hidden="true"
+      data-dot={status}
       className={cn("inline-block size-1.5 shrink-0 rounded-full", dotTones[status], pulse && "animate-pulse", className)}
     />
   );
