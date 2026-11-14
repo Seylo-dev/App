@@ -65,7 +65,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 20 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.13, with a lookup from a test container on seylo-edge since 0.2.17, see "Container DNS check"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 21 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.13, with a lookup from a test container on seylo-edge since 0.2.17, see "Container DNS check"), DNS cache (`docker.dnscache`, since 0.2.17, see "Node DNS cache"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, since 0.2.13 `set-panel`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI; `NodeStatus.RouteErrors` (0.2.13) lists the services whose route file reconcile cannot write, and `seylo status` prints them under Recent errors after the last 5 connection errors, whatever their number | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -98,6 +98,8 @@ packages use. "Built" means implemented and tested.
 | `wings` | Pelican Wings detection (`FileDetector`), re-attaching our networks to the fork's Traefik (`Attacher`), games-first CPU weight (`SliceCPU`) | Built (attach after recreate and cgroupfs weight verified in the VM; no real Wings yet) |
 | `tailnet` | The panel on the owner's tailnet (since 0.2.1), standard library only: `Client` over tailscaled's LocalAPI socket (`/var/run/tailscale/tailscaled.sock`, config.yml `tailscale_socket`; status, prefs, an EditPrefs mask of WantRunning and CorpDNS only, login-interactive, Serve config with ETag/If-Match), `Ensure`/`Remove`/`Find` (pure edits of the Serve config JSON: one handler whose Proxy is exactly our unix target, every other field kept byte for byte, never AllowFunnel), `Manager` (the agent's `tailnet` component, see "Panel access and the tailnet"), `MinVersion` 1.104.4 | Built (unit tests against an httptest LocalAPI with recorded 1.104.x answers; not yet against a real tailnet) |
 | `update` | Signed agent self-update with a systemd rollback guard, panel swap (snapshot, health check, restore), Docker update and the daily Docker version check (`DockerUpdater.Check`, `RunChecks`, since 0.2.5), reboot, release manifest builder (`releasetool`) | Built; see "Releases and updates" (the version check is unit tested with scripted apt/dnf answers; no real apt run yet) |
+
+| `dnscache` | The node's DNS cache for containers (since 0.2.17, see "Node DNS cache"): a forwarding cache on one link-local address (`Server`, golang.org/x/net/dns/dnsmessage), the dummy interface through `ip` (`Link`), its upstreams and the containers' fallbacks (`Sources`), the gate, states and status (`Manager`) | Built (unit and fuzz tests; VM tests on Docker 29.5) |
 
 Naming note: the node health check package is `nodecheck` (not `doctor`)
 because `health` is the per-service probe package.
@@ -315,6 +317,133 @@ gives it fresh servers) and build's `TestFailedLookupPointsAtContainerDNS`
 VM's own Docker and a live-restore restart are not tested there, since
 both need a Docker restart, nor the reload case (it needs Docker 29.0 to
 29.2 and a reload of the VM's Docker).
+
+Node DNS cache (`NodeSettings.dns_cache`, since 0.2.17; `go/internal/dnscache`,
+`wire_dnscache.go`, check `docker.dnscache` in `nodecheck/dnscache.go`).
+Why: a provider firewall (a DoS policy) flagged a node for too many UDP
+sessions to 1.1.1.1 and dropped every new outbound connection for hours.
+On that node daemon.json had `"dns": ["8.8.8.8", "1.1.1.1"]`, Docker's
+embedded DNS forwards without caching and Node apps do not cache, so
+every new connection was a fresh query. The cache cuts repeated lookups
+of one name and shares one upstream question between identical
+concurrent ones. It does not help with bursts of unique names, is no
+hard cap (containers keep fallbacks) and would not have prevented that
+outage (once outbound was blocked, connections failed with names
+resolved); the panel's text says so.
+
+- Address and listener: a dummy interface `seylo-dns` (`dnscache.LinkName`)
+  with `169.254.53.53/32` (`DefaultAddress`; config.yml
+  `dns_cache_address`, an IPv4 address that is not loopback, unspecified
+  or multicast, moves it; `seylo join` keeps it), added with `ip link add
+  ... type dummy`, `ip addr add`, `ip link set up` (iproute2; no netlink
+  library) and re-asserted every 15 s. One address valid from every
+  network: a container's packet goes to its bridge's gateway, the host,
+  which owns it (Kubernetes NodeLocal DNSCache does the same with
+  169.254.20.10). The listener binds that address port 53, UDP and TCP,
+  never a wildcard, and answers only sources inside a Docker bridge
+  subnet of the node (`Moby.BridgeSubnets`, the default bridge included;
+  an unknown source lists them again, at most every 2 s) and the address
+  itself. A bind that fails (another program on 0.0.0.0:53, named from
+  `ss -lunp`) or a missing `ip` is BLOCKED with the reason.
+- Cache: opcode QUERY with one question, keyed by lowercased name, type,
+  class and the DO and CD bits; anything else is relayed as it is with a
+  fresh id. Positive answers for their lowest TTL (at most 1 h, no floor,
+  TTLs counted down), NXDOMAIN and NODATA for min(SOA TTL, SOA minimum)
+  (at most 30 s, 5 s without an SOA), never SERVFAIL or REFUSED. Identical
+  concurrent questions share one upstream question. Upstream: a fresh
+  connected UDP socket per question (random port and id, the question
+  checked, other packets ignored), 1.5 s per server, the next server on
+  SERVFAIL, REFUSED, a timeout or a closed port, TCP on TC. If every
+  upstream failed or 1.8 s passed, an entry expired up to 1 h ago goes
+  out with TTL 30 (RFC 8767); else SERVFAIL within 3 s (Docker's
+  embedded DNS waits 4 s per server). The cache speaks EDNS itself (UDP
+  1232 both ways, the client's DO bit; a client's OPT options are not
+  passed on, the answer is shared); a client without EDNS gets at most
+  512 bytes or an empty answer with TC. Bounds: 10,000 names and 8 MB
+  (LRU), 200 upstream questions in flight (then SERVFAIL at once), 1,024
+  UDP and 64 TCP clients at a time. No recursion, no DNSSEC validation.
+  Names under `dnscache.seylo.internal.` (`ProbeZone`) are answered by
+  the cache itself (A 192.0.2.53, nothing else) and remembered for the
+  test.
+- Upstreams (from the host, re-read every minute): Docker's "dns" setting
+  when there is one (the servers containers use now, so split horizon
+  keeps working; `nodecheck.DockerDNSSetting` reads it like the Container
+  DNS check), else the host's /etc/resolv.conf (127.0.0.53 included),
+  else 8.8.8.8 and 8.8.4.4 (Docker's own fallback; the design said
+  1.1.1.1 and 8.8.8.8, Docker's code says these). Never the cache's own
+  address.
+- Containers: `HostConfig.Dns` = the cache, then at most two fallbacks,
+  the servers Docker would give the container without it: the "dns"
+  setting, else the host's (systemd-resolved's real ones from
+  /run/systemd/resolve/resolv.conf when the host has only 127.0.0.53),
+  else 8.8.8.8 and 8.8.4.4; loopback ones left out, IPv4 first. Set at
+  create (`docker.ContainerDNS`, `ContainerSpec.DNS`, `jobrun.Docker.DNS`)
+  for service containers (reconcile: apps, databases, compose members,
+  boxes) and jobrun containers (cron runs, backup and database helpers,
+  the tunnel), with the label `seylo.dns-cache=<address>`; never for the
+  protected panel, Traefik or the registry, nor for containers on host,
+  none or another container's network. On a project network the
+  container keeps `nameserver 127.0.0.11`; Docker's embedded DNS answers
+  container names and forwards the rest to the cache, then the
+  fallbacks, from the container's namespace (verified on Docker 29.5:
+  `# ExtServers: [169.254.53.x <fallback>]`; a stopped cache fails over
+  in about 20 ms). Search domains and options are untouched. Outside
+  `SpecHash`: turning it on or off recreates nothing. A deploy (a
+  generation the worker has not finished, a redeploy of the same spec
+  included) creates a container again when its DNS differs from what a
+  container gets now (`worker.dnsOutdated`), so "redeploy to apply"
+  holds; a resync, Restart or the setting alone never do. Build workers
+  do not get it yet (release B: buildkitd.toml `[dns]`).
+- Gate: containers get the cache only while the state is ACTIVE: on, the
+  address and listener up, and the last test passed. The test
+  (`Manager.Check`, also the health check): from the host, the first
+  name that answers through the cache's own address (the panel's host,
+  then github.com); from inside containers (`nodecheck.ProbeDNSCache`)
+  `docker run --rm --pull never --network <bridge, then the first
+  seylo-p-*> --label seylo.dnscheck=true --entrypoint nslookup <image>
+  probe-<random>.dnscache.seylo.internal <address>` from an image already
+  on the node (`probeRepos`, the first whose container has nslookup; none
+  is pulled), which passes when the cache saw that name from the
+  container and the container printed 192.0.2.53, so it proves the
+  firewall path whatever the upstreams do. It runs when the setting turns
+  on, again 10 minutes after a failure, hourly with the health checks and
+  on Run checks now.
+- States (`DnsCacheState`): OFF, STARTING (on, not proven yet), ACTIVE,
+  BLOCKED (reason and fix hint: the port, `ip`, the test), DRAINING (off
+  while a running container carries the label: it keeps answering).
+  The listener closes and the interface goes only when no running
+  container has the label; a marker file (`<datadir>/network/
+  dns-cache-in-use`, written while containers get it, removed after)
+  brings the address and the listener up in wiring, before reconcile
+  starts containers after a reboot. When the agent stops (an update) the
+  address stays and the port closes: lookups fail over at once.
+- Firewall: firewalld puts Docker's bridges in its `docker` zone, which
+  accepts, so no rule. ufw with default-deny input needs `ufw allow to
+  169.254.53.53 port 53 comment "seylo dns"`, which the installer adds
+  next to the 5756 rule on install and upgrade (harmless while off). The
+  agent never edits the firewall; a failed test's hint names the ufw
+  command and the iptables rules (`-d <address> -p udp|tcp --dport 53 -j
+  ACCEPT` in INPUT). While running containers use a cache the test cannot
+  reach, the agent raises `NODE_ALERT_KIND_DNS_CACHE` with that hint once
+  and resolves it when the test passes or none uses it (the panel maps it
+  to `node_health_check_failed`); the health memory leaves
+  `docker.dnscache` to it. `--purge` uninstalls delete the interface after
+  the containers; a plain uninstall leaves it.
+- Check `docker.dnscache` ("DNS cache"): skipped while off and unused
+  (and in `seylo health`); pass names the networks, the address, the
+  upstreams and how many containers use it with what it does and does
+  not do; fail for BLOCKED, upstreams that do not answer or a test
+  container without an answer (with how many containers already pay up
+  to 4 s per lookup for it); warn when no test container could run. The
+  Container DNS check counts the cache's address as a usable server.
+- `GetDnsCacheStatus` (`node.dns-cache.v1`): state, reason, fix hint,
+  address, upstreams, fallbacks, names held, totals (questions, hits,
+  stale, upstream questions and failures), the last 60 one-minute
+  buckets, the last test, and our running containers that can use it
+  (`uses_cache`). Not built: Release B (build workers through
+  buildkitd.toml, re-creating idle builders; Traefik), and the e2e on
+  Ubuntu 22.04/24.04 with ufw, Debian 12, Rocky 9 with firewalld and
+  Docker 28 (the VM tests ran on Ubuntu 24.04, Docker 29.5, nftables).
 
 Find every unfinished feature with:
 
@@ -558,7 +687,13 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `git_internal_hosts` for the project. A refused connection fails the fetch with
   "the node refused to connect to <host:port>: ..."; for the source's own
   host the message names how an admin allows it (the project's Settings >
-  Internal git hosts, or `git.allowInternalHost`). ssh is used only with
+  Internal git hosts, or `git.allowInternalHost`). A connection the proxy
+  could not make for another reason (no route, DNS, a timeout, a refused
+  port, the agent's own proxy failing) answers git 502, logs "The git
+  connection to <host:port> failed: <why>" in the build log and, since
+  0.2.17, fails the fetch as a network failure (`build.GitNetworkError`,
+  below); auth and not-found failures keep "check the address, the branch
+  and the credentials". ssh is used only with
   the source's SSH key (`protocol.ssh.allow=never` otherwise), and ssh://
   hosts must be plain names or IP addresses. Since the ssh tunnel always
   goes to the source's host, an ssh submodule on another host fails its
@@ -591,11 +726,14 @@ Summary; the full rules are in `proto/README.md` and the comments of
   fetch proxy's 502 ("CONNECT tunnel failed, response 502"), so the proxy
   records (and logs to the build log, "The git connection to <host:port>
   failed: <error>") the first connection it could not make that it did
-  not refuse, and a failed git command is a network failure when the
-  proxy recorded one, else when a line of its stderr is one of: a
+  not refuse, with the dial's own error (`gitProxy.ConnFailed`; not one
+  git gave up on or the fetch's end cut), and a failed git command is a
+  network failure when the proxy recorded one, else when a line of its
+  stderr is one of: a
   connection refused, timed out, reset or without a route (curl's "Failed
   to connect to <host> port <n>", ssh's "connect to host", Go's "dial tcp
-  <addr>: ...", `RPC failed; curl 7/28/52/55/56`, git-dial's "the git
+  <addr>: ...", curl's "Timeout was reached", `RPC failed; curl
+  7/28/52/55/56`, git-dial's "the git
   server could not be reached"), a name that did not resolve ("Could not
   resolve host/proxy/hostname", Go's "lookup <name>"), a proxy error
   ("CONNECT tunnel failed, response <n>", "Received HTTP code <n> from
@@ -622,8 +760,16 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `seylo health` on the node) tests its DNS and connections". Timeouts, a
   DNS server that failed ("server misbehaving", "Temporary failure in name
   resolution", a lookup that timed out), no route, a reset, a proxy's
-  error and TLS keep "not the address". The first error line is the
-  proxy's error, else git's line, with any `user:password@` in an address
+  error and TLS keep "not the address". The proxy's recorded error is
+  read by its words as above and then by its type where it has one
+  (`classifyDialError`): anything about the agent's own HTTP proxy
+  (`agentProxyError`: reaching it, its answer, its setting such as a
+  socks5:// proxy git cannot use, its name not resolving) is the node's,
+  never the address (a proxy name that does not resolve names the proxy,
+  not the git server); a `net.DNSError` is a name that did not resolve,
+  "check the address" only when `IsNotFound`; ECONNREFUSED asks for the
+  address; ENETUNREACH, EHOSTUNREACH and timeouts are the node's. The
+  first error line is the proxy's error, else git's line, with any `user:password@` in an address
   replaced by `***@`, at most 300 bytes; the host is the one git asked the
   proxy for (not the address it resolved to), else the one the line names,
   else the source's. The node's name is its panel name from the desired state's
@@ -675,7 +821,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
 - `seylo join` (`agent.Join`) on a node that has a config.yml (`--force`
   once it joined) keeps every key it does not set: `no_host_shell`,
   `no_tailnet`, `tailscale_socket`, `git_proxy_resolves`, `node_name`,
-  `can_build`, the `acme_ca*` keys and
+  `can_build`, the `acme_ca*` keys, `dns_cache_address` (0.2.17) and
   keys this agent does not know, with their comments. It replaces only the connection
   (`panel_url`, `panel_pin`, `trust_on_first_use`, `insecure_transport`,
   `fallback`, since 0.2.8 `staged` and `staged_move`), the identity the token gives (`node_id` cleared,
@@ -1077,6 +1223,7 @@ local API, join and resume. The areas:
 | Area | Wire file | Packages |
 |---|---|---|
 | runtime | `wire_runtime.go` | `docker`, `reconcile`, `health`, `crash`, `volumes` |
+| dnscache | `wire_dnscache.go` | `dnscache` (since 0.2.17) |
 | network | `wire_network.go` (and `cert_retry.go`) | `proxy`, `edge`, `portgate`, `wings` |
 | build | `wire_build.go` | `build`, `registry`, `compose` |
 | observe | `wire_observe.go` | `logs`, `metrics`, `console` (with `console/dockerapi`), `shell`, `fs` |
@@ -1085,7 +1232,7 @@ local API, join and resume. The areas:
 
 - Each area has one file, `wire_<area>.go`, with two functions.
   `agent.Wire` runs every `provide<Area>(d *Deps) error` in the order
-  runtime, observe, network, build, jobs, node (phase 1: build components,
+  runtime, dnscache, observe, network, build, jobs, node, tailnet (phase 1: build components,
   set the area's `Deps` fields; read only the core block and fields of the
   areas before it), then every `wire<Area>(reg *Registry, d *Deps) error`
   in the same order (phase 2: every provided field is set; register
@@ -1111,6 +1258,8 @@ local API, join and resume. The areas:
   reconnects and answer UNAVAILABLE while disconnected), `Facts`
   (`Update(func(*NodeFacts))` for your fields; never set capabilities),
   `Components`. Area blocks: runtime `Docker`, `Prober`, `Reconcile`;
+  dnscache `DNSCache` (`ContainerDNS()`, read by reconcile and jobrun at
+  each create; its wire brings the cache up before components start);
   network `Router`, `Gate`, `Tickets`, `Wings`, `CPU`; build `Builder`;
   observe `Logs`, `Metrics`, `Files`; jobs `Cron`, `Backups`, `Cloudflare`,
   `Pruner`, `CleanupScheduler` (the node area feeds it the disk checks'
@@ -1184,7 +1333,13 @@ local API, join and resume. The areas:
   test containers (`seylo-dnscheck-<hex>`, `seylo.dnscheck=true`, not
   managed): `docker run --rm` for under a second (the lookup one on
   `seylo-edge` at most 20 s), and the check itself removes one a cut-off
-  run left behind.
+  run left behind. The DNS cache's test containers are the same kind
+  (`--entrypoint nslookup`).
+- Containers created while the node's DNS cache is ACTIVE carry
+  `seylo.dns-cache=<address>` and `HostConfig.Dns` = the cache plus its
+  fallbacks (see "Node DNS cache"); the host has a dummy interface
+  `seylo-dns` with that address while any running container carries the
+  label.
 - Every container gets `traefik.enable=false` and `--cgroup-parent=seylo.slice`
   and Docker restart policy `no`. Service containers and cron runs also
   get `--init` by their spec's `ContainerConfig.init` (since 0.2.15, see
@@ -2903,6 +3058,21 @@ never type the ids by hand.
   (Traefik's default is 30s, which held requests to a copy that just died
   until its crash restart). A node with no copy of the service right now
   answers 503 on its LB entry point (a service with no servers), not 404.
+- Node DNS cache (0.2.17, `modules/nodes/dns-cache.ts`): `nodes.dns_cache`
+  (boolean, default false, migration `0026_node_dns_cache`) compiles to
+  `NodeSettings.dns_cache.enabled`. `nodes.setDnsCache { nodeId, enabled }`
+  (`nodes.manage`, audited as `nodes.setDnsCache`, MCP) refuses turning it
+  on when the node's agent did not advertise `node.dns-cache.v1` now or at
+  its last connect (`nodeHasCapability`; CONFLICT, details `field:
+  enabled`, `reason: agentTooOld`, "needs the node's agent 0.2.17");
+  turning it off always works. `Node.dnsCache` is the setting and
+  `NodeDetail.dnsCacheSupported` the capability. `nodes.dnsCacheStatus`
+  (`nodes.view`) calls `GetDnsCacheStatus` on an online, capable node and
+  adds service names, the hit rate (hits / questions, null before the
+  first) and upstream questions per minute (the last 10 full minutes);
+  offline or older agents answer state "unknown" without asking. Nothing
+  is recreated in bulk: containers get or lose the cache at their next
+  deploy (each service's own Redeploy).
 - Node addresses: agents report `NodeFacts.private_ipv4` (the local address
   they dial the panel from, or the default-route address when the panel is on
   the same host; empty when that address is public). `nodes.publicAddress`
@@ -3206,6 +3376,7 @@ or the method descriptor's options (TS). Current names:
 | `node.prune.v1`, `node.update.v1`, `node.healthcheck.v1`, `node.troubleshoot.v1`, `node.reboot.v1`, `node.docker-update.v1` | Prune, UpdateAgent, RunHealthCheck, Troubleshoot, Reboot, UpdateDocker |
 | `node.host-shell.v1` | HostShell |
 | `node.agent-logs.v1` | AgentLogs |
+| `node.dns-cache.v1` (0.2.17) | GetDnsCacheStatus; also says the agent follows `NodeSettings.dns_cache`. The panel turns the cache on only for agents that advertised it (now or at their last connect: `nodes.setDnsCache` CONFLICT `agentTooOld` otherwise) |
 | `routing.certificate-retry.v1` | RetryCertificate |
 | `panel.report.v1` | ReportCrash, ReportEvent |
 | `node.panel-update.v1` | UpdatePanel |
@@ -6473,7 +6644,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 
 - Screens: the shell (sidebar, command palette, layouts), dashboard,
   project page, nodes (the node sheet's views: overview, health, cleanup,
-  shell, settings in `components/nodes/`), templates (with its Docker Hub
+  shell, settings in `components/nodes/`; the settings' DNS cache switch
+  and its status, read every 10 s, are `node-dns-cache.tsx`: disabled with
+  the version it needs on older agents, state chip, address, hit rate,
+  upstream lookups per minute, the reason and fix (commands as code) when
+  blocked, "Using the cache" and "Not yet - redeploy to apply" lists with
+  links to the services, "Still using the cache" while draining, and next
+  to Wings that game servers take DNS from Wings' own config), templates (with its Docker Hub
   tab, `?tab=docker-hub`, the image form and the popular images in
   `src/components/docker-hub/`), setup and login are
   `src/routes/{__root,_app,login,setup}.tsx`, `src/routes/_app/` and
@@ -7155,6 +7332,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the popular images row and its dialog, a screenshot per preset),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
+  `dns-cache.spec.ts` (0.2.17, a node's DNS cache on the demo data: turning
+  it on sends `nodes.setDnsCache`, Starting then Active with the address,
+  hit rate, upstream lookups and the two lists; Blocked with the reason
+  and the ufw command; turning it off drains; an agent before 0.2.17 gets
+  a disabled switch and no status call; the Wings note),
   `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo
   data, with the ops answered and recorded per test),
   `database-move.spec.ts` (0.2.16, a database's Advanced tab on the demo
