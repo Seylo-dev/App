@@ -152,6 +152,13 @@ export const LogRetention = Type.Object({
   maxAgeDays: Type.Integer({ minimum: 1, maximum: 3650, description: "Default 14 days." }),
 });
 
+/** The agent capability the DNS cache needs, and the first release that has it. */
+export const dnsCacheCapability = "node.dns-cache.v1";
+export const dnsCacheMinAgent = "0.2.17";
+
+const dnsCacheText =
+  "The node's DNS cache for containers: the agent answers DNS on one link-local address of the server (169.254.53.53 by default) and gives every container it creates, once it proved containers reach it, that address first and the servers Docker would give it as fallbacks. It cuts repeated lookups of the same names (a container retrying in a loop) and the UDP sessions they open to outside resolvers; it does not help with bursts of different names and is no hard limit, since containers keep the fallbacks. Containers get it, or lose it, when they are next created (a redeploy, the next cron run); nothing restarts on its own.";
+
 const parallelBuildsAutoText =
   "true: builds at once is on Auto, so maxParallelBuilds is one build per 4 CPU cores and per 4 GiB of memory the node reported, whichever allows fewer, at least 1 and at most 16 (1 until the node reported its cores and memory), and follows the machine when its hardware changes. false: a fixed number. Nodes that join since 0.2.15 start on Auto; nodes from before keep their fixed number.";
 
@@ -206,6 +213,8 @@ export const Node = Type.Object({
   parallelBuildsAuto: Type.Boolean({ description: parallelBuildsAutoText }),
   wings: WingsInfo,
   gamesFirstCpu: Type.Boolean(),
+  /** The node's DNS cache for containers is on (nodes.setDnsCache; added in 0.2.17). */
+  dnsCache: Type.Boolean({ description: dnsCacheText }),
   facts: Nullable(NodeFacts),
   /** Whether a newer Docker Engine is there; left out while unknown (older agents, no check yet). */
   docker: Type.Optional(NodeDocker),
@@ -276,6 +285,11 @@ export const NodeDetail = Type.Composite([
     panelAddressChoiceAt: Type.Optional(Nullable(Timestamp)),
     /** The last time the node was away with a reason its agent reported; left out when there is none (added in 0.2.15). */
     lastOffline: Type.Optional(NodeOfflineReport),
+    /**
+     * The node's agent can run the DNS cache (it advertised node.dns-cache.v1, now or at its last
+     * connect). False: the switch says the agent needs 0.2.17 (added in 0.2.17).
+     */
+    dnsCacheSupported: Type.Boolean(),
   }),
 ]);
 
@@ -562,6 +576,90 @@ export const updateDocker = defineOp({
   permission: permission.global("nodes.manage"),
   mcp: true,
   audit: true,
+});
+
+export const setDnsCache = defineOp({
+  id: "nodes.setDnsCache",
+  kind: "mutation",
+  summary: "Turn the node's DNS cache on or off",
+  description: `${dnsCacheText} Turning it on needs an agent of ${dnsCacheMinAgent} or later: CONFLICT with details.reason "agentTooOld" otherwise. Turning it off stops giving it to new containers; the agent keeps answering the containers that have it until they are redeployed.`,
+  input: Type.Object({ nodeId: Id, enabled: Type.Boolean() }),
+  output: Node,
+  permission: permission.global("nodes.manage"),
+  mcp: true,
+  audit: true,
+});
+
+export const DnsCacheState = Type.Union(
+  [
+    Type.Literal("off"),
+    Type.Literal("starting"),
+    Type.Literal("active"),
+    Type.Literal("blocked"),
+    Type.Literal("draining"),
+    Type.Literal("unknown"),
+  ],
+  {
+    description:
+      '"off": nothing runs. "starting": listening, testing from inside a container before containers get it. "active": new containers get it. "blocked": it cannot work here (reason, fixHint), containers keep Docker\'s servers. "draining": turned off, containers created with it still use it until they are redeployed. "unknown": the node is offline or its agent is older than 0.2.17.',
+  },
+);
+
+export const DnsCacheContainer = Type.Object({
+  name: Type.String(),
+  /** The service the container belongs to; null for the agent's own helpers without one. */
+  serviceId: Nullable(Id),
+  serviceName: Nullable(Type.String()),
+  /** "service", or the helper's role: "cron", "backup", "db-ui", "box", "cloudflared". */
+  kind: Type.String(),
+  usesCache: Type.Boolean(),
+  created: Nullable(Timestamp),
+});
+
+export const DnsCacheStatus = Type.Object({
+  nodeId: Id,
+  /** The setting (nodes.setDnsCache). */
+  enabled: Type.Boolean(),
+  /** The agent advertised node.dns-cache.v1. */
+  supported: Type.Boolean(),
+  online: Type.Boolean(),
+  state: DnsCacheState,
+  reason: Type.String(),
+  fixHint: Type.String(),
+  /** The cache's address, for example "169.254.53.53"; "" while unknown. */
+  address: Type.String(),
+  upstreams: Type.Array(Type.String()),
+  fallbacks: Type.Array(Type.String()),
+  entries: Type.Integer({ minimum: 0 }),
+  queries: Type.Integer({ minimum: 0, description: "Questions answered since the agent started." }),
+  hits: Type.Integer({ minimum: 0, description: "Answered from the cache while fresh." }),
+  stale: Type.Integer({ minimum: 0, description: "Answered from an expired entry because no upstream answered." }),
+  upstreamQueries: Type.Integer({ minimum: 0, description: "Questions the cache sent to its upstream servers." }),
+  upstreamFailures: Type.Integer({ minimum: 0 }),
+  /** hits / queries since the agent started; null before the first question. */
+  hitRate: Nullable(Type.Number({ minimum: 0, maximum: 1 })),
+  /** Upstream questions per minute over the last 10 full minutes. */
+  upstreamPerMinute: Type.Number({ minimum: 0 }),
+  /** The last 60 minutes, oldest first. */
+  minutes: Type.Array(Type.Object({ queries: Type.Integer({ minimum: 0 }), upstream: Type.Integer({ minimum: 0 }) })),
+  /** The last test from inside containers; null when none ran since the agent started. */
+  checkedAt: Nullable(Timestamp),
+  checkPassed: Type.Boolean(),
+  /** Running containers that can use the cache (not the panel, Traefik or the registry). */
+  containers: Type.Array(DnsCacheContainer),
+});
+
+export const dnsCacheStatus = defineOp({
+  id: "nodes.dnsCacheStatus",
+  kind: "query",
+  summary: "Get the node's DNS cache status",
+  description:
+    'The DNS cache\'s state on the node, its address, upstream servers and fallbacks, hit rate and upstream questions per minute, and which running containers use it (the rest get it at their next redeploy). State "unknown" while the node is offline or its agent is older than 0.2.17.',
+  input: Type.Object({ nodeId: Id }),
+  output: DnsCacheStatus,
+  permission: permission.global("nodes.view"),
+  mcp: true,
+  audit: false,
 });
 
 export const runHealthCheck = defineOp({

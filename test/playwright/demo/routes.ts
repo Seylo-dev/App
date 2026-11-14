@@ -52,6 +52,7 @@ const worldHandlers: Record<string, Handler> = {
   }),
   "nodes.get": (input) => world.nodeDetail(String(input.nodeId ?? "")),
   "nodes.healthReport": () => world.healthReport,
+  "nodes.dnsCacheStatus": (input) => world.dnsCacheStatus(String(input.nodeId ?? "")),
   "cleanup.getSchedule": (input) => world.cleanupSchedule(String(input.nodeId ?? "")),
   "cleanup.runs": (input) => world.cleanupRuns(String(input.nodeId ?? "")),
   "hostShell.status": (input) => world.hostShellStatus(String(input.nodeId ?? "")),

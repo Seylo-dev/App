@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `dns_cache` integer DEFAULT false NOT NULL;

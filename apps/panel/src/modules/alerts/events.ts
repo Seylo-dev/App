@@ -177,6 +177,7 @@ const nodeAlertEvent: Partial<Record<NodeAlertKind, RaiseAlert["event"]>> = {
   [NodeAlertKind.UPDATE_FAILED]: "update_failed",
   // The node could not move to the panel domain and keeps its old address.
   [NodeAlertKind.PANEL_MOVE_FAILED]: "node_health_check_failed",
+  [NodeAlertKind.DNS_CACHE]: "node_health_check_failed",
 };
 
 export function subscribeAgentEvents(deps: Deps): void {

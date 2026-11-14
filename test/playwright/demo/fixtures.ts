@@ -34,6 +34,7 @@ const nodeBase = {
   maxParallelBuilds: 2,
   parallelBuildsAuto: false,
   gamesFirstCpu: false,
+  dnsCache: false,
   lastSeenAt: iso(5_000),
   createdAt: iso(40 * day),
   updatedAt: iso(day),
@@ -567,6 +568,37 @@ export function nodeDetail(nodeId: string) {
     appliedRevision: 42,
     // The panel node dials loopback; the others moved to the panel's domain.
     panelAddress: node?.status === "offline" ? null : node?.isPanelNode ? "http://127.0.0.1:3000" : "https://panel.acme.dev",
+    dnsCacheSupported: node?.status !== "offline",
+  };
+}
+
+/** The DNS cache of a node, off: what nodes.dnsCacheStatus answers before it is turned on (dns-cache.spec.ts sets the rest). */
+export function dnsCacheStatus(nodeId: string) {
+  const node = nodes.find((n) => n.id === nodeId) ?? nodes[0];
+  const online = node?.status === "online";
+  return {
+    nodeId,
+    enabled: false,
+    supported: online,
+    online,
+    state: online ? "off" : "unknown",
+    reason: "",
+    fixHint: "",
+    address: online ? "169.254.53.53" : "",
+    upstreams: online ? ["8.8.8.8", "1.1.1.1"] : [],
+    fallbacks: online ? ["8.8.8.8", "1.1.1.1"] : [],
+    entries: 0,
+    queries: 0,
+    hits: 0,
+    stale: 0,
+    upstreamQueries: 0,
+    upstreamFailures: 0,
+    hitRate: null,
+    upstreamPerMinute: 0,
+    minutes: [],
+    checkedAt: null,
+    checkPassed: false,
+    containers: [],
   };
 }
 

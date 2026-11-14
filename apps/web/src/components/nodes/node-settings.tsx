@@ -1,7 +1,7 @@
 // Node settings in the node sheet. Each group saves on its own op:
 // rename, tags, the general settings (location, wildcard domain, parallel
-// builds, log retention), the can-build switch and games-first CPU (only
-// when Wings is detected), the Panel address (follow the panel's domain or
+// builds, log retention), the can-build switch, games-first CPU (only
+// when Wings is detected), the DNS cache (node-dns-cache.tsx), the Panel address (follow the panel's domain or
 // stay on the node's address; not on the panel node), and removing the
 // node. A location the panel
 // detected from the node's address is marked Detected until the form is
@@ -26,6 +26,7 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage, queryClient } from "../../lib/api";
 import type { NodeDetail } from "../../lib/types";
+import { DnsCacheSetting } from "./node-dns-cache";
 
 const mib = 1024 * 1024;
 
@@ -223,6 +224,7 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
             onChange={(value) => gamesFirst.mutate({ nodeId: node.id, enabled: value })}
           />
         )}
+        <DnsCacheSetting node={node} />
       </div>
 
       {node.panelAddressChoice && (

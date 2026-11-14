@@ -366,6 +366,8 @@ expect_fail "an answer that ends early stops with how to join by hand" "join --p
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --pin "sha256:$(printf '%064d' 1)" --binary "$T/local-binary"
 expect_ok "a join behind ufw allows 5757 from the panel's IPv4 address" \
   "+ ufw allow from 192.0.2.10 to any port 5757 proto tcp" "ufw allow <port>/tcp"
+# The node's DNS cache: containers reach it on its link-local address, port 53.
+expect_ok "a join behind ufw allows DNS to the node's DNS cache" "+ ufw allow to 169.254.53.53 port 53 comment $SLUG dns"
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'https://[2001:db8::7]:3443' --token t --binary "$T/local-binary"
 expect_ok "a join behind ufw allows 5757 from the panel's IPv6 address" "+ ufw allow from 2001:db8::7 to any port 5757 proto tcp"
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
@@ -753,6 +755,9 @@ expect_ok "re-running the panel installer warns about an account with the panel'
   "the group entry oldgroup on this server has id $panel_uid, the panel's user"
 PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
 expect_ok "re-running the panel installer with the panel's id free" "Already installed"
+# An upgrade behind ufw adds the DNS cache's rule too.
+FAKE_UFW=1 PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "an upgrade behind ufw allows DNS to the node's DNS cache" "Already installed" "+ ufw allow to 169.254.53.53 port 53 comment $SLUG dns"
 has "the panel's user" && flunk "a free panel uid got a warning on a re-run" "$OUT" || pass "a re-run with a free panel uid gets no warning"
 rm -rf "$seed/var/lib/$SLUG/panel"
 FAKE_GETENT_passwd=olduser PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"

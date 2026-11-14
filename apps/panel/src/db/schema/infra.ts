@@ -116,6 +116,12 @@ export const nodes = sqliteTable(
     isPanelNode: integer("is_panel_node", { mode: "boolean" }).notNull().default(false),
     /** Next to Wings: lower the CPU weight of our services so game servers win. Shown only when Wings is detected. */
     gamesFirstCpu: integer("games_first_cpu", { mode: "boolean" }).notNull().default(false),
+    /**
+     * The node's DNS cache for containers (NodeSettings.dns_cache): new containers get the agent's
+     * cache as their first DNS server once the agent proved containers reach it. Off by default.
+     * Added in 0.2.17.
+     */
+    dnsCache: integer("dns_cache", { mode: "boolean" }).notNull().default(false),
     healthReport: json<NodeHealthReport>("health_report"),
     healthCheckedAt: timestamp("health_checked_at"),
     /** Scheduled cleanup; null = never set (off). Added in 0.2 (nodeops). */

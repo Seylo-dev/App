@@ -23,6 +23,7 @@ import { defineModule } from "../module";
 import { writesPaused } from "../panelMove/pause";
 import { runningMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
+import { dnsCacheHandlers } from "./dns-cache";
 import { checksDocker, recordAgentFinding, recordDockerUpgraded, reportFromAgent } from "./docker-check";
 import { importInstallerJoinToken } from "./installer-join";
 import { confirmGraceMs, confirmNodeCertificate, issueNodeCertificate, lbTlsContributor, refreshLbPeers, rememberLbPeers } from "./lb-tls";
@@ -250,4 +251,4 @@ function start(deps: Deps) {
   detectNodeLocations({ ...deps, logger: nodesLogger });
 }
 
-export default defineModule({ name: "nodes", ops: nodeHandlers, jobs: [pruneReports], start });
+export default defineModule({ name: "nodes", ops: [...nodeHandlers, ...dnsCacheHandlers], jobs: [pruneReports], start });

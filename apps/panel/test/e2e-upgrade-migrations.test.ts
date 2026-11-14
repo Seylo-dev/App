@@ -65,6 +65,8 @@ test("a 0.2.15 panel.db updates through 0021-0025 at start and keeps its rows", 
     "0023_backup_contents",
     "0024_exposure_allow_plain",
     "0025_domain_origin_unknown_since",
+    // 0.2.17
+    "0026_node_dns_cache",
   ]);
   const dir = mkdtempSync(join(tmpdir(), "seylo-upgrade-0215-"));
   try {
@@ -137,6 +139,8 @@ test("a 0.2.15 panel.db updates through 0021-0025 at start and keeps its rows", 
         port_exposures: () => ({ allow_plain: 0 }),
         // No backfill: an origin unknown from before starts its run at the first re-check.
         domains: () => ({ origin_unknown_since: null }),
+        // 0.2.17: the node DNS cache starts off.
+        nodes: () => ({ dns_cache: 0 }),
       };
       for (const table of tables) {
         const want = (before[table] ?? []).map((row) => ({ ...row, ...(added[table]?.(row) ?? {}) }));

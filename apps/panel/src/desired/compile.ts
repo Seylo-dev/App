@@ -89,6 +89,8 @@ export function compileNodeSettings(db: PanelDb, node: typeof nodes.$inferSelect
     autoUpdate: getSetting(db, "autoUpdate") ?? false,
     // `seylo status` on the node shows the panel's name for it, a rename included.
     nodeName: node.name,
+    // Agents before 0.2.17 ignore it; nodes.setDnsCache only turns it on for those that advertise it.
+    dnsCache: { enabled: node.dnsCache },
   });
   for (const contributor of options.contributors ?? []) {
     contributor.node?.({ db, secrets: options.secrets, nodeId: node.id, settings: out });

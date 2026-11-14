@@ -3,6 +3,7 @@
 // Docker version check (docker-check.ts).
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
+import { nodes as nodeOps } from "@seylo/ops";
 import { type NodeFacts, ServicePhase } from "@seylo/proto";
 import { count, eq } from "drizzle-orm";
 import {
@@ -16,6 +17,7 @@ import { isNewer } from "../../agent-hub/version";
 import type { NodeHealthReport, nodes } from "../../db/schema";
 import { projects, servicePlacements, services } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { nodeHasCapability } from "../databases/capability";
 import { usageOf } from "../metrics/index";
 import { metricsFor } from "../metrics/ingest";
 import { latestRelease } from "../updates/release-state";
@@ -84,6 +86,7 @@ export function toNode(deps: Deps, row: NodeRow) {
       sharedProxy: Boolean(facts?.wings?.traefikDynamicDir),
     },
     gamesFirstCpu: row.gamesFirstCpu,
+    dnsCache: row.dnsCache,
     facts: facts
       ? {
           hostname: facts.hostname,
@@ -195,5 +198,6 @@ export function toNodeDetail(deps: Deps, row: NodeRow) {
     appliedRevision: view?.synced ? Number(view.appliedRevision) : null,
     panelAddress: deps.agents.dialedAddress(row.id),
     ...addressDetail(deps, row),
+    dnsCacheSupported: nodeHasCapability(deps.db, deps.agents, row.id, nodeOps.dnsCacheCapability),
   };
 }
