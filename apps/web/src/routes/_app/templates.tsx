@@ -3,11 +3,13 @@
 // project (from a project's New service menu), ?q= and ?category= keep the
 // filter in the URL. ?tab=docker-hub switches to Docker Hub search (the
 // same search box, sent to dockerHub.search); the popular images row and
-// every Docker Hub result open the prefilled image form. Under the title,
-// the catalog line says where the templates come from (catalog-status.tsx);
-// templates a catalog update brought carry a New tag until someone with
-// templates.manage opens the page (templates.markCatalogSeen; the tags stay
-// for that visit).
+// every Docker Hub result open the prefilled image form. On the title row,
+// left of the search: Catalog source (the owner) and the refresh button
+// (templates.manage) with a warning dot when a catalog has a problem
+// (catalog-status.tsx); opening the page asks for a check in the
+// background when the last one is old. Templates a catalog update brought
+// carry a New tag until someone with templates.manage opens the page
+// (templates.markCatalogSeen; the tags stay for that visit).
 
 import { templates } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -28,7 +30,7 @@ import { PopularRow } from "../../components/docker-hub/popular-row";
 import { useDebounced } from "../../components/docker-hub/use-debounced";
 import { PageHeader } from "../../components/page-header";
 import { QueryError } from "../../components/query-error";
-import { CatalogStatusLine, templateTags } from "../../components/templates/catalog-status";
+import { CatalogNotes, CatalogToolbar, templateTags, useCatalogCheckOnOpen } from "../../components/templates/catalog-status";
 import { InstallDialog } from "../../components/templates/install-dialog";
 import { TemplateLogo } from "../../components/templates/template-logo";
 import { t } from "../../i18n/t";
@@ -67,6 +69,7 @@ function TemplatesPage() {
   const categories = all.data?.categories ?? [];
   const status = useOp(templates.catalogStatus, {});
   const newSlugs = useNewSlugs(status.data);
+  useCatalogCheckOnOpen(status.data);
 
   const pickCategory = (category: string | undefined) => void navigate({ search: (prev) => ({ ...prev, category }), replace: true });
 
@@ -76,36 +79,41 @@ function TemplatesPage() {
         title={t("nav.templates")}
         subtitle={t("templates.subtitle")}
         actions={
-          // The kit's Input with a leading icon, like every other search box in the panel.
-          <div className="relative w-full sm:w-[300px]">
-            <IconSearch
-              size={15}
-              stroke={1.8}
-              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              type="search"
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                void navigate({ search: (prev) => ({ ...prev, q: e.target.value || undefined }), replace: true });
-              }}
-              placeholder={
-                hub
-                  ? t("dockerHub.search")
-                  : all.data
-                    ? t("templates.searchCount", { count: all.data.templates.length })
-                    : t("templates.search")
-              }
-              aria-label={hub ? t("dockerHub.search") : t("templates.search")}
-              className="pl-9"
-            />
-          </div>
+          <CatalogToolbar
+            status={hub ? undefined : status.data}
+            search={
+              // The kit's Input with a leading icon, like every other search box in the panel.
+              <>
+                <IconSearch
+                  size={15}
+                  stroke={1.8}
+                  className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  value={text}
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    void navigate({ search: (prev) => ({ ...prev, q: e.target.value || undefined }), replace: true });
+                  }}
+                  placeholder={
+                    hub
+                      ? t("dockerHub.search")
+                      : all.data
+                        ? t("templates.searchCount", { count: all.data.templates.length })
+                        : t("templates.search")
+                  }
+                  aria-label={hub ? t("dockerHub.search") : t("templates.search")}
+                  className="pl-9"
+                />
+              </>
+            }
+          />
         }
       />
 
-      {!hub && status.data && <CatalogStatusLine status={status.data} />}
+      {!hub && status.data && <CatalogNotes status={status.data} />}
 
       <Segmented
         aria-label={t("dockerHub.tabs")}

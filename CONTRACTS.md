@@ -3157,20 +3157,33 @@ never type the ids by hand.
     edited copy is ignored. The panel uses the download when its sequence
     is at least the shipped copy's, else the shipped copy (after an upgrade
     that one may be newer). State (sequence floor, commit, fetchedAt,
-    lastTriedAt, lastError, notPublished, knownSlugs) is the
-    `templatesCatalogState` setting in panel.db, not a file.
+    lastTriedAt, lastError, notPublished, the download's `etag` and
+    `lastModified` since 0.2.18, knownSlugs) is the `templatesCatalogState`
+    setting in panel.db, not a file.
+  - Conditional requests (since 0.2.18, `remote.ts`): while the copy in use
+    is the download a track's `etag`/`lastModified` came with (same
+    sequence), a check sends them as `If-None-Match`/`If-Modified-Since`
+    for `catalog.json` (fetch keeps them through GitHub's redirect to its
+    file host, which answers 304). A 304 is a check that worked: no
+    signature download, the copy stays, `lastTriedAt` moves, `lastError`
+    null, `notPublished` false, `fetchedAt` stays the last download. Any
+    other copy in use (the shipped one, a download kept only in memory
+    before a restart) gets a plain request, and a 304 to a request without
+    validators is a failure ("answered 304"). Private catalogs work the
+    same way; a server that sends neither header gets plain requests.
   - Not published yet: until the Templates repo has the signing secrets
     (CONTRIBUTING.md, Releases, step 8) it publishes nothing and GitHub
     answers 404 for `catalog.json`. The panel lists the shipped copy, asks
     for `catalog.json` only (no signature, no retry) and next at the 6-hour
-    check, and records the try without an error:
+    check (or when the Templates page opens 10 minutes later), and records
+    the try without an error:
     `catalogStatus.official.notPublished` true, `lastError` null (false
     again after any other outcome, and while downloads are off or without
-    the key). The Templates page says "The official catalog is not
-    published yet. Last checked <when>." ("... is not published at the
-    moment, so this copy stays." over a download), "Check for new
-    templates" answers "The official catalog is not published yet.", and
-    nothing shows an error toast or alert. `make sync-templates` keeps
+    the key). The Catalog source dialog says "The official catalog is not
+    published yet." ("... is not published at the moment, so this copy
+    stays." over a download), "Check for new templates" answers "The
+    official catalog is not published yet.", and nothing shows an error
+    toast, alert or warning. `make sync-templates` keeps
     `templates/` as committed, says so and exits 0 (a 404 for the signature
     alone, another status or no answer exits 1). `release-preflight.sh`
     only warns, also for the unsigned shipped copy; it refuses an unsigned
@@ -3182,18 +3195,35 @@ never type the ids by hand.
     `templates.refreshCatalog`, not when the owner turns it back on, and a
     download kept on disk by a build with the key is not used
     (`lastTriedAt`/`fetchedAt` stay null). A private catalog still
-    downloads. `catalogStatus.official.signingKey` is false and the
-    Templates page says "This build has no key for the official catalog, so
-    no new templates are downloaded." (the Catalog source dialog says so
-    below the Official catalog switch, which still saves the setting), and
-    shows "Check for new templates" only when a check can download
-    something (the official catalog on with the key, or a private one).
+    downloads. `catalogStatus.official.signingKey` is false; the Templates
+    page's refresh button carries the warning "This build has no key for
+    the official catalog, so no new templates are downloaded. Release builds
+    of <product> have it." (the Catalog source dialog says so below the
+    Official catalog switch, which still saves the setting), and the button
+    is dimmed (`aria-disabled`, a click sends nothing) unless a check can
+    download something (the official catalog on with the key, or a private
+    one).
     `make sync-templates` without `--local` writes nothing, says what it
     needs and exits 0; `release-preflight.sh` only warns.
   - When: at start (schedule `templates.refresh`, `runNow`) and every 6
     hours (jitter 10 min); `templates.refreshCatalog` (`templates.manage`,
-    audited) on demand; one check at a time. A refresh publishes
-    `invalidate` for templates.list/get/source/catalogStatus.
+    audited) on demand; and when the Templates page opens with
+    `catalogStatus.checkDue` true (since 0.2.18): a catalog the panel
+    downloads (official on with the key, or the private one) last tried
+    more than `catalogFreshSeconds` (10 minutes, `store.ts`) ago or never,
+    and no check running. The page then calls `templates.checkCatalogIfDue`
+    (signed in, any viewer: it reads only the public catalog and changes
+    only the catalog state and copies, never `templatesCatalog`; audited,
+    mcp false) once per visit, and reads the status again. The op starts a
+    check of the due catalogs in the background and returns `{ started }`
+    at once: false when none is due or any check runs (scheduled, manual or
+    another page's), so never more than one is in flight. 10 minutes: the
+    Templates repo publishes on merges, a few times a day, and its publish
+    job takes minutes; one panel asks GitHub at most 6 times an hour
+    however many people open the page, and an unchanged catalog is one 304.
+    One check at a time (`refreshCatalogs`). A refresh publishes
+    `invalidate` for templates.list/get/source/catalogStatus, so an open
+    Templates page updates by itself when a newer catalog arrives.
   - `minPanel` (optional in meta.yaml, "0.2.17"): a template whose minPanel
     is above the panel's version is left out and counted
     (`needNewerPanel`) before the rest of its meta.yaml is read, so a newer
@@ -3215,9 +3245,31 @@ never type the ids by hand.
     `templates.catalogStatus` (signed in) says where the catalog comes from,
     `newSlugs` (slugs not in `knownSlugs`; on the first start every slug
     counts as seen; `templates.markCatalogSeen`, `templates.manage`, adds the
-    current ones), `needNewerPanel`, `skipped`, `canRefresh`,
-    `canChangeSource` and, for the owner only, `source`. `saveCustom`
-    refuses any slug a catalog has, also one left out.
+    current ones), `needNewerPanel`, `skipped`, `canRefresh`, `checkDue`
+    (0.2.18), `canChangeSource` and, for the owner only, `source`.
+    `saveCustom` refuses any slug a catalog has, also one left out.
+  - Templates page (since 0.2.18, `components/templates/catalog-status.tsx`):
+    no status line under the title. The title row holds, left to right,
+    Catalog source (owner only, `canChangeSource`), the refresh icon button
+    ("Check for new templates" as its accessible name and tooltip,
+    `canRefresh` only; it spins while `templates.refreshCatalog` runs and
+    ends with the same toasts: "No new templates.", "N new templates.", "The
+    official catalog is not published yet." or "The check failed: ...") and
+    the search (300px; on a phone the buttons keep their row and the search
+    spans the next). A problem (`catalogProblems`: the official check's
+    `lastError` (a failed download or a bad signature), a private catalog's
+    `lastError`, downloads off, no key, the shipped copy unusable) is an
+    amber dot on the refresh button; the tooltip and the button's
+    `aria-describedby` say what is wrong and what to do; nothing shows
+    while all is well, and a catalog not published yet is no problem. The
+    Catalog source dialog starts with what is in use (`catalogInUse`): the
+    official source (downloaded from <githubOrg>/<templatesRepo>, bundled
+    with <product> <version>, or none), its build date, its commit (linked
+    to the commit on GitHub), the last check (or "Downloads off"/"No key in
+    this build"), the same for a private catalog, "not published yet" when
+    so, and the problems as a warning. Templates that need a newer panel
+    (linked to Settings > Updates) or could not be read (reasons in the
+    title) get a one-line note under the title only when there are any.
   - Checks (`check-templates.ts`, the same code the panel runs): folder
     (slug `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, at most 60, unique ignoring
     case; only meta.yaml, index.ts and one logo), meta.yaml (`parseMeta` and
@@ -5234,7 +5286,9 @@ keeps only names in `auth.sidebarItems` (dashboard, nodes, templates,
 activity, approvals: never settings), each once, drops unknown names
 without an error and leaves the key out when none is left. Global
 `templates.manage` gates custom templates and "Check for new templates"
-(`templates.refreshCatalog`); only the owner sets the catalog source.
+(`templates.refreshCatalog`); only the owner sets the catalog source; any
+signed-in person's Templates page may ask for a due check
+(`templates.checkCatalogIfDue`, since 0.2.18).
 
 APIs for other modules (all in `apps/panel/src/modules/`):
 
@@ -7576,8 +7630,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   dark preset), `template-logos.spec.ts` (app logos on the Templates page from the
   catalog the panel ships: logo images with their `?v=` URLs, letter tiles
   without one or when one fails to load, the popular images row and its
-  dialog, the catalog line under the title and the owner's Catalog source
-  dialog, a screenshot per preset),
+  dialog, the toolbar's buttons and warnings on the real panel (not
+  published yet is no warning, downloads off and no key are), the owner's
+  Catalog source dialog with what is in use, the note for templates left
+  out, a screenshot per preset),
+  `templates-toolbar.spec.ts` (0.2.18, the Templates page's toolbar on the
+  demo data: Catalog source, the refresh button and the search in that
+  order on the title row at desktop width, the search on its own row at
+  390 and 320px with no sideways scroll, the refresh button spinning and
+  its four toasts, the warning dot and tooltip for each problem and none
+  when all is well, a dimmed button with nothing to check, the Catalog
+  source dialog's source, build date, commit, last check and problems, and
+  one `templates.checkCatalogIfDue` per visit when due, none per keystroke,
+  with the list updated by a live invalidation),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `dns-cache.spec.ts` (0.2.17, a node's DNS cache on the demo data: turning

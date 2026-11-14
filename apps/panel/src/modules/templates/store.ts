@@ -23,6 +23,12 @@
 // for it: the status says so (notPublished), not as an error, and the next
 // try is the scheduled one.
 //
+// When: at start and every 6 hours (index.ts), on "Check for new
+// templates", and when the Templates page opens and the last check is
+// older than catalogFreshSeconds (checkCatalogsIfDue, in the background).
+// A check sends the validators of the copy it has (remote.ts), so an
+// unchanged catalog is a 304 and nothing more.
+//
 // A catalog that fails a check (signature, format, source, sequence, a file
 // whose sha256 does not match) is refused as a whole and the panel keeps
 // what it had. A catalog that passes but has a template this panel cannot
@@ -52,6 +58,7 @@ import { CatalogError, catalogDir, logoFiles, metaMinPanel, parseMeta, type Temp
 import { type CatalogFile, sha256Hex } from "./catalog-file";
 import {
   CatalogFetchError,
+  type CatalogValidators,
   catalogSource,
   type FetchedCatalog,
   fetchCatalog,
@@ -98,6 +105,8 @@ const memory = new Map<Kind, Stored>();
 
 let bundledOverride: { text: string; signature: string | null; trusted: boolean } | null = null;
 let bundledMemo: { key: string; value: Loaded | string } | null = null;
+/** The last background check checkCatalogsIfDue started, with its publish (catalogHooks.settled). */
+let background: Promise<void> = Promise.resolve();
 
 /** Test and check hooks (scripts/check-templates.ts, test/template-catalog.test.ts). */
 export const catalogHooks = {
@@ -110,6 +119,10 @@ export const catalogHooks = {
     bundledOverride = override && { text: override.text, signature: override.signature ?? null, trusted: override.trusted ?? false };
     bundledMemo = null;
     merged = null;
+  },
+  /** Resolves once the background check checkCatalogsIfDue started last is done (its publish included). */
+  settled(): Promise<void> {
+    return background;
   },
 };
 
@@ -391,83 +404,166 @@ export async function refreshCatalogs(
 
 async function refresh(deps: Pick<Deps, "db" | "logger">, which: { official: boolean; extra: boolean }): Promise<void> {
   const setting = sourceSetting(deps.db);
-  const failure = (error: unknown) => {
-    if (error instanceof CatalogFetchError) return error.message;
-    deps.logger.warn({ err: error }, "template catalog check failed");
-    return "Checking for new templates failed.";
-  };
-  if (which.official && setting.official && officialKeyConfigured()) {
-    const triedAt = new Date().toISOString();
-    try {
-      const fetched = await fetchCatalog({ url: catalogSource.officialUrl, publicKey: catalogSource.publicKey });
-      if (fetched.file.source !== officialSource) {
-        throw new CatalogFetchError(`The downloaded catalog is from ${fetched.file.source}, not ${officialSource}.`);
-      }
-      const floor = Math.max(readState(deps.db).official.sequence ?? 0, official?.file.sequence ?? 0);
-      if (fetched.file.sequence < floor) {
-        throw new CatalogFetchError(
-          `The downloaded catalog (number ${fetched.file.sequence}) is older than the one this panel has (${floor}); keeping that one.`,
-        );
-      }
-      // Read first, as the next start reads it: one this panel cannot read is not kept and does not raise the sequence floor.
-      toLoaded(fetched.file, "official", false, "downloaded");
-      keep("official", fetched);
-      writeState(deps.db, (s) => ({
-        ...s,
-        official: {
-          sequence: fetched.file.sequence,
-          commit: fetched.file.commit,
-          fetchedAt: triedAt,
-          lastTriedAt: triedAt,
-          lastError: null,
-          notPublished: false,
-        },
-      }));
-    } catch (error) {
-      // GitHub answered 404 for catalog.json: none is published yet. Not an error, and no retry
-      // before the next scheduled check (fetchCatalog only tries again for a signature that does not match).
-      const notPublished = officialNotPublished(error);
-      const message = notPublished ? null : failure(error);
-      writeState(deps.db, (s) => ({ ...s, official: { ...s.official, lastTriedAt: triedAt, lastError: message, notPublished } }));
-    }
-  }
-  const extraSetting = setting.extra;
-  if (which.extra && extraSetting) {
-    const triedAt = new Date().toISOString();
-    const source = extraKey(extraSetting);
-    const before = readState(deps.db).extra;
-    const track = before?.source === source ? before : { ...emptyTrack, source };
-    try {
-      const fetched = await fetchCatalog({ url: extraSetting.url, publicKey: extraSetting.publicKey });
-      // The owner changed the private catalog while this one downloaded: its copy must not take the new one's place.
-      const now = sourceSetting(deps.db).extra;
-      if (!now || extraKey(now) !== source) return reload(deps.db);
-      if (fetched.file.sequence < (track.sequence ?? 0)) {
-        throw new CatalogFetchError(
-          `The private catalog (number ${fetched.file.sequence}) is older than the one this panel has (${track.sequence}); keeping that one.`,
-        );
-      }
-      toLoaded(fetched.file, "private", extraSetting.publicKey === null, "downloaded");
-      keep("private", fetched);
-      writeState(deps.db, (s) => ({
-        ...s,
-        extra: {
-          source,
-          sequence: fetched.file.sequence,
-          commit: fetched.file.commit,
-          fetchedAt: triedAt,
-          lastTriedAt: triedAt,
-          lastError: null,
-        },
-      }));
-    } catch (error) {
-      const message = failure(error);
-      const now = sourceSetting(deps.db).extra;
-      if (now && extraKey(now) === source)
-        writeState(deps.db, (s) => ({ ...s, extra: { ...track, lastTriedAt: triedAt, lastError: message } }));
-    }
-  }
+  if (which.official && setting.official && officialKeyConfigured()) await refreshOfficial(deps);
+  if (which.extra && setting.extra) await refreshExtra(deps, setting.extra);
   reload(deps.db);
+}
+
+/** The message a failed check records: a CatalogFetchError's own, anything else logged and said plainly. */
+function failure(deps: Pick<Deps, "logger">, error: unknown): string {
+  if (error instanceof CatalogFetchError) return error.message;
+  deps.logger.warn({ err: error }, "template catalog check failed");
+  return "Checking for new templates failed.";
+}
+
+/** The validators of a track, when it has any. */
+function validatorsOf(track: CatalogTrack): CatalogValidators | null {
+  const etag = track.etag ?? null;
+  const lastModified = track.lastModified ?? null;
+  return etag || lastModified ? { etag, lastModified } : null;
+}
+
+async function refreshOfficial(deps: Pick<Deps, "db" | "logger">): Promise<void> {
+  const triedAt = new Date().toISOString();
+  const track = readState(deps.db).official;
+  try {
+    const fetched = await fetchCatalog({
+      url: catalogSource.officialUrl,
+      publicKey: catalogSource.publicKey,
+      // Only for the copy in use being the download those validators came with: a 304 then keeps it.
+      ifChanged: official?.origin === "downloaded" && official.file.sequence === track.sequence ? validatorsOf(track) : null,
+    });
+    if (fetched === "unchanged") {
+      writeState(deps.db, (s) => ({ ...s, official: { ...s.official, lastTriedAt: triedAt, lastError: null, notPublished: false } }));
+      return;
+    }
+    if (fetched.file.source !== officialSource) {
+      throw new CatalogFetchError(`The downloaded catalog is from ${fetched.file.source}, not ${officialSource}.`);
+    }
+    const floor = Math.max(readState(deps.db).official.sequence ?? 0, official?.file.sequence ?? 0);
+    if (fetched.file.sequence < floor) {
+      throw new CatalogFetchError(
+        `The downloaded catalog (number ${fetched.file.sequence}) is older than the one this panel has (${floor}); keeping that one.`,
+      );
+    }
+    // Read first, as the next start reads it: one this panel cannot read is not kept and does not raise the sequence floor.
+    toLoaded(fetched.file, "official", false, "downloaded");
+    keep("official", fetched);
+    writeState(deps.db, (s) => ({
+      ...s,
+      official: {
+        sequence: fetched.file.sequence,
+        commit: fetched.file.commit,
+        fetchedAt: triedAt,
+        lastTriedAt: triedAt,
+        lastError: null,
+        notPublished: false,
+        etag: fetched.etag,
+        lastModified: fetched.lastModified,
+      },
+    }));
+  } catch (error) {
+    // GitHub answered 404 for catalog.json: none is published yet. Not an error, and no retry
+    // before the next scheduled check (fetchCatalog only tries again for a signature that does not match).
+    const notPublished = officialNotPublished(error);
+    const message = notPublished ? null : failure(deps, error);
+    writeState(deps.db, (s) => ({ ...s, official: { ...s.official, lastTriedAt: triedAt, lastError: message, notPublished } }));
+  }
+}
+
+async function refreshExtra(deps: Pick<Deps, "db" | "logger">, setting: NonNullable<CatalogSourceSetting["extra"]>): Promise<void> {
+  const triedAt = new Date().toISOString();
+  const source = extraKey(setting);
+  const before = readState(deps.db).extra;
+  const track = before?.source === source ? before : { ...emptyTrack, source };
+  // The owner changed the private catalog while this one downloaded: its copy must not take the new one's place.
+  const replaced = () => {
+    const now = sourceSetting(deps.db).extra;
+    return !now || extraKey(now) !== source;
+  };
+  try {
+    const fetched = await fetchCatalog({
+      url: setting.url,
+      publicKey: setting.publicKey,
+      ifChanged: extra && extra.file.sequence === track.sequence ? validatorsOf(track) : null,
+    });
+    if (replaced()) return;
+    if (fetched === "unchanged") {
+      writeState(deps.db, (s) => ({ ...s, extra: { ...track, lastTriedAt: triedAt, lastError: null } }));
+      return;
+    }
+    if (fetched.file.sequence < (track.sequence ?? 0)) {
+      throw new CatalogFetchError(
+        `The private catalog (number ${fetched.file.sequence}) is older than the one this panel has (${track.sequence}); keeping that one.`,
+      );
+    }
+    toLoaded(fetched.file, "private", setting.publicKey === null, "downloaded");
+    keep("private", fetched);
+    writeState(deps.db, (s) => ({
+      ...s,
+      extra: {
+        source,
+        sequence: fetched.file.sequence,
+        commit: fetched.file.commit,
+        fetchedAt: triedAt,
+        lastTriedAt: triedAt,
+        lastError: null,
+        etag: fetched.etag,
+        lastModified: fetched.lastModified,
+      },
+    }));
+  } catch (error) {
+    const message = failure(deps, error);
+    if (!replaced()) writeState(deps.db, (s) => ({ ...s, extra: { ...track, lastTriedAt: triedAt, lastError: message } }));
+  }
+}
+
+// ---- checks when the Templates page opens -------------------------------------
+
+/**
+ * How old the last check may be before opening the Templates page asks for
+ * another (templates.checkCatalogIfDue). The Templates repo publishes on
+ * merges, a few times a day at most, and its publish job takes minutes, so
+ * a page opened 10 minutes after the last check sees a merge soon enough;
+ * however many people open the page, one panel asks GitHub at most 6 times
+ * an hour, and an unchanged catalog is a 304 of a few hundred bytes.
+ */
+export const catalogFreshSeconds = 10 * 60;
+
+/** Which catalogs this panel downloads were last checked more than catalogFreshSeconds ago (or never). */
+function dueCatalogs(db: PanelDb, now: number): { official: boolean; extra: boolean } {
+  const setting = sourceSetting(db);
+  const state = readState(db);
+  // An unreadable time counts as old.
+  const old = (at: string | null | undefined) => !at || !(now - Date.parse(at) < catalogFreshSeconds * 1000);
+  const extraTrack = setting.extra && state.extra?.source === extraKey(setting.extra) ? state.extra : null;
+  return {
+    official: setting.official && officialKeyConfigured() && old(state.official.lastTriedAt),
+    extra: setting.extra !== null && old(extraTrack?.lastTriedAt),
+  };
+}
+
+/** catalogStatus.checkDue: a catalog is due and no check runs. */
+function checkDue(db: PanelDb, now: number): boolean {
+  if (running) return false;
+  const due = dueCatalogs(db, now);
+  return due.official || due.extra;
+}
+
+/**
+ * Starts a check of the catalogs that are due, in the background, unless
+ * none is or a check already runs (any: scheduled, "Check for new
+ * templates" or one this started); `done` runs after it (the op publishes
+ * the invalidation). True when it started one. It changes no setting, only
+ * the catalog state and the copies (refreshCatalogs).
+ */
+export function checkCatalogsIfDue(deps: Pick<Deps, "db" | "logger">, done: () => void, now = Date.now()): boolean {
+  if (!checkDue(deps.db, now)) return false;
+  // refreshCatalogs sets `running` before it returns, so a second call right after this one finds it.
+  background = refreshCatalogs(deps, dueCatalogs(deps.db, now))
+    .then(done)
+    .catch((error: unknown) => deps.logger.warn({ err: error }, "template catalog check failed"));
+  return true;
 }
 
 // ---- ops --------------------------------------------------------------------
@@ -522,6 +618,7 @@ export function catalogStatus(ctx: {
       ...(extra?.skipped ?? []).map((s) => ({ ...s, catalog: "private" as const })),
     ],
     canRefresh: ctx.access.can("templates.manage"),
+    checkDue: checkDue(ctx.db, Date.now()),
     canChangeSource: owner,
     source: owner ? setting : null,
   };

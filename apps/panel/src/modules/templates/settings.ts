@@ -16,7 +16,8 @@ declare module "../../settings" {
     /**
      * What the panel knows about its catalogs (store.ts): the highest
      * sequence it accepted from each (it never goes back to a lower one),
-     * the last download and the last error, whether the last check found
+     * the last download (with its ETag and Last-Modified for the next,
+     * conditional request) and the last error, whether the last check found
      * the official catalog not published yet, and the slugs people with
      * templates.manage have seen (the rest carry a New tag).
      */
@@ -38,4 +39,11 @@ export interface CatalogTrack {
   lastError: string | null;
   /** Official catalog only: the last check got a 404 for catalog.json (none published yet). Not an error. */
   notPublished?: boolean;
+  /**
+   * The ETag and Last-Modified of the catalog.json response that brought
+   * the copy with this sequence (since 0.2.18): the next check asks for it
+   * only if it changed (a 304 keeps the copy). Absent or null: a plain request.
+   */
+  etag?: string | null;
+  lastModified?: string | null;
 }

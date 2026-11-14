@@ -7,7 +7,9 @@
 // A catalog that fails a check (signature, format, source, sequence, a
 // file's sha256) is refused as a whole and the panel keeps what it had; a
 // catalog that passes but has a template this panel cannot read loses only
-// that template.
+// that template. A check asks for catalog.json only if it changed (the fake
+// GitHub answers 304 like the real one), and opening the Templates page
+// starts one in the background when the last is 10 minutes old.
 
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -19,8 +21,9 @@ import * as catalogModule from "../src/modules/templates/catalog";
 import { CatalogError, parseMeta } from "../src/modules/templates/catalog";
 import { catalogCheckSeconds } from "../src/modules/templates/index";
 import { CatalogFetchError, catalogSource, fetchCatalog, officialNotPublished } from "../src/modules/templates/remote";
-import { catalogHooks } from "../src/modules/templates/store";
-import { catalogKey, fixtureCatalog, resetCatalogs, serveCatalogs, simpleTemplate } from "./catalog-fakes";
+import { catalogFreshSeconds, catalogHooks } from "../src/modules/templates/store";
+import { getSetting, setSetting } from "../src/settings";
+import { catalogKey, catalogRequests, fixtureCatalog, resetCatalogs, serveCatalogs, simpleTemplate } from "./catalog-fakes";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
 const officialUrl = catalogSource.officialUrl;
@@ -832,5 +835,278 @@ describe("a catalog this panel fails to read", () => {
     expect((await status(panel, owner)).official.lastError).toBe(
       "The catalog that ships with this panel was not used: this panel could not read it.",
     );
+  });
+});
+
+describe("asking only for a changed catalog (If-None-Match)", () => {
+  test("an unchanged catalog is a 304: no signature, no download, the copy stays and the check counts", async () => {
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    const seven = fixtureCatalog({ sequence: 7, add: { notes: simpleTemplate("Notes") } });
+    const fetched = serveCatalogs({ [officialUrl]: { catalog: seven, signature: key.sign(seven), etag: '"v7"' } });
+    // The copy in use is the shipped one: a plain request.
+    const first = await refresh(panel, owner);
+    expect(catalogRequests[0]).toEqual({ url: officialUrl, ifNoneMatch: null, ifModifiedSince: null });
+    expect(first.official).toMatchObject({ origin: "downloaded", sequence: 7, lastError: null });
+
+    await Bun.sleep(5);
+    const second = await refresh(panel, owner);
+    // The download's validators, and only catalog.json: a 304 needs no signature.
+    expect(fetched).toEqual([officialUrl, `${officialUrl}.minisig`, officialUrl]);
+    expect(catalogRequests[2]).toEqual({ url: officialUrl, ifNoneMatch: '"v7"', ifModifiedSince: "Sat, 14 Nov 2026 10:00:00 GMT" });
+    expect(second.official).toMatchObject({
+      origin: "downloaded",
+      sequence: 7,
+      lastError: null,
+      notPublished: false,
+      fetchedAt: first.official.fetchedAt,
+    });
+    expect(Date.parse(second.official.lastTriedAt)).toBeGreaterThan(Date.parse(first.official.lastTriedAt));
+    expect(await slugs(panel, owner)).toContain("notes");
+
+    // A new publish has another ETag: the same conditional request gets the whole catalog.
+    const nine = fixtureCatalog({ sequence: 9, add: { notes: simpleTemplate("Notes"), wiki: simpleTemplate("Wiki") } });
+    serveCatalogs({ [officialUrl]: { catalog: nine, signature: key.sign(nine), etag: '"v9"' } });
+    const third = await refresh(panel, owner);
+    expect(catalogRequests[0]?.ifNoneMatch).toBe('"v7"');
+    expect(third.official).toMatchObject({ origin: "downloaded", sequence: 9, lastError: null });
+    expect(await slugs(panel, owner)).toContain("wiki");
+  });
+
+  test("validators are sent only while the copy in use is the download they came with", async () => {
+    const key = catalogKey();
+    const dataDir = tempDir();
+    const panelPath = join(dataDir, "panel.db");
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    // No data folder: the download is kept in memory only, so a restart is back on the shipped copy.
+    const first = await start({ key, panelPath, masterKey });
+    const seven = fixtureCatalog({ sequence: 7 });
+    serveCatalogs({ [officialUrl]: { catalog: seven, signature: key.sign(seven), etag: '"v7"' } });
+    expect((await refresh(first.panel, first.owner)).official).toMatchObject({ origin: "downloaded", sequence: 7 });
+    first.panel.close();
+    panels.splice(panels.indexOf(first.panel), 1);
+
+    const second = await start({ key, panelPath, masterKey });
+    expect((await status(second.panel, second.owner)).official).toMatchObject({ origin: "bundled", sequence: 1 });
+    serveCatalogs({ [officialUrl]: { catalog: seven, signature: key.sign(seven), etag: '"v7"' } });
+    // A 304 would leave the shipped copy in place of the download it stands for: a plain request instead.
+    expect((await refresh(second.panel, second.owner)).official).toMatchObject({ origin: "downloaded", sequence: 7, lastError: null });
+    expect(catalogRequests[0]).toEqual({ url: officialUrl, ifNoneMatch: null, ifModifiedSince: null });
+  });
+
+  test("a private catalog is asked for the same way", async () => {
+    const { panel, owner } = await start();
+    const url = "https://templates.example.com/catalog.json";
+    const extra = fixtureCatalog({
+      source: "acme/templates",
+      drop: ["board", "flows", "metrics"],
+      add: { tools: simpleTemplate("Tools") },
+    });
+    const fetched = serveCatalogs({ [url]: { catalog: extra, etag: 'W/"tools-1"' } });
+    // The official catalog off, so the requests are the private catalog's.
+    const set = await callOp(
+      panel,
+      templates.setCatalogSource,
+      { official: false, extra: { url, publicKey: null, allowUnsigned: true } },
+      { cookie: owner },
+    );
+    expect(set.body.extra).toMatchObject({ origin: "downloaded", templates: 1 });
+    const after = await refresh(panel, owner);
+    expect(fetched).toEqual([url, url]);
+    expect(catalogRequests[1]?.ifNoneMatch).toBe('W/"tools-1"');
+    expect(after.extra).toMatchObject({ origin: "downloaded", templates: 1, lastError: null });
+    expect(await slugs(panel, owner)).toContain("tools");
+  });
+
+  test("a 304 to a request that asked for none is a failure, not an unchanged catalog", async () => {
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    serveCatalogs({ [officialUrl]: { catalog: new Response(null, { status: 304 }) } });
+    expect((await refresh(panel, owner)).official).toMatchObject({
+      origin: "bundled",
+      lastError: "github.com answered 304 for catalog.json.",
+    });
+  });
+});
+
+describe("a check when the Templates page opens (templates.checkCatalogIfDue)", () => {
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+  /** Sets when the official (or the private) catalog was last tried, as an older check would have left it. */
+  function lastTried(panel: TestPanel, at: string, which: "official" | "extra" = "official") {
+    const state = getSetting(panel.deps.db, "templatesCatalogState");
+    if (!state) throw new Error("no catalog state yet");
+    const track = which === "official" ? state.official : state.extra;
+    if (!track) throw new Error(`no ${which} track`);
+    setSetting(panel.deps.db, "templatesCatalogState", { ...state, [which]: { ...track, lastTriedAt: at } });
+  }
+
+  const checkIfDue = async (panel: TestPanel, cookie: string) => {
+    const res = await callOp(panel, templates.checkCatalogIfDue, {}, { cookie });
+    if (res.status !== 200) throw new Error(`checkCatalogIfDue: ${res.status} ${JSON.stringify(res.body)}`);
+    return res.body.started as boolean;
+  };
+
+  test("the bound is 10 minutes", () => {
+    expect(catalogFreshSeconds).toBe(600);
+  });
+
+  test("any signed-in person starts one when the last check is older than the bound; the list updates; no setting changes", async () => {
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    const { cookie: member } = await createUser(panel, "member");
+    const seven = fixtureCatalog({ sequence: 7, add: { notes: simpleTemplate("Notes") } });
+    const fetched = serveCatalogs({ [officialUrl]: { catalog: seven, signature: key.sign(seven), etag: '"v7"' } });
+    const sourceBefore = getSetting(panel.deps.db, "templatesCatalog");
+    const knownBefore = getSetting(panel.deps.db, "templatesCatalogState")?.knownSlugs;
+    const published: unknown[] = [];
+    const publish = spyOn(panel.deps.live, "publish").mockImplementation((_topic, event) => void published.push(event));
+    restores.push(() => publish.mockRestore());
+
+    // Never checked: due, for a member too (no templates.manage).
+    expect((await status(panel, member)).checkDue).toBe(true);
+    expect(await checkIfDue(panel, member)).toBe(true);
+    await catalogHooks.settled();
+    expect(fetched).toEqual([officialUrl, `${officialUrl}.minisig`]);
+    const after = await status(panel, member);
+    expect(after.official).toMatchObject({ origin: "downloaded", sequence: 7, lastError: null });
+    expect(after.checkDue).toBe(false);
+    expect(after.newSlugs).toEqual(["notes"]);
+    expect(await slugs(panel, member)).toContain("notes");
+    // An open page updates by itself: the list, the details and the status are invalidated.
+    expect(published).toContainEqual({
+      type: "invalidate",
+      ops: [templates.list.id, templates.get.id, templates.source.id, templates.catalogStatus.id],
+    });
+    // Nothing but the catalog changed: not the source setting, not which templates count as seen.
+    expect(getSetting(panel.deps.db, "templatesCatalog")).toEqual(sourceBefore);
+    expect(getSetting(panel.deps.db, "templatesCatalogState")?.knownSlugs).toEqual(knownBefore);
+    expect((await status(panel, owner)).source).toEqual({ official: true, extra: null });
+
+    // Checked a moment ago, and 9 minutes ago: not due, nothing asked.
+    expect(await checkIfDue(panel, member)).toBe(false);
+    lastTried(panel, minutesAgo(9));
+    expect((await status(panel, member)).checkDue).toBe(false);
+    expect(await checkIfDue(panel, owner)).toBe(false);
+    expect(fetched).toHaveLength(2);
+
+    // 11 minutes ago: due, and the catalog has not changed, so it is one conditional request.
+    lastTried(panel, minutesAgo(11));
+    expect((await status(panel, member)).checkDue).toBe(true);
+    expect(await checkIfDue(panel, member)).toBe(true);
+    await catalogHooks.settled();
+    expect(fetched).toEqual([officialUrl, `${officialUrl}.minisig`, officialUrl]);
+    expect(catalogRequests[2]?.ifNoneMatch).toBe('"v7"');
+    const checked = await status(panel, member);
+    expect(checked.official).toMatchObject({ origin: "downloaded", sequence: 7, lastError: null });
+    expect(Date.now() - Date.parse(checked.official.lastTriedAt)).toBeLessThan(60_000);
+
+    // Audited like every change, as the person who opened the page.
+    const rows = panel.deps.db
+      .select()
+      .from(auditLog)
+      .all()
+      .filter((row) => row.opId === "templates.checkCatalogIfDue" && row.outcome === "ok");
+    expect(rows).toHaveLength(4);
+  });
+
+  test("never more than one check in flight: opening the page while any check runs starts none", async () => {
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    const { cookie: member } = await createUser(panel, "member");
+    const seven = fixtureCatalog({ sequence: 7 });
+    const fetched: string[] = [];
+    /** Answers every request once `gate` resolves. */
+    const serveAfter = (gate: Promise<void>) => {
+      catalogSource.fetch = async (url: string) => {
+        fetched.push(url);
+        await gate;
+        return new Response(url.endsWith(".minisig") ? key.sign(seven) : seven);
+      };
+    };
+    let release = () => {};
+    serveAfter(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    expect(await checkIfDue(panel, owner)).toBe(true);
+    // The first is downloading: a second page, the status and a third page all see it running.
+    expect(await checkIfDue(panel, member)).toBe(false);
+    expect((await status(panel, member)).checkDue).toBe(false);
+    expect(await checkIfDue(panel, member)).toBe(false);
+    release();
+    await catalogHooks.settled();
+    expect(fetched).toEqual([officialUrl, `${officialUrl}.minisig`]);
+    expect((await status(panel, owner)).official).toMatchObject({ origin: "downloaded", sequence: 7 });
+
+    // "Check for new templates" running counts as well.
+    lastTried(panel, minutesAgo(30));
+    let releaseManual = () => {};
+    serveAfter(
+      new Promise<void>((resolve) => {
+        releaseManual = resolve;
+      }),
+    );
+    const manual = refresh(panel, owner);
+    for (let i = 0; i < 50 && fetched.length < 3; i++) await Bun.sleep(5);
+    expect(await checkIfDue(panel, member)).toBe(false);
+    releaseManual();
+    await manual;
+    expect(fetched).toHaveLength(4);
+  });
+
+  test("nothing is due when nothing can be downloaded; a private catalog is due on its own", async () => {
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    const fetched = serveCatalogs({});
+    // Downloads off.
+    await callOp(panel, templates.setCatalogSource, { official: false, extra: null }, { cookie: owner });
+    expect((await status(panel, owner)).checkDue).toBe(false);
+    expect(await checkIfDue(panel, owner)).toBe(false);
+    // A build without the key.
+    catalogSource.publicKey = "PLACEHOLDER_TEMPLATES_MINISIGN_PUBLIC_KEY";
+    await callOp(panel, templates.setCatalogSource, { official: true, extra: null }, { cookie: owner });
+    expect((await status(panel, owner)).checkDue).toBe(false);
+    expect(await checkIfDue(panel, owner)).toBe(false);
+    expect(fetched).toEqual([]);
+
+    // A private catalog next to it: only that one is checked, once its last check is old.
+    const url = "https://templates.example.com/catalog.json";
+    const extra = fixtureCatalog({
+      source: "acme/templates",
+      drop: ["board", "flows", "metrics"],
+      add: { tools: simpleTemplate("Tools") },
+    });
+    const served = serveCatalogs({ [url]: { catalog: extra } });
+    await callOp(
+      panel,
+      templates.setCatalogSource,
+      { official: true, extra: { url, publicKey: null, allowUnsigned: true } },
+      { cookie: owner },
+    );
+    expect(served).toEqual([url]);
+    expect(await checkIfDue(panel, owner)).toBe(false);
+    lastTried(panel, minutesAgo(11), "extra");
+    expect(await checkIfDue(panel, owner)).toBe(true);
+    await catalogHooks.settled();
+    expect(served).toEqual([url, url]);
+    expect((await status(panel, owner)).extra).toMatchObject({ origin: "downloaded", templates: 1, lastError: null });
+  });
+
+  test("a failed check counts as a check: the next page asks again only after the bound", async () => {
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    let tries = 0;
+    catalogSource.fetch = async () => {
+      tries++;
+      throw new TypeError("network down");
+    };
+    expect(await checkIfDue(panel, owner)).toBe(true);
+    await catalogHooks.settled();
+    expect((await status(panel, owner)).official).toMatchObject({ lastError: "Could not reach github.com." });
+    expect(await checkIfDue(panel, owner)).toBe(false);
+    expect(tries).toBe(1);
   });
 });

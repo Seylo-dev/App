@@ -245,7 +245,8 @@ export const CatalogStatus = Type.Object({
      * The last check found no official catalog: GitHub answered 404 for
      * catalog.json, so none is published yet. Not an error (lastError stays
      * null): the panel keeps the catalog it has and checks again on its
-     * 6-hour schedule. False while downloads are off or without the key.
+     * 6-hour schedule (or when the Templates page opens 10 minutes after
+     * the last check). False while downloads are off or without the key.
      */
     notPublished: Type.Boolean(),
     /** The panel version whose copy ships here. */
@@ -275,6 +276,13 @@ export const CatalogStatus = Type.Object({
   ),
   /** The caller holds templates.manage ("Check for new templates"). */
   canRefresh: Type.Boolean(),
+  /**
+   * A catalog this panel downloads (the official one, on and with the key,
+   * or the private one) was last checked more than 10 minutes ago, or
+   * never, and no check runs: the Templates page asks for one when it
+   * opens (checkCatalogIfDue). added in 0.2.18
+   */
+  checkDue: Type.Boolean(),
   /** The caller is the owner and may change the source. */
   canChangeSource: Type.Boolean(),
   /** The source setting, for the owner; null for everyone else. */
@@ -299,10 +307,23 @@ export const refreshCatalog = defineOp({
   kind: "mutation",
   summary: "Check for new templates",
   description:
-    "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. A 404 for the official catalog (none published yet) is no failure: official.notPublished is true and lastError null. One check runs at a time. added in 0.2.17",
+    "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours, or when the Templates page opens 10 minutes after the last one), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. A 404 for the official catalog (none published yet) is no failure: official.notPublished is true and lastError null. One check runs at a time. added in 0.2.17",
   input: Empty,
   output: CatalogStatus,
   permission: permission.global("templates.manage"),
+  mcp: false,
+  audit: true,
+});
+
+export const checkCatalogIfDue = defineOp({
+  id: "templates.checkCatalogIfDue",
+  kind: "mutation",
+  summary: "Check for new templates if the last check is old",
+  description:
+    "Starts a check for new templates in the background when catalogStatus.checkDue is true (the last check is more than 10 minutes old and none runs) and returns at once; started says whether it did. The Templates page calls it when it opens. The check asks for catalog.json only when it changed since the copy the panel has (If-None-Match and If-Modified-Since, which GitHub answers with 304), and when a newer catalog arrives the panel invalidates templates.list, so an open page updates by itself. Any signed-in person may call it: it only downloads the public catalog and changes nothing but the panel's copy of it, never the source setting. added in 0.2.18",
+  input: Empty,
+  output: Type.Object({ started: Type.Boolean() }),
+  permission: permission.signedIn(),
   mcp: false,
   audit: true,
 });

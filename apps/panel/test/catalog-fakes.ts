@@ -97,7 +97,15 @@ export interface Served {
   catalog?: string | Response;
   /** catalog.json.minisig text, a Response, or nothing (404). */
   signature?: string | Response | null;
+  /**
+   * catalog.json's ETag, as GitHub's file host sends one: a request whose
+   * If-None-Match has it gets 304 Not Modified, like GitHub answers.
+   */
+  etag?: string;
 }
+
+/** The conditional headers of every request serveCatalogs answered, in order (null: none sent). */
+export const catalogRequests: { url: string; ifNoneMatch: string | null; ifModifiedSince: string | null }[] = [];
 
 /**
  * Serves catalogs at catalogSource.officialUrl and other URLs; returns the
@@ -107,9 +115,12 @@ export interface Served {
 export function serveCatalogs(files: Record<string, Served | Served[]>) {
   const fetched: string[] = [];
   const counts = new Map<string, number>();
+  catalogRequests.length = 0;
   catalogSource.retryDelayMs = 0;
-  catalogSource.fetch = async (url: string) => {
+  catalogSource.fetch = async (url: string, init?: RequestInit) => {
     fetched.push(url);
+    const headers = new Headers(init?.headers);
+    catalogRequests.push({ url, ifNoneMatch: headers.get("if-none-match"), ifModifiedSince: headers.get("if-modified-since") });
     const base = url.endsWith(".minisig") ? url.slice(0, -".minisig".length) : url;
     const entry = files[base];
     if (!entry) throw new Error(`no route to ${url}`);
@@ -119,7 +130,9 @@ export function serveCatalogs(files: Record<string, Served | Served[]>) {
     const value = url.endsWith(".minisig") ? served.signature : served.catalog;
     if (value instanceof Response) return value;
     if (value === undefined || value === null) return new Response("Not Found", { status: 404 });
-    return new Response(value);
+    if (url.endsWith(".minisig") || !served.etag) return new Response(value);
+    if (headers.get("if-none-match") === served.etag) return new Response(null, { status: 304, headers: { etag: served.etag } });
+    return new Response(value, { headers: { etag: served.etag, "last-modified": "Sat, 14 Nov 2026 10:00:00 GMT" } });
   };
   return fetched;
 }

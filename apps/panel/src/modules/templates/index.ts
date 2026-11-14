@@ -2,7 +2,8 @@
 // generate()). Code runs only in the QuickJS sandbox (src/template-runner);
 // its output is validated and previewed before anything is created. The
 // catalog templates come from a signed catalog (store.ts, remote.ts),
-// checked every 6 hours, at start and on "Check for new templates".
+// checked every 6 hours, at start, on "Check for new templates" and when
+// the Templates page opens 10 minutes or more after the last check.
 
 import { OpError, templates as templateOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
@@ -17,7 +18,15 @@ import { defineModule } from "../module";
 import { allTemplates, CatalogError, parseMeta, sampleValues, type TemplateDetail } from "./catalog";
 import { findTemplate, formValues, installTemplate, planServices, runForProject } from "./install";
 import { logoRoutes } from "./logo";
-import { assertSlugFree, catalogStatus, changeCatalogSource, configureCatalog, markCatalogSeen, refreshCatalogs } from "./store";
+import {
+  assertSlugFree,
+  catalogStatus,
+  changeCatalogSource,
+  checkCatalogsIfDue,
+  configureCatalog,
+  markCatalogSeen,
+  refreshCatalogs,
+} from "./store";
 
 /** Lists, details and the status line change together when a catalog does. */
 const publishCatalog = (deps: Pick<Deps, "live">) =>
@@ -130,6 +139,13 @@ const refreshCatalog = implement(templateOps.refreshCatalog, async (_input, ctx)
   return catalogStatus(ctx);
 });
 
+/** The Templates page opened: a check in the background when the last one is old (store.ts catalogFreshSeconds). */
+const checkIfDue = implement(templateOps.checkCatalogIfDue, (_input, ctx) => {
+  // Only the long-lived deps: the check outlives the request.
+  const deps = { db: ctx.db, logger: ctx.logger, live: ctx.live };
+  return { started: checkCatalogsIfDue(deps, () => publishCatalog(deps)) };
+});
+
 const setCatalogSource = implement(templateOps.setCatalogSource, async (input, ctx) => {
   if (ctx.principal.type === "anonymous" || ctx.principal.user.role !== "owner") {
     throw new OpError("FORBIDDEN", "Only the owner can change where templates come from.");
@@ -179,7 +195,7 @@ function start(deps: Deps) {
 
 export default defineModule({
   name: "templates",
-  ops: [list, get, preview, create, source, saveCustom, deleteCustom, status, refreshCatalog, setCatalogSource, markSeen],
+  ops: [list, get, preview, create, source, saveCustom, deleteCustom, status, refreshCatalog, checkIfDue, setCatalogSource, markSeen],
   jobs: [refreshJob],
   http: logoRoutes,
   start,

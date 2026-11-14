@@ -483,7 +483,7 @@ const tpl = (slug: string, name: string, category: string, description: string, 
   unsigned: false,
 });
 
-/** The Templates page's catalog line: the official catalog, downloaded. */
+/** The Templates page's catalog status: the official catalog, downloaded and checked a moment ago, nothing wrong. */
 export const catalogStatus = {
   official: {
     origin: "downloaded",
@@ -504,6 +504,7 @@ export const catalogStatus = {
   needNewerPanel: 0,
   skipped: [],
   canRefresh: true,
+  checkDue: false,
   canChangeSource: true,
   source: { official: true, extra: null },
 };

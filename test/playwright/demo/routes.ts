@@ -126,6 +126,9 @@ const worldHandlers: Record<string, Handler> = {
   },
   "templates.get": () => world.n8nDetail,
   "templates.catalogStatus": () => world.catalogStatus,
+  // Nothing new in the demo catalog, and no check due (checkDue false).
+  "templates.refreshCatalog": () => world.catalogStatus,
+  "templates.checkCatalogIfDue": () => ({ started: false }),
   "templates.preview": () => world.n8nPreview,
   "cliLogin.get": (input) => ({
     request: {

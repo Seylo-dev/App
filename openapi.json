@@ -93086,6 +93086,7 @@
                     "needNewerPanel",
                     "skipped",
                     "canRefresh",
+                    "checkDue",
                     "canChangeSource",
                     "source"
                   ],
@@ -93372,6 +93373,9 @@
                     "canRefresh": {
                       "type": "boolean"
                     },
+                    "checkDue": {
+                      "type": "boolean"
+                    },
                     "canChangeSource": {
                       "type": "boolean"
                     },
@@ -93443,6 +93447,62 @@
         "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": true
+      }
+    },
+    "/api/v1/templates.checkCatalogIfDue": {
+      "post": {
+        "operationId": "templates.checkCatalogIfDue",
+        "summary": "Check for new templates if the last check is old",
+        "description": "Starts a check for new templates in the background when catalogStatus.checkDue is true (the last check is more than 10 minutes old and none runs) and returns at once; started says whether it did. The Templates page calls it when it opens. The check asks for catalog.json only when it changed since the copy the panel has (If-None-Match and If-Modified-Since, which GitHub answers with 304), and when a newer catalog arrives the panel invalidates templates.list, so an open page updates by itself. Any signed-in person may call it: it only downloads the public catalog and changes nothing but the panel's copy of it, never the source setting. added in 0.2.18",
+        "tags": [
+          "templates"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "started"
+                  ],
+                  "properties": {
+                    "started": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
       }
     },
     "/api/v1/templates.create": {
@@ -94725,7 +94785,7 @@
       "post": {
         "operationId": "templates.refreshCatalog",
         "summary": "Check for new templates",
-        "description": "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. A 404 for the official catalog (none published yet) is no failure: official.notPublished is true and lastError null. One check runs at a time. added in 0.2.17",
+        "description": "Downloads the official catalog (and the private one, if set) now instead of at the next check (every 6 hours, or when the Templates page opens 10 minutes after the last one), verifies it and switches to it when it is newer. On any failure the panel keeps the catalog it has and returns the reason. A 404 for the official catalog (none published yet) is no failure: official.notPublished is true and lastError null. One check runs at a time. added in 0.2.17",
         "tags": [
           "templates"
         ],
@@ -94763,6 +94823,7 @@
                     "needNewerPanel",
                     "skipped",
                     "canRefresh",
+                    "checkDue",
                     "canChangeSource",
                     "source"
                   ],
@@ -95047,6 +95108,9 @@
                       }
                     },
                     "canRefresh": {
+                      "type": "boolean"
+                    },
+                    "checkDue": {
                       "type": "boolean"
                     },
                     "canChangeSource": {
@@ -95477,6 +95541,7 @@
                     "needNewerPanel",
                     "skipped",
                     "canRefresh",
+                    "checkDue",
                     "canChangeSource",
                     "source"
                   ],
@@ -95761,6 +95826,9 @@
                       }
                     },
                     "canRefresh": {
+                      "type": "boolean"
+                    },
+                    "checkDue": {
                       "type": "boolean"
                     },
                     "canChangeSource": {

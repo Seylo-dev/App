@@ -7,6 +7,12 @@
 // source (updates/manifest.ts), no environment variable can point a panel
 // at another official source or key; tests replace `catalogSource`.
 //
+// A check asks for catalog.json only if it changed since the copy the
+// panel has (If-None-Match and If-Modified-Since from that copy's
+// response, which GitHub's asset host answers with 304): an unchanged
+// catalog costs one small request and no signature download. A server that
+// sends neither header gets a plain request every time.
+//
 // Every failure is a CatalogFetchError with a message safe to show; the
 // caller keeps the catalog it has. A 404 for the official catalog.json
 // means none is published yet (the Templates repo has not published its
@@ -67,7 +73,13 @@ export class CatalogFetchError extends Error {
 export const officialNotPublished = (error: unknown) =>
   error instanceof CatalogFetchError && error.answer?.status === 404 && error.answer.url === catalogSource.officialUrl;
 
-export interface FetchedCatalog {
+/** What a catalog.json response said about its version, for asking only for a changed one next time. */
+export interface CatalogValidators {
+  etag: string | null;
+  lastModified: string | null;
+}
+
+export interface FetchedCatalog extends CatalogValidators {
   file: CatalogFile;
   bytes: Uint8Array;
   /** The .minisig text; null for an unsigned private catalog. */
@@ -78,10 +90,15 @@ export interface CatalogTarget {
   url: string;
   /** The key the signature must verify with; null takes the catalog without one (allowUnsigned private catalogs only). */
   publicKey: string | null;
+  /** The validators of the copy the panel has: catalog.json is asked for only if it changed. */
+  ifChanged?: CatalogValidators | null;
 }
 
-/** Fetches, verifies and parses a catalog. */
-export async function fetchCatalog(target: CatalogTarget): Promise<FetchedCatalog> {
+/**
+ * Fetches, verifies and parses a catalog; "unchanged" when the target had
+ * validators and the server answered 304 (the panel keeps its copy).
+ */
+export async function fetchCatalog(target: CatalogTarget): Promise<FetchedCatalog | "unchanged"> {
   try {
     return await fetchOnce(target);
   } catch (error) {
@@ -92,11 +109,13 @@ export async function fetchCatalog(target: CatalogTarget): Promise<FetchedCatalo
   }
 }
 
-async function fetchOnce(target: CatalogTarget): Promise<FetchedCatalog> {
-  const bytes = await download(target.url);
+async function fetchOnce(target: CatalogTarget): Promise<FetchedCatalog | "unchanged"> {
+  const got = await download(target.url, target.ifChanged ?? null);
+  if (got === "unchanged") return "unchanged";
+  const { bytes, etag, lastModified } = got;
   let signature: string | null = null;
   if (target.publicKey !== null) {
-    signature = new TextDecoder().decode(await download(`${target.url}.minisig`));
+    signature = new TextDecoder().decode((await download(`${target.url}.minisig`)).bytes);
     try {
       verifyMinisign(target.publicKey, bytes, signature, "catalog");
     } catch (error) {
@@ -104,7 +123,7 @@ async function fetchOnce(target: CatalogTarget): Promise<FetchedCatalog> {
       throw error;
     }
   }
-  return { file: readCatalog(bytes), bytes, signature };
+  return { file: readCatalog(bytes), bytes, signature, etag, lastModified };
 }
 
 /** parseCatalogFile with its error as a CatalogFetchError. */
@@ -128,12 +147,29 @@ function hostOf(url: string): string {
 /** The test build's catalog URL or its signature next to it. */
 const isTestUrl = (url: string) => testCatalogUrl !== null && (url === testCatalogUrl || url === `${testCatalogUrl}.minisig`);
 
-async function download(url: string): Promise<Uint8Array> {
+/** Conditional request headers for the validators a copy came with; none without. */
+function conditionalHeaders(ifChanged: CatalogValidators | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (ifChanged?.etag) headers["if-none-match"] = ifChanged.etag;
+  if (ifChanged?.lastModified) headers["if-modified-since"] = ifChanged.lastModified;
+  return headers;
+}
+
+interface Downloaded extends CatalogValidators {
+  bytes: Uint8Array;
+}
+
+/** A file; with validators, "unchanged" when the server answers 304 Not Modified. */
+async function download(url: string): Promise<Downloaded>;
+async function download(url: string, ifChanged: CatalogValidators | null): Promise<Downloaded | "unchanged">;
+async function download(url: string, ifChanged: CatalogValidators | null = null): Promise<Downloaded | "unchanged"> {
   const host = hostOf(url);
+  const conditional = conditionalHeaders(ifChanged);
   let response: Response;
   try {
     response = await catalogSource.fetch(url, {
-      headers: { "user-agent": `${slug}-panel` },
+      // fetch keeps these through GitHub's redirect to its file host, which answers 304 for an unchanged file.
+      headers: { "user-agent": `${slug}-panel`, ...conditional },
       redirect: "follow",
       signal: AbortSignal.timeout(catalogSource.timeoutMs),
     });
@@ -144,6 +180,8 @@ async function download(url: string): Promise<Uint8Array> {
   // (only a test build's own catalog URL, compiled in, may be plain HTTP).
   if (response.url && !response.url.startsWith("https:") && !isTestUrl(response.url))
     throw new CatalogFetchError(`${host} redirected to a plain HTTP address.`);
+  // Not modified: only an answer to a conditional request (anywhere else a 304 is a failure below).
+  if (response.status === 304 && Object.keys(conditional).length > 0) return "unchanged";
   if (!response.ok)
     throw new CatalogFetchError(`${host} answered ${response.status} for ${new URL(url).pathname.split("/").pop()}.`, {
       url,
@@ -164,5 +202,9 @@ async function download(url: string): Promise<Uint8Array> {
     if (error instanceof CatalogFetchError) throw error;
     throw new CatalogFetchError(`The download from ${host} broke off.`);
   }
-  return new Uint8Array(Buffer.concat(chunks));
+  return {
+    bytes: new Uint8Array(Buffer.concat(chunks)),
+    etag: response.headers.get("etag"),
+    lastModified: response.headers.get("last-modified"),
+  };
 }
