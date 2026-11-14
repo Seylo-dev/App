@@ -198,8 +198,9 @@ func TestRealContainerDNS(t *testing.T) {
 // and the check passes. A lookup container whose only server drops every
 // query (192.0.2.53, TEST-NET-1, as --dns, which the embedded DNS forwards
 // to) fails the check with nslookup's error and the server to try, after
-// nslookup's own 5 s and well within the run's bound. No test container
-// is left behind.
+// nslookup's own 5 s and well within the run's bound. busybox 1.28's
+// nslookup, which takes no options, is no lookup. No test container is
+// left behind.
 func TestRealContainerDNSLookup(t *testing.T) {
 	if os.Getenv("SEYLO_IT") == "" {
 		t.Skip("SEYLO_IT not set")
@@ -251,6 +252,19 @@ func TestRealContainerDNSLookup(t *testing.T) {
 	}
 	if d := time.Since(start); d > probeTimeout+lookupTimeout {
 		t.Fatalf("the check took %v", d)
+	}
+
+	// An old busybox (1.28) takes no nslookup options: it prints its
+	// usage and exits 1, which is no lookup, not a failed one.
+	docker("pull", "-q", "busybox:1.28")
+	usage, _ := exec.Command("docker", "run", "--rm", "--network", network, "busybox:1.28", "nslookup", "-type=a", "-timeout=5", "github.com").CombinedOutput()
+	t.Logf("busybox 1.28's nslookup:\n%s", usage)
+	e.lookupServers = nil
+	l = e.lookupDNS(context.Background(), "busybox:1.28", nil)
+	t.Logf("busybox 1.28: %+v", l)
+	if l.Skipped != "no lookup from a test container: busybox:1.28's nslookup does not take -type and -timeout (an older or minimal busybox)" ||
+		l.status() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
+		t.Fatalf("busybox 1.28's lookup = %+v", l)
 	}
 
 	// No test container is left behind.

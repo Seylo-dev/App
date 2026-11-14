@@ -47,6 +47,12 @@ var lookupDropped = lookupOut("298238.62", "298243.63", 1,
 	"Server:\t\t127.0.0.11\nAddress:\t127.0.0.11:53\n\n;; connection timed out; no servers could be reached\n\n",
 	strings.ReplaceAll(strings.ReplaceAll(lookupResolvConf, "[host(1.1.1.1) host(192.168.5.3)]", "[192.0.2.53]"), "# Overrides: []", "# Overrides: [nameservers]"))
 
+// busybox128Usage is what busybox 1.28.4's nslookup (busybox:1.28 in the
+// VM) prints for lookupScript's options, which it does not take, with exit
+// status 1.
+const busybox128Usage = "BusyBox v1.28.4 (2018-05-22 16:59:59 UTC) multi-call binary.\n\nUsage: nslookup [HOST] [SERVER]\n\n" +
+	"Query the nameserver for the IP address of the given HOST\noptionally using a specified DNS server\n"
+
 // lookupServfail is the embedded DNS answering at once that it has no
 // server to ask (--dns 127.0.0.1 in the VM).
 var lookupServfail = lookupOut("298514.73", "298514.73", 1,
@@ -70,9 +76,12 @@ func TestParseLookupOutput(t *testing.T) {
 		{name: "SERVFAIL", out: lookupServfail, exit: 1, err: "server can't find github.com: SERVFAIL", ext: []string{"127.0.0.1"}},
 		{name: "NXDOMAIN", out: lookupOut("298514.46", "298514.47", 1, "Server:\t\t127.0.0.11\nAddress:\t127.0.0.11:53\n\n** server can't find nonexistent.invalid: NXDOMAIN\n\n", lookupResolvConf),
 			took: 10 * time.Millisecond, exit: 1, err: "server can't find nonexistent.invalid: NXDOMAIN", ext: []string{"host(1.1.1.1)", "host(192.168.5.3)"}},
-		// busybox before 1.28 numbers its addresses and names them.
-		{name: "old busybox", out: lookupOut("10.00", "10.12", 0, "Server:    127.0.0.11\nAddress 1: 127.0.0.11\n\nName:      github.com\nAddress 1: 140.82.121.4 lb-140-82-121-4-fra.github.com\n", ""),
-			took: 120 * time.Millisecond, address: "140.82.121.4", noResolvConf: true},
+		// An IPv6 answer.
+		{name: "an IPv6 address", out: lookupOut("10.00", "10.12", 0, "Server:\t\t127.0.0.11\nAddress:\t127.0.0.11:53\n\nNon-authoritative answer:\nName:\tgithub.com\nAddress: 2001:db8::4\n\n", ""),
+			took: 120 * time.Millisecond, address: "2001:db8::4", noResolvConf: true},
+		// busybox before 1.29 takes no options: its usage, no answer and no
+		// error line (nslookupRejected).
+		{name: "busybox 1.28's usage", out: lookupOut("10.00", "10.00", 1, busybox128Usage, lookupResolvConf), exit: 1, ext: []string{"host(1.1.1.1)", "host(192.168.5.3)"}},
 		// No A record: busybox says so and still exits 0.
 		{name: "no answer", out: lookupOut("1.00", "1.02", 0, "Server:\t\t127.0.0.11\nAddress:\t127.0.0.11:53\n\nNon-authoritative answer:\n*** Can't find example.invalid: No answer\n\n", lookupResolvConf),
 			took: 20 * time.Millisecond, err: "Can't find example.invalid: No answer", ext: []string{"host(1.1.1.1)", "host(192.168.5.3)"}},
@@ -90,6 +99,11 @@ func TestParseLookupOutput(t *testing.T) {
 			address, errText := nslookupAnswer(lines)
 			if took != tc.took || exit != tc.exit || address != tc.address || errText != tc.err {
 				t.Fatalf("took %v exit %d address %q error %q, want %v %d %q %q", took, exit, address, errText, tc.took, tc.exit, tc.address, tc.err)
+			}
+			// Only the usage is nslookup refusing to run; every other
+			// output, an error too, says "Server:" first.
+			if rejected := nslookupRejected(lines); rejected != strings.Contains(tc.out, "Usage:") {
+				t.Fatalf("nslookupRejected = %v", rejected)
 			}
 			if tc.noResolvConf {
 				if rc != nil && len(rc.Servers) > 0 {
@@ -166,6 +180,15 @@ func TestContainerDNSLookup(t *testing.T) {
 				"the node's firewall, or the hosting provider's", "`systemctl restart docker`", "Live-restore is on, so containers keep running through the restart"},
 			// The setting itself is fine: no hint to put addresses in it or remove it.
 			noHint: []string{"already gives", `remove its "dns" key`},
+		},
+		{
+			// Not the usage's exit 1 (nslookupRejected): a lookup that ended
+			// without an answer.
+			name:   "fails: nslookup ended by a signal",
+			lookup: lookupOut("100.00", "100.40", 137, "", ext),
+			want:   fl,
+			detail: []string{"a test container on seylo-edge could not resolve github.com through Docker's embedded DNS, which forwards to 8.8.8.8, 1.1.1.1: nslookup exited with status 137 (after 400 ms)"},
+			hint:   []string{"Check on the node that 8.8.8.8, 1.1.1.1 answer"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -252,6 +275,16 @@ func TestContainerDNSLookupSkipped(t *testing.T) {
 		{name: "no nslookup in the image", node: dnsNode{images: "alpine:3.20\n", resolv: hostResolvConf,
 			lookup: lookupOut("1.00", "1.00", 127, "sh: 1: nslookup: not found\n", lookupResolvConf)}, live: ptr(true),
 			detail: "; no lookup from a test container: alpine:3.20 has no nslookup", ran: true},
+		// busybox before 1.29: its nslookup prints its usage for the
+		// options and exits 1, which is no lookup, not a failed one (no
+		// FAIL, no firewall hint).
+		{name: "an nslookup that takes no options", node: dnsNode{images: "busybox:1.28\n", resolv: hostResolvConf,
+			lookup: lookupOut("1.00", "1.00", 1, busybox128Usage, lookupResolvConf)}, live: ptr(true),
+			detail: "; no lookup from a test container: busybox:1.28's nslookup does not take -type and -timeout (an older or minimal busybox)", ran: true},
+		// A busybox without its usage texts prints nothing.
+		{name: "an nslookup that takes no options, no usage text", node: dnsNode{images: "busybox:1.28\n", resolv: hostResolvConf,
+			lookup: lookupOut("1.00", "1.00", 1, "", lookupResolvConf)}, live: ptr(true),
+			detail: "; no lookup from a test container: busybox:1.28's nslookup does not take -type and -timeout (an older or minimal busybox)", ran: true},
 		{name: "Docker does not answer in time", node: dnsNode{images: "alpine:3.20\n", resolv: hostResolvConf, lookupErr: timedOut}, live: ptr(true),
 			detail: "; no lookup from a test container: the test container from alpine:3.20 did not run on seylo-edge: context deadline exceeded", ran: true},
 		{name: "Docker is not reachable", node: dnsNode{}, detail: "no lookup from a test container: Docker is not reachable (no docker)"},

@@ -28,7 +28,9 @@ import (
 //
 // The container runs the image the resolv.conf test container uses (one
 // already on the node, never pulled: BuildKit's, Traefik's, alpine or
-// busybox, which all have sh and busybox's nslookup), with the same
+// busybox, which all have sh and busybox's nslookup; one from before
+// busybox 1.29, or built without its full nslookup, takes no options and
+// prints its usage: no lookup, not a failed one), with the same
 // seylo.dnscheck label (a leftover is removed by a later run), and is gone
 // when the lookup is (`docker run --rm`, `docker rm -f` when the run is
 // cut off). It only joins the network while it runs: no running container
@@ -154,8 +156,12 @@ func (e *Env) lookupDNS(ctx context.Context, image string, dockerErr error) dnsL
 		l.Skipped = "no lookup from a test container: " + image + " has no nslookup"
 		return l
 	}
-	l.Took, l.RC = took, rc
 	l.Address, l.Error = nslookupAnswer(lines)
+	if exit == 1 && l.Address == "" && l.Error == "" && nslookupRejected(lines) {
+		l.Skipped = "no lookup from a test container: " + image + "'s nslookup does not take -type and -timeout (an older or minimal busybox)"
+		return l
+	}
+	l.Took, l.RC = took, rc
 	if l.Address == "" && l.Error == "" {
 		l.Error = "no address in the answer"
 		if exit != 0 {
@@ -202,6 +208,25 @@ func parseUptime(s string) (float64, bool) {
 	return v, err == nil && v >= 0
 }
 
+// nslookupRejected says whether nslookup refused to run, from its output
+// when it exited 1 with no error line of its own: busybox's nslookup
+// before 1.29 (and a later one built without FEATURE_NSLOOKUP_BIG) takes
+// no options, so for -type and -timeout it prints "Usage: nslookup [HOST]
+// [SERVER]" (only its banner, or nothing, without its usage texts) and
+// exits 1, never asking a server. A lookup that ran says "Server:" first.
+func nslookupRejected(lines []string) bool {
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "Usage:"):
+			return true
+		case strings.HasPrefix(t, "Server:"):
+			return false
+		}
+	}
+	return true
+}
+
 // nslookupAnswer reads busybox nslookup's output: the first address after
 // the answer's "Name:" line (the "Address:" before it is the server's),
 // else its first error line (";; connection timed out; no servers could
@@ -215,8 +240,7 @@ func nslookupAnswer(lines []string) (address, errText string) {
 		case strings.HasPrefix(t, "Name:"):
 			afterName = true
 		case afterName && strings.HasPrefix(t, "Address"):
-			// "Address: 140.82.121.4", or "Address 1: 140.82.121.4 name"
-			// from busybox before 1.28.
+			// "Address: 140.82.121.4" (also "Address: 2001:db8::1").
 			if _, v, ok := strings.Cut(t, ":"); ok && address == "" {
 				if f := strings.Fields(v); len(f) > 0 {
 					if a, err := netip.ParseAddr(f[0]); err == nil {

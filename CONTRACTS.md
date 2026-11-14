@@ -291,14 +291,20 @@ reads follows them and their hint stays. No lookup, with the reason at
 the end of the detail: Docker not reachable (`GET /info` failed), no
 probe image (the resolv.conf test container's note already says so), no
 `seylo-edge` network yet ("the agent creates it when it starts"), the
-image has no `nslookup` (exit 127), the run failed or took longer than
-20 s. The build service's `WorkerDNS` runs no lookup.
+image has no `nslookup` (exit 127), the image's nslookup takes no options
+(busybox before 1.29, or one built without FEATURE_NSLOOKUP_BIG: it prints
+"Usage: nslookup [HOST] [SERVER]" and exits 1, asking no server; a
+non-zero exit with no answer, no error line and no "Server:" line before
+a "Usage:" one: "<image>'s nslookup does not take -type and -timeout (an
+older or minimal busybox)"), the run failed or took longer than 20 s.
+The build service's `WorkerDNS` runs no lookup.
 The panel and the web app show its title, detail and hint like every other
 check's. VM tests: `TestRealContainerDNSLookup` (on a network of its own:
 the VM's Docker resolves and passes; a lookup container whose only server
 is 192.0.2.53 as `--dns`, which drops every query, fails with
 "connection timed out; no servers could be reached" after nslookup's 5 s,
-the run well within 20 s, no `seylo.dnscheck` container left),
+the run well within 20 s; busybox:1.28's nslookup is no lookup, not a
+failed one; no `seylo.dnscheck` container left),
 `TestRealContainerDNS` (the test container on the VM's
 Docker, dockerd found through its pid file, no `seylo.dnscheck` container
 left; a build worker with the real node's resolv.conf, and a
