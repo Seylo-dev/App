@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -342,21 +341,13 @@ func (g *git) fetchErr(ctx context.Context, err error, format string, args ...an
 }
 
 // networkErr is the failed command err as a network failure: the first
-// connection the fetch's proxy could not make (its target and error),
-// else the first line of the command's stderr that names one. nil when
-// neither does.
+// connection the fetch's proxy could not make (classifyDialError, its
+// target and the dial's own error), else the first line of the command's
+// stderr that names one. nil when neither does.
 func (g *git) networkErr(err error) *GitNetworkError {
 	var netErr *GitNetworkError
-	if target, text := g.proxy.ConnFailed(); text != "" {
-		netErr = classifyGitNetwork(text, target)
-		if netErr == nil {
-			netErr = &GitNetworkError{Kind: GitConnect, Line: cleanGitLine(text)}
-		}
-		// The host git asked for, not the address it resolved to.
-		netErr.Target = target
-		if host, _, splitErr := net.SplitHostPort(target); splitErr == nil && netErr.Kind == GitDNS {
-			netErr.Target = host
-		}
+	if target, dialErr := g.proxy.ConnFailed(); dialErr != nil {
+		netErr = classifyDialError(target, dialErr)
 	} else {
 		netErr = classifyGitNetwork(g.lastStderr, g.proxy.policy.source.String())
 	}

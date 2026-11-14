@@ -2,12 +2,15 @@ package build
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/seylo-dev/app/go/gen/brand"
 )
@@ -32,10 +35,12 @@ import (
 // the address".
 //
 // The first error is the fetch proxy's when it could not connect (it
-// records that, gitProxy.connFailed: "dial tcp 192.0.2.10:443: i/o
-// timeout", "dial tcp: lookup github.com ...: server misbehaving", the
-// agent's own HTTP proxy answering 502), else the first line of git's
-// stderr that names a network failure (curl's, ssh's, git-dial's).
+// records the dial's own error, gitProxy.connFailed: "dial tcp
+// 192.0.2.10:443: i/o timeout", "dial tcp: lookup github.com ...: server
+// misbehaving", the agent's own HTTP proxy answering 502), read by its
+// words and then by its type (classifyDialError), else the first line of
+// git's stderr that names a network failure (curl's, ssh's, git-dial's),
+// read by its words alone.
 
 // GitNetworkKind is what failed on the way to the git server.
 type GitNetworkKind int
@@ -172,7 +177,7 @@ var gitNetPatterns = []gitNetPattern{
 	{kind: GitConnect, re: regexp.MustCompile(`connect to host (\S+) port (\d+): `), target: 1, port: 2},
 	{kind: GitConnect, re: regexp.MustCompile(`dial tcp (\S+):(\d+): `), target: 1, port: 2},
 	{kind: GitConnect, re: regexp.MustCompile(`(?i)Connection refused|Connection timed out|Operation timed out|Connection reset by peer|Network is unreachable|No route to host|` +
-		`Couldn't connect to server|i/o timeout|Empty reply from server|Recv failure|Send failure|RPC failed; curl (?:7|28|52|55|56) |the git server could not be reached`)},
+		`Couldn't connect to server|Timeout was reached|i/o timeout|Empty reply from server|Recv failure|Send failure|RPC failed; curl (?:7|28|52|55|56) |the git server could not be reached`)},
 }
 
 // addressLikeRe is a failure a wrong address gives as well: a name that
@@ -240,6 +245,61 @@ func classifyGitNetwork(text, fallback string) *GitNetworkError {
 		}
 	}
 	return nil
+}
+
+// classifyDialError reads a connection the fetch's proxy could not make
+// for git: target is the host:port git asked for, err the dial's own
+// error. Its words go through classifyGitNetwork (else it is a connection
+// that failed, its first line), then its type, where it has one, decides:
+// anything about the agent's own HTTP proxy (agentProxyError: reaching
+// it, its answer, its setting; its name, a DNS failure) is the node's
+// setting, never the address; a name that does not exist
+// (net.DNSError's IsNotFound) or a refused port (ECONNREFUSED) is what a
+// wrong address gives as well; a DNS server that timed out or failed, a
+// timeout and no route are the node's network. The target is the host git
+// asked for (not the address it resolved to), or for a name that did not
+// resolve, that name.
+func classifyDialError(target string, err error) *GitNetworkError {
+	text := err.Error()
+	ne := classifyGitNetwork(text, target)
+	if ne == nil {
+		line, _, _ := strings.Cut(text, "\n")
+		ne = &GitNetworkError{Kind: GitConnect, Line: cleanGitLine(strings.TrimSpace(line))}
+	}
+	var viaProxy *agentProxyError
+	var dnsErr *net.DNSError
+	var timeout net.Error
+	switch {
+	case errors.As(err, &viaProxy):
+		// Its name that did not resolve stays that; else it is the proxy.
+		if ne.Kind != GitDNS {
+			ne.Kind = GitProxy
+		}
+		ne.MaybeAddress = false
+	case errors.As(err, &dnsErr):
+		ne.Kind, ne.MaybeAddress = GitDNS, dnsErr.IsNotFound
+	case errors.Is(err, syscall.ECONNREFUSED):
+		ne.Kind, ne.MaybeAddress = GitConnect, true
+	case errors.Is(err, syscall.ENETUNREACH), errors.Is(err, syscall.EHOSTUNREACH),
+		errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded),
+		errors.As(err, &timeout) && timeout.Timeout():
+		ne.Kind, ne.MaybeAddress = GitConnect, false
+	}
+	switch {
+	case dnsErr != nil && dnsErr.Name != "":
+		// The name that did not resolve: git's host, or the agent's proxy's.
+		ne.Target = dnsErr.Name
+	case ne.Kind == GitDNS && viaProxy != nil:
+		// The agent's proxy's name, as its error says it.
+	case ne.Kind == GitDNS:
+		ne.Target = target
+		if host, _, splitErr := net.SplitHostPort(target); splitErr == nil {
+			ne.Target = host
+		}
+	default:
+		ne.Target = target
+	}
+	return ne
 }
 
 // cleanGitLine is an error line for a message: no credentials in an

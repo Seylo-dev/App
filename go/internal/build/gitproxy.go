@@ -199,10 +199,25 @@ type gitProxy struct {
 	refused  *BlockedHostError
 	closed   bool
 	handlers sync.WaitGroup
-	// failedTarget and failedErr are the first connection the proxy could
-	// not make (not one it refused): what git asked for and why.
-	failedTarget, failedErr string
+	// failed is the first connection the proxy could not make (not one it
+	// refused): what git asked for and the dial's own error, whose type
+	// says more than its words (classifyDialError).
+	failed *dialFailure
 }
+
+// dialFailure is one connection the proxy could not make for git.
+type dialFailure struct {
+	target string
+	err    error
+}
+
+// agentProxyError is a failure reaching the agent's own HTTP proxy, or
+// one it answered, or its setting: the node's side of the network,
+// whatever the target (classifyDialError).
+type agentProxyError struct{ err error }
+
+func (e *agentProxyError) Error() string { return e.err.Error() }
+func (e *agentProxyError) Unwrap() error { return e.err }
 
 // syncWriter serializes the writes of git (through exec) and the proxy
 // into one log.
@@ -284,25 +299,29 @@ func (p *gitProxy) Refused() *BlockedHostError {
 }
 
 // ConnFailed is the first connection the proxy could not make: the
-// host:port git asked for and the error; "" when every one worked.
-func (p *gitProxy) ConnFailed() (target, text string) {
+// host:port git asked for and the dial's error; nil when every one worked.
+func (p *gitProxy) ConnFailed() (target string, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.failedTarget, p.failedErr
+	if p.failed == nil {
+		return "", nil
+	}
+	return p.failed.target, p.failed.err
 }
 
 // connFailed records a connection to target that failed (one the policy
 // refused is recorded by refuse), and logs it when logIt (the paths
 // through the agent's HTTP proxy log their own). A request git gave up on
-// itself (ctx done) is not the fetch's failure.
+// itself (ctx done), or one the fetch's end cut, is not the fetch's
+// failure.
 func (p *gitProxy) connFailed(ctx context.Context, target string, err error, logIt bool) {
 	var blocked *BlockedHostError
-	if err == nil || ctx.Err() != nil || errors.As(err, &blocked) {
+	if err == nil || ctx.Err() != nil || p.ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.As(err, &blocked) {
 		return
 	}
 	p.mu.Lock()
-	if p.failedErr == "" {
-		p.failedTarget, p.failedErr = target, err.Error()
+	if p.failed == nil {
+		p.failed = &dialFailure{target: target, err: err}
 	}
 	p.mu.Unlock()
 	if logIt {
@@ -431,8 +450,11 @@ func portOr(port, def string) string {
 // (no proxy set, NO_PROXY, loopback).
 func (p *gitProxy) upstreamFor(scheme, host, port string) (*url.URL, error) {
 	shared, err := p.upstream(&url.URL{Scheme: scheme, Host: net.JoinHostPort(strings.Trim(host, "[]"), port)})
-	if err != nil || shared == nil {
-		return nil, err
+	if err != nil {
+		return nil, &agentProxyError{fmt.Errorf("the agent's proxy setting: %w", err)}
+	}
+	if shared == nil {
+		return nil, nil
 	}
 	// httpproxy hands out the same URL every time.
 	up := *shared
@@ -443,7 +465,7 @@ func (p *gitProxy) upstreamFor(scheme, host, port string) (*url.URL, error) {
 	switch up.Scheme {
 	case "http", "https":
 	default:
-		return nil, fmt.Errorf("the agent's proxy %s: git goes only through http:// or https:// proxies", up.Redacted())
+		return nil, &agentProxyError{fmt.Errorf("the agent's proxy %s: git goes only through http:// or https:// proxies", up.Redacted())}
 	}
 	if up.Port() == "" {
 		// curl's defaults, which git used before.
@@ -492,10 +514,11 @@ func (p *gitProxy) checkBeforeUpstream(ctx context.Context, host, port string) e
 func (p *gitProxy) dialProxyServer(ctx context.Context, addr string) (net.Conn, error) {
 	conn, err := netguard.DialContext(ctx, addr, gitDialTimeout, true)
 	if err != nil {
-		err = fmt.Errorf("connecting to the agent's proxy %s: %w", addr, err)
+		err = &agentProxyError{fmt.Errorf("connecting to the agent's proxy %s: %w", addr, err)}
 		fmt.Fprintf(p.log, "The git connection could not reach the proxy: %v\n", err)
+		return nil, err
 	}
-	return conn, err
+	return conn, nil
 }
 
 // dialVia opens a CONNECT tunnel to host:port through the agent's HTTP
@@ -520,7 +543,7 @@ func (p *gitProxy) dialVia(ctx context.Context, up *url.URL, host, port string) 
 	target := net.JoinHostPort(strings.Trim(host, "[]"), port)
 	fail := func(err error) (net.Conn, error) {
 		_ = conn.Close()
-		err = fmt.Errorf("the tunnel to %s through the agent's proxy %s: %w", target, up.Redacted(), err)
+		err = &agentProxyError{fmt.Errorf("the tunnel to %s through the agent's proxy %s: %w", target, up.Redacted(), err)}
 		fmt.Fprintf(p.log, "The git connection failed: %v\n", err)
 		return nil, err
 	}
@@ -587,11 +610,12 @@ type forwardTransport struct{ p *gitProxy }
 
 func (f forwardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	host, port := r.URL.Hostname(), portOr(r.URL.Port(), "80")
+	target := net.JoinHostPort(host, port)
 	up, err := f.p.upstreamFor("http", host, port)
 	if err != nil {
+		f.p.connFailed(r.Context(), target, err, true)
 		return nil, err
 	}
-	target := net.JoinHostPort(host, port)
 	if up == nil {
 		res, err := f.p.transport.RoundTrip(r)
 		f.p.connFailed(r.Context(), target, err, true)
@@ -601,6 +625,11 @@ func (f forwardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	res, err := f.p.viaUpstream.RoundTrip(r)
+	var already *agentProxyError
+	if err != nil && !errors.As(err, &already) {
+		// The proxy's answer or the connection to it: the node's side.
+		err = &agentProxyError{fmt.Errorf("through the agent's proxy: %w", err)}
+	}
 	// dialProxyServer logged a proxy it could not reach.
 	f.p.connFailed(r.Context(), target, err, false)
 	return res, err
