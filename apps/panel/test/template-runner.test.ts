@@ -53,5 +53,27 @@ describe("template runner", () => {
       runTemplate("export function generate() { return { services: [{ type: 'app', data: { serviceName: 'Bad Name' } }] }; }", {}),
     ).rejects.toThrow("invalid result");
     await expect(runTemplate("export const x = 1;", {})).rejects.toThrow("generate");
+    // The path goes into the service the type picks, not just "union".
+    await expect(
+      runTemplate(
+        "export function generate() { return { services: [{ type: 'postgres', data: { serviceName: 'db', version: 16 } }] }; }",
+        {},
+      ),
+    ).rejects.toThrow("at /services/0/data/version:");
+  });
+
+  test("custom domains follow domains.add's host and path rules (installing skips the op's input check)", async () => {
+    const withDomain = (domain: string) =>
+      runTemplate(
+        `export function generate(input) { return { services: [{ type: "app", data: { serviceName: input.serviceName, source: { type: "image", image: "nginx:1.27" }, domains: [${domain}] } }] }; }`,
+        { serviceName: "web" },
+      );
+    await expect(withDomain('{ host: "a.example.com`) || Host(`b.example.com", port: 80 }')).rejects.toThrow(
+      "at /services/0/data/domains/0/host",
+    );
+    await expect(withDomain('{ host: "Shop.Example.com", port: 80 }')).rejects.toThrow("/domains/0/host");
+    await expect(withDomain('{ host: "shop.example.com", path: "/a b`)", port: 80 }')).rejects.toThrow("/domains/0/path");
+    for (const ok of ['{ host: "shop.example.com", path: "/api", port: 80 }', '{ host: "$(PRIMARY_DOMAIN)", port: 80 }', "{ port: 80 }"])
+      expect((await withDomain(ok)).services).toHaveLength(1);
   });
 });

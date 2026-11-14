@@ -2,7 +2,7 @@
 // shown or created. The shape follows Easypanel's template output
 // (services[] of { type, data }), limited to what this panel can run.
 
-import { services } from "@seylo/ops";
+import { domains, services } from "@seylo/ops";
 import { type Static, Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
@@ -10,10 +10,17 @@ const ServiceName = Type.String({ minLength: 1, maxLength: 40, pattern: "^[a-z0-
 const AbsolutePath = Type.String({ minLength: 1, maxLength: 500, pattern: "^/" });
 
 export const TemplateDomain = Type.Object({
-  /** "$(PRIMARY_DOMAIN)" (or omitted) = the node's automatic domain; anything else is a custom host. */
-  host: Type.Optional(Type.String({ maxLength: 253 })),
+  /**
+   * "$(PRIMARY_DOMAIN)" (or omitted, or "$(EASYPANEL_DOMAIN)") = the node's
+   * automatic domain; anything else is a custom host, held to domains.add's
+   * rules: installing adds it through domains.add's code, which leaves input
+   * checks to the op pipeline.
+   */
+  host: Type.Optional(
+    Type.Union([Type.Literal(""), Type.Literal("$(PRIMARY_DOMAIN)"), Type.Literal("$(EASYPANEL_DOMAIN)"), domains.Hostname]),
+  ),
   port: Type.Integer({ minimum: 1, maximum: 65535 }),
-  path: Type.Optional(Type.String({ maxLength: 200, pattern: "^/" })),
+  path: Type.Optional(domains.PathPrefix),
 });
 
 export const TemplateMount = Type.Union([
@@ -84,6 +91,15 @@ export class TemplateError extends Error {
 /** Throws a TemplateError naming the first problem, so template authors can fix it. */
 export function checkOutput(value: unknown): TemplateOutput {
   if (!Value.Check(TemplateOutput, value)) {
+    // A service is a union of the app and database shapes: name the field of the shape its type picks, not just "union".
+    const services = (value as { services?: unknown })?.services;
+    if (Array.isArray(services))
+      for (const [i, service] of services.entries()) {
+        const type = (service as { type?: unknown })?.type;
+        const shape = type === "app" ? TemplateApp : typeof type === "string" && type !== "" ? TemplateDatabase : null;
+        const error = shape && !Value.Check(shape, service) ? [...Value.Errors(shape, service)][0] : undefined;
+        if (error) throw new TemplateError(`generate() returned an invalid result at /services/${i}${error.path}: ${error.message}`);
+      }
     const first = [...Value.Errors(TemplateOutput, value)][0];
     throw new TemplateError(`generate() returned an invalid result at ${first?.path || "/"}: ${first?.message ?? "unknown"}`);
   }
