@@ -3222,12 +3222,21 @@ never type the ids by hand.
     downloads (official on with the key, or the private one) last tried
     more than `catalogFreshSeconds` (10 minutes, `store.ts`) ago or never,
     and no check running. The page then calls `templates.checkCatalogIfDue`
-    (signed in, any viewer: it reads only the public catalog and changes
-    only the catalog state and copies, never `templatesCatalog`; audited,
-    mcp false) once per visit, and reads the status again. The op starts a
-    check of the due catalogs in the background and returns `{ started }`
-    at once: false when none is due or any check runs (scheduled, manual or
-    another page's), so never more than one is in flight. 10 minutes: the
+    (signed in, any viewer, read-only keys too: it reads only the public
+    catalog and changes only the catalog state and copies, never
+    `templatesCatalog`; mcp false) once per visit, and reads the status
+    again. The op starts the panel's own check of the due catalogs in the
+    background and returns `{ started }` at once: false when none is due,
+    any check runs (scheduled, manual or another page's), so never more
+    than one is in flight, or the panel moves (`writesPaused`; the job
+    runner runs no scheduled check then either). It is a query (a GET, not
+    audited), not a mutation: the person only asks, and the check is the
+    panel's, like the scheduled one, which writes no audit row either; as a
+    mutation every page open (up to 6 an hour, every day) was an activity
+    log row. A person's own check, "Check for new templates"
+    (`templates.refreshCatalog`), is audited. The page calls it with the
+    op client, not a cached query, so focus and invalidations never repeat
+    it. 10 minutes: the
     Templates repo publishes on merges, a few times a day, and its publish
     job takes minutes; one panel asks GitHub at most 6 times an hour
     however many people open the page, and an unchanged catalog is one 304.
@@ -7651,8 +7660,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   its four toasts, the warning dot and tooltip for each problem and none
   when all is well, a dimmed button with nothing to check, the Catalog
   source dialog's source, build date, commit, last check and problems, and
-  one `templates.checkCatalogIfDue` per visit when due, none per keystroke,
-  with the list updated by a live invalidation),
+  one `templates.checkCatalogIfDue` per visit when due (a GET), none per
+  keystroke, with the list updated by a live invalidation),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `dns-cache.spec.ts` (0.2.17, a node's DNS cache on the demo data: turning

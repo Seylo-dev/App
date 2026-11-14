@@ -315,17 +315,25 @@ export const refreshCatalog = defineOp({
   audit: true,
 });
 
+/**
+ * A query, not a mutation: the caller only asks whether a check is due. The
+ * check it may start is the panel's own background work, the same as the
+ * scheduled one every 6 hours, and changes nothing a person set; so,
+ * like the scheduled check, it is not in the activity log (up to 6 calls an
+ * hour from pages being opened would fill it). A person's own "Check for
+ * new templates" is templates.refreshCatalog, which is audited.
+ */
 export const checkCatalogIfDue = defineOp({
   id: "templates.checkCatalogIfDue",
-  kind: "mutation",
+  kind: "query",
   summary: "Check for new templates if the last check is old",
   description:
-    "Starts a check for new templates in the background when catalogStatus.checkDue is true (the last check is more than 10 minutes old and none runs) and returns at once; started says whether it did. The Templates page calls it when it opens. The check asks for catalog.json only when it changed since the copy the panel has (If-None-Match and If-Modified-Since, which GitHub answers with 304), and when a newer catalog arrives the panel invalidates templates.list, so an open page updates by itself. Any signed-in person may call it: it only downloads the public catalog and changes nothing but the panel's copy of it, never the source setting. added in 0.2.18",
+    "Starts the panel's own check for new templates in the background when catalogStatus.checkDue is true (the last check is more than 10 minutes old and none runs) and returns at once; started says whether it did. The Templates page calls it when it opens. The check asks for catalog.json only when it changed since the copy the panel has (If-None-Match and If-Modified-Since, which GitHub answers with 304), and when a newer catalog arrives the panel invalidates templates.list, so an open page updates by itself. Any signed-in person may call it: it only downloads the public catalog and changes nothing but the panel's copy of it, never the source setting. Like the scheduled check it is not written to the audit log, and while the panel moves it starts none. added in 0.2.18",
   input: Empty,
   output: Type.Object({ started: Type.Boolean() }),
   permission: permission.signedIn(),
   mcp: false,
-  audit: true,
+  audit: false,
 });
 
 export const setCatalogSource = defineOp({

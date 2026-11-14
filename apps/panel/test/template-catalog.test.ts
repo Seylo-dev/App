@@ -9,7 +9,8 @@
 // catalog that passes but has a template this panel cannot read loses only
 // that template. A check asks for catalog.json only if it changed (the fake
 // GitHub answers 304 like the real one), and opening the Templates page
-// starts one in the background when the last is 10 minutes old.
+// starts one in the background when the last is 10 minutes old: the
+// panel's own check, like the scheduled one, so not in the audit log.
 
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { templates } from "@seylo/ops";
 import { auditLog } from "../src/db/schema";
+import { setWritePause } from "../src/modules/panelMove/pause";
 import * as catalogModule from "../src/modules/templates/catalog";
 import { CatalogError, parseMeta } from "../src/modules/templates/catalog";
 import { catalogCheckSeconds } from "../src/modules/templates/index";
@@ -24,7 +26,7 @@ import { CatalogFetchError, catalogSource, fetchCatalog, officialNotPublished } 
 import { catalogFreshSeconds, catalogHooks } from "../src/modules/templates/store";
 import { getSetting, setSetting } from "../src/settings";
 import { catalogKey, catalogRequests, fixtureCatalog, resetCatalogs, serveCatalogs, simpleTemplate } from "./catalog-fakes";
-import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
 
 const officialUrl = catalogSource.officialUrl;
 const panels: TestPanel[] = [];
@@ -1001,13 +1003,47 @@ describe("a check when the Templates page opens (templates.checkCatalogIfDue)", 
     expect(checked.official).toMatchObject({ origin: "downloaded", sequence: 7, lastError: null });
     expect(Date.now() - Date.parse(checked.official.lastTriedAt)).toBeLessThan(60_000);
 
-    // Audited like every change, as the person who opened the page.
-    const rows = panel.deps.db
-      .select()
-      .from(auditLog)
-      .all()
-      .filter((row) => row.opId === "templates.checkCatalogIfDue" && row.outcome === "ok");
-    expect(rows).toHaveLength(4);
+    // Not in the activity log: the check is the panel's own, like the scheduled one, so the
+    // page opens above (up to 6 an hour, every day) left no row. "Check for new templates" is a person's.
+    const rows = (opId: string) =>
+      panel.deps.db
+        .select()
+        .from(auditLog)
+        .all()
+        .filter((row) => row.opId === opId);
+    expect(rows(templates.checkCatalogIfDue.id)).toHaveLength(0);
+    await refresh(panel, owner);
+    expect(rows(templates.refreshCatalog.id)).toHaveLength(1);
+  });
+
+  test("a query, not a person's change: a GET, open to read-only keys; while the panel moves it starts none", async () => {
+    expect(templates.checkCatalogIfDue).toMatchObject({ kind: "query", audit: false });
+    const key = catalogKey();
+    const { panel, owner } = await start({ key });
+    const seven = fixtureCatalog({ sequence: 7 });
+    const fetched = serveCatalogs({ [officialUrl]: { catalog: seven, signature: key.sign(seven) } });
+
+    // The panel moves: the job runner runs no scheduled check, and a page that opens starts none.
+    setWritePause(panel.deps.db, { reason: "moving", targetName: "node-b", agentsClosed: false });
+    expect((await status(panel, owner)).checkDue).toBe(true);
+    expect(await checkIfDue(panel, owner)).toBe(false);
+    expect(fetched).toEqual([]);
+    setWritePause(panel.deps.db, null);
+
+    // A read-only key may ask, as it may read the status.
+    const { user } = await createUser(panel, "member");
+    const readOnly = createApiKey(panel, user.id, { readOnly: true });
+    const res = await callOp(panel, templates.checkCatalogIfDue, {}, { bearer: readOnly });
+    expect(res).toMatchObject({ status: 200, body: { started: true } });
+    await catalogHooks.settled();
+    expect(fetched).toEqual([officialUrl, `${officialUrl}.minisig`]);
+    expect(
+      panel.deps.db
+        .select()
+        .from(auditLog)
+        .all()
+        .filter((row) => row.opId === templates.checkCatalogIfDue.id),
+    ).toEqual([]);
   });
 
   test("never more than one check in flight: opening the page while any check runs starts none", async () => {

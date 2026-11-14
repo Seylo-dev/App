@@ -16,7 +16,7 @@
 
 import { brand } from "@seylo/brand";
 import { type OpOutput, templates } from "@seylo/ops";
-import { useOpMutation } from "@seylo/ops/react";
+import { useOpClient } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
@@ -251,17 +251,23 @@ export function CatalogNotes({ status }: { status: CatalogStatus }) {
  * Opening the Templates page asks the panel for a check in the background
  * when the status says one is due: once per visit, never per keystroke or
  * render. The panel refuses a second while one runs; the status is read
- * again right away, so it says no check is due while that one runs.
+ * again right away, so it says no check is due while that one runs. The op
+ * is a query (the check is the panel's own, not audited) but not a cached
+ * one: called here once, never refetched on focus or by an invalidation.
+ * A failed call says nothing: the next visit asks again.
  */
 export function useCatalogCheckOnOpen(status: CatalogStatus | undefined): void {
-  const check = useOpMutation(templates.checkCatalogIfDue, { onSuccess: () => invalidateOps([templates.catalogStatus]) });
+  const client = useOpClient();
   const asked = useRef(false);
   const due = status?.checkDue === true;
   // biome-ignore lint/correctness/useExhaustiveDependencies: asks once, when the status first says a check is due
   useEffect(() => {
     if (!due || asked.current) return;
     asked.current = true;
-    check.mutate({});
+    client
+      .call(templates.checkCatalogIfDue, {})
+      .then(() => invalidateOps([templates.catalogStatus]))
+      .catch(() => undefined);
   }, [due]);
 }
 

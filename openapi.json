@@ -93464,10 +93464,10 @@
       }
     },
     "/api/v1/templates.checkCatalogIfDue": {
-      "post": {
+      "get": {
         "operationId": "templates.checkCatalogIfDue",
         "summary": "Check for new templates if the last check is old",
-        "description": "Starts a check for new templates in the background when catalogStatus.checkDue is true (the last check is more than 10 minutes old and none runs) and returns at once; started says whether it did. The Templates page calls it when it opens. The check asks for catalog.json only when it changed since the copy the panel has (If-None-Match and If-Modified-Since, which GitHub answers with 304), and when a newer catalog arrives the panel invalidates templates.list, so an open page updates by itself. Any signed-in person may call it: it only downloads the public catalog and changes nothing but the panel's copy of it, never the source setting. added in 0.2.18",
+        "description": "Starts the panel's own check for new templates in the background when catalogStatus.checkDue is true (the last check is more than 10 minutes old and none runs) and returns at once; started says whether it did. The Templates page calls it when it opens. The check asks for catalog.json only when it changed since the copy the panel has (If-None-Match and If-Modified-Since, which GitHub answers with 304), and when a newer catalog arrives the panel invalidates templates.list, so an open page updates by itself. Any signed-in person may call it: it only downloads the public catalog and changes nothing but the panel's copy of it, never the source setting. Like the scheduled check it is not written to the audit log, and while the panel moves it starts none. added in 0.2.18",
         "tags": [
           "templates"
         ],
@@ -93480,17 +93480,7 @@
             "apiKey": []
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {}
-              }
-            }
-          }
-        },
+        "parameters": [],
         "responses": {
           "200": {
             "description": "Success.",
@@ -93514,7 +93504,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-op-kind": "mutation",
+        "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": false
       }

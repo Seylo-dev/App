@@ -15,6 +15,7 @@ import { implement } from "../../ops/implement";
 import { TemplateError } from "../../template-runner/output";
 import { runTemplate } from "../../template-runner/runner";
 import { defineModule } from "../module";
+import { writesPaused } from "../panelMove/pause";
 import { allTemplates, CatalogError, parseMeta, sampleValues, type TemplateDetail } from "./catalog";
 import { findTemplate, formValues, installTemplate, planServices, runForProject } from "./install";
 import { logoRoutes } from "./logo";
@@ -139,8 +140,14 @@ const refreshCatalog = implement(templateOps.refreshCatalog, async (_input, ctx)
   return catalogStatus(ctx);
 });
 
-/** The Templates page opened: a check in the background when the last one is old (store.ts catalogFreshSeconds). */
+/**
+ * The Templates page opened: the panel's own check in the background when
+ * the last one is old (store.ts catalogFreshSeconds). A query, so neither
+ * audited nor stopped by a panel move's write pause: while the panel moves
+ * it starts none, as the job runner runs no scheduled check then.
+ */
 const checkIfDue = implement(templateOps.checkCatalogIfDue, (_input, ctx) => {
+  if (writesPaused(ctx.db)) return { started: false };
   // Only the long-lived deps: the check outlives the request.
   const deps = { db: ctx.db, logger: ctx.logger, live: ctx.live };
   return { started: checkCatalogsIfDue(deps, () => publishCatalog(deps)) };

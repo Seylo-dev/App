@@ -260,8 +260,14 @@ test("opening the page asks for a check once when one is due, and a newer catalo
       if (topic === "panel") panelTopic.push(send);
     },
   });
+  // A query (the check is the panel's own, so it is not audited): a GET, not a POST.
+  const methods: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/templates.checkCatalogIfDue")) methods.push(request.method());
+  });
   await page.goto("/templates");
   await expect.poll(() => asked.length).toBe(1);
+  expect(methods).toEqual(["GET"]);
   // Typing, filtering and the refetches after it ask nothing more.
   await search(page).pressSequentially("gh");
   await search(page).fill("");
