@@ -225,11 +225,13 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 			// explain why, then fail with its output.
 			hcancel()
 			lines := dockerTail(ctx, w.r.o.Docker, c.ID, failureLines)
-			restore()
+			// Read the exit code before restore() removes the container:
+			// after it, the inspect can only fail.
 			msg := c.Name + " exited right after starting"
-			if d, err := w.r.o.Docker.InspectContainer(ctx, c.ID); err == nil {
+			if d, err := w.r.o.Docker.InspectContainer(ctx, c.ID); err == nil && !d.Running {
 				msg = fmt.Sprintf("%s exited right after starting (exit code %d)", c.Name, d.ExitCode)
 			}
+			restore()
 			w.failDeploy(ctx, rollCtx, spec, hash, msg, lines, nil)
 			return
 		}

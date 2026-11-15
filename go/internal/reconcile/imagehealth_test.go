@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
+	"github.com/seylo-dev/app/go/internal/docker/dockertest"
 	"github.com/seylo-dev/app/go/internal/health"
 )
 
@@ -60,6 +62,37 @@ func emittedHealthChecking(h *harness, id string, gen uint64) *agentv1.DeployPro
 		p := e.GetDeployProgress()
 		return p.GetServiceId() == id && p.GetGeneration() == gen && p.GetStage() == agentv1.DeployStage_DEPLOY_STAGE_HEALTH_CHECKING
 	}).GetDeployProgress()
+}
+
+// inspectWatch is Docker that tells a test when a container is next
+// inspected while it runs. During a rollout's health wait only the rollout
+// inspects its new containers (status, publish checks and restarts run on
+// the same worker goroutine).
+type inspectWatch struct {
+	*dockertest.Fake
+	mu   sync.Mutex
+	name string
+	seen chan struct{}
+}
+
+// nextRunningInspect returns a channel closed by the next inspect that
+// finds the container name running.
+func (e *inspectWatch) nextRunningInspect(name string) <-chan struct{} {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.name, e.seen = name, make(chan struct{})
+	return e.seen
+}
+
+func (e *inspectWatch) InspectContainer(ctx context.Context, id string) (docker.ContainerDetails, error) {
+	d, err := e.Fake.InspectContainer(ctx, id)
+	e.mu.Lock()
+	if err == nil && d.Running && e.seen != nil && d.Name == e.name {
+		close(e.seen)
+		e.seen = nil
+	}
+	e.mu.Unlock()
+	return d, err
 }
 
 func finished(h *harness, id string, gen uint64) bool {
@@ -123,11 +156,24 @@ func TestImageHealthCheckUnhealthyFailsWithItsOutput(t *testing.T) {
 // moment a checked container stops, before the die event arrives, though
 // the check never failed.
 func TestImageHealthCheckExitedContainerFailsWithItsExitCode(t *testing.T) {
-	h := newHarness(t)
+	var eng *inspectWatch
+	h := newHarnessEngine(t, nil, func(f *dockertest.Fake) docker.Engine {
+		eng = &inspectWatch{Fake: f}
+		return eng
+	})
 	h.eng.Images["api:1"] = docker.Image{Healthcheck: respoCheck}
 	h.applyAsync(1, imageSpec("api", 1, "api:1"))
 	name := h.runningContainer("api", 1)
 	emittedHealthChecking(h, "api", 1)
+	// HEALTH_CHECKING goes out before the rollout first reads the new
+	// container. Stopped before that read, it fails as exited right after
+	// starting, and the health wait under test never runs: wait until the
+	// rollout has seen it running (once, or at its next poll).
+	select {
+	case <-eng.nextRunningInspect(name):
+	case <-time.After(5 * time.Second):
+		t.Fatal("the rollout never read the new container running")
+	}
 
 	// Exited, die event still on its way: Docker already says unhealthy.
 	h.eng.CrashQuietly(name, 3)
