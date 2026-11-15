@@ -284,6 +284,47 @@ describe("decideHello", () => {
     expect(again).toMatchObject({ ok: false, reason: HelloRejectReason.INVALID_TOKEN });
   });
 
+  test("a join whose answer was lost: the same key gets its node back with the used token, another key does not", () => {
+    // The connection dropped after the panel accepted the join and before the agent read its node id,
+    // so the agent still holds the token and joins with it again.
+    const key = agentKey();
+    addJoinToken("lost", 60_000);
+    const first = decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "lost", key));
+    expect(first).toMatchObject({ ok: true, joined: true });
+    if (!first.ok) return;
+
+    const otherNonce = crypto.getRandomValues(new Uint8Array(32));
+    const later = new Date(Date.now() + 3_600_000); // past the token's expiry: the key is the credential
+    expect(decideHello(panel.deps.db, panel.deps.panelId, otherNonce, joinHello(otherNonce, "lost", key), { now: later })).toEqual({
+      ok: true,
+      nodeId: first.nodeId,
+      joined: false,
+    });
+    expect(panel.deps.db.select().from(nodes).all()).toHaveLength(1);
+
+    // Someone else holding the used token, or the same key with a signature for another nonce, gets nothing.
+    expect(decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "lost", agentKey()))).toMatchObject({
+      ok: false,
+      reason: HelloRejectReason.INVALID_TOKEN,
+    });
+    expect(decideHello(panel.deps.db, panel.deps.panelId, otherNonce, joinHello(nonce, "lost", key))).toMatchObject({
+      ok: false,
+      reason: HelloRejectReason.INVALID_TOKEN,
+    });
+
+    // A disabled node stays out; a removed one has to join again with a new token.
+    panel.deps.db.update(nodes).set({ disabledAt: new Date() }).where(eq(nodes.id, first.nodeId)).run();
+    expect(decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "lost", key))).toMatchObject({
+      ok: false,
+      reason: HelloRejectReason.NODE_DISABLED,
+    });
+    panel.deps.db.delete(nodes).where(eq(nodes.id, first.nodeId)).run();
+    expect(decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "lost", key))).toMatchObject({
+      ok: false,
+      reason: HelloRejectReason.INVALID_TOKEN,
+    });
+  });
+
   test("expired tokens and bad signatures are rejected", () => {
     addJoinToken("old", -1);
     expect(decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "old", agentKey()))).toMatchObject({

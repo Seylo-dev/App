@@ -113,6 +113,13 @@ func TestCleanupRunsWhileThePanelIsDown(t *testing.T) {
 	a := startDaemon(t, layout)
 	nodeID := panel.WaitConnected("")
 	ctx := context.Background()
+	// The panel counts the node as connected once it sent its answer; wait
+	// until the agent read it too, or the proxy below cuts the connection
+	// before the agent learns its node id (on one CPU it always did).
+	waitUntil(t, "the agent connected", func() bool {
+		s, _ := a.d.backend.Status(ctx)
+		return s.PanelConnected && s.NodeID == nodeID
+	})
 	schedule := &agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * *", DiskPercent: 80, Images: true}
 	if _, _, err := a.d.deps.DesiredSync.Sync(ctx, &agentv1.DesiredState{Revision: 1, Settings: &agentv1.NodeSettings{Cleanup: schedule}}); err != nil {
 		t.Fatal(err)

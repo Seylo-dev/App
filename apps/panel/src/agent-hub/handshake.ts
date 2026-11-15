@@ -107,6 +107,29 @@ export function decideHello(
         .from(joinTokens)
         .where(eq(joinTokens.tokenHash, hashToken(token)))
         .get();
+      if (row?.usedAt && row.nodeId) {
+        // The agent that used this token may never have read the answer: the
+        // connection dropped after the panel accepted the join and before the
+        // agent got its node id, so it still holds the token and joins again.
+        // The key it signs with is the node's own credential (a resume needs
+        // nothing more), so that key gets its node back, also after the
+        // token's expiry; any other key is refused below as before.
+        const node = db
+          .select({ id: nodes.id, publicKey: nodes.publicKey, disabledAt: nodes.disabledAt })
+          .from(nodes)
+          .where(eq(nodes.id, row.nodeId))
+          .get();
+        if (
+          node &&
+          Buffer.from(publicKey).equals(node.publicKey) &&
+          verifyEd25519(node.publicKey, helloSignedBytes(panelId, "", nonce), signature)
+        ) {
+          if (node.disabledAt) return reject(HelloRejectReason.NODE_DISABLED, "This node is disabled in the panel.");
+          db.update(nodes).set(report).where(eq(nodes.id, node.id)).run();
+          rememberConnectAddress(db, node.id, seen.v4 ?? seen.v6);
+          return { ok: true, nodeId: node.id, joined: false };
+        }
+      }
       if (!row || row.usedAt)
         return reject(HelloRejectReason.INVALID_TOKEN, "The join token is not valid. Create a new one with Add node.");
       if (row.expiresAt <= now) return reject(HelloRejectReason.TOKEN_EXPIRED, "The join token expired. Create a new one with Add node.");

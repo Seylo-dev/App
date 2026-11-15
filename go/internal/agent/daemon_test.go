@@ -268,6 +268,48 @@ func TestOutboxReplayAfterRestart(t *testing.T) {
 	}
 }
 
+// The panel accepted a join and the connection dropped before the agent
+// read its node id: the agent still holds the join token and joins with it
+// again. The panel lets the key that used the token in as that node, and
+// the agent then keeps the node id instead of the token.
+func TestJoinAnswerLost(t *testing.T) {
+	isolate(t)
+	panel := rpctest.NewFakePanel(t)
+	panel.AddJoinToken("tok")
+	layout := shortLayout(t)
+	if err := Join(layout, JoinOptions{PanelURL: panel.URL(), Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	beforeAnswer, err := LoadConfig(layout.ConfigFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	a := startDaemon(t, layout)
+	nodeID := panel.WaitConnected("")
+	waitUntil(t, "the agent connected", func() bool {
+		s, _ := a.d.backend.Status(ctx)
+		return s.PanelConnected && s.NodeID == nodeID
+	})
+	a.stop(t)
+	panel.WaitDisconnected(nodeID)
+
+	// The config as it was before the answer: the token, no node id.
+	if err := SaveConfig(layout.ConfigFile(), beforeAnswer); err != nil {
+		t.Fatal(err)
+	}
+	b := startDaemon(t, layout)
+	panel.WaitConnected(nodeID)
+	waitUntil(t, "the node id in config.yml", func() bool {
+		s, _ := b.d.backend.Status(ctx)
+		cfg, err := LoadConfig(layout.ConfigFile())
+		return s.PanelConnected && s.NodeID == nodeID && err == nil && cfg.NodeID == nodeID && cfg.JoinToken == ""
+	})
+	if r := panel.Rejects(); len(r) != 0 {
+		t.Fatalf("rejected: %v", r)
+	}
+}
+
 func TestHandshakeRejections(t *testing.T) {
 	isolate(t)
 	panel := rpctest.NewFakePanel(t)

@@ -40,7 +40,7 @@ type FakePanel struct {
 
 	mu       sync.Mutex
 	caps     []string
-	tokens   map[string]bool // token -> used
+	tokens   map[string]string // token -> the node it joined, "" until used
 	nodes    map[string]ed25519.PublicKey
 	nextNode int
 	sessions map[string]*rpc.Session
@@ -120,7 +120,7 @@ func NewFakePanel(tb testing.TB, opts ...FakePanelOption) *FakePanel {
 	edge, edgePriv, _ := ed25519.GenerateKey(rand.Reader)
 	p := &FakePanel{
 		tb: tb, PanelID: "fakepanel", EdgeKey: edge, EdgePrivate: edgePriv, caps: cfg.caps,
-		tokens: map[string]bool{}, nodes: map[string]ed25519.PublicKey{}, sessions: map[string]*rpc.Session{},
+		tokens: map[string]string{}, nodes: map[string]ed25519.PublicKey{}, sessions: map[string]*rpc.Session{},
 		seen: map[uint64]bool{}, changed: make(chan struct{}),
 		names: map[string]string{}, choices: map[string]agentv1.PanelAddressChoice{},
 	}
@@ -246,7 +246,7 @@ func (p *FakePanel) HoldClosedSessions(d time.Duration) {
 func (p *FakePanel) AddJoinToken(token string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.tokens[token] = false
+	p.tokens[token] = ""
 }
 
 // FailReports makes ReportCrash/ReportEvent answer err (nil: succeed).
@@ -364,6 +364,13 @@ func (p *FakePanel) Hellos() []*agentv1.ClientHello {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return slices.Clone(p.hellos)
+}
+
+// Rejects returns every rejection sent so far, in order.
+func (p *FakePanel) Rejects() []*agentv1.HelloRejected {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.rejects)
 }
 
 // WaitRejected waits for the n-th rejection and returns it.
@@ -587,17 +594,29 @@ func (p *FakePanel) decide(h *agentv1.ClientHello, nonce []byte) (string, *agent
 		}
 		return id, nil
 	case *agentv1.ClientHello_Join:
-		used, ok := p.tokens[cred.Join.GetToken()]
-		if !ok || used {
+		token, pub := cred.Join.GetToken(), ed25519.PublicKey(cred.Join.GetPublicKey())
+		joined, ok := p.tokens[token]
+		if !ok {
 			return reject(agentv1.HelloRejectReason_HELLO_REJECT_REASON_INVALID_TOKEN, "invalid token")
 		}
-		pub := ed25519.PublicKey(cred.Join.GetPublicKey())
+		if joined != "" {
+			// Like the panel (agent-hub/handshake.ts): the key that used the
+			// token gets its node back, since the agent may never have read
+			// the first answer; any other key is refused.
+			if !pub.Equal(p.nodes[joined]) || !rpc.VerifyHello(pub, p.PanelID, "", nonce, cred.Join.GetSignature()) {
+				return reject(agentv1.HelloRejectReason_HELLO_REJECT_REASON_INVALID_TOKEN, "invalid token")
+			}
+			if p.sessions[joined] != nil {
+				return reject(agentv1.HelloRejectReason_HELLO_REJECT_REASON_ALREADY_CONNECTED, "already connected")
+			}
+			return joined, nil
+		}
 		if !rpc.VerifyHello(pub, p.PanelID, "", nonce, cred.Join.GetSignature()) {
 			return reject(agentv1.HelloRejectReason_HELLO_REJECT_REASON_BAD_SIGNATURE, "bad join signature")
 		}
-		p.tokens[cred.Join.GetToken()] = true
 		p.nextNode++
 		id := fmt.Sprintf("node%d", p.nextNode)
+		p.tokens[token] = id
 		p.nodes[id] = slices.Clone(pub)
 		return id, nil
 	default:
