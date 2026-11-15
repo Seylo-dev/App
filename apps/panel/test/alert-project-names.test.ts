@@ -252,7 +252,9 @@ test("a service moved to another project is linked where it is now; the alert ke
   expect(stayed).toMatchObject([{ projectId, serviceProjectId: projectId, link: `/p/${projectId}/s/${member}` }]);
   // A node alert is about no service.
   emit({ case: "nodeAlert", value: create(NodeAlertSchema, { kind: NodeAlertKind.DISK_LOW, message: "Disk / is 91% full" }) });
-  expect((await callOp(panel, alertOps.list, { nodeId }, { cookie })).body.alerts[0]).toMatchObject({
+  // The node's crash alerts are listed too, and one raised in the same millisecond may come first.
+  const nodeAlerts = (await callOp(panel, alertOps.list, { nodeId }, { cookie })).body.alerts;
+  expect(nodeAlerts.find((a: { serviceId: string | null }) => a.serviceId === null)).toMatchObject({
     serviceProjectId: null,
     link: "/nodes",
   });
