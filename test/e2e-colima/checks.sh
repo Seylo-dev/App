@@ -3487,13 +3487,28 @@ p39_builds() {
     test "$(node_can_build c)" = false
   ev "C's config.yml says $(on "$E2E_C" "grep '^can_build:' $BRAND_DATA_DIR/config.yml" 2>/dev/null || echo 'no can_build'), which the panel only reports"
 
-  # The same command again: its token is used, the panel refuses the node and the installer exits 3.
+  # The same command again on C: its token is used, but by C's own key, so C gets its node back
+  # (since 0.2.18; an agent that never read the panel's answer to its join joins again the same way).
+  local cid
+  cid=$(node_id c)
   again=$JOIN_CMD
   case " $again " in *" --force "*) ;; *) again="$again --force" ;; esac
   rc=0
   out=$(on "$E2E_C" "$again" 2>&1) || rc=$?
   printf '%s\n' "$out" >>"$RES/$CUR.log"
-  ev "the used join command again: exit $rc, $(printf '%s' "$out" | grep -E 'refused|not valid|already used' | head -2 | tr '\n' ' ' | head -c 300)"
+  ev "the used join command again on the server that used it: exit $rc"
+  map_nodes
+  expect "the server that used a token joins again with it and keeps its node (exit $rc, node $(node_id c), was $cid)" \
+    test "$rc" = 0 -a -n "$cid" -a "$(node_id c)" = "$cid"
+  expect "and its closing block says it is a node of the panel" grep -qF 'This server is a node of the panel now.' <<<"$out"
+  wait_for 120 "C online" online_ge 3 || true
+
+  # A token the panel never made: the panel refuses the node and the installer exits 3.
+  again=$(printf '%s' "$again" | sed -E "s/--token [^ ]+/--token '${SLUG}_join_$(openssl rand -hex 21)x'/")
+  rc=0
+  out=$(on "$E2E_C" "$again" 2>&1) || rc=$?
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  ev "a join command with a token the panel never made: exit $rc, $(printf '%s' "$out" | grep -E 'refused|not valid|already used' | head -2 | tr '\n' ' ' | head -c 300)"
   expect "a join the panel refuses exits 3 (exit $rc)" test "$rc" = 3
   expect "and its closing block says the panel refused this node" grep -qF 'Installed, but the panel refused this node.' <<<"$out"
 
