@@ -148,7 +148,12 @@ func TestConnectionCaps(t *testing.T) {
 }
 
 func TestIdleConnectionsAreCut(t *testing.T) {
-	m := newManager(t, echoServer(t), func(c *Config) { c.IdleTimeout = 300 * time.Millisecond })
+	// The idle timeout is all the slack busy has: each tick below has to
+	// cross the gate and come back before it runs out, and a loaded CI
+	// runner with -race can stall one round trip for a few hundred ms
+	// (300 ms left only 200 ms past the 100 ms between ticks).
+	const idleTimeout = time.Second
+	m := newManager(t, echoServer(t), func(c *Config) { c.IdleTimeout = idleTimeout })
 	ports, err := m.Sync(context.Background(), "svc1", []Listener{{ID: "public-80", ContainerPort: 80}})
 	if err != nil {
 		t.Fatal(err)
@@ -165,20 +170,26 @@ func TestIdleConnectionsAreCut(t *testing.T) {
 	defer busy.Close()
 	_ = busy.SetDeadline(time.Time{})
 	r := bufio.NewReader(busy)
-	for range 6 {
-		time.Sleep(100 * time.Millisecond)
+	tick := func() {
+		t.Helper()
 		if _, err := io.WriteString(busy, "tick\n"); err != nil {
 			t.Fatalf("a busy connection was cut: %v", err)
 		}
-		_ = busy.SetReadDeadline(time.Now().Add(time.Second))
+		_ = busy.SetReadDeadline(time.Now().Add(2 * idleTimeout))
 		if _, err := r.ReadString('\n'); err != nil {
 			t.Fatalf("a busy connection was cut: %v", err)
 		}
 	}
-	// 600 ms passed with traffic on busy only: idle is gone.
-	if !closedSoon(idle, 100*time.Millisecond) {
-		t.Fatal("an idle connection was kept past the idle timeout")
+	// Traffic on busy only, about every 100 ms, until the gate cuts idle.
+	deadline := time.Now().Add(idleTimeout + 3*time.Second)
+	for !closedSoon(idle, 100*time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("an idle connection was kept past the idle timeout")
+		}
+		tick()
 	}
+	// busy outlived idle and is still served.
+	tick()
 }
 
 // Each listener cuts idle connections after its own IdleTimeout (a

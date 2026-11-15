@@ -169,6 +169,9 @@ func TestPanelSwapSucceeds(t *testing.T) {
 	if got := readString(t, filepath.Join(dataDir, "panel", "panel.db")); got != "migrated" {
 		t.Fatalf("panel.db = %q", got)
 	}
+	// The swap clears the journal after it queues the result, and releases
+	// the lock last.
+	waitFor(t, "the swap to release the lock", func() bool { return s.lock.Holder() == "" })
 	if exists(filepath.Join(dataDir, "update", panelJournal)) {
 		t.Fatal("journal left behind")
 	}

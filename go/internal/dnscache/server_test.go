@@ -250,13 +250,19 @@ func TestSlowUpstreamTimes(t *testing.T) {
 // A closed port upstream fails at once and the next server answers.
 func TestClosedPortMovesOnFast(t *testing.T) {
 	c := newClock()
-	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	good := newFakeUpstream(t)
+	// The closed port stays held by a socket connected to good. A port
+	// bound and closed again is free for anyone: the forwarder's own fresh
+	// socket can get it and read back its own question, or a test running
+	// alongside binds it, and the try then waits out its whole perTry. A
+	// connected socket takes datagrams from its peer only, so the kernel
+	// still refuses the question with ICMP port unreachable.
+	hold, err := net.DialUDP("udp4", nil, good.udp.LocalAddr().(*net.UDPAddr))
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed := pc.LocalAddr().String()
-	_ = pc.Close()
-	good := newFakeUpstream(t)
+	defer hold.Close()
+	closed := hold.LocalAddr().String()
 	s := newTestServer(c, closed, good.addr)
 	defer s.Close()
 	start := time.Now()

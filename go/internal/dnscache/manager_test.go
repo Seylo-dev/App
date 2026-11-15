@@ -2,6 +2,7 @@ package dnscache
 
 import (
 	"context"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"os"
@@ -82,6 +83,35 @@ func newManagerRigOn(t *testing.T, port int) *managerRig {
 	}
 	r.m = NewManager(r.opts)
 	return r
+}
+
+// holdPort is another program on a free 127.0.0.1 port, UDP and TCP
+// alike, until release. The cache listens on both, so a port picked by
+// UDP alone may already be in use on TCP. And the port is never one the
+// kernel hands out by itself (Linux from 32768, macOS from 49152): once
+// released, a fresh socket in any test running alongside could get such
+// a port before the cache binds it again.
+func holdPort(t *testing.T) (port int, release func()) {
+	t.Helper()
+	ip := net.IPv4(127, 0, 0, 1)
+	for range 50 {
+		port := 20000 + rand.IntN(10000)
+		udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: port})
+		if err != nil {
+			continue
+		}
+		tcp, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: ip, Port: port})
+		if err != nil {
+			_ = udp.Close()
+			continue
+		}
+		var once sync.Once
+		release := func() { once.Do(func() { _ = udp.Close(); _ = tcp.Close() }) }
+		t.Cleanup(release)
+		return port, release
+	}
+	t.Fatal("no port in 20000-29999 on 127.0.0.1 is free for both UDP and TCP")
+	return 0, nil
 }
 
 // restart is the agent starting again: a new Manager with the same
@@ -317,11 +347,7 @@ func TestManagerPortTaken(t *testing.T) {
 // restarts. Turning the cache on again or the health check run by hand
 // tries once more.
 func TestManagerPortTakenIsNotRetriedByItself(t *testing.T) {
-	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := holder.LocalAddr().(*net.UDPAddr).Port
+	port, release := holdPort(t)
 	r := newManagerRigOn(t, port)
 	r.opts.Holder = func(context.Context, int) string { return "dnsmasq" }
 	r.m.opts.Holder = r.opts.Holder
@@ -339,7 +365,7 @@ func TestManagerPortTakenIsNotRetriedByItself(t *testing.T) {
 
 	// dnsmasq restarts: the port is free for a moment. The next passes
 	// leave it to dnsmasq.
-	_ = holder.Close()
+	release()
 	r.m.step(ctx)
 	r.m.step(ctx)
 	if r.m.isListening() {
@@ -374,16 +400,13 @@ func TestManagerPortTakenIsNotRetriedByItself(t *testing.T) {
 
 // Turning the cache off and on again tries the port once more.
 func TestManagerPortTakenRetriedWhenTurnedOnAgain(t *testing.T) {
-	holder, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := newManagerRigOn(t, holder.LocalAddr().(*net.UDPAddr).Port)
+	port, release := holdPort(t)
+	r := newManagerRigOn(t, port)
 	ctx := context.Background()
 	defer r.m.closeListener()
 	r.m.SetEnabled(true)
 	r.m.step(ctx)
-	_ = holder.Close()
+	release()
 	r.m.step(ctx)
 	if r.m.isListening() {
 		t.Fatal("took the port on its own pass")
