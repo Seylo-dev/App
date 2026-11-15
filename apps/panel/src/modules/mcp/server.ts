@@ -11,6 +11,8 @@ import type { Deps } from "../../deps";
 import { clientIp } from "../../http/client-ip";
 import { jsonResponse } from "../../http/compress";
 import { requestOrigin } from "../../http/request-origin";
+import { pngSize } from "../push/http";
+import { uploadedFavicon } from "../settings/http";
 import { readPanelName } from "../settings/keys";
 import { readMcpEnabled, readMcpSafety } from "./keys";
 import { callTool, toolsFor } from "./tools";
@@ -80,7 +82,7 @@ export async function handleMcp(deps: Deps, request: Request, socketIp: string |
   }
 
   const ip = clientIp(request, socketIp, deps.proxy.trusts(socketIp));
-  const context = { deps, principal, bearerToken: credentials.bearerToken, ip, userAgent: request.headers.get("user-agent") };
+  const context = { deps, principal, bearerToken: credentials.bearerToken, ip, userAgent: request.headers.get("user-agent"), origin };
   if (Array.isArray(body)) {
     if (body.length === 0) return Response.json(rpcError(null, -32600, "Empty batch."), { status: 400 });
     const replies = (await Promise.all(body.map((message) => handleMessage(context, message)))).filter((r) => r !== null);
@@ -97,6 +99,39 @@ interface MessageContext {
   bearerToken: string;
   ip: string | null;
   userAgent: string | null;
+  /** Where the client reached /mcp, for the icon URLs. */
+  origin: string;
+}
+
+/** An icon in serverInfo (MCP 2025-11-25). */
+export interface McpIcon {
+  src: string;
+  mimeType: string;
+  sizes?: string[];
+}
+
+/**
+ * The panel's icon for MCP clients (serverInfo.icons): the favicon
+ * uploaded under Appearance, whatever its format, else the built-in icon.
+ * Absolute URLs on the origin the client reached /mcp at, so they share
+ * the server's origin; the files are public, like the sign-in page's.
+ */
+export async function mcpIcons(deps: Pick<Deps, "db" | "config">, origin: string): Promise<McpIcon[]> {
+  const uploaded = await uploadedFavicon(deps);
+  if (uploaded) {
+    const icon: McpIcon = { src: `${origin}${uploaded.url}`, mimeType: uploaded.contentType };
+    if (uploaded.contentType === "image/svg+xml") icon.sizes = ["any"];
+    if (uploaded.contentType === "image/png") {
+      const size = pngSize(new Uint8Array(await uploaded.file.slice(0, 24).arrayBuffer()));
+      if (size) icon.sizes = [`${size.width}x${size.height}`];
+    }
+    return [icon];
+  }
+  return [
+    { src: `${origin}/pwa/icon-192.png`, mimeType: "image/png", sizes: ["192x192"] },
+    { src: `${origin}/pwa/icon-512.png`, mimeType: "image/png", sizes: ["512x512"] },
+    { src: `${origin}/favicon.svg`, mimeType: "image/svg+xml", sizes: ["any"] },
+  ];
 }
 
 async function handleMessage(ctx: MessageContext, message: unknown) {
@@ -121,7 +156,7 @@ async function handleMessage(ctx: MessageContext, message: unknown) {
       return rpcResult(id, {
         protocolVersion: supportedProtocolVersions.includes(asked) ? asked : supportedProtocolVersions[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: slug, title: panelName, version: ctx.deps.config.version },
+        serverInfo: { name: slug, title: panelName, version: ctx.deps.config.version, icons: await mcpIcons(ctx.deps, ctx.origin) },
         instructions:
           `Tools of the ${panelName} deploy panel (${displayName}): projects, services, deployments, domains, logs and more. ` +
           `Tools that change things may be refused for this token (read-only by default). ${destructive}`,

@@ -17,7 +17,7 @@ let panel: TestPanel | undefined;
 afterEach(() => panel?.close());
 
 const indexHtml =
-  '<!doctype html><html lang="en"><head><meta charset="utf-8" /><link rel="icon" href="/favicon.svg" type="image/svg+xml" /><title>Panel</title><link rel="stylesheet" href="/assets/app.css"></head><body><div id="root"></div></body></html>';
+  '<!doctype html><html lang="en"><head><meta charset="utf-8" /><link rel="icon" href="/favicon.ico" sizes="32x32" /><link rel="icon" href="/favicon.svg" type="image/svg+xml" /><title>Panel</title><link rel="stylesheet" href="/assets/app.css"></head><body><div id="root"></div></body></html>';
 
 function webDist() {
   const dir = mkdtempSync(join(tmpdir(), "web-dist-"));
@@ -83,6 +83,8 @@ test("index.html carries the theme, name, accent and custom CSS before the app l
   expect(html).toContain('<style id="panel-accent">:root{--primary:#0F8A6A;');
   expect(html).toContain("<title>Acme &lt;Cloud&gt;</title>");
   expect(html).toContain(`<link rel="icon" href="/branding/favicon?v=${"ab".repeat(8)}" />`);
+  // The uploaded favicon is the only icon link: a browser that prefers SVG cannot pick the built-in one.
+  expect(html.match(/<link rel="icon"/g)).toHaveLength(1);
   // Custom CSS cannot close its <style> element.
   expect(html).not.toContain("</style><script>x");
   // Styles come after the app stylesheet; the charset meta stays first.
@@ -96,6 +98,8 @@ test("index.html carries the theme, name, accent and custom CSS before the app l
 test("system mode leaves light or dark to the inline script, which runs before the body paints", () => {
   panel = testPanel();
   const html = injectBoot(indexHtml, readBoot(panel.deps.db));
+  // No uploaded favicon: the built-in ICO and SVG links both stay.
+  expect(html.match(/<link rel="icon"/g)).toHaveLength(2);
   // The preset is in the markup; no dark class from the server, so a dark device is not forced light or dark here.
   expect(html).toContain('<html lang="en" data-theme="seylo" data-color-mode="system">');
   const script = html.match(/<script>(.*?)<\/script>/)?.[1] ?? "";

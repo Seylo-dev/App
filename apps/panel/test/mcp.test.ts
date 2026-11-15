@@ -7,7 +7,10 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { approvals as approvalOps, auth, databases as dbOps, env as envOps, mcp, projects as projectOps } from "@seylo/ops";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { approvals as approvalOps, auth, databases as dbOps, env as envOps, mcp, projects as projectOps, settings } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { approvals, auditLog, mcpAuthCodes, mcpClients, nodes, projects, services, sessions } from "../src/db/schema";
 import { runOpAs } from "../src/modules/approvals/run-as";
@@ -308,6 +311,63 @@ test("OAuth read-only token: initialize, filtered tools, calls through the pipel
   expect(clients.body.clients).toMatchObject([{ name: "Claude Code", activeTokens: 1 }]);
   await send("/oauth/revoke", { method: "POST", body: new URLSearchParams({ token: next.access_token }).toString() });
   expect((await rpc(next.access_token, "ping")).status).toBe(401);
+});
+
+test("initialize gives the panel's icon: the favicon uploaded under Appearance, else the built-in one", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  panel.deps.config.dataDir = mkdtempSync(join(tmpdir(), "seylo-mcp-icon-"));
+  const { cookie } = await createUser(panel, "owner");
+  const tokens = await connect(cookie, "read");
+  const icons = async () =>
+    (
+      await rpc(tokens.access_token, "initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "t", version: "1" },
+      })
+    ).body.result.serverInfo.icons;
+
+  // Absolute URLs on the origin the client reached /mcp at.
+  expect(await icons()).toEqual([
+    { src: `${origin}/pwa/icon-192.png`, mimeType: "image/png", sizes: ["192x192"] },
+    { src: `${origin}/pwa/icon-512.png`, mimeType: "image/png", sizes: ["512x512"] },
+    { src: `${origin}/favicon.svg`, mimeType: "image/svg+xml", sizes: ["any"] },
+  ]);
+
+  // A 64 x 64 PNG: its size is read from the file.
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000400000004008060000001f15c489", "hex");
+  const uploaded = await callOp(
+    panel,
+    settings.uploadBrandAsset,
+    { kind: "favicon", dataUrl: `data:image/png;base64,${png.toString("base64")}` },
+    { cookie },
+  );
+  expect(uploaded.status).toBe(200);
+  expect(await icons()).toEqual([{ src: `${origin}${uploaded.body.favicon}`, mimeType: "image/png", sizes: ["64x64"] }]);
+  // MCP clients fetch it without the panel's session.
+  const served = await send(uploaded.body.favicon);
+  expect(served.status).toBe(200);
+  expect(Buffer.from(await served.arrayBuffer()).equals(png)).toBe(true);
+
+  // An SVG fits any size; an ICO goes out as it is, without sizes.
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
+  await callOp(
+    panel,
+    settings.uploadBrandAsset,
+    { kind: "favicon", dataUrl: `data:image/svg+xml;base64,${svg.toString("base64")}` },
+    { cookie },
+  );
+  expect((await icons())[0]).toMatchObject({ mimeType: "image/svg+xml", sizes: ["any"] });
+  const ico = Buffer.from([0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0]);
+  await callOp(
+    panel,
+    settings.uploadBrandAsset,
+    { kind: "favicon", dataUrl: `data:image/x-icon;base64,${ico.toString("base64")}` },
+    { cookie },
+  );
+  expect(await icons()).toEqual([
+    { src: expect.stringMatching(/^http:\/\/panel\.test\/branding\/favicon\?v=[0-9a-f]{16}$/), mimeType: "image/x-icon" },
+  ]);
 });
 
 test("destructive tool calls wait for a person; approving runs them as the approver", async () => {

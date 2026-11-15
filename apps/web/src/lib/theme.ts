@@ -52,7 +52,7 @@ export function applyBoot(boot: PanelBoot): void {
   current = boot;
   paintAppearance(boot);
   document.title = boot.name;
-  faviconLink().href = boot.favicon ?? "/favicon.svg";
+  setIconLinks(boot.favicon);
   for (const listener of listeners) listener();
 }
 
@@ -105,13 +105,38 @@ function styleElement(id: string): HTMLStyleElement {
   return element;
 }
 
-function faviconLink(): HTMLLinkElement {
-  const existing = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  if (existing) return existing;
-  const link = document.createElement("link");
-  link.rel = "icon";
-  document.head.append(link);
-  return link;
+/** The built-in icons, as in index.html: the ICO for tools that want one, the SVG for browsers. */
+const builtInIcons: { href: string; sizes?: string; type?: string }[] = [
+  { href: "/favicon.ico", sizes: "32x32" },
+  { href: "/favicon.svg", type: "image/svg+xml" },
+];
+
+/**
+ * The icon links: an uploaded favicon alone (a browser that prefers SVG
+ * would otherwise keep the built-in one), else the built-in pair. Left
+ * alone when they already match, so the browser does not fetch again.
+ */
+function setIconLinks(favicon: string | null): void {
+  const wanted = favicon ? [{ href: favicon }] : builtInIcons;
+  const links = [...document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')];
+  const same =
+    links.length === wanted.length &&
+    links.every(
+      (link, i) =>
+        link.getAttribute("href") === wanted[i]?.href &&
+        link.getAttribute("sizes") === (wanted[i]?.sizes ?? null) &&
+        link.getAttribute("type") === (wanted[i]?.type ?? null),
+    );
+  if (same) return;
+  for (const link of links) link.remove();
+  for (const icon of wanted) {
+    const link = document.createElement("link");
+    link.rel = "icon";
+    link.href = icon.href;
+    if (icon.sizes) link.setAttribute("sizes", icon.sizes);
+    if (icon.type) link.type = icon.type;
+    document.head.append(link);
+  }
 }
 
 function subscribe(listener: () => void): () => void {

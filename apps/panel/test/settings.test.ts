@@ -3,7 +3,7 @@
 // telemetry opt-in with the exact payload the collector accepts.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { settings, telemetry } from "@seylo/ops";
@@ -127,6 +127,46 @@ test("branding: upload checks the bytes, serves the file and changes the boot da
   const removed = await callOp(panel, settings.removeBrandAsset, { kind: "favicon" }, { cookie });
   expect(removed.body.favicon).toBeNull();
   expect((await panel.app.handle(new Request("http://panel.test/branding/favicon"))).status).toBe(404);
+});
+
+test("/favicon.ico is the favicon uploaded under Appearance, else the built-in one, never the app's page", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const dist = mkdtempSync(join(tmpdir(), "seylo-web-dist-"));
+  const ico = Buffer.from([0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0]);
+  writeFileSync(join(dist, "favicon.ico"), ico);
+  panel.deps.config.webDist = dist;
+  const get = (headers: Record<string, string> = {}) => panel.app.handle(new Request("http://panel.test/favicon.ico", { headers }));
+
+  const builtIn = await get();
+  expect(builtIn.status).toBe(200);
+  expect(builtIn.headers.get("content-type")).toBe("image/x-icon");
+  expect(Buffer.from(await builtIn.arrayBuffer()).equals(ico)).toBe(true);
+
+  const uploaded = await callOp(
+    panel,
+    settings.uploadBrandAsset,
+    { kind: "favicon", dataUrl: `data:image/png;base64,${png.toString("base64")}` },
+    { cookie },
+  );
+  expect(uploaded.status).toBe(200);
+  const custom = await get();
+  expect(custom.status).toBe(200);
+  expect(custom.headers.get("content-type")).toBe("image/png");
+  expect(custom.headers.get("cache-control")).toBe("no-cache");
+  expect(custom.headers.get("content-security-policy")).toContain("sandbox");
+  expect(Buffer.from(await custom.arrayBuffer()).equals(png)).toBe(true);
+  // The address has no version: a client asks again and gets a 304 while the file is the same.
+  const etag = custom.headers.get("etag") ?? "";
+  expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+  expect((await get({ "if-none-match": etag })).status).toBe(304);
+
+  expect((await callOp(panel, settings.removeBrandAsset, { kind: "favicon" }, { cookie })).status).toBe(200);
+  expect(Buffer.from(await (await get({ "if-none-match": etag })).arrayBuffer()).equals(ico)).toBe(true);
+  // A panel without a built web app has none: a 404, not index.html.
+  panel.deps.config.webDist = join(dist, "missing");
+  const none = await get();
+  expect(none.status).toBe(404);
+  expect(none.headers.get("content-type")).toStartWith("text/plain");
 });
 
 test("appearance: admins change the theme; only the owner changes custom CSS", async () => {

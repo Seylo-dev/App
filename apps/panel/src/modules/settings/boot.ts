@@ -112,7 +112,16 @@ export function injectBoot(html: string, boot: settingOps.PanelBoot): string {
     return `<html${clean} ${dom.themeAttribute}="${boot.preset}" ${dom.colorModeAttribute}="${boot.colorMode}"${classAttr}>`;
   });
   out = out.replace(/<title>[^<]*<\/title>/i, () => `<title>${escapeHtml(boot.name)}</title>`);
-  if (boot.favicon) out = out.replace(/<link rel="icon"[^>]*>/i, () => `<link rel="icon" href="${escapeHtml(boot.favicon ?? "")}" />`);
+  if (boot.favicon) {
+    // The first icon link becomes the uploaded favicon and the others go, so
+    // a browser that prefers the built-in SVG cannot pick it over the upload.
+    let first = true;
+    out = out.replace(/<link rel="icon"[^>]*>/gi, () => {
+      if (!first) return "";
+      first = false;
+      return `<link rel="icon" href="${escapeHtml(boot.favicon ?? "")}" />`;
+    });
+  }
   out = out.replace(/<\/head>/i, () => `${tail}</head>`);
   return out;
 }
