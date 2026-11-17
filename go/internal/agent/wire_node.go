@@ -113,6 +113,20 @@ func provideNode(d *Deps) error {
 			return d.Docker.PullImage(ctx, ref, auth)
 		},
 	}
+	mover := update.NewPanelMover(update.MoveOptions{
+		DataDir:        d.Layout.Root(),
+		Runtime:        rt,
+		Host:           moveHost(d),
+		PanelServiceID: docker.PanelServiceID,
+		PanelURL: func() string {
+			u, _ := panelAddress(d)
+			return u
+		},
+		Logger: d.Logger.With("component", "panel-move"),
+	}, lock)
+	if d.RegistryServer != nil {
+		d.RegistryServer.Paused = mover.Moving
+	}
 	d.Updater = &update.Service{
 		Agent: agentUpdater,
 		Panel: update.NewPanelSwapper(update.PanelOptions{
@@ -143,17 +157,7 @@ func provideNode(d *Deps) error {
 				found := proto.Clone(info).(*agentv1.DockerUpdateInfo)
 				d.Facts.Update(func(f *agentv1.NodeFacts) { f.DockerUpdate = found })
 			}}, lock),
-		Mover: update.NewPanelMover(update.MoveOptions{
-			DataDir:        d.Layout.Root(),
-			Runtime:        rt,
-			Host:           moveHost(d),
-			PanelServiceID: docker.PanelServiceID,
-			PanelURL: func() string {
-				u, _ := panelAddress(d)
-				return u
-			},
-			Logger: d.Logger.With("component", "panel-move"),
-		}, lock),
+		Mover:  mover,
 		System: update.NewSystemdSystem(),
 		Lock:   lock,
 		Logger: d.Logger,

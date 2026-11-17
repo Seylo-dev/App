@@ -75,6 +75,11 @@ type Server struct {
 	// agent restart (every update restarts it) does not put the next one
 	// off by another day. Empty keeps it in memory only (tests).
 	StatePath string
+	// Paused, when it says true, refuses new collections (ErrBusy): a
+	// panel move on this node stops, renames and starts the registry
+	// itself, and a collection's restart must not land in the middle.
+	// Nil never pauses. WaitGC lets the move wait for one under way.
+	Paused func() bool
 
 	mu sync.Mutex
 	// dialing counts Dials that have not got their connection yet.
@@ -101,6 +106,7 @@ func (s *Server) clock() time.Time {
 
 func (s *Server) name() string    { return or(s.Name, ContainerName) }
 func (s *Server) gcName() string  { return s.name() + "-gc" }
+func (s *Server) dryName() string { return s.name() + "-gc-dry" }
 func (s *Server) network() string { return or(s.Network, NetworkName) }
 func (s *Server) image() string   { return or(s.Image, Image) }
 
@@ -270,7 +276,7 @@ func (s *Server) ensure(ctx context.Context) (string, error) {
 		// An agent that stopped in the middle of a collection left its
 		// collector to dockerd: it must never run next to a registry that
 		// takes pushes.
-		s.removeCollector(ctx)
+		s.removeContainer(ctx, s.gcName())
 	}
 	switch {
 	case err != nil:
@@ -460,7 +466,7 @@ func (s *Server) CollectGarbage(ctx context.Context) (GCResult, error) {
 		s.mu.Unlock()
 		return GCResult{}, errCollecting
 	}
-	if s.dialing > 0 {
+	if s.dialing > 0 || (s.Paused != nil && s.Paused()) {
 		s.mu.Unlock()
 		return GCResult{}, ErrBusy
 	}
@@ -503,8 +509,8 @@ func (s *Server) CollectGarbage(ctx context.Context) (GCResult, error) {
 	// collector would go on in dockerd, deleting blobs that pushes to the
 	// restarted registry rely on. Killing it is safe: it only ever deletes
 	// blobs nothing referenced when it started.
-	defer s.removeCollector(ctx)
-	s.removeCollector(ctx) // one left over from an agent that stopped midway
+	defer s.removeContainer(ctx, s.gcName())
+	s.removeContainer(ctx, s.gcName()) // one left over from an agent that stopped midway
 	if _, err := s.docker(ctx, s.collectorArgs(false)...); err != nil {
 		return GCResult{}, fmt.Errorf("collecting garbage: %w", err)
 	}
@@ -522,6 +528,14 @@ func (s *Server) PruneRegistry(ctx context.Context, dryRun bool) (uint64, []stri
 		return 0, nil, nil
 	}
 	if dryRun {
+		s.mu.Lock()
+		collecting := s.gcActive
+		s.mu.Unlock()
+		if collecting {
+			// Reading the store while the sweep deletes from it gives a
+			// wrong answer.
+			return 0, []string{"registry: skipped, a garbage collection is running"}, nil
+		}
 		n, err := s.reclaimable(ctx)
 		if err != nil {
 			return 0, nil, fmt.Errorf("reading what garbage collection would free: %w", err)
@@ -550,6 +564,10 @@ const reclaimTimeout = 45 * time.Second
 func (s *Server) reclaimable(ctx context.Context) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, reclaimTimeout)
 	defer cancel()
+	// A timed-out dry run would go on scanning in dockerd: removed after,
+	// and before (one an agent that stopped midway left).
+	s.removeContainer(ctx, s.dryName())
+	defer s.removeContainer(ctx, s.dryName())
 	out, err := s.docker(ctx, s.collectorArgs(true)...)
 	if err != nil {
 		return 0, err
@@ -565,8 +583,10 @@ func (s *Server) collectorArgs(dryRun bool) []string {
 	}
 	args := []string{"run", "--rm", "--network", "none", "--cgroup-parent", docker.CgroupParent,
 		"-v", mount, "-e", "OTEL_TRACES_EXPORTER=none", "--entrypoint", "registry"}
-	if !dryRun {
-		// Named, so removeCollector finds one a cancelled run left behind.
+	// Named, so a run whose ctx ended can be found and removed.
+	if dryRun {
+		args = append(args, "--name", s.dryName())
+	} else {
 		args = append(args, "--name", s.gcName())
 	}
 	for _, l := range labels()[:3] {
@@ -579,12 +599,32 @@ func (s *Server) collectorArgs(dryRun bool) []string {
 	return append(args, "--delete-untagged=false", "/etc/distribution/config.yml")
 }
 
-// removeCollector removes the garbage collector's container, killing it
-// if it still runs. "No such container" is the usual answer.
-func (s *Server) removeCollector(ctx context.Context) {
+// removeContainer removes a garbage collector's container (name), killing
+// it if it still runs. "No such container" is the usual answer.
+func (s *Server) removeContainer(ctx context.Context, name string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
-	_, _ = s.docker(ctx, "container", "rm", "-f", s.gcName())
+	_, _ = s.docker(ctx, "container", "rm", "-f", name)
+}
+
+// WaitGC waits for a garbage collection under way to finish (it starts
+// the registry again last). A panel move calls it before it stops the
+// registry, with Paused already refusing new collections.
+func (s *Server) WaitGC(ctx context.Context) error {
+	for {
+		s.mu.Lock()
+		if !s.gcActive {
+			s.mu.Unlock()
+			return nil
+		}
+		done := s.gcDone
+		s.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // present reports whether this node runs the registry.

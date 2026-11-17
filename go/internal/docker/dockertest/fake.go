@@ -285,7 +285,7 @@ func (f *Fake) ListContainers(ctx context.Context, labels map[string]string) ([]
 			continue
 		}
 		out = append(out, docker.Container{
-			ID: c.ID, Name: c.Spec.Name, Image: c.Spec.Image, Labels: maps.Clone(c.Spec.Labels),
+			ID: c.ID, Name: c.Spec.Name, Image: c.Spec.Image, ImageID: "sha256:" + c.Spec.Image, Labels: maps.Clone(c.Spec.Labels),
 			State: c.state(), Created: c.Created,
 		})
 	}

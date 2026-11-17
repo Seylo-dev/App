@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -218,8 +219,10 @@ func (d *Docker) RemoveUnlabeledImage(ctx context.Context, id string) error {
 		return ErrImageInUse
 	}
 	repos := map[string]bool{}
-	for _, tag := range img.RepoTags {
-		repos[repository(tag)] = true
+	for _, ref := range append(slices.Clone(img.RepoTags), img.RepoDigests...) {
+		if r := repository(ref); r != "" && r != "<none>" {
+			repos[r] = true
+		}
 	}
 	if len(repos) > 1 {
 		return ErrImageShared

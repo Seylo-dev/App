@@ -312,8 +312,13 @@ func (m *PanelMover) panelAside(id string) string {
 func (m *PanelMover) registryAside(id string) string {
 	return filepath.Join(m.root(), registryBefore+id)
 }
-func (m *PanelMover) marker() string     { return filepath.Join(m.panelDir(), commitMarker) }
-func (m *PanelMover) journal() string    { return filepath.Join(updateDir(m.root()), moveJournal) }
+func (m *PanelMover) marker() string  { return filepath.Join(m.panelDir(), commitMarker) }
+func (m *PanelMover) journal() string { return filepath.Join(updateDir(m.root()), moveJournal) }
+
+// Moving reports whether a panel move on this node is under way or left
+// to finish (its journal exists): the registry's garbage collection waits
+// until it is over.
+func (m *PanelMover) Moving() bool       { return exists(m.journal()) }
 func (m *PanelMover) retireFile() string { return filepath.Join(updateDir(m.root()), retireJournal) }
 
 // panelMove is the journal of a moved panel started on this node. Every

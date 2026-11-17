@@ -386,3 +386,43 @@ func TestCreatedContainersRecordTheirImage(t *testing.T) {
 		t.Fatalf("recorded %v", used)
 	}
 }
+
+// Containers an older agent made, before the record existed, count from
+// the first pass after the start: once a deploy replaces them, their
+// images can go. Each image is reported once per worker.
+func TestAdoptedContainersRecordTheirImage(t *testing.T) {
+	h := newHarness(t)
+	h.apply(1, appSpec("api", 1, "api:1"))
+	h.runningContainer("api", 1)
+	h.stop()
+	var mu sync.Mutex
+	calls := 0
+	h.imageUsed = func(serviceID, imageID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if serviceID == "api" && imageID == "sha256:api:1" {
+			calls++
+		}
+	}
+	h.start()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("adopted container recorded %d times", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	h.rt.Refresh("api") // another pass
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("recorded again on a later pass: %d", calls)
+	}
+}

@@ -33,6 +33,8 @@ type worker struct {
 
 	rec       record
 	recLoaded bool
+	// imagesSeen are the images recordImages already reported.
+	imagesSeen map[string]bool
 	// expected are containers we stop or remove on purpose, so their die
 	// event is not a crash.
 	expected map[string]bool
@@ -254,6 +256,26 @@ func (w *worker) instances(ctx context.Context) ([]docker.Container, error) {
 	return list, nil
 }
 
+// recordImages tells ImageUsed which images the service's current
+// containers run, once per image and worker: containers an older agent
+// made (before the record existed) count from the first pass on, so their
+// images can be cleaned up once a deploy replaces them.
+func (w *worker) recordImages(spec *agentv1.ServiceSpec, list []docker.Container) {
+	if w.r.o.ImageUsed == nil || spec == nil {
+		return
+	}
+	for _, c := range list {
+		if c.ImageID == "" || w.imagesSeen[c.ImageID] || labelUint(c, docker.LabelGeneration) != spec.GetGeneration() {
+			continue
+		}
+		if w.imagesSeen == nil {
+			w.imagesSeen = map[string]bool{}
+		}
+		w.imagesSeen[c.ImageID] = true
+		w.r.o.ImageUsed(spec.GetId(), c.ImageID)
+	}
+}
+
 func labelUint(c docker.Container, key string) uint64 {
 	n, _ := strconv.ParseUint(c.Labels[key], 10, 64)
 	return n
@@ -279,6 +301,7 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 		return false
 	}
 	w.pruneReattached(list)
+	w.recordImages(spec, list)
 	if spec == nil {
 		if protectedInstances(list) {
 			// Protected (Panel project) containers are never removed for

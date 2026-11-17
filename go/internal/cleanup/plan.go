@@ -304,6 +304,12 @@ func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) 
 	}
 	kept := map[string]bool{}
 	for _, img := range s.Unlabeled {
+		if sharedNames(img) {
+			// RemoveUnlabeledImage keeps it too (ErrImageShared): someone
+			// else named it, and a preview must not count it.
+			kept[img.ID] = true
+			continue
+		}
 		for _, spec := range desired {
 			if namesImage(spec.GetImage(), img) {
 				// Also when no record ties it to that service yet (a deploy
@@ -361,6 +367,18 @@ func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) 
 		items = append(items, Item{Kind: KindImage, ID: img.ID, Name: imageName(img), Size: img.Size, Reason: reasons[img.ID], Unlabeled: true})
 	}
 	return items
+}
+
+// sharedNames reports whether img's tags and digests name more than one
+// repository (jobrun.RemoveUnlabeledImage's ErrImageShared rule).
+func sharedNames(img jobrun.Image) bool {
+	repos := map[string]bool{}
+	for _, ref := range append(slices.Clone(img.RepoTags), img.RepoDigests...) {
+		if r := repository(ref); r != "" && r != "<none>" {
+			repos[r] = true
+		}
+	}
+	return len(repos) > 1
 }
 
 // isPanelImage reports whether img is a tag or digest of the panel's own

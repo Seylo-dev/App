@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -155,7 +156,7 @@ func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapsh
 		// Every cleanup learns which images services' containers use (also
 		// the ones made before the record existed), whatever it removes:
 		// a cleanup of containers may remove the last one of an image.
-		u.Record(s.Now, imageUses(s.Containers)...)
+		u.Record(s.Now, imageUses(s.Containers, s.Desired)...)
 	}
 	if req.GetImages() {
 		if s.Images, err = l.opts.Docker.Images(ctx); err != nil {
@@ -195,18 +196,31 @@ func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapsh
 	return s, nil
 }
 
-// imageUses are the images services' containers run, for UsedImages: a
-// service's own containers under its id, helpers (a database's web UI,
-// cloudflared, a cron or backup run) under "<service>/<role>", so their
-// images rank apart from the service's versions.
-func imageUses(containers []jobrun.Container) []Use {
+// imageUses are the images services' containers run, for UsedImages:
+// under the service's id its own containers and its cron and backup runs
+// (they run its image), under "<service>/<role>" helpers that bring their
+// own image (a database's web UI, cloudflared), so those rank apart from
+// the service's versions. A stopped container of an older generation (one
+// a deploy failed to remove) is no use: it would hold a rollback place.
+func imageUses(containers []jobrun.Container, desired *agentv1.DesiredState) []Use {
+	generation := map[string]uint64{}
+	for _, spec := range desired.GetServices() {
+		generation[spec.GetId()] = spec.GetGeneration()
+	}
 	var uses []Use
 	for _, c := range containers {
 		svc := c.Labels[docker.LabelService]
 		if svc == "" || c.ImageID == "" {
 			continue
 		}
-		if role := c.Labels[docker.LabelRole]; role != "" {
+		switch role := c.Labels[docker.LabelRole]; role {
+		case "":
+			gen, err := strconv.ParseUint(c.Labels[docker.LabelGeneration], 10, 64)
+			if !c.Running && err == nil && gen < generation[svc] {
+				continue
+			}
+		case jobrun.RoleCron, jobrun.RoleBackup:
+		default:
 			svc += "/" + role
 		}
 		uses = append(uses, Use{Service: svc, Image: c.ImageID})

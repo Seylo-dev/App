@@ -186,6 +186,13 @@ func moveHost(d *Deps) update.MoveHost {
 		StopContainer:   stop,
 		RemoveContainer: remove,
 		StopRegistry: func(ctx context.Context) error {
+			// A garbage collection under way would start the registry
+			// again when it ends; new ones wait for the move (Paused).
+			if d.RegistryServer != nil {
+				if err := d.RegistryServer.WaitGC(ctx); err != nil {
+					return err
+				}
+			}
 			list, err := registryContainers(ctx)
 			if err != nil {
 				return err
@@ -198,6 +205,11 @@ func moveHost(d *Deps) update.MoveHost {
 			return nil
 		},
 		RemoveRegistry: func(ctx context.Context) error {
+			if d.RegistryServer != nil {
+				if err := d.RegistryServer.WaitGC(ctx); err != nil {
+					return err
+				}
+			}
 			list, err := registryContainers(ctx)
 			if err != nil {
 				return err

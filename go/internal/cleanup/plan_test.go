@@ -464,18 +464,42 @@ func TestLocalPrunesPulledImagesAndTheRegistry(t *testing.T) {
 	}
 }
 
-// A service's own containers count under its id, helpers under
-// "<service>/<role>".
+// A service's own containers and its cron and backup runs count under
+// its id, helpers with their own image under "<service>/<role>"; a stopped
+// container of an older generation counts as no use.
 func TestImageUses(t *testing.T) {
 	got := imageUses([]jobrun.Container{
-		{ImageID: "app", Labels: labels(docker.LabelService, "svc")},
-		{ImageID: "ui", Labels: labels(docker.LabelService, "svc", docker.LabelRole, jobrun.RoleDBUI)},
-		{ImageID: "app", Labels: labels(docker.LabelService, "svc", docker.LabelRole, jobrun.RoleCron)},
+		{ImageID: "app", Running: true, Labels: labels(docker.LabelService, "live", docker.LabelGeneration, "4")},
+		{ImageID: "ui", Labels: labels(docker.LabelService, "live", docker.LabelRole, jobrun.RoleDBUI)},
+		{ImageID: "app", Labels: labels(docker.LabelService, "live", docker.LabelRole, jobrun.RoleCron)},
+		{ImageID: "pg", Labels: labels(docker.LabelService, "live", docker.LabelRole, jobrun.RoleBackup)},
+		{ImageID: "old", Labels: labels(docker.LabelService, "live", docker.LabelGeneration, "2")},
+		{ImageID: "old-running", Running: true, Labels: labels(docker.LabelService, "live", docker.LabelGeneration, "3")},
 		{ImageID: "traefik", Labels: labels()},
-		{ImageID: "", Labels: labels(docker.LabelService, "svc")},
-	})
-	want := []Use{{Service: "svc", Image: "app"}, {Service: "svc/db-ui", Image: "ui"}, {Service: "svc/cron", Image: "app"}}
+		{ImageID: "", Labels: labels(docker.LabelService, "live")},
+	}, desiredState())
+	want := []Use{{Service: "live", Image: "app"}, {Service: "live/db-ui", Image: "ui"}, {Service: "live", Image: "app"},
+		{Service: "live", Image: "pg"}, {Service: "live", Image: "old-running"}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("uses = %v, want %v", got, want)
+	}
+}
+
+// An image whose names span repositories (someone else tagged it) is kept
+// by the plan too, so a preview does not count what every run keeps.
+func TestPlanKeepsImagesNamedInTwoRepositories(t *testing.T) {
+	s := Snapshot{Desired: desiredState(),
+		Unlabeled: []jobrun.Image{
+			{ID: "two-tags", RepoTags: []string{"nginx:1", "myorg/proxy:1"}, Size: 10},
+			{ID: "tag-and-digest", RepoTags: []string{"nginx:2"}, RepoDigests: []string{"mirror.gcr.io/library/nginx@sha256:a"}, Size: 10},
+			{ID: "same-repo", RepoTags: []string{"nginx:3", "nginx:3.1"}, RepoDigests: []string{"nginx@sha256:b", "<none>@<none>"}, Size: 10},
+		},
+		UsedBy: map[string]map[string]time.Time{
+			"two-tags": {"gone": {}}, "tag-and-digest": {"gone": {}}, "same-repo": {"gone": {}},
+		},
+	}
+	items, _ := Plan(&agentv1.PruneRequest{Images: true}, s)
+	if len(items) != 1 || items[0].ID != "same-repo" {
+		t.Fatalf("items = %v", items)
 	}
 }

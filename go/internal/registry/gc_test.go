@@ -240,6 +240,70 @@ func TestGCRecordFromTheFutureAndOneAtATime(t *testing.T) {
 	}
 }
 
+// The dry run is named and removed after it (a timed-out one would go on
+// scanning in dockerd), and skipped while a collection runs.
+func TestDryRunIsNamedAndRemoved(t *testing.T) {
+	s, fd, _ := newGCServer(t)
+	if _, _, err := s.PruneRegistry(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, c := range fd.calls {
+		switch {
+		case strings.HasPrefix(c, "container rm -f "+s.dryName()):
+			order = append(order, "rm")
+		case strings.Contains(c, "--name "+s.dryName()) && strings.Contains(c, "garbage-collect --dry-run"):
+			order = append(order, "dry-run")
+		}
+	}
+	if !slices.Equal(order, []string{"rm", "dry-run", "rm"}) {
+		t.Fatalf("order = %v", order)
+	}
+	s.mu.Lock()
+	s.gcActive = true
+	s.mu.Unlock()
+	if n, lines, err := s.PruneRegistry(context.Background(), true); err != nil || n != 0 || !slices.Equal(lines, []string{"registry: skipped, a garbage collection is running"}) {
+		t.Fatalf("dry run while collecting = %d %v %v", n, lines, err)
+	}
+}
+
+// A panel move pauses collections (Paused) and waits for one under way
+// (WaitGC) before it stops the registry itself.
+func TestPanelMoveFence(t *testing.T) {
+	s, fd, _ := newGCServer(t)
+	moving := true
+	s.Paused = func() bool { return moving }
+	if _, err := s.CollectGarbage(context.Background()); !errors.Is(err, ErrBusy) || fd.ran("container stop") != 0 {
+		t.Fatalf("collected during a move: %v", err)
+	}
+	moving = false
+
+	s.mu.Lock()
+	s.gcActive = true
+	done := make(chan struct{})
+	s.gcDone = done
+	s.mu.Unlock()
+	waited := make(chan error, 1)
+	go func() { waited <- s.WaitGC(context.Background()) }()
+	select {
+	case err := <-waited:
+		t.Fatalf("WaitGC returned during a collection: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	s.mu.Lock()
+	s.gcActive = false
+	close(done)
+	s.mu.Unlock()
+	if err := <-waited; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.WaitGC(ctx); err != nil {
+		t.Fatalf("no collection: %v", err)
+	}
+}
+
 // PruneRegistry is the node cleanup's part: what a collection would free
 // (from the dry run, each blob once, never outside the store), the
 // collection itself, a skip while a transfer runs, and nothing at all on

@@ -61,19 +61,21 @@ test("2FA: enroll, confirm, then sign-in asks for a code and a used code fails",
   expect(bad.status).toBe(401);
   expect(bad.body.error.details.attemptsLeft).toBe("4");
 
-  const good = await ok(panel, auth.verifySecondFactor, { ticket, method: "totp", code: code(enroll.body.secret, 1) });
+  // Computed once: the next 30-second window would make code() another, unused code.
+  const used = code(enroll.body.secret, 1);
+  const good = await ok(panel, auth.verifySecondFactor, { ticket, method: "totp", code: used });
   expect(good.body.viewer.id).toBe(user.id);
   expect(good.body.recoveryCodesLeft).toBe(10);
   const session = cookieFrom(good.headers) as string;
   expect((await ok(panel, auth.whoami, {}, { cookie: session })).body.via).toBe("session");
 
   // The ticket is single use, and the same code never works twice.
-  expect((await call(panel, auth.verifySecondFactor, { ticket, method: "totp", code: code(enroll.body.secret, 1) })).status).toBe(401);
+  expect((await call(panel, auth.verifySecondFactor, { ticket, method: "totp", code: used })).status).toBe(401);
   const second = await signIn(user.email, password);
   const replay = await call(panel, auth.verifySecondFactor, {
     ticket: second.body.challenge.ticket,
     method: "totp",
-    code: code(enroll.body.secret, 1),
+    code: used,
   });
   expect(replay.status).toBe(401);
 });
