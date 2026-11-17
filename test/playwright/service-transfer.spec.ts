@@ -205,7 +205,8 @@ test.describe("service import", () => {
   test("the New service menu opens the import page; damaged files are refused in the browser", async ({ page }) => {
     await installDemo(page);
     await page.goto(`/p/${ids.acme}`);
-    await page.getByRole("button", { name: "New service" }).click();
+    // exact: the sidebar's "New service in <project>" buttons match the name too.
+    await page.getByRole("button", { name: "New service", exact: true }).click();
     await page.getByRole("menuitem", { name: /Import from a file/ }).click();
     await expect(page).toHaveURL(new RegExp(`/import\\?project=${ids.acme}`));
     await expect(page.getByRole("heading", { name: "Import a service" })).toBeVisible();

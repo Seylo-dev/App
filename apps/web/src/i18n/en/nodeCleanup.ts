@@ -20,10 +20,7 @@ export default {
   percent: "Percent",
   what: "What to remove",
   kinds: {
-    images: {
-      name: "Old images",
-      hint: "Past the newest 3 per service, built or pulled, and what deleted images left in the panel's registry; the ones in use always stay",
-    },
+    images: { name: "Old images", hint: "Past the newest 3 per service, built or pulled, unless in use" },
     buildCache: { name: "Build cache", hint: "Layers this panel's builders cached" },
     stoppedContainers: { name: "Stopped containers", hint: "Finished jobs, old generations, removed services" },
     unusedVolumes: { name: "Unused volumes", hint: "Data of services removed from this node" },
