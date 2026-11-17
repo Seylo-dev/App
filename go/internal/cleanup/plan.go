@@ -273,11 +273,13 @@ func removableImages(images []jobrun.Image, containers []jobrun.Container, desir
 
 // removablePulledImages applies the image rule to images without the
 // seylo label: the ones services' containers were made from (UsedBy) and
-// the panel's own image (brand.Image), which only Seylo runs. Per
-// service, keep any image a container on the machine uses, the one the
-// desired spec names and the newest KeepImagesPerService the service
-// used; an image goes only when every service it belongs to lets it go.
-// Images no service used stay, whoever pulled them.
+// the panel's own image (brand.Image), which only Seylo runs. An image any
+// container on the machine uses, or any desired spec names, stays. Per
+// service, so do the newest KeepImagesPerService it used; a helper's
+// images (a database's web UI, cloudflared: UsedBy keys "<service>/<role>")
+// rank on their own, so they never take the service's rollback images'
+// places. An image goes only when every service it belongs to lets it go;
+// images no service used stay, whoever pulled them.
 func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) []Item {
 	type use struct {
 		img jobrun.Image
@@ -301,6 +303,16 @@ func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) 
 		}
 	}
 	kept := map[string]bool{}
+	for _, img := range s.Unlabeled {
+		for _, spec := range desired {
+			if namesImage(spec.GetImage(), img) {
+				// Also when no record ties it to that service yet (a deploy
+				// that pulled it and has not made its container).
+				kept[img.ID] = true
+				break
+			}
+		}
+	}
 	reasons := map[string]string{}
 	var order []jobrun.Image
 	services := make([]string, 0, len(byService))
@@ -316,7 +328,8 @@ func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) 
 			}
 			return uses[i].img.Created.After(uses[j].img.Created)
 		})
-		spec := desired[svc]
+		base, _, _ := strings.Cut(svc, "/")
+		spec := desired[base]
 		keep := 0
 		if spec != nil {
 			keep = KeepImagesPerService
@@ -326,16 +339,14 @@ func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) 
 			switch {
 			case s.InUse[id] || u.img.Containers > 0:
 				kept[id] = true
-			case spec != nil && namesImage(spec.GetImage(), u.img):
-				kept[id] = true
 			case i < keep:
 				kept[id] = true
 			default:
 				if _, seen := reasons[id]; !seen {
 					order = append(order, u.img)
-					reason := "older than the newest " + strconv.Itoa(keep) + " this service used"
+					reason := "older than the newest " + strconv.Itoa(keep)
 					if spec == nil {
-						reason = "its service is no longer on this node"
+						reason = "service removed from this node"
 					}
 					reasons[id] = reason
 				}

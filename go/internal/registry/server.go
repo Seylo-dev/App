@@ -54,8 +54,12 @@ const (
 )
 
 // ErrBusy means an image is being pushed or pulled, or the registry is
-// already collecting garbage; try again soon.
-var ErrBusy = errors.New("the registry is busy: an image is being pushed or pulled, or it is collecting garbage")
+// already collecting garbage; try again soon. errCollecting is the second
+// case (errors.Is(errCollecting, ErrBusy) holds).
+var (
+	ErrBusy       = errors.New("the registry is busy: an image is being pushed or pulled")
+	errCollecting = fmt.Errorf("%w: a garbage collection is already running", ErrBusy)
+)
 
 // Server runs the panel registry container on the panel's node: started
 // on first use (the first Tunnel with a RegistryTarget), on its own bridge
@@ -96,6 +100,7 @@ func (s *Server) clock() time.Time {
 }
 
 func (s *Server) name() string    { return or(s.Name, ContainerName) }
+func (s *Server) gcName() string  { return s.name() + "-gc" }
 func (s *Server) network() string { return or(s.Network, NetworkName) }
 func (s *Server) image() string   { return or(s.Image, Image) }
 
@@ -261,6 +266,12 @@ func (s *Server) ensure(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, err := s.docker(ctx, "container", "inspect", "--format", `{{.State.Running}}`, s.name())
+	if err != nil || state != "true" {
+		// An agent that stopped in the middle of a collection left its
+		// collector to dockerd: it must never run next to a registry that
+		// takes pushes.
+		s.removeCollector(ctx)
+	}
 	switch {
 	case err != nil:
 		if err := s.create(ctx); err != nil {
@@ -388,6 +399,9 @@ func (s *Server) lastCollected() (time.Time, bool) {
 	if s.StatePath == "" {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if s.lastGC.After(s.clock()) {
+			return time.Time{}, false
+		}
 		return s.lastGC, !s.lastGC.IsZero()
 	}
 	b, err := os.ReadFile(s.StatePath)
@@ -395,7 +409,12 @@ func (s *Server) lastCollected() (time.Time, bool) {
 		return time.Time{}, false
 	}
 	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(b)))
-	return t, err == nil
+	// A time in the future (a clock that was wrong when it was written)
+	// would put the next collection off by as much: count it as none.
+	if err != nil || t.After(s.clock()) {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func (s *Server) recordCollected(t time.Time) {
@@ -437,7 +456,11 @@ func (s *Server) CollectGarbage(ctx context.Context) (GCResult, error) {
 	}
 	now := s.clock()
 	s.mu.Lock()
-	if s.gcActive || s.dialing > 0 {
+	if s.gcActive {
+		s.mu.Unlock()
+		return GCResult{}, errCollecting
+	}
+	if s.dialing > 0 {
 		s.mu.Unlock()
 		return GCResult{}, ErrBusy
 	}
@@ -475,6 +498,13 @@ func (s *Server) CollectGarbage(ctx context.Context) (GCResult, error) {
 			s.log().Error("restarting the registry after garbage collection", "err", err)
 		}
 	}()
+	// Runs before the restart above. When ctx ends midway (a cleanup's
+	// deadline, the agent stopping) only the docker CLI is killed and the
+	// collector would go on in dockerd, deleting blobs that pushes to the
+	// restarted registry rely on. Killing it is safe: it only ever deletes
+	// blobs nothing referenced when it started.
+	defer s.removeCollector(ctx)
+	s.removeCollector(ctx) // one left over from an agent that stopped midway
 	if _, err := s.docker(ctx, s.collectorArgs(false)...); err != nil {
 		return GCResult{}, fmt.Errorf("collecting garbage: %w", err)
 	}
@@ -499,6 +529,9 @@ func (s *Server) PruneRegistry(ctx context.Context, dryRun bool) (uint64, []stri
 		return uint64(n), []string{"registry: " + formatBytes(n) + " left by images deleted from it"}, nil
 	}
 	res, err := s.CollectGarbage(ctx)
+	if errors.Is(err, errCollecting) {
+		return 0, []string{"registry: skipped, a garbage collection is already running"}, nil
+	}
 	if errors.Is(err, ErrBusy) {
 		return 0, []string{"registry: skipped while an image is pushed or pulled; the daily garbage collection tries again"}, nil
 	}
@@ -532,6 +565,10 @@ func (s *Server) collectorArgs(dryRun bool) []string {
 	}
 	args := []string{"run", "--rm", "--network", "none", "--cgroup-parent", docker.CgroupParent,
 		"-v", mount, "-e", "OTEL_TRACES_EXPORTER=none", "--entrypoint", "registry"}
+	if !dryRun {
+		// Named, so removeCollector finds one a cancelled run left behind.
+		args = append(args, "--name", s.gcName())
+	}
 	for _, l := range labels()[:3] {
 		args = append(args, "--label", l)
 	}
@@ -540,6 +577,14 @@ func (s *Server) collectorArgs(dryRun bool) []string {
 		args = append(args, "--dry-run")
 	}
 	return append(args, "--delete-untagged=false", "/etc/distribution/config.yml")
+}
+
+// removeCollector removes the garbage collector's container, killing it
+// if it still runs. "No such container" is the usual answer.
+func (s *Server) removeCollector(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	_, _ = s.docker(ctx, "container", "rm", "-f", s.gcName())
 }
 
 // present reports whether this node runs the registry.

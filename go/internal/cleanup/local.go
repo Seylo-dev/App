@@ -105,7 +105,7 @@ func (l *Local) Prune(ctx context.Context, req *agentv1.PruneRequest) (*agentv1.
 			continue
 		}
 		if err := l.remove(ctx, it); err != nil {
-			if errors.Is(err, volumes.ErrIncoming) || errors.Is(err, volumes.ErrInUse) || errors.Is(err, jobrun.ErrImageInUse) {
+			if errors.Is(err, volumes.ErrIncoming) || errors.Is(err, volumes.ErrInUse) || errors.Is(err, jobrun.ErrImageInUse) || errors.Is(err, jobrun.ErrImageShared) {
 				// Changed since the plan was made: not a failure.
 				resp.Removed = append(resp.Removed, fmt.Sprintf("kept %s %s: %v", it.Kind, it.Name, err))
 				continue
@@ -151,6 +151,12 @@ func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapsh
 	if s.Containers, err = l.opts.Docker.ContainersWithSize(ctx); err != nil {
 		return s, err
 	}
+	if u := l.opts.UsedImages; u != nil {
+		// Every cleanup learns which images services' containers use (also
+		// the ones made before the record existed), whatever it removes:
+		// a cleanup of containers may remove the last one of an image.
+		u.Record(s.Now, imageUses(s.Containers)...)
+	}
 	if req.GetImages() {
 		if s.Images, err = l.opts.Docker.Images(ctx); err != nil {
 			return s, err
@@ -162,15 +168,6 @@ func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapsh
 			return s, err
 		}
 		if u := l.opts.UsedImages; u != nil {
-			// Containers made before the record existed (or while it could
-			// not be written) count from now on.
-			var uses []Use
-			for _, c := range s.Containers {
-				if svc := c.Labels[docker.LabelService]; svc != "" {
-					uses = append(uses, Use{Service: svc, Image: c.ImageID})
-				}
-			}
-			u.Record(s.Now, uses...)
 			present := map[string]bool{}
 			for _, img := range s.Images {
 				present[img.ID] = true
@@ -196,6 +193,25 @@ func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapsh
 		}
 	}
 	return s, nil
+}
+
+// imageUses are the images services' containers run, for UsedImages: a
+// service's own containers under its id, helpers (a database's web UI,
+// cloudflared, a cron or backup run) under "<service>/<role>", so their
+// images rank apart from the service's versions.
+func imageUses(containers []jobrun.Container) []Use {
+	var uses []Use
+	for _, c := range containers {
+		svc := c.Labels[docker.LabelService]
+		if svc == "" || c.ImageID == "" {
+			continue
+		}
+		if role := c.Labels[docker.LabelRole]; role != "" {
+			svc += "/" + role
+		}
+		uses = append(uses, Use{Service: svc, Image: c.ImageID})
+	}
+	return uses
 }
 
 // serviceDirs lists services/<id> folders with their sizes.

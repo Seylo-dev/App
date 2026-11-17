@@ -325,11 +325,11 @@ func TestDockerfileBuildPushPull(t *testing.T) {
 		t.Fatalf("%d bytes reclaimable after the prune", n)
 	}
 
-	// Docker keeps idle connections to the relay for a while; collection
-	// waits until none is open.
+	// Docker keeps idle connections to the relay open; collection is busy
+	// until none has moved a byte for 2 minutes, then closes the idle ones.
 	deadline := time.Now().Add(4 * time.Minute)
 	for {
-		err := e.server.CollectGarbage(context.Background())
+		_, err := e.server.CollectGarbage(context.Background())
 		if err == nil {
 			break
 		}

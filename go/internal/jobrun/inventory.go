@@ -185,14 +185,20 @@ func (d *Docker) RemoveContainer(ctx context.Context, id string) error {
 }
 
 // ErrImageInUse means a container (any, also another program's) uses the
-// image, so the cleanup keeps it.
-var ErrImageInUse = errors.New("a container uses it")
+// image, and ErrImageShared that it is also tagged under another
+// repository (someone else's name for it), so the cleanup keeps it.
+var (
+	ErrImageInUse  = errors.New("a container uses it")
+	ErrImageShared = errors.New("it is also tagged under another repository")
+)
 
 // RemoveUnlabeledImage removes an image without the seylo label that the
 // cleanup found unused (one Seylo pulled for a service). It checks again
 // right before: an image a container uses or was built on stays
-// (ErrImageInUse), and one that carries the label after all goes through
-// RemoveImage. Forced only to drop several tags at once.
+// (ErrImageInUse), so does one tagged under more than one repository
+// (ErrImageShared: a tag someone else gave it), and one that carries the
+// label after all goes through RemoveImage. Forced only to drop several
+// tags of one repository at once (postgres:16 and postgres:16.4).
 func (d *Docker) RemoveUnlabeledImage(ctx context.Context, id string) error {
 	img, err := d.cli.ImageInspect(ctx, id)
 	if IsNotFound(err) {
@@ -211,11 +217,30 @@ func (d *Docker) RemoveUnlabeledImage(ctx context.Context, id string) error {
 	if len(users.Items) > 0 {
 		return ErrImageInUse
 	}
+	repos := map[string]bool{}
+	for _, tag := range img.RepoTags {
+		repos[repository(tag)] = true
+	}
+	if len(repos) > 1 {
+		return ErrImageShared
+	}
 	_, err = d.cli.ImageRemove(ctx, id, client.ImageRemoveOptions{PruneChildren: true, Force: len(img.RepoTags) > 1})
 	if err != nil && !IsNotFound(err) {
 		return fmt.Errorf("removing image %s: %w", id, err)
 	}
 	return nil
+}
+
+// repository is ref without its tag or digest ("ghcr.io/a/b:1" ->
+// "ghcr.io/a/b"; a registry port stays).
+func repository(ref string) string {
+	if i := strings.IndexByte(ref, '@'); i >= 0 {
+		ref = ref[:i]
+	}
+	if i := strings.LastIndexByte(ref, ':'); i > strings.LastIndexByte(ref, '/') {
+		ref = ref[:i]
+	}
+	return ref
 }
 
 // RemoveImage removes a managed image (never forced, so an image a

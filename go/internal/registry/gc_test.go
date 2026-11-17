@@ -26,6 +26,8 @@ type fakeDocker struct {
 	dataDir string
 	garbage string
 	calls   []string
+	// failCollect makes the collector fail, as when its ctx ends midway.
+	failCollect bool
 }
 
 func (f *fakeDocker) Run(_ context.Context, cmd build.Cmd) error {
@@ -43,6 +45,9 @@ func (f *fakeDocker) Run(_ context.Context, cmd build.Cmd) error {
 		_, _ = fmt.Fprintf(cmd.Stdout, "repo: marking manifest sha256:%s\nblob eligible for deletion: sha256:%s\nblob eligible for deletion: sha256:%s\nblob eligible for deletion: sha256:ffff\nblob eligible for deletion: sha256:../../etc\n",
 			strings.Repeat("1", 64), f.garbage, f.garbage)
 	case strings.Contains(line, "garbage-collect"):
+		if f.failCollect {
+			return errors.New("signal: killed")
+		}
 		return os.RemoveAll(blobPath(f.dataDir, f.garbage))
 	}
 	return nil
@@ -176,6 +181,62 @@ func TestGCIsDueAcrossRestarts(t *testing.T) {
 	}
 	if d := restarted.untilDue(); d != gcFirstWait {
 		t.Fatalf("unreadable record: %v", d)
+	}
+}
+
+// The collector is named and removed before the registry starts again,
+// also when the collection fails midway (its ctx ended: only the docker
+// CLI dies, the collector would go on next to a registry taking pushes),
+// and one left by an agent that stopped midway is removed first.
+func TestGCRemovesTheCollectorBeforeTheRegistryRestarts(t *testing.T) {
+	s, fd, _ := newGCServer(t)
+	fd.failCollect = true
+	if _, err := s.CollectGarbage(context.Background()); err == nil {
+		t.Fatal("a failed collection reported success")
+	}
+	var order []string
+	for _, c := range fd.calls {
+		switch {
+		case strings.HasPrefix(c, "container rm -f "+s.gcName()):
+			order = append(order, "rm")
+		case strings.HasPrefix(c, "container start"):
+			order = append(order, "start")
+		case strings.Contains(c, "--name "+s.gcName()) && strings.Contains(c, "garbage-collect"):
+			order = append(order, "collect")
+		}
+	}
+	if !slices.Equal(order, []string{"rm", "collect", "rm", "start"}) {
+		t.Fatalf("order = %v (calls %v)", order, fd.calls)
+	}
+	if _, ok := s.lastCollected(); ok {
+		t.Fatal("a failed collection was recorded")
+	}
+	s.mu.Lock()
+	active := s.gcActive
+	s.mu.Unlock()
+	if active {
+		t.Fatal("the gate stayed closed")
+	}
+}
+
+// A record from the future (a wrong clock) counts as none, and a second
+// collection while one runs says so.
+func TestGCRecordFromTheFutureAndOneAtATime(t *testing.T) {
+	s, _, now := newGCServer(t)
+	s.StatePath = filepath.Join(t.TempDir(), "registry-gc")
+	if err := os.WriteFile(s.StatePath, []byte(now.Add(48*time.Hour).Format(time.RFC3339Nano)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d := s.untilDue(); d != gcFirstWait {
+		t.Fatalf("future record: %v", d)
+	}
+	s.mu.Lock()
+	s.gcActive = true
+	s.mu.Unlock()
+	_, err := s.CollectGarbage(context.Background())
+	_, lines, perr := s.PruneRegistry(context.Background(), false)
+	if !errors.Is(err, ErrBusy) || !errors.Is(err, errCollecting) || perr != nil || !slices.Equal(lines, []string{"registry: skipped, a garbage collection is already running"}) {
+		t.Fatalf("while collecting: %v / %v %v", err, lines, perr)
 	}
 }
 

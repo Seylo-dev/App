@@ -156,10 +156,12 @@ func TestPlanWithoutDesiredStateOnlyRemovesJobLeftovers(t *testing.T) {
 	}
 }
 
-// fakeDocker records removals.
+// fakeDocker records removals; refuse makes RemoveUnlabeledImage fail
+// for an id, as Docker's last check would.
 type fakeDocker struct {
 	snap    Snapshot
 	removed []string
+	refuse  map[string]error
 }
 
 func (f *fakeDocker) ContainersWithSize(context.Context) ([]jobrun.Container, error) {
@@ -183,6 +185,9 @@ func (f *fakeDocker) ImageIDsInUse(context.Context) (map[string]bool, error) {
 	return f.snap.InUse, nil
 }
 func (f *fakeDocker) RemoveUnlabeledImage(_ context.Context, id string) error {
+	if err := f.refuse[id]; err != nil {
+		return err
+	}
 	f.removed = append(f.removed, "pulled:"+id)
 	return nil
 }
@@ -272,8 +277,13 @@ func TestPlanPulledImages(t *testing.T) {
 		return jobrun.Image{ID: id, RepoTags: tags, Labels: map[string]string{}, Created: day(1), Size: 100}
 	}
 	desired := desiredState()
-	desired.Services = append(desired.Services, &agentv1.ServiceSpec{Id: "db", ProjectId: "p1", Generation: 2,
-		Image: &agentv1.ImageRef{Reference: "postgres:16.3"}})
+	desired.Services = append(desired.Services,
+		&agentv1.ServiceSpec{Id: "db", ProjectId: "p1", Generation: 2, Image: &agentv1.ImageRef{Reference: "postgres:16.3"}},
+		// Pulled for a deploy that has not made its container yet: only a
+		// removed service's record names these images.
+		&agentv1.ServiceSpec{Id: "db2", ProjectId: "p1", Generation: 1, Image: &agentv1.ImageRef{Reference: "postgres:17"}},
+		&agentv1.ServiceSpec{Id: "db3", ProjectId: "p1", Generation: 1, Image: &agentv1.ImageRef{Reference: "mysql:8", Digest: "sha256:m8"}},
+	)
 	s := Snapshot{Desired: desired,
 		Unlabeled: []jobrun.Image{
 			pulled("pg-16.0", "postgres:16.0"),
@@ -284,6 +294,12 @@ func TestPlanPulledImages(t *testing.T) {
 			pulled("redis", "redis:7"),         // the removed service's
 			pulled("shared", "nginx:1"),        // removed service's, and db's newest
 			pulled("never-used", "busybox:1"),  // no service used it
+			pulled("pg-17", "postgres:17"),     // db2's desired, recorded for gone only
+			{ID: "mysql-8", RepoDigests: []string{"mysql@sha256:m8"}, Labels: map[string]string{}, Created: day(1)},
+			pulled("ui-1", "sosedoff/pgweb:1"), // db's web UI helper: ranks on its own
+			pulled("ui-2", "sosedoff/pgweb:2"),
+			pulled("ui-3", "sosedoff/pgweb:3"),
+			pulled("ui-4", "sosedoff/pgweb:4"),
 			{ID: "labeled", RepoTags: []string{"x:1"}, Labels: labels(), Created: day(1)},
 		},
 		InUse: map[string]bool{"pg-15": true},
@@ -296,6 +312,12 @@ func TestPlanPulledImages(t *testing.T) {
 			"redis":   {"gone": day(9)},
 			"shared":  {"gone": day(9), "db": day(6)},
 			"labeled": {"gone": day(9)},
+			"pg-17":   {"gone": day(1)},
+			"mysql-8": {"gone": day(1)},
+			"ui-1":    {"db/db-ui": day(7)},
+			"ui-2":    {"db/db-ui": day(8)},
+			"ui-3":    {"db/db-ui": day(9)},
+			"ui-4":    {"db/db-ui": day(10)},
 		},
 	}
 	items, _ := Plan(&agentv1.PruneRequest{Images: true}, s)
@@ -307,11 +329,14 @@ func TestPlanPulledImages(t *testing.T) {
 		got[it.ID] = it.Reason
 	}
 	// db's newest 3 are shared (which gone would let go), 16.3 (also
-	// desired) and 16.2; pg-15 is in use; redis's service is gone.
+	// desired) and 16.2, whatever its web UI used; pg-15 is in use;
+	// redis's service is gone; pg-17 and mysql-8 are desired (by tag and
+	// by digest); the web UI keeps its own newest 3.
 	want := map[string]string{
-		"pg-16.0": "older than the newest 3 this service used",
-		"pg-16.1": "older than the newest 3 this service used",
-		"redis":   "its service is no longer on this node",
+		"pg-16.0": "older than the newest 3",
+		"pg-16.1": "older than the newest 3",
+		"redis":   "service removed from this node",
+		"ui-1":    "older than the newest 3",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("removed %v, want %v", got, want)
@@ -417,13 +442,40 @@ func TestLocalPrunesPulledImagesAndTheRegistry(t *testing.T) {
 		t.Fatalf("record = %v", rec)
 	}
 
+	// A removal the last check refuses is reported as kept, not as a failure.
+	fd.snap.Containers = nil
+	fd.snap.InUse = nil
+	fd.refuse = map[string]error{"stale-2": jobrun.ErrImageShared}
+	fd.snap.Unlabeled = append(fd.snap.Unlabeled, jobrun.Image{ID: "stale-2", RepoTags: []string{"redis:6"}, Created: now})
+	used.Record(now, Use{Service: "gone", Image: "stale-2"})
+	resp, err = p.Prune(context.Background(), &agentv1.PruneRequest{Images: true})
+	if err != nil || !slices.ContainsFunc(resp.GetRemoved(), func(l string) bool { return strings.HasPrefix(l, "kept image redis:6") }) {
+		t.Fatalf("refused removal: %v %v", err, resp.GetRemoved())
+	}
+
 	// Without the images kind the registry is left alone; its failure is a note.
 	reg.err = errors.New("docker: boom")
-	if _, err := p.Prune(context.Background(), &agentv1.PruneRequest{StoppedContainers: true}); err != nil || len(reg.calls) != 1 {
+	if _, err := p.Prune(context.Background(), &agentv1.PruneRequest{StoppedContainers: true}); err != nil || len(reg.calls) != 2 {
 		t.Fatalf("registry called for containers only: %v %v", err, reg.calls)
 	}
 	resp, err = p.Prune(context.Background(), &agentv1.PruneRequest{Images: true, DryRun: true})
-	if err != nil || !slices.Contains(resp.GetRemoved(), "registry: docker: boom") || !slices.Equal(reg.calls, []bool{false, true}) {
+	if err != nil || !slices.Contains(resp.GetRemoved(), "registry: docker: boom") || !slices.Equal(reg.calls, []bool{false, false, true}) {
 		t.Fatalf("dry run: %v %v %v", err, resp.GetRemoved(), reg.calls)
+	}
+}
+
+// A service's own containers count under its id, helpers under
+// "<service>/<role>".
+func TestImageUses(t *testing.T) {
+	got := imageUses([]jobrun.Container{
+		{ImageID: "app", Labels: labels(docker.LabelService, "svc")},
+		{ImageID: "ui", Labels: labels(docker.LabelService, "svc", docker.LabelRole, jobrun.RoleDBUI)},
+		{ImageID: "app", Labels: labels(docker.LabelService, "svc", docker.LabelRole, jobrun.RoleCron)},
+		{ImageID: "traefik", Labels: labels()},
+		{ImageID: "", Labels: labels(docker.LabelService, "svc")},
+	})
+	want := []Use{{Service: "svc", Image: "app"}, {Service: "svc/db-ui", Image: "ui"}, {Service: "svc/cron", Image: "app"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("uses = %v, want %v", got, want)
 	}
 }
