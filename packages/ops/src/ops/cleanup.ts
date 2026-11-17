@@ -46,7 +46,7 @@ export const run = defineOp({
   kind: "destructive",
   summary: "Clean up a node",
   description:
-    "Removes unused images, build cache, stopped containers and (when asked) orphaned service data created by this panel on one node. Never touches anything else on the machine.",
+    "Removes unused images (built by this panel or pulled for its services, and on the panel's node what deleted images left in its registry), build cache, stopped containers and (when asked) orphaned service data created by this panel on one node. Never touches anything else on the machine.",
   input: PruneInput,
   output: PruneResult,
   permission: permission.global("nodes.manage"),
@@ -56,7 +56,10 @@ export const run = defineOp({
 
 /** What a scheduled cleanup removes; the same kinds as a manual cleanup. */
 export const CleanupKinds = Type.Object({
-  images: Type.Boolean({ description: "Images past the newest 3 per service (the ones in use and the deployed one always stay)." }),
+  images: Type.Boolean({
+    description:
+      "Images past the newest 3 per service, built or pulled (the ones in use and the deployed one always stay), and on the panel's node what deleted images left in its registry.",
+  }),
   buildCache: Type.Boolean({ description: "The build cache of this panel's own builders." }),
   stoppedContainers: Type.Boolean({ description: "Finished job containers, old generations and containers of removed services." }),
   unusedVolumes: Type.Boolean({

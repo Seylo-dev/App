@@ -364,3 +364,25 @@ func TestImageProbeKeepsSpecHash(t *testing.T) {
 		t.Fatal("HealthCheck.image changed the spec hash")
 	}
 }
+
+// A service's new containers tell which image they are made from, pulled
+// first or already there, so the cleanup knows a pulled image's service.
+func TestCreatedContainersRecordTheirImage(t *testing.T) {
+	h := newHarness(t)
+	h.stop()
+	var mu sync.Mutex
+	used := map[string]string{}
+	h.imageUsed = func(serviceID, imageID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		used[serviceID] = imageID
+	}
+	h.start()
+	h.apply(1, appSpec("api", 1, "api:1"))
+	h.runningContainer("api", 1)
+	mu.Lock()
+	defer mu.Unlock()
+	if used["api"] != "sha256:api:1" {
+		t.Fatalf("recorded %v", used)
+	}
+}

@@ -151,6 +151,11 @@ type Options struct {
 	// SpecHash, so turning it on or off recreates nothing.
 	DNS docker.DNSSource
 
+	// ImageUsed is told which image a service's new containers are made
+	// from (cleanup.UsedImages, so the cleanup knows a pulled image's
+	// service). Nil records nothing.
+	ImageUsed func(serviceID, imageID string)
+
 	// Scope labels are added to everything the runtime creates and to
 	// every listing, so it only sees its own resources. Production leaves
 	// it empty (the whole node is ours); tests on a shared Docker set a

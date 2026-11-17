@@ -15276,7 +15276,7 @@
                           ],
                           "properties": {
                             "images": {
-                              "description": "Images past the newest 3 per service (the ones in use and the deployed one always stay).",
+                              "description": "Images past the newest 3 per service, built or pulled (the ones in use and the deployed one always stay), and on the panel's node what deleted images left in its registry.",
                               "type": "boolean"
                             },
                             "buildCache": {
@@ -15444,7 +15444,7 @@
       "post": {
         "operationId": "cleanup.run",
         "summary": "Clean up a node",
-        "description": "Removes unused images, build cache, stopped containers and (when asked) orphaned service data created by this panel on one node. Never touches anything else on the machine.",
+        "description": "Removes unused images (built by this panel or pulled for its services, and on the panel's node what deleted images left in its registry), build cache, stopped containers and (when asked) orphaned service data created by this panel on one node. Never touches anything else on the machine.",
         "tags": [
           "cleanup"
         ],
@@ -15800,7 +15800,7 @@
                         ],
                         "properties": {
                           "images": {
-                            "description": "Images past the newest 3 per service (the ones in use and the deployed one always stay).",
+                            "description": "Images past the newest 3 per service, built or pulled (the ones in use and the deployed one always stay), and on the panel's node what deleted images left in its registry.",
                             "type": "boolean"
                           },
                           "buildCache": {
@@ -15890,7 +15890,7 @@
                           ],
                           "properties": {
                             "images": {
-                              "description": "Images past the newest 3 per service (the ones in use and the deployed one always stay).",
+                              "description": "Images past the newest 3 per service, built or pulled (the ones in use and the deployed one always stay), and on the panel's node what deleted images left in its registry.",
                               "type": "boolean"
                             },
                             "buildCache": {

@@ -42,6 +42,14 @@ func (s scoped) Images(ctx context.Context) ([]jobrun.Image, error) {
 	return slices.DeleteFunc(all, func(i jobrun.Image) bool { return !s.mine(i.Labels) }), err
 }
 
+// UnlabeledImages keeps this test's images only (tagged with its project).
+func (s scoped) UnlabeledImages(ctx context.Context) ([]jobrun.Image, error) {
+	all, err := s.Docker.UnlabeledImages(ctx)
+	return slices.DeleteFunc(all, func(i jobrun.Image) bool {
+		return !slices.ContainsFunc(i.RepoTags, func(t string) bool { return strings.Contains(t, s.project) })
+	}), err
+}
+
 func (s scoped) Volumes(ctx context.Context) ([]jobrun.Volume, error) {
 	all, err := s.Docker.Volumes(ctx)
 	return slices.DeleteFunc(all, func(v jobrun.Volume) bool { return !s.mine(v.Labels) }), err
@@ -99,6 +107,23 @@ func TestPruneLeavesUnlabeledResourcesAlone(t *testing.T) {
 	}
 	ourImage := mkImage("jbit/"+p+":ours", ourLabels())
 	theirImage := mkImage("jbit/"+p+":theirs", theirLabels())
+	// Pulled images carry no seylo label: one a removed service's
+	// container was made from goes; one it used that another program's
+	// container still runs stays.
+	pulledImage := mkImage("jbit/"+p+":pulled", theirLabels())
+	pulledInUse := mkImage("jbit/"+p+":pulled-in-use", theirLabels())
+	mkContainerFrom := func(name, image string) {
+		res, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{Name: name, Config: &container.Config{Image: image, Cmd: []string{"true"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = cli.ContainerRemove(context.Background(), res.ID, client.ContainerRemoveOptions{Force: true})
+		})
+	}
+	mkContainerFrom(p+"-other-program", "jbit/"+p+":pulled-in-use")
+	used := cleanup.NewUsedImages(filepath.Join(t.TempDir(), "used-images.json"), nil)
+	used.Record(time.Now(), cleanup.Use{Service: gone, Image: pulledImage}, cleanup.Use{Service: gone, Image: pulledInUse})
 
 	mkVolume := func(name string, labels map[string]string) {
 		if _, err := cli.VolumeCreate(ctx, client.VolumeCreateOptions{Name: name, Labels: labels}); err != nil {
@@ -134,7 +159,7 @@ func TestPruneLeavesUnlabeledResourcesAlone(t *testing.T) {
 	}
 
 	desired := &agentv1.DesiredState{Revision: 3, Services: []*agentv1.ServiceSpec{live}, Networks: []*agentv1.ProjectNetwork{{ProjectId: p}}}
-	pruner := cleanup.NewLocal(cleanup.Options{Docker: scoped{e.D, p}, Layout: e.Layout, Desired: func() *agentv1.DesiredState { return desired }})
+	pruner := cleanup.NewLocal(cleanup.Options{Docker: scoped{e.D, p}, Layout: e.Layout, UsedImages: used, Desired: func() *agentv1.DesiredState { return desired }})
 	req := &agentv1.PruneRequest{Images: true, StoppedContainers: true, OrphanedServiceData: true, BuildCache: true, DryRun: true}
 
 	dry, err := pruner.Prune(ctx, req)
@@ -145,12 +170,12 @@ func TestPruneLeavesUnlabeledResourcesAlone(t *testing.T) {
 	mentions := func(lines []string, s string) bool {
 		return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, s) })
 	}
-	for _, want := range []string{p + "-ours", "jbit/" + p + ":ours", "volume " + p + "-ours", docker.ProjectNetwork(p + "old"), "data " + gone} {
+	for _, want := range []string{p + "-ours", "jbit/" + p + ":ours", "jbit/" + p + ":pulled ", "volume " + p + "-ours", docker.ProjectNetwork(p + "old"), "data " + gone} {
 		if !mentions(dry.GetRemoved(), want) {
 			t.Errorf("dry run misses %q", want)
 		}
 	}
-	for _, never := range []string{p + "-theirs", ":theirs", docker.ProjectNetwork(p + "foreign"), "data " + live.GetId(), "container " + docker.ContainerName(live.GetId(), 1, 0)} {
+	for _, never := range []string{p + "-theirs", ":theirs", ":pulled-in-use", docker.ProjectNetwork(p + "foreign"), "data " + live.GetId(), "container " + docker.ContainerName(live.GetId(), 1, 0)} {
 		if mentions(dry.GetRemoved(), never) {
 			t.Errorf("dry run would remove %q", never)
 		}
@@ -173,6 +198,12 @@ func TestPruneLeavesUnlabeledResourcesAlone(t *testing.T) {
 	}
 	if _, err := cli.ImageInspect(ctx, ourImage); err == nil {
 		t.Error("our orphan image survived")
+	}
+	if _, err := cli.ImageInspect(ctx, pulledImage); err == nil {
+		t.Error("the removed service's pulled image survived")
+	}
+	if _, err := cli.ImageInspect(ctx, pulledInUse); err != nil {
+		t.Error("a pulled image another program's container uses was removed")
 	}
 	if _, err := cli.VolumeInspect(ctx, p+"-ours", client.VolumeInspectOptions{}); err == nil {
 		t.Error("our orphan volume survived")

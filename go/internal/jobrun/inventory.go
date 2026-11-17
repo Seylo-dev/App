@@ -92,6 +92,42 @@ func (d *Docker) Images(ctx context.Context) ([]Image, error) {
 	return out, nil
 }
 
+// UnlabeledImages lists the images without the seylo label: pulled ones,
+// and other programs'. The cleanup only takes the ones services used.
+func (d *Docker) UnlabeledImages(ctx context.Context) ([]Image, error) {
+	res, err := d.cli.ImageList(ctx, client.ImageListOptions{SharedSize: true})
+	if err != nil {
+		return nil, fmt.Errorf("listing images: %w", err)
+	}
+	var out []Image
+	for _, s := range res.Items {
+		if docker.IsManaged(s.Labels) {
+			continue
+		}
+		size := s.Size
+		if s.SharedSize > 0 && s.SharedSize <= size {
+			size -= s.SharedSize
+		}
+		out = append(out, Image{ID: s.ID, RepoTags: s.RepoTags, RepoDigests: s.RepoDigests, Labels: s.Labels,
+			Created: time.Unix(s.Created, 0), Size: size, Containers: s.Containers})
+	}
+	return out, nil
+}
+
+// ImageIDsInUse returns the image of every container on the machine, in
+// any state, ours or not.
+func (d *Docker) ImageIDsInUse(ctx context.Context) (map[string]bool, error) {
+	res, err := d.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("listing containers: %w", err)
+	}
+	out := make(map[string]bool, len(res.Items))
+	for _, c := range res.Items {
+		out[c.ImageID] = true
+	}
+	return out, nil
+}
+
 // Volumes lists managed volumes.
 func (d *Docker) Volumes(ctx context.Context) ([]Volume, error) {
 	res, err := d.cli.VolumeList(ctx, client.VolumeListOptions{Filters: managedFilter()})
@@ -144,6 +180,40 @@ func (d *Docker) RemoveContainer(ctx context.Context, id string) error {
 	_, err = d.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: true})
 	if err != nil && !IsNotFound(err) {
 		return fmt.Errorf("removing container %s: %w", c.Name, err)
+	}
+	return nil
+}
+
+// ErrImageInUse means a container (any, also another program's) uses the
+// image, so the cleanup keeps it.
+var ErrImageInUse = errors.New("a container uses it")
+
+// RemoveUnlabeledImage removes an image without the seylo label that the
+// cleanup found unused (one Seylo pulled for a service). It checks again
+// right before: an image a container uses or was built on stays
+// (ErrImageInUse), and one that carries the label after all goes through
+// RemoveImage. Forced only to drop several tags at once.
+func (d *Docker) RemoveUnlabeledImage(ctx context.Context, id string) error {
+	img, err := d.cli.ImageInspect(ctx, id)
+	if IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspecting image %s: %w", id, err)
+	}
+	if img.Config != nil && docker.IsManaged(img.Config.Labels) {
+		return d.RemoveImage(ctx, id)
+	}
+	users, err := d.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("ancestor", id)})
+	if err != nil {
+		return fmt.Errorf("listing the containers of image %s: %w", id, err)
+	}
+	if len(users.Items) > 0 {
+		return ErrImageInUse
+	}
+	_, err = d.cli.ImageRemove(ctx, id, client.ImageRemoveOptions{PruneChildren: true, Force: len(img.RepoTags) > 1})
+	if err != nil && !IsNotFound(err) {
+		return fmt.Errorf("removing image %s: %w", id, err)
 	}
 	return nil
 }

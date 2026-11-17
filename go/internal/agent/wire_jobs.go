@@ -92,7 +92,11 @@ func provideJobs(d *Deps) error {
 	d.Cron = p
 	d.Backups = p.backups
 	d.Cloudflare = p.cf
-	d.Pruner = cleanup.NewLocal(cleanup.Options{Docker: dk, Layout: d.Layout, Desired: d.Feed.Current, Cache: cache, Logger: log})
+	popts := cleanup.Options{Docker: dk, Layout: d.Layout, Desired: d.Feed.Current, Cache: cache, UsedImages: d.UsedImages, Logger: log}
+	if d.RegistryServer != nil {
+		popts.Registry = d.RegistryServer
+	}
+	d.Pruner = cleanup.NewLocal(popts)
 	d.CleanupScheduler = newCleanupScheduler(d)
 	return nil
 }

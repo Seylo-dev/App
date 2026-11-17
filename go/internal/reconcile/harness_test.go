@@ -305,6 +305,8 @@ type harness struct {
 	// engine, when set, is the Docker the runtime gets instead of eng (a
 	// wrapper around it).
 	engine docker.Engine
+	// imageUsed is Options.ImageUsed.
+	imageUsed func(serviceID, imageID string)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -383,6 +385,7 @@ func (h *harness) start() {
 		EtcDir:        h.etc,
 		ProcDir:       h.proc,
 		DNS:           h.dns,
+		ImageUsed:     h.imageUsed,
 	})
 	if err != nil {
 		h.t.Fatal(err)

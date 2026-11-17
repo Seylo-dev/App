@@ -13,6 +13,7 @@ import (
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/datadir"
+	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/jobrun"
 	"github.com/seylo-dev/app/go/internal/volumes"
 )
@@ -24,8 +25,16 @@ type Docker interface {
 	Images(ctx context.Context) ([]jobrun.Image, error)
 	Volumes(ctx context.Context) ([]jobrun.Volume, error)
 	Networks(ctx context.Context) ([]jobrun.Network, error)
+	// UnlabeledImages lists the images without the seylo label;
+	// ImageIDsInUse the image of every container on the machine, in any
+	// state, also other programs'.
+	UnlabeledImages(ctx context.Context) ([]jobrun.Image, error)
+	ImageIDsInUse(ctx context.Context) (map[string]bool, error)
 	RemoveContainer(ctx context.Context, id string) error
 	RemoveImage(ctx context.Context, id string) error
+	// RemoveUnlabeledImage removes an image without the seylo label,
+	// checking again right before that no container uses it.
+	RemoveUnlabeledImage(ctx context.Context, id string) error
 	RemoveVolume(ctx context.Context, name string) error
 	RemoveNetwork(ctx context.Context, id string) error
 }
@@ -37,15 +46,24 @@ type CachePruner interface {
 	PruneCache(ctx context.Context, dryRun bool) (reclaimedBytes uint64, items []string, err error)
 }
 
+// RegistryPruner frees what images deleted from the panel's registry
+// leave behind (registry.Server, on the panel's node; elsewhere it
+// reports nothing). Runs with the images kind.
+type RegistryPruner interface {
+	PruneRegistry(ctx context.Context, dryRun bool) (reclaimedBytes uint64, items []string, err error)
+}
+
 // Options configure a Local pruner.
 type Options struct {
 	Docker Docker
 	Layout datadir.Layout
 	// Desired returns the node's current desired state (never nil).
 	Desired func() *agentv1.DesiredState
-	// Cache may be nil.
-	Cache  CachePruner
-	Logger *slog.Logger
+	// Cache, Registry and UsedImages may be nil.
+	Cache      CachePruner
+	Registry   RegistryPruner
+	UsedImages *UsedImages
+	Logger     *slog.Logger
 	// Now is the clock; default time.Now.
 	Now func() time.Time
 }
@@ -87,7 +105,7 @@ func (l *Local) Prune(ctx context.Context, req *agentv1.PruneRequest) (*agentv1.
 			continue
 		}
 		if err := l.remove(ctx, it); err != nil {
-			if errors.Is(err, volumes.ErrIncoming) || errors.Is(err, volumes.ErrInUse) {
+			if errors.Is(err, volumes.ErrIncoming) || errors.Is(err, volumes.ErrInUse) || errors.Is(err, jobrun.ErrImageInUse) {
 				// Changed since the plan was made: not a failure.
 				resp.Removed = append(resp.Removed, fmt.Sprintf("kept %s %s: %v", it.Kind, it.Name, err))
 				continue
@@ -111,6 +129,14 @@ func (l *Local) Prune(ctx context.Context, req *agentv1.PruneRequest) (*agentv1.
 			resp.Removed = append(resp.Removed, lines...)
 		}
 	}
+	if req.GetImages() && l.opts.Registry != nil {
+		n, lines, err := l.opts.Registry.PruneRegistry(ctx, req.GetDryRun())
+		if err != nil {
+			notes = append(notes, "registry: "+err.Error())
+		}
+		resp.ReclaimedBytes += n
+		resp.Removed = append(resp.Removed, lines...)
+	}
 	resp.Removed = append(resp.Removed, notes...)
 	if !req.GetDryRun() {
 		l.opts.Logger.Info("cleanup done", "reclaimed_bytes", resp.GetReclaimedBytes(), "items", len(items))
@@ -128,6 +154,32 @@ func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapsh
 	if req.GetImages() {
 		if s.Images, err = l.opts.Docker.Images(ctx); err != nil {
 			return s, err
+		}
+		if s.Unlabeled, err = l.opts.Docker.UnlabeledImages(ctx); err != nil {
+			return s, err
+		}
+		if s.InUse, err = l.opts.Docker.ImageIDsInUse(ctx); err != nil {
+			return s, err
+		}
+		if u := l.opts.UsedImages; u != nil {
+			// Containers made before the record existed (or while it could
+			// not be written) count from now on.
+			var uses []Use
+			for _, c := range s.Containers {
+				if svc := c.Labels[docker.LabelService]; svc != "" {
+					uses = append(uses, Use{Service: svc, Image: c.ImageID})
+				}
+			}
+			u.Record(s.Now, uses...)
+			present := map[string]bool{}
+			for _, img := range s.Images {
+				present[img.ID] = true
+			}
+			for _, img := range s.Unlabeled {
+				present[img.ID] = true
+			}
+			u.Retain(present)
+			s.UsedBy = u.Snapshot()
 		}
 	}
 	if req.GetStoppedContainers() {
@@ -205,6 +257,9 @@ func (l *Local) remove(ctx context.Context, it Item) error {
 	case KindContainer:
 		return l.opts.Docker.RemoveContainer(ctx, it.ID)
 	case KindImage:
+		if it.Unlabeled {
+			return l.opts.Docker.RemoveUnlabeledImage(ctx, it.ID)
+		}
 		return l.opts.Docker.RemoveImage(ctx, it.ID)
 	case KindVolume:
 		// The plan's desired state is from before the slow size walk.

@@ -145,7 +145,7 @@ func TestRegistryServerLifecycle(t *testing.T) {
 	}
 
 	// Garbage collection with no open tunnel stops, collects, restarts.
-	if err := srv.CollectGarbage(context.Background()); err != nil {
+	if _, err := srv.CollectGarbage(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if state := run(t, "container", "inspect", "--format", "{{.State.Running}}", srv.Name); state != "true" {

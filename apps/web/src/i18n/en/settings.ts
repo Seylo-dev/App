@@ -275,7 +275,10 @@ export default {
     scheduleOff: "Automatic cleanup is off on this node.",
     scheduleLink: "Schedule and history",
     kinds: {
-      images: { name: "Unused images", hint: "Images no service needs any more. Images kept for rollback stay." },
+      images: {
+        name: "Unused images",
+        hint: "Images no service needs any more, built or pulled, and what deleted images left in the panel's registry. Images kept for rollback stay.",
+      },
       buildCache: { name: "Build cache", hint: "Cached build layers; the next build of each app is slower." },
       stoppedContainers: { name: "Stopped containers", hint: "Old containers left after deploys." },
       orphanedServiceData: { name: "Orphaned service data", hint: "Data folders of services removed without deleting their data." },

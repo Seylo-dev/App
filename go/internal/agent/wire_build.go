@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +50,11 @@ func provideBuild(d *Deps) error {
 		opts.Report = d.Reports.Event
 	}
 	d.Builder = build.New(opts)
+	d.RegistryServer = &registry.Server{
+		DataDir:   d.Layout.RegistryDir(),
+		StatePath: filepath.Join(d.Layout.StateDir(), "registry-gc"),
+		Logger:    d.Logger.With("component", "registry"),
+	}
 	return nil
 }
 
@@ -88,7 +94,7 @@ func wireBuild(reg *Registry, d *Deps) error {
 		return &agentv1.UploadBuildContextResponse{}, nil
 	})
 
-	server := &registry.Server{DataDir: d.Layout.RegistryDir(), Logger: d.Logger.With("component", "registry")}
+	server := d.RegistryServer
 	tunnel := &registry.Tunnel{Dial: &registry.NodeDialer{Registry: server}, Logger: d.Logger.With("component", "tunnel")}
 	rpc.HandleRaw(reg, "Tunnel", tunnel.Serve)
 

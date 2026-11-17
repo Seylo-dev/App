@@ -43,6 +43,9 @@ func (s scopedDocker) Images(ctx context.Context) ([]jobrun.Image, error) {
 	return slices.DeleteFunc(all, func(i jobrun.Image) bool { return i.Labels[docker.LabelProject] != s.project }), err
 }
 
+// UnlabeledImages lists none: the test VM's other images are not ours.
+func (s scopedDocker) UnlabeledImages(context.Context) ([]jobrun.Image, error) { return nil, nil }
+
 func (s scopedDocker) Networks(ctx context.Context) ([]jobrun.Network, error) {
 	all, err := s.Docker.Networks(ctx)
 	return slices.DeleteFunc(all, func(n jobrun.Network) bool { return !strings.Contains(n.Name, s.project) }), err

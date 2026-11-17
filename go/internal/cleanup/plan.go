@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/jobrun"
@@ -41,6 +42,9 @@ type Item struct {
 	Reason string
 	// ServiceID is the service whose data a volume or data item holds.
 	ServiceID string
+	// Unlabeled marks an image without the seylo label (a pulled one),
+	// which only RemoveUnlabeledImage removes.
+	Unlabeled bool
 }
 
 // Describe is the line shown in the panel.
@@ -60,8 +64,14 @@ type Snapshot struct {
 	Desired    *agentv1.DesiredState
 	Containers []jobrun.Container
 	Images     []jobrun.Image
-	Volumes    []jobrun.Volume
-	Networks   []jobrun.Network
+	// Unlabeled are the images without the seylo label, InUse the image
+	// of every container on the machine (also other programs'), UsedBy
+	// which services used which of those images and when (UsedImages).
+	Unlabeled []jobrun.Image
+	InUse     map[string]bool
+	UsedBy    map[string]map[string]time.Time
+	Volumes   []jobrun.Volume
+	Networks  []jobrun.Network
 	// ServiceDirs are the folders under <data dir>/services.
 	ServiceDirs []ServiceDir
 	// Now is when the snapshot was taken.
@@ -89,6 +99,9 @@ type ServiceDir struct {
 //     generation of a service.
 //   - Images: per service, keep the ones any container uses, the one the
 //     desired spec names and the newest KeepImagesPerService; the rest go.
+//     The same rule covers images without the label that a service's
+//     containers were made from (pulled ones, see UsedImages) and the
+//     panel's own image; any container on the machine keeps those.
 //   - Volumes, data folders and project networks: only when no service
 //     here uses them any more, and data never within
 //     volumes.IncomingGrace of a volume import into it (a move or clone
@@ -149,6 +162,7 @@ func Plan(req *agentv1.PruneRequest, s Snapshot) (items []Item, notes []string) 
 
 	if req.GetImages() && known {
 		items = append(items, removableImages(s.Images, s.Containers, desired)...)
+		items = append(items, removablePulledImages(s, desired)...)
 	}
 
 	if req.GetOrphanedServiceData() && known {
@@ -255,6 +269,110 @@ func removableImages(images []jobrun.Image, containers []jobrun.Container, desir
 		}
 	}
 	return items
+}
+
+// removablePulledImages applies the image rule to images without the
+// seylo label: the ones services' containers were made from (UsedBy) and
+// the panel's own image (brand.Image), which only Seylo runs. Per
+// service, keep any image a container on the machine uses, the one the
+// desired spec names and the newest KeepImagesPerService the service
+// used; an image goes only when every service it belongs to lets it go.
+// Images no service used stay, whoever pulled them.
+func removablePulledImages(s Snapshot, desired map[string]*agentv1.ServiceSpec) []Item {
+	type use struct {
+		img jobrun.Image
+		at  time.Time
+	}
+	byService := map[string][]use{}
+	for _, img := range s.Unlabeled {
+		if docker.IsManaged(img.Labels) {
+			continue // RemoveImage's rule
+		}
+		uses := map[string]time.Time{}
+		for svc, at := range s.UsedBy[img.ID] {
+			uses[svc] = at
+		}
+		if _, ok := uses[docker.PanelServiceID]; !ok && isPanelImage(img) {
+			// Panel images pulled before the record existed.
+			uses[docker.PanelServiceID] = img.Created
+		}
+		for svc, at := range uses {
+			byService[svc] = append(byService[svc], use{img, at})
+		}
+	}
+	kept := map[string]bool{}
+	reasons := map[string]string{}
+	var order []jobrun.Image
+	services := make([]string, 0, len(byService))
+	for svc := range byService {
+		services = append(services, svc)
+	}
+	sort.Strings(services)
+	for _, svc := range services {
+		uses := byService[svc]
+		sort.SliceStable(uses, func(i, j int) bool {
+			if !uses[i].at.Equal(uses[j].at) {
+				return uses[i].at.After(uses[j].at)
+			}
+			return uses[i].img.Created.After(uses[j].img.Created)
+		})
+		spec := desired[svc]
+		keep := 0
+		if spec != nil {
+			keep = KeepImagesPerService
+		}
+		for i, u := range uses {
+			id := u.img.ID
+			switch {
+			case s.InUse[id] || u.img.Containers > 0:
+				kept[id] = true
+			case spec != nil && namesImage(spec.GetImage(), u.img):
+				kept[id] = true
+			case i < keep:
+				kept[id] = true
+			default:
+				if _, seen := reasons[id]; !seen {
+					order = append(order, u.img)
+					reason := "older than the newest " + strconv.Itoa(keep) + " this service used"
+					if spec == nil {
+						reason = "its service is no longer on this node"
+					}
+					reasons[id] = reason
+				}
+			}
+		}
+	}
+	var items []Item
+	for _, img := range order {
+		if kept[img.ID] {
+			continue
+		}
+		items = append(items, Item{Kind: KindImage, ID: img.ID, Name: imageName(img), Size: img.Size, Reason: reasons[img.ID], Unlabeled: true})
+	}
+	return items
+}
+
+// isPanelImage reports whether img is a tag or digest of the panel's own
+// image repository.
+func isPanelImage(img jobrun.Image) bool {
+	for _, ref := range append(slices.Clone(img.RepoTags), img.RepoDigests...) {
+		if repository(ref) == brand.Image {
+			return true
+		}
+	}
+	return false
+}
+
+// repository is ref without its tag or digest ("ghcr.io/a/b:1" ->
+// "ghcr.io/a/b"; a registry port stays).
+func repository(ref string) string {
+	if i := strings.IndexByte(ref, '@'); i >= 0 {
+		ref = ref[:i]
+	}
+	if i := strings.LastIndexByte(ref, ':'); i > strings.LastIndexByte(ref, '/') {
+		ref = ref[:i]
+	}
+	return ref
 }
 
 // namesImage reports whether the desired image reference or digest points

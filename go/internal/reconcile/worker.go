@@ -596,10 +596,15 @@ func (w *worker) createInstances(ctx context.Context, spec *agentv1.ServiceSpec,
 	if err != nil {
 		return nil, err
 	}
-	if _, err := w.r.o.Docker.InspectImage(ctx, image); err != nil {
+	info, err := w.r.o.Docker.InspectImage(ctx, image)
+	if err != nil {
 		if _, err := w.r.o.Docker.PullImage(ctx, image, spec.GetImage().GetAuth()); err != nil {
 			return nil, fmt.Errorf("pulling image: %w", err)
 		}
+		info, _ = w.r.o.Docker.InspectImage(ctx, image)
+	}
+	if w.r.o.ImageUsed != nil && info.ID != "" {
+		w.r.o.ImageUsed(spec.GetId(), info.ID)
 	}
 	binds, mounts, err := prepareData(ctx, w.r.o.Docker, w.r.o.Layout, spec, w.r.o.Scope)
 	if err != nil {

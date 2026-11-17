@@ -20,6 +20,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/portgate"
 	"github.com/seylo-dev/app/go/internal/proxy"
 	"github.com/seylo-dev/app/go/internal/reconcile"
+	"github.com/seylo-dev/app/go/internal/registry"
 	"github.com/seylo-dev/app/go/internal/rpc"
 	"github.com/seylo-dev/app/go/internal/state"
 	"github.com/seylo-dev/app/go/internal/tunnel"
@@ -147,6 +148,9 @@ type Deps struct {
 	// Build (wire_build.go).
 
 	Builder build.Builder
+	// RegistryServer runs the panel registry on the panel's node; the
+	// cleanup collects its garbage too.
+	RegistryServer *registry.Server
 
 	// Observe (wire_observe.go).
 
@@ -160,6 +164,9 @@ type Deps struct {
 	Backups    backup.Runner
 	Cloudflare tunnel.Cloudflare
 	Pruner     cleanup.Pruner
+	// UsedImages records which images services used (reconcile writes,
+	// the cleanup reads), so pulled images can be cleaned up.
+	UsedImages *cleanup.UsedImages
 	// CleanupScheduler runs NodeSettings.cleanup; the node area feeds it
 	// the disk checks' readings.
 	CleanupScheduler cleanup.Scheduler

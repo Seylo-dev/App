@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/cleanup"
 	"github.com/seylo-dev/app/go/internal/crash"
 	"github.com/seylo-dev/app/go/internal/datadir"
 	"github.com/seylo-dev/app/go/internal/docker"
@@ -34,6 +36,9 @@ func provideRuntime(d *Deps) error {
 			return err
 		}
 		d.Docker = eng
+	}
+	if d.UsedImages == nil {
+		d.UsedImages = cleanup.NewUsedImages(filepath.Join(d.Layout.StateDir(), "used-images.json"), d.Logger.With("component", "cleanup"))
 	}
 	if d.Prober == nil {
 		eng := d.Docker
@@ -74,6 +79,11 @@ func wireRuntime(reg *Registry, d *Deps) error {
 	}
 	if d.DNSCache != nil {
 		opts.DNS = d.DNSCache.ContainerDNS
+	}
+	if d.UsedImages != nil {
+		opts.ImageUsed = func(serviceID, imageID string) {
+			d.UsedImages.Record(time.Now(), cleanup.Use{Service: serviceID, Image: imageID})
+		}
 	}
 	rt, err := reconcile.New(opts)
 	if err != nil {

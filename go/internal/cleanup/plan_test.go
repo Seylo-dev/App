@@ -2,6 +2,7 @@ package cleanup
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/datadir"
 	"github.com/seylo-dev/app/go/internal/docker"
@@ -174,6 +176,16 @@ func (f *fakeDocker) RemoveImage(_ context.Context, id string) error {
 	f.removed = append(f.removed, "image:"+id)
 	return nil
 }
+func (f *fakeDocker) UnlabeledImages(context.Context) ([]jobrun.Image, error) {
+	return f.snap.Unlabeled, nil
+}
+func (f *fakeDocker) ImageIDsInUse(context.Context) (map[string]bool, error) {
+	return f.snap.InUse, nil
+}
+func (f *fakeDocker) RemoveUnlabeledImage(_ context.Context, id string) error {
+	f.removed = append(f.removed, "pulled:"+id)
+	return nil
+}
 func (f *fakeDocker) RemoveVolume(_ context.Context, n string) error {
 	f.removed = append(f.removed, "volume:"+n)
 	return nil
@@ -246,5 +258,172 @@ func TestPlanRemovesDataOnceItsLastContainerGoes(t *testing.T) {
 	}
 	if items[0].Kind != KindContainer {
 		t.Fatal("containers must go first")
+	}
+}
+
+// Images without the seylo label follow the image rule once a service
+// used them (UsedImages): any container on the machine keeps one, as do
+// the desired one and the newest 3 a service used; an image goes only
+// when every service it belongs to lets it go, and images no service
+// used are never candidates.
+func TestPlanPulledImages(t *testing.T) {
+	day := func(d int) time.Time { return time.Date(2026, 1, d, 0, 0, 0, 0, time.UTC) }
+	pulled := func(id string, tags ...string) jobrun.Image {
+		return jobrun.Image{ID: id, RepoTags: tags, Labels: map[string]string{}, Created: day(1), Size: 100}
+	}
+	desired := desiredState()
+	desired.Services = append(desired.Services, &agentv1.ServiceSpec{Id: "db", ProjectId: "p1", Generation: 2,
+		Image: &agentv1.ImageRef{Reference: "postgres:16.3"}})
+	s := Snapshot{Desired: desired,
+		Unlabeled: []jobrun.Image{
+			pulled("pg-16.0", "postgres:16.0"),
+			pulled("pg-16.1", "postgres:16.1"),
+			pulled("pg-16.2", "postgres:16.2"),
+			pulled("pg-16.3", "postgres:16.3"), // desired
+			pulled("pg-15", "postgres:15"),     // another program's container uses it
+			pulled("redis", "redis:7"),         // the removed service's
+			pulled("shared", "nginx:1"),        // removed service's, and db's newest
+			pulled("never-used", "busybox:1"),  // no service used it
+			{ID: "labeled", RepoTags: []string{"x:1"}, Labels: labels(), Created: day(1)},
+		},
+		InUse: map[string]bool{"pg-15": true},
+		UsedBy: map[string]map[string]time.Time{
+			"pg-16.0": {"db": day(2)},
+			"pg-16.1": {"db": day(3)},
+			"pg-16.2": {"db": day(4)},
+			"pg-16.3": {"db": day(5)},
+			"pg-15":   {"db": day(1)},
+			"redis":   {"gone": day(9)},
+			"shared":  {"gone": day(9), "db": day(6)},
+			"labeled": {"gone": day(9)},
+		},
+	}
+	items, _ := Plan(&agentv1.PruneRequest{Images: true}, s)
+	got := map[string]string{}
+	for _, it := range items {
+		if !it.Unlabeled || it.Kind != KindImage {
+			t.Fatalf("item %+v is not an unlabeled image", it)
+		}
+		got[it.ID] = it.Reason
+	}
+	// db's newest 3 are shared (which gone would let go), 16.3 (also
+	// desired) and 16.2; pg-15 is in use; redis's service is gone.
+	want := map[string]string{
+		"pg-16.0": "older than the newest 3 this service used",
+		"pg-16.1": "older than the newest 3 this service used",
+		"redis":   "its service is no longer on this node",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("removed %v, want %v", got, want)
+	}
+	for id, reason := range want {
+		if got[id] != reason {
+			t.Fatalf("removed %v, want %v", got, want)
+		}
+	}
+
+	// A node that never received a desired state removes nothing.
+	s.Desired = &agentv1.DesiredState{}
+	if items, _ := Plan(&agentv1.PruneRequest{Images: true}, s); len(items) != 0 {
+		t.Fatalf("revision 0 removes %v", items)
+	}
+}
+
+// The panel's own image is Seylo's even when no record says so (pulled
+// before the record existed): the panel service keeps the newest 3.
+func TestPlanOldPanelImages(t *testing.T) {
+	day := func(d int) time.Time { return time.Date(2026, 1, d, 0, 0, 0, 0, time.UTC) }
+	panel := func(id, version string, d int) jobrun.Image {
+		return jobrun.Image{ID: id, RepoTags: []string{brand.Image + ":" + version}, Created: day(d), Size: 300}
+	}
+	desired := desiredState()
+	desired.Services = append(desired.Services, &agentv1.ServiceSpec{Id: docker.PanelServiceID, Protected: true,
+		Image: &agentv1.ImageRef{Reference: brand.Image + ":0.2.18"}})
+	s := Snapshot{Desired: desired, Unlabeled: []jobrun.Image{
+		panel("p13", "0.2.13", 13),
+		panel("p14", "0.2.14", 14),
+		panel("p15", "0.2.15", 15),
+		panel("p16", "0.2.16", 16),
+		panel("p17", "0.2.17", 17),
+		panel("p18", "0.2.18", 18),
+		{ID: "lookalike", RepoTags: []string{brand.Image + "-fork:0.1"}, Created: day(1)},
+		{ID: "by-digest", RepoDigests: []string{brand.Image + "@sha256:abc"}, Created: day(2)},
+	}}
+	items, _ := Plan(&agentv1.PruneRequest{Images: true}, s)
+	if got, want := names(items, KindImage), []string{"by-digest", "ghcr.io/seylo-dev/seylo:0.2.13 (p13)", "ghcr.io/seylo-dev/seylo:0.2.14 (p14)", "ghcr.io/seylo-dev/seylo:0.2.15 (p15)"}; !slices.Equal(got, want) {
+		t.Fatalf("panel images removed = %v, want %v", got, want)
+	}
+}
+
+func TestRepository(t *testing.T) {
+	for ref, want := range map[string]string{
+		"ghcr.io/seylo-dev/seylo:0.2.18":          "ghcr.io/seylo-dev/seylo",
+		"ghcr.io/seylo-dev/seylo@sha256:abc":      "ghcr.io/seylo-dev/seylo",
+		"127.0.0.1:5755/svc:3":                    "127.0.0.1:5755/svc",
+		"127.0.0.1:5755/svc":                      "127.0.0.1:5755/svc",
+		"postgres":                                "postgres",
+		"ghcr.io/seylo-dev/seylo:0.2.18@sha256:a": "ghcr.io/seylo-dev/seylo",
+	} {
+		if got := repository(ref); got != want {
+			t.Errorf("repository(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}
+
+type fakeRegistry struct {
+	calls []bool
+	err   error
+}
+
+func (f *fakeRegistry) PruneRegistry(_ context.Context, dryRun bool) (uint64, []string, error) {
+	f.calls = append(f.calls, dryRun)
+	if f.err != nil {
+		return 0, nil, f.err
+	}
+	return 7000, []string{"registry: 6.8 KiB freed"}, nil
+}
+
+// A cleanup with images runs the registry's garbage collection and counts
+// what it freed; pulled images go through RemoveUnlabeledImage; the
+// record learns from the containers it sees.
+func TestLocalPrunesPulledImagesAndTheRegistry(t *testing.T) {
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	fd := &fakeDocker{snap: Snapshot{
+		Containers: []jobrun.Container{{ID: "c1", ImageID: "live-now", Running: true, Labels: labels(docker.LabelService, "live", docker.LabelGeneration, "4")}},
+		Unlabeled: []jobrun.Image{
+			{ID: "live-now", RepoTags: []string{"app:2"}, Created: now, Size: 10},
+			{ID: "gone-img", RepoTags: []string{"redis:7"}, Created: now, Size: 20},
+			{ID: "stale", RepoTags: []string{"old:1"}, Created: now, Size: 5},
+		},
+		InUse: map[string]bool{"live-now": true},
+	}}
+	used := NewUsedImages(filepath.Join(t.TempDir(), "used.json"), nil)
+	used.Record(now.Add(-time.Hour), Use{Service: "gone", Image: "gone-img"}, Use{Service: "gone", Image: "deleted-meanwhile"})
+	reg := &fakeRegistry{}
+	p := NewLocal(Options{Docker: fd, Layout: datadir.New(t.TempDir()), Desired: desiredState, Registry: reg, UsedImages: used, Now: func() time.Time { return now }})
+
+	resp, err := p.Prune(context.Background(), &agentv1.PruneRequest{Images: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(fd.removed, []string{"pulled:gone-img"}) || resp.GetReclaimedBytes() != 7020 || !slices.Equal(reg.calls, []bool{false}) {
+		t.Fatalf("removed %v, reclaimed %d, registry calls %v", fd.removed, resp.GetReclaimedBytes(), reg.calls)
+	}
+	if !slices.Contains(resp.GetRemoved(), "registry: 6.8 KiB freed") {
+		t.Fatalf("lines %v", resp.GetRemoved())
+	}
+	rec := used.Snapshot()
+	if rec["live-now"]["live"] != now || rec["deleted-meanwhile"] != nil {
+		t.Fatalf("record = %v", rec)
+	}
+
+	// Without the images kind the registry is left alone; its failure is a note.
+	reg.err = errors.New("docker: boom")
+	if _, err := p.Prune(context.Background(), &agentv1.PruneRequest{StoppedContainers: true}); err != nil || len(reg.calls) != 1 {
+		t.Fatalf("registry called for containers only: %v %v", err, reg.calls)
+	}
+	resp, err = p.Prune(context.Background(), &agentv1.PruneRequest{Images: true, DryRun: true})
+	if err != nil || !slices.Contains(resp.GetRemoved(), "registry: docker: boom") || !slices.Equal(reg.calls, []bool{false, true}) {
+		t.Fatalf("dry run: %v %v %v", err, resp.GetRemoved(), reg.calls)
 	}
 }

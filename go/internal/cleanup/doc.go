@@ -4,15 +4,20 @@
 // desired one, so rollback stays instant), Docker volumes and data folders
 // of services removed from the node, and project networks with no service
 // left. It only ever touches resources with the seylo.managed label
-// (docker.IsManaged), checked again right before each removal; a
-// whole-machine prune was rejected on purpose, because nodes may run other
-// workloads such as Pelican Wings game servers. Every prune can run as a
-// dry run first, which reports the same lines with sizes.
+// (docker.IsManaged), checked again right before each removal, with one
+// exception: images pulled from a registry cannot carry the label, so the
+// ones a service's containers were made from (UsedImages) and the panel's
+// own image follow the same image rule, and any container on the machine
+// keeps them. A whole-machine prune was rejected on purpose, because nodes
+// may run other workloads such as Pelican Wings game servers. Every prune
+// can run as a dry run first, which reports the same lines with sizes.
 //
 // PruneRequest flags map to: stopped_containers -> containers and unused
-// project networks; images -> images; orphaned_service_data -> Docker
-// volumes and services/<id> folders; build_cache -> the builder's own
-// cache through CachePruner (never Docker's machine-wide cache).
+// project networks; images -> images, and on the panel's node a garbage
+// collection of its registry through RegistryPruner (what images the panel
+// deleted from it leave behind); orphaned_service_data -> Docker volumes
+// and services/<id> folders; build_cache -> the builder's own cache
+// through CachePruner (never Docker's machine-wide cache).
 //
 // Scheduled cleanup (NodeSettings.cleanup) runs on the node by itself, so
 // it keeps going while the panel is down: on a cron expression in the
