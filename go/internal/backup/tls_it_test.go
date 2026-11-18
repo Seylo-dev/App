@@ -60,10 +60,10 @@ func TestDumpsSkipTLS(t *testing.T) {
 			spec, cont, q, measure := playerStage(t, r, e, id, c.engine, c.image, c.env, c.args...)
 			want := measure()
 			subject := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: "app"}}}
-			before := sslAccepts(t, e, cont)
 			if c.burst {
 				tlsBurst(t, spec, c.image, 150)
 			}
+			before := sslAccepts(t, e, cont)
 			st.set(spec.GetId(), true, false)
 			res := r.tryBackup(e, subject, "tls-"+id, 0, false)
 			st.set(spec.GetId(), false, false)
@@ -71,10 +71,11 @@ func TestDumpsSkipTLS(t *testing.T) {
 				logs, _ := exec.Command("docker", "logs", "--tail", "10", cont).CombinedOutput()
 				t.Fatalf("backup failed: %s\nserver log:\n%s", res.GetError(), logs)
 			}
+			mid := sslAccepts(t, e, cont)
 			if out, code := q(e, cont, "app", "DELETE FROM PlayerStage WHERE id % 3 = 0"); code != 0 {
 				t.Fatalf("delete: %s", out)
 			}
-			mid := sslAccepts(t, e, cont)
+			mid2 := sslAccepts(t, e, cont)
 			if err := r.tryRestore(e, subject, res.GetObjectKey()); err != nil {
 				t.Fatal(err)
 			}
@@ -82,21 +83,22 @@ func TestDumpsSkipTLS(t *testing.T) {
 			if got := measure(); got != want {
 				t.Fatalf("after the restore: %q, want %q", got, want)
 			}
-			// q itself connects over TCP (with TLS where the client
-			// prefers it): only the backup and the restore are counted.
-			t.Logf("TLS handshakes: backup %d, restore %d", mid-before, after-mid)
-			if c.tls && (mid == before || after == mid) || !c.tls && (mid != before || after != mid) {
-				t.Fatalf("TLS handshakes: backup %d, restore %d; want TLS %v", mid-before, after-mid, c.tls)
+			// q connects over TCP (with TLS where the client prefers it),
+			// so only the backup and the restore are counted.
+			t.Logf("TLS handshakes: backup %d, restore %d", mid-before, after-mid2)
+			if c.tls && (mid == before || after == mid2) || !c.tls && (mid != before || after != mid2) {
+				t.Fatalf("TLS handshakes: backup %d, restore %d; want TLS %v", mid-before, after-mid2, c.tls)
 			}
 		})
 	}
 }
 
 // sslAccepts is the server's count of TLS handshakes, read over its socket
-// (no TLS, and allowed when the server requires secure transport).
+// (allowed when the server requires secure transport) without TLS: the
+// MariaDB 11 client uses TLS on the socket too, and would count itself.
 func sslAccepts(t *testing.T, e *itest.Env, cont string) int {
 	t.Helper()
-	script := `if command -v mariadb >/dev/null 2>&1; then exec mariadb "$@"; fi; exec mysql "$@"`
+	script := `if command -v mariadb >/dev/null 2>&1; then exec mariadb --skip-ssl "$@"; fi; exec mysql --ssl-mode=DISABLED "$@"`
 	out, code := e.Exec(cont, []string{"sh", "-c", script, "sh", "--user=root", "-N", "-B", "-e", "SHOW GLOBAL STATUS LIKE 'Ssl_accepts'"}, []string{"MYSQL_PWD=" + pw})
 	f := strings.Fields(out)
 	if code != 0 || len(f) != 2 {
