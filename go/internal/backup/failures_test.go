@@ -46,7 +46,11 @@ func TestConnectionLostHint(t *testing.T) {
 	// a full stop gets no second one.
 	line := "mariadb-dump: Error 2026: TLS/SSL error: unexpected eof while reading when dumping table `PlayerStage` at row: 812345"
 	want := line + ". The database closed the connection in the middle of the dump. Usually it restarted or ran out of memory: " +
-		`look in its Logs for a restart or "Aborted connection". Before Seylo 0.2.17 a slow upload to the bucket caused this too.`
+		`look in its Logs for a restart or "Aborted connection". Over TLS, MariaDB with thread_handling=pool-of-threads also drops ` +
+		"connections right after many clients left at once. Before Seylo 0.2.17 a slow upload to the bucket caused this too."
+	if got := connectionLostHint("mariadb-dump: Error 2013: Lost connection to server during query when dumping table `t` at row: 5", true, nil); strings.Contains(got, "TLS") {
+		t.Fatalf("a plain connection's hint talks about TLS: %q", got)
+	}
 	if got := line + connectionLostHint(line, true, nil); got != want {
 		t.Fatalf("message:\n%s\nwant:\n%s", got, want)
 	}
@@ -93,6 +97,36 @@ func TestConnectionLostHintAfterAHold(t *testing.T) {
 		got := connectionLostHint(c.line, c.dump, floor)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
 			t.Errorf("%q after a hold: hint %q, want one with %q", c.line, got, c.want)
+		}
+	}
+}
+
+// TestLostConnectionRetries: a dump the database closed under it gets a
+// second try, unless the database closed it while the dump waited for the
+// upload (MySQL, MariaDB and Redis drop a reader that stops; a second try
+// would wait the same way). Postgres never drops a slow reader, so its lost
+// connection is retried either way.
+func TestLostConnectionRetries(t *testing.T) {
+	hold := &spoolHold{dur: 90 * time.Second, why: holdFloor}
+	cases := []struct {
+		line  string
+		hold  *spoolHold
+		retry bool
+	}{
+		{"mariadb-dump: Error 2026: TLS/SSL error: unexpected eof while reading when dumping table `ranks_period_cursor` at row: 37649", nil, true},
+		{"mariadb-dump: Error 2026: TLS/SSL error: unexpected eof while reading when dumping table `ranks_period_cursor` at row: 37649", hold, false},
+		{"mariadb-dump: Error 2013: Lost connection to server during query when dumping table `PlayerStage` at row: 98934", nil, true},
+		{"mysqldump: Couldn't execute 'SHOW TRIGGERS LIKE 't'': Lost connection to MySQL server during query (2013)", hold, false},
+		{"I/O Error reading RDB payload from socket", nil, true},
+		{"pg_dump: error: Dumping the contents of table \"t\" failed: PQgetResult() failed. pg_dump: detail: Error message from server: server closed the connection unexpectedly", hold, true},
+		{noOutput, hold, false},
+		{noOutput, nil, false},
+		{"mariadb-dump: Got error: 2026: TLS/SSL error: self-signed certificate in certificate chain when trying to connect", nil, false},
+		{"ERROR 1045 (28000): Access denied for user 'root'@'10.0.0.5' (using password: YES)", nil, false},
+	}
+	for _, c := range cases {
+		if got := lostConnection(c.line, c.hold); got != c.retry {
+			t.Errorf("%q (hold %v): retry %v, want %v", c.line, c.hold != nil, got, c.retry)
 		}
 	}
 }

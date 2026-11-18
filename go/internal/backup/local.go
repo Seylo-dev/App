@@ -73,6 +73,10 @@ type Options struct {
 	// SpoolSpace reports the free and total bytes of the filesystem
 	// holding SpoolDir; nil reads them with statfs. Tests replace it.
 	SpoolSpace func(dir string) (free, total uint64, ok bool)
+	// RetryWait is how long a database backup whose connection the
+	// database closed waits before its one more try; 0 means a minute,
+	// negative means no second try.
+	RetryWait time.Duration
 }
 
 // Local is the agent's Runner.
@@ -111,6 +115,9 @@ func NewLocal(opts Options) *Local {
 	}
 	if opts.SpoolDir == "" {
 		opts.SpoolDir = opts.Layout.BackupSpoolDir()
+	}
+	if opts.RetryWait == 0 {
+		opts.RetryWait = time.Minute
 	}
 	return &Local{opts: opts, log: opts.Logger, sem: make(chan struct{}, opts.MaxParallel), running: map[string]bool{}}
 }
@@ -173,14 +180,7 @@ func (l *Local) Start(ctx context.Context, req *agentv1.RunBackupRequest, report
 			delete(l.running, req.GetRunId())
 			l.mu.Unlock()
 		}()
-		res := &agentv1.BackupResult{BackupId: req.GetBackupId(), RunId: req.GetRunId(), StartedAt: timestamppb.New(l.opts.Now())}
-		select {
-		case l.sem <- struct{}{}:
-			err = l.backup(base, plan, res)
-			<-l.sem
-		case <-base.Done():
-			err = base.Err()
-		}
+		res, err := l.runBackup(base, plan)
 		res.FinishedAt = timestamppb.New(l.opts.Now())
 		if err != nil {
 			res.Success = false
@@ -193,6 +193,55 @@ func (l *Local) Start(ctx context.Context, req *agentv1.RunBackupRequest, report
 		report(res)
 	}()
 	return nil
+}
+
+// runBackup runs a backup once a slot is free. A database backup the
+// database closed the connection of (errLostConnection) runs once more
+// after RetryWait, in a slot of its own again: what does that (a restart,
+// MariaDB's TLS error queue after many clients left at once, a network
+// blip) has usually passed by then.
+func (l *Local) runBackup(base context.Context, p *backupPlan) (*agentv1.BackupResult, error) {
+	started := timestamppb.New(l.opts.Now())
+	var first *errLostConnection
+	for {
+		res := &agentv1.BackupResult{BackupId: p.req.GetBackupId(), RunId: p.req.GetRunId(), StartedAt: started}
+		select {
+		case l.sem <- struct{}{}:
+		case <-base.Done():
+			return res, base.Err()
+		}
+		err := l.backup(base, p, res)
+		<-l.sem
+		if first != nil {
+			if err == nil {
+				res.Warnings = append(res.Warnings, "The first try lost its connection to the database ("+first.line+"), so the backup ran again.")
+				return res, nil
+			}
+			return res, fmt.Errorf("%w%s", err, sentence(err.Error(), "This was a second try: the first one lost its connection to the database too ("+first.line+")."))
+		}
+		var lost *errLostConnection
+		if err == nil || l.opts.RetryWait < 0 || base.Err() != nil || !errors.As(err, &lost) {
+			return res, err
+		}
+		first = lost
+		l.log.Warn("the database closed the backup's connection, trying once more", "service_id", p.spec.GetId(),
+			"run_id", p.req.GetRunId(), "wait", l.opts.RetryWait, "err", err)
+		t := time.NewTimer(l.opts.RetryWait)
+		select {
+		case <-t.C:
+		case <-base.Done():
+			t.Stop()
+			return res, base.Err()
+		}
+	}
+}
+
+// sentence is s, written after msg as a sentence of its own.
+func sentence(msg, s string) string {
+	if strings.HasSuffix(msg, ".") {
+		return " " + s
+	}
+	return ". " + s
 }
 
 // userError is the message shown in the panel.
@@ -532,7 +581,12 @@ func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writ
 	}
 	if res.ExitCode != 0 {
 		line := lastLine(errTail)
-		return fmt.Errorf("the dump exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, true, p.spool.recentHold()))
+		hold := p.spool.recentHold()
+		err := fmt.Errorf("the dump exited with code %d: %s%s", res.ExitCode, line, connectionLostHint(line, true, hold))
+		if lostConnection(line, hold) {
+			return &errLostConnection{err: err, line: line}
+		}
+		return err
 	}
 	if gz != nil {
 		return gz.Close()

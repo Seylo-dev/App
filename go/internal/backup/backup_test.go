@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -358,6 +359,7 @@ func newRig(t *testing.T, specs ...*agentv1.ServiceSpec) *rig {
 			r.now = r.now.Add(time.Hour)
 			return r.now
 		},
+		RetryWait: time.Millisecond,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -515,6 +517,82 @@ func TestDatabaseDumpAndFailures(t *testing.T) {
 	r.start(req)
 	if res = r.result(); res.GetSuccess() || !strings.Contains(res.GetError(), "bucket gone") {
 		t.Fatalf("upload failure result = %v", res)
+	}
+}
+
+// TestLostConnectionTriesOnceMore: a dump the database closed under it
+// (the owner's MariaDB 11.8 behind a thread pool, over TLS) runs once more;
+// a second try that works is a success with a warning, a second failure
+// says it was the second try, and other failures are not retried.
+func TestLostConnectionTriesOnceMore(t *testing.T) {
+	maria := dbSpec(agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB)
+	r := newRig(t, maria)
+	const lost = "mariadb-dump: Error 2026: TLS/SSL error: unexpected eof while reading when dumping table `ranks_period_cursor` at row: 37649"
+	var dumps atomic.Int32
+	failFirst := 1
+	r.docker.fn = func(spec jobrun.Spec, stdio jobrun.IO) (jobrun.Result, error) {
+		if strings.HasPrefix(spec.Labels[jobrun.LabelRun], "measure-") {
+			return jobrun.Result{ExitCode: 1}, nil
+		}
+		n := int(dumps.Add(1))
+		fmt.Fprint(stdio.Stdout, "-- dump part\n")
+		if n <= failFirst {
+			fmt.Fprintln(stdio.Stderr, lost)
+			return jobrun.Result{ExitCode: 3}, nil
+		}
+		fmt.Fprint(stdio.Stdout, "-- dump end\n")
+		return jobrun.Result{}, nil
+	}
+	req := &agentv1.RunBackupRequest{BackupId: "pol1", RunId: "r1",
+		Subject: &agentv1.BackupSubject{ServiceId: "db1", What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: "app"}}}}
+	r.start(req)
+	res := r.result()
+	if !res.GetSuccess() || dumps.Load() != 2 || !slices.ContainsFunc(res.GetWarnings(), func(w string) bool {
+		return w == "The first try lost its connection to the database ("+lost+"), so the backup ran again."
+	}) {
+		t.Fatalf("after one lost connection: %v (dumps %d)", res, dumps.Load())
+	}
+	if keys := r.store.keys(); len(keys) != 1 || !strings.Contains(string(r.store.objs[keys[0]]), "-- dump end") {
+		t.Fatalf("objects = %v", keys)
+	}
+
+	// Lost twice: the error says so, and nothing is left in the bucket.
+	dumps.Store(0)
+	failFirst = 2
+	req.RunId = "r2"
+	r.start(req)
+	res = r.result()
+	if res.GetSuccess() || dumps.Load() != 2 || !strings.HasPrefix(res.GetError(), "the dump exited with code 3: "+lost) ||
+		!strings.HasSuffix(res.GetError(), "This was a second try: the first one lost its connection to the database too ("+lost+").") {
+		t.Fatalf("after two lost connections: %v (dumps %d)", res, dumps.Load())
+	}
+	if len(r.store.keys()) != 1 {
+		t.Fatalf("partial dumps left behind: %v", r.store.keys())
+	}
+
+	// Without a second try (RetryWait < 0), and for a failure that is not
+	// a lost connection, one dump.
+	for name, c := range map[string]struct {
+		line string
+		wait time.Duration
+	}{"no retry": {lost, -1}, "other failure": {"mariadb-dump: Got error: 1045: Access denied for user 'root'@'10.0.0.5' (using password: YES)", time.Millisecond}} {
+		dumps.Store(0)
+		failFirst = 2
+		r.runner.opts.RetryWait = c.wait
+		line := c.line
+		r.docker.fn = func(spec jobrun.Spec, stdio jobrun.IO) (jobrun.Result, error) {
+			if strings.HasPrefix(spec.Labels[jobrun.LabelRun], "measure-") {
+				return jobrun.Result{ExitCode: 1}, nil
+			}
+			dumps.Add(1)
+			fmt.Fprintln(stdio.Stderr, line)
+			return jobrun.Result{ExitCode: 2}, nil
+		}
+		req.RunId = "r-" + strings.ReplaceAll(name, " ", "-")
+		r.start(req)
+		if res = r.result(); res.GetSuccess() || dumps.Load() != 1 || strings.Contains(res.GetError(), "second try") {
+			t.Fatalf("%s: %v (dumps %d)", name, res, dumps.Load())
+		}
 	}
 }
 

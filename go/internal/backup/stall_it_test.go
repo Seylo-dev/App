@@ -177,15 +177,18 @@ func TestMySQLDumpRestoreSurviveStalls(t *testing.T) {
 // with a PlayerStage table of 262,144 rows (about 30 MB compressed) in the
 // app database; q runs a statement in a database and measure returns the
 // table's row count and checksum.
-func playerStage(t *testing.T, r *rig, e *itest.Env, name string, engine agentv1.DatabaseEngine, image, env string) (
+func playerStage(t *testing.T, r *rig, e *itest.Env, name string, engine agentv1.DatabaseEngine, image, env string, args ...string) (
 	spec *agentv1.ServiceSpec, cont string, q func(e *itest.Env, cont, db, stmt string) (string, int), measure func() string,
 ) {
 	spec = e.Spec(name, name, image)
 	spec.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
 	spec.Env = []*agentv1.EnvVar{{Name: env, Value: pw}}
-	// The server's own short timeouts (the entrypoints pass arguments
-	// starting with - to the server).
-	spec.Container = &agentv1.ContainerConfig{Command: []string{"--net-write-timeout=2", "--net-read-timeout=2", "--wait-timeout=4"}}
+	// The server's own short timeouts unless args says otherwise (the
+	// entrypoints pass arguments starting with - to the server).
+	if args == nil {
+		args = []string{"--net-write-timeout=2", "--net-read-timeout=2", "--wait-timeout=4"}
+	}
+	spec.Container = &agentv1.ContainerConfig{Command: args}
 	spec.Volumes = []*agentv1.VolumeMount{{Name: "data", ContainerPath: "/var/lib/mysql"}}
 	spec.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{Engine: engine,
 		Credentials: &agentv1.DatabaseCredentials{AdminUser: "root", AdminPassword: pw, Database: "app"}}}

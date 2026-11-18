@@ -103,12 +103,27 @@ func (t dbTarget) baseEnv() []string {
 }
 
 // mysqlPrelude writes the password to an option file (MYSQL_PWD is
-// deprecated) and picks mariadb-* tools when the image has them (MariaDB
-// 11 images dropped the mysql* names).
+// deprecated), picks mariadb-* tools when the image has them (MariaDB
+// 11 images dropped the mysql* names) and turns TLS off for the job when
+// the server takes a plain connection. The helper reaches the server on
+// the project's own network, and MariaDB (11.8 still) does not clear
+// OpenSSL's per-thread error queue before a TLS read or write: under
+// thread_handling=pool-of-threads, once many TLS clients went away at once
+// (game servers restarting), a worker thread keeps their errors and the
+// next TLS connection it serves that waits on its socket dies ("Got an
+// error writing communication packets", and in the dump "Error 2026:
+// TLS/SSL error: unexpected eof while reading"). A server that refuses
+// plain connections (require_secure_transport, a user that requires SSL)
+// fails the probe, and the job uses TLS as before. MySQL clients take
+// ssl-mode=DISABLED (8.0 dropped --skip-ssl); MariaDB ones only skip-ssl.
 const mysqlPrelude = `set -e
 umask 077
 printf '[client]\npassword="%s"\n' "$DB_PASSWORD_CNF" > /tmp/.backup.cnf
 if command -v mariadb-dump >/dev/null 2>&1; then DUMP=mariadb-dump; CLIENT=mariadb; else DUMP=mysqldump; CLIENT=mysql; fi
+if $CLIENT --help 2>/dev/null | grep -q -- '--ssl-mode='; then NOTLS='ssl-mode=DISABLED'; else NOTLS='skip-ssl'; fi
+if $CLIENT --defaults-extra-file=/tmp/.backup.cnf --$NOTLS --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --connect-timeout=10 -e 'SELECT 1' </dev/null >/dev/null 2>&1; then
+  printf '%s\n' "$NOTLS" >> /tmp/.backup.cnf
+fi
 `
 
 // mysqlDumpPrelude is mysqlPrelude for a dump. Where the dump tool takes

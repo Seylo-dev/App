@@ -13,24 +13,32 @@ var connectionLost = []struct {
 	re      *regexp.Regexp
 	logs    string
 	timeout string
+	// also: one more cause, said after the usual ones.
+	also string
 }{
 	// MySQL and MariaDB clients: 2013 lost connection during a query, 2006
 	// server gone away (it closed an idle connection), 4031 disconnected
-	// for inactivity (MySQL 8.0.24+), and 2026 when TLS saw the connection
-	// end (unexpected eof). The tools print "Error 2013: ..." (dumps),
-	// "Got error: 2013: ...", "ERROR 2013 (HY000) at line 5: ..." (the
-	// clients) or "...: <message> (2013)" (mysqldump's "Couldn't
-	// execute"), where the eof comes before the code.
-	{regexp.MustCompile(`(?i)\berror:? (2006|2013|4031)\b|\((2006|2013|4031)\)|\berror:? 2026\b.*\b(eof|reset|broken pipe)\b|\b(eof|reset|broken pipe)\b.*\(2026\)`),
-		`a restart or "Aborted connection"`, "net_write_timeout and wait_timeout"},
+	// for inactivity (MySQL 8.0.24+). The tools print "Error 2013: ..."
+	// (dumps), "Got error: 2013: ...", "ERROR 2013 (HY000) at line 5: ..."
+	// (the clients) or "...: <message> (2013)" (mysqldump's "Couldn't
+	// execute").
+	{re: regexp.MustCompile(`(?i)\berror:? (2006|2013|4031)\b|\((2006|2013|4031)\)`),
+		logs: `a restart or "Aborted connection"`, timeout: "net_write_timeout and wait_timeout"},
+	// 2026 when TLS saw the connection end (unexpected eof), where the eof
+	// comes before the code in "Couldn't execute". The jobs only use TLS
+	// when the server refuses plain connections (mysqlPrelude), and then
+	// MariaDB's thread pool can drop them too.
+	{re: regexp.MustCompile(`(?i)\berror:? 2026\b.*\b(eof|reset|broken pipe)\b|\b(eof|reset|broken pipe)\b.*\(2026\)`),
+		logs: `a restart or "Aborted connection"`, timeout: "net_write_timeout and wait_timeout",
+		also: "Over TLS, MariaDB with thread_handling=pool-of-threads also drops connections right after many clients left at once."},
 	// redis-cli, valkey-cli and keydb-cli --rdb: the server dropped the
 	// replica connection the RDB comes through.
-	{regexp.MustCompile(`(?i)error reading (the )?RDB payload|while SYNCing`),
-		`a restart or "Disconnecting timedout replica"`, "repl-timeout"},
+	{re: regexp.MustCompile(`(?i)error reading (the )?RDB payload|while SYNCing`),
+		logs: `a restart or "Disconnecting timedout replica"`, timeout: "repl-timeout"},
 	// pg_dump, pg_restore and psql. Postgres never drops a dump that stops
 	// reading.
-	{regexp.MustCompile(`(?i)server closed the connection unexpectedly|connection to server was lost|terminating connection due to`),
-		`a restart or "terminating connection"`, ""},
+	{re: regexp.MustCompile(`(?i)server closed the connection unexpectedly|connection to server was lost|terminating connection due to`),
+		logs: `a restart or "terminating connection"`},
 }
 
 // noOutput stands for the last line of a tool that wrote nothing to stderr.
@@ -65,12 +73,40 @@ func connectionLostHint(line string, dump bool, hold *spoolHold) string {
 		if dump {
 			what, transfer = "dump", "upload to"
 		}
+		also := ""
+		if c.also != "" {
+			also = " " + c.also
+		}
 		return sep + "The database closed the connection in the middle of the " + what +
-			". Usually it restarted or ran out of memory: look in its Logs for " + c.logs +
-			". Before Seylo 0.2.17 a slow " + transfer + " the bucket caused this too."
+			". Usually it restarted or ran out of memory: look in its Logs for " + c.logs + "." + also +
+			" Before Seylo 0.2.17 a slow " + transfer + " the bucket caused this too."
 	}
 	return ""
 }
+
+// lostConnection says whether a failed dump's last line means the database
+// closed the connection for a reason of its own (a restart, a TLS error, a
+// dropped network), which a second try a little later usually gets past.
+// A connection closed while the dump waited for the upload is not one:
+// the same upload would wait again.
+func lostConnection(line string, hold *spoolHold) bool {
+	for _, c := range connectionLost {
+		if c.re.MatchString(line) {
+			return hold == nil || c.timeout == ""
+		}
+	}
+	return false
+}
+
+// errLostConnection marks a dump the database closed under it (see
+// lostConnection); line is the dump's last line.
+type errLostConnection struct {
+	err  error
+	line string
+}
+
+func (e *errLostConnection) Error() string { return e.err.Error() }
+func (e *errLostConnection) Unwrap() error { return e.err }
 
 // holdFix says what avoids a dump dropped while it waited for the upload;
 // timeout names the database's settings.

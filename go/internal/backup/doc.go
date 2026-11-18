@@ -28,7 +28,11 @@
 //     client waits as long as the download does; so do the dumps of
 //     mysqldump 8.4 and later, the only dump tool that takes an init
 //     command. A dump or restore that lost its connection says so
-//     (failures.go).
+//     (failures.go), and a database backup whose connection the database
+//     closed for a reason of its own runs once more a minute later
+//     (Local.runBackup). MySQL and MariaDB jobs connect without TLS when
+//     the server allows it (mysqlPrelude): MariaDB's thread pool drops
+//     waiting TLS connections after many TLS clients left at once.
 //   - Restores download, unpack into a staging folder and swap (volumes,
 //     the RDB of Redis, Valkey, KeyDB and Dragonfly) or pipe into
 //     pg_restore/psql/mysql/mongorestore, or into a ClickHouse helper that
