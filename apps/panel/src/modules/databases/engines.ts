@@ -528,6 +528,32 @@ export function hasNativePassword(command: readonly string[]): boolean {
   return command.includes(mysqlNativePasswordFlag);
 }
 
+/** The variable a Redis-like engine's command reads its password from (containerCommand), or null. */
+function commandPasswordVariable(engine: DatabaseEngine): string | null {
+  if (engine === "redis") return "REDIS_PASSWORD";
+  if (engine === "valkey") return "VALKEY_PASSWORD";
+  if (engine === "keydb") return "KEYDB_PASSWORD";
+  return null;
+}
+
+/**
+ * Why a command set by hand (the database's Advanced tab) would leave a
+ * Redis-like database open: Redis, Valkey and KeyDB take their password on
+ * the command line, which containerCommand reads from the environment, so
+ * a command that does not name the variable starts them without one, and a
+ * new password (databases.resetPassword) would not apply either. Null when
+ * it names it, and for every other engine (Dragonfly reads
+ * DFLY_requirepass by itself).
+ */
+export function commandPasswordRefusal(engine: DatabaseEngine, command: readonly string[]): string | null {
+  const variable = commandPasswordVariable(engine);
+  if (!variable) return null;
+  const plain = "$" + variable;
+  const braced = "$" + "{" + variable + "}";
+  if (command.some((arg) => arg.includes(plain) || arg.includes(braced))) return null;
+  return `Keep --requirepass "${plain}" in the command: without it ${engines[engine].label} takes connections without a password, and a new password would not apply.`;
+}
+
 /**
  * A MySQL container command with mysql_native_password on or off. On adds
  * the option to the panel's command (containerCommand) or to a mysqld

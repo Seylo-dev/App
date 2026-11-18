@@ -2,10 +2,11 @@
 // the fixed 5 second wait), replicas per node and sticky sessions, moving
 // to another node (move-card.tsx), resource limits (all off by default),
 // container settings and ports, a cron service's schedule, and the
-// maintenance page. A database's has only the move, its limits (saved
-// with a restart) and its crash policy: its engine sets the rest.
+// maintenance page. A database's has the move, its limits and its command
+// (both saved with a restart) and its crash policy: its engine sets the
+// rest.
 
-import { builds, deployments, type OpInput, services } from "@seylo/ops";
+import { builds, databases, deployments, type OpInput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -48,12 +49,13 @@ function useSaved(...ops: { id: string }[]) {
 
 export function AdvancedPage({ service }: { service: ServiceDetail }) {
   const runs = service.kind === "app" || service.kind === "cron";
-  // A database's engine sets its health check, ports, command and data volume: what fits is moving it, its limits and its crash policy.
+  // A database's engine sets its health check, ports and data volume: what fits is moving it, its limits, its command (server options) and its crash policy.
   if (isDatabaseKind(service.kind)) {
     return (
       <div className="flex flex-col gap-4">
         <MoveCard service={service} />
         <ResourcesCard service={service} />
+        <DatabaseCommandCard service={service} />
         <CrashCard service={service} />
       </div>
     );
@@ -481,6 +483,65 @@ function ResourcesCard({ service }: { service: ServiceDetail }) {
           <Input id="r-pids" inputMode="numeric" value={pids} onChange={(e) => setPids(e.target.value)} />
         </Field>
       </FieldGrid>
+    </SectionCard>
+  );
+}
+
+type DatabaseEngine = (typeof databases.databaseEngineIds)[number];
+const nativePasswordFlag = "--mysql-native-password=ON";
+
+// A database's command, for server options (a MariaDB started with
+// mariadbd --max-connections=...). It is saved with a restart, like its
+// limits: a database deploys in recreate mode, so a command it does not
+// start with fails the deploy and the old container starts again. The
+// panel refuses a Redis, Valkey or KeyDB command without its password
+// variable (services.update).
+function DatabaseCommandCard({ service }: { service: ServiceDetail }) {
+  const engine = service.kind as DatabaseEngine;
+  const [command, setCommand] = useState(joinArgs(service.container.command));
+  const [confirm, setConfirm] = useState(false);
+  const invalidate = useInvalidate();
+  const save = useOpMutation(services.update);
+  const deploy = useOpMutation(deployments.deploy);
+  const restart = async () => {
+    await save.mutateAsync({ serviceId: service.id, container: { command: splitArgs(command) } });
+    await deploy.mutateAsync({ serviceId: service.id });
+    invalidate(services.get, deployments.list);
+    toast.success(t("serviceAdvanced.dbCommand.restarted", { name: service.name }));
+  };
+  const hints = [t(`serviceAdvanced.dbCommand.examples.${engine}`)];
+  if (engine === "mysql" && service.container.command.includes(nativePasswordFlag)) hints.push(t("serviceAdvanced.dbCommand.nativePassword"));
+  return (
+    <SectionCard
+      title={t("serviceAdvanced.dbCommand.title")}
+      description={t("serviceAdvanced.dbCommand.description")}
+      footer={
+        <>
+          <Button size="sm" variant="primary" disabled={save.isPending || deploy.isPending} onClick={() => setConfirm(true)}>
+            {t("serviceAdvanced.dbCommand.saveAndRestart")}
+          </Button>
+          <span>{t("serviceAdvanced.dbCommand.restartHint")}</span>
+          <MutationError error={save.error ?? deploy.error} />
+          <ConfirmDialog
+            open={confirm}
+            onOpenChange={setConfirm}
+            title={t("serviceAdvanced.dbCommand.restartTitle", { name: service.name })}
+            description={t("serviceAdvanced.dbCommand.restartBody")}
+            confirmLabel={t("serviceAdvanced.dbCommand.saveAndRestart")}
+            onConfirm={restart}
+          />
+        </>
+      }
+    >
+      <Field label={t("serviceAdvanced.dbCommand.label")} htmlFor="db-cmd" hint={hints.join(" ")}>
+        <Input
+          id="db-cmd"
+          className="font-mono"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          placeholder={t("serviceAdvanced.dbCommand.emptyImage")}
+        />
+      </Field>
     </SectionCard>
   );
 }

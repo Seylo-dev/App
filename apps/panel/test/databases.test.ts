@@ -8,6 +8,7 @@ import { databaseRuntime } from "../src/modules/databases/desired";
 import { edgeSubject, verifyEdgeTicket } from "../src/modules/databases/edge-ticket";
 import {
   changePasswordExec,
+  commandPasswordRefusal,
   connectionUrl,
   containerCommand,
   engines,
@@ -92,6 +93,26 @@ describe("engines", () => {
     expect(changePasswordExec("dragonfly", "default", "x", "y")).toBeNull();
     expect(changePasswordExec("clickhouse", "admin", "x", "y")).toBeNull();
   });
+
+  test("a command set by hand keeps a Redis-like engine's password variable", () => {
+    // The panel's own commands pass.
+    for (const engine of ["redis", "valkey", "keydb"] as const) {
+      expect(commandPasswordRefusal(engine, containerCommand(engine))).toBeNull();
+    }
+    expect(commandPasswordRefusal("redis", ["sh", "-c", 'exec redis-server --requirepass "${REDIS_PASSWORD}" --maxmemory 1gb'])).toBeNull();
+    expect(commandPasswordRefusal("redis", ["redis-server", "--appendonly", "yes"])).toBe(
+      'Keep --requirepass "$REDIS_PASSWORD" in the command: without it Redis takes connections without a password, and a new password would not apply.',
+    );
+    // Empty runs the image's own command: no password either.
+    expect(commandPasswordRefusal("valkey", [])).toContain('--requirepass "$VALKEY_PASSWORD"');
+    // A literal password is not the variable: a reset would not reach it.
+    expect(commandPasswordRefusal("keydb", ["keydb-server", "--requirepass", "hunter2"])).toContain("KeyDB takes connections");
+    // Other engines take any command, the image's own included.
+    for (const engine of ["postgres", "mysql", "mariadb", "mongo", "dragonfly", "clickhouse"] as const) {
+      expect(commandPasswordRefusal(engine, [])).toBeNull();
+      expect(commandPasswordRefusal(engine, ["x"])).toBeNull();
+    }
+  });
 });
 
 describe("databases ops", () => {
@@ -154,6 +175,33 @@ describe("databases ops", () => {
       exposure: { enabled: false },
       retiredExposedUser: "",
     });
+  });
+
+  test("a database's command (its Advanced tab): server options are saved; a Redis command without its password is refused", async () => {
+    const maria = await createDb("mariadb");
+    const options = ["mariadbd", "--max-connections=5000", "--net-write-timeout=120"];
+    const set = await callOp(panel, serviceOps.update, { serviceId: maria.res.body.serviceId, container: { command: options } }, { cookie });
+    expect(set.status).toBe(200);
+    expect(set.body.container.command).toEqual(options);
+    // Back to the image's own command.
+    const cleared = await callOp(panel, serviceOps.update, { serviceId: maria.res.body.serviceId, container: { command: [] } }, { cookie });
+    expect(cleared.body.container.command).toEqual([]);
+
+    const redis = await createDb("redis");
+    const serviceId = redis.res.body.serviceId;
+    const open = await callOp(panel, serviceOps.update, { serviceId, container: { command: ["redis-server", "--appendonly", "yes"] } }, { cookie });
+    expect(open.status).toBe(400);
+    expect(open.body.error.message).toContain('Keep --requirepass "$REDIS_PASSWORD"');
+    expect(open.body.error.details.field).toBe("container.command");
+    const empty = await callOp(panel, serviceOps.update, { serviceId, container: { command: [] } }, { cookie });
+    expect(empty.status).toBe(400);
+    expect((await callOp(panel, serviceOps.get, { serviceId }, { cookie })).body.container.command).toEqual(containerCommand("redis"));
+    const tuned = ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --maxmemory 1gb'];
+    const ok = await callOp(panel, serviceOps.update, { serviceId, container: { command: tuned } }, { cookie });
+    expect(ok.status).toBe(200);
+    expect(ok.body.container.command).toEqual(tuned);
+    // Other changes to the service leave the command alone.
+    expect((await callOp(panel, serviceOps.update, { serviceId, name: "cache" }, { cookie })).status).toBe(200);
   });
 
   test("bad versions, names in use and Redis users are refused", async () => {

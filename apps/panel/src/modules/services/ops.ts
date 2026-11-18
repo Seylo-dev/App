@@ -8,6 +8,8 @@ import { domains, projectPrefs, projects, servicePlacements, services, volumes }
 import type { Deps } from "../../deps";
 import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
+import { commandPasswordRefusal } from "../databases/engines";
+import { findDatabase } from "../databases/info";
 import { assertNoActiveDeploy, assertNoDeployForPlacement, queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
@@ -184,6 +186,11 @@ const update = implement(serviceOps.update, (input, ctx) => {
       .run();
   }
   if (input.ports !== undefined || input.container !== undefined) forbidMemberEdit(row, "ports and command");
+  // A database's command (its Advanced tab) keeps a Redis-like engine's password.
+  const command = input.container?.command;
+  const database = command !== undefined ? findDatabase(ctx.db, row.id) : undefined;
+  const refusal = database && command ? commandPasswordRefusal(database.engine, command) : null;
+  if (refusal) throw new OpError("BAD_REQUEST", refusal, { field: "container.command" });
   const before = readSpec(row.spec).ports;
   const next = updateSpec(ctx, row.id, (spec) => ({
     ...spec,

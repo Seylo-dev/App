@@ -86,6 +86,34 @@ test("a database's Advanced tab: Move to another node, its limits with a restart
   expect(out.indexOf(t("serviceAdvanced.move.title"))).toBeLessThan(out.indexOf(t("serviceAdvanced.resources.title")));
 });
 
+test("a database's Command card shows the command it runs, saved with a restart, with its engine's hint", async () => {
+  const command = ["mariadbd", "--max-connections=5000", "--thread-handling=pool-of-threads"];
+  const out = await page("mariadb", impact(), { container: { ...service("mariadb").container, command } });
+  expect(out).toContain(t("serviceAdvanced.dbCommand.title"));
+  expect(out).toContain(t("serviceAdvanced.dbCommand.description"));
+  expect(out).toContain(`value="mariadbd --max-connections=5000 --thread-handling=pool-of-threads"`);
+  expect(out).toContain(t("serviceAdvanced.dbCommand.examples.mariadb"));
+  expect(out).toContain(t("serviceAdvanced.dbCommand.restartHint"));
+  // Between the limits and the crash policy.
+  const at = out.indexOf(t("serviceAdvanced.dbCommand.description"));
+  expect(out.indexOf(t("serviceAdvanced.resources.title"))).toBeLessThan(at);
+  expect(at).toBeLessThan(out.indexOf(t("serviceAdvanced.crash.title")));
+
+  // The image's own command: an empty field that says so.
+  const own = await page("postgres");
+  expect(own).toContain(`placeholder="${t("serviceAdvanced.dbCommand.emptyImage")}"`);
+  expect(own).toContain(t("serviceAdvanced.dbCommand.examples.postgres"));
+
+  // Redis says what must stay; MySQL with mysql_native_password on says to keep it.
+  const redis = await page("redis", impact(), {
+    container: { ...service("redis").container, command: ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'] },
+  });
+  expect(redis).toContain(t("serviceAdvanced.dbCommand.examples.redis").replace(/"/g, "&quot;"));
+  const mysql = await page("mysql", impact(), { container: { ...service("mysql").container, command: ["mysqld", "--mysql-native-password=ON"] } });
+  expect(mysql).toContain(t("serviceAdvanced.dbCommand.nativePassword"));
+  expect(own).not.toContain(t("serviceAdvanced.dbCommand.nativePassword"));
+});
+
 test("the Move card says why a node cannot take it", async () => {
   const out = await page("postgres");
   expect(out).toContain(t("serviceAdvanced.move.cannotGo"));

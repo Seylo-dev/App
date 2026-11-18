@@ -1,7 +1,8 @@
 // A database's Advanced tab (0.2.16) on the demo data: Move to another
-// node, its resource limits (saved with a restart) and its crash policy,
-// nothing the engine manages. The node picker says why a node cannot take
-// it, the Move dialog says what happens (downtime with its size, the same
+// node, its resource limits and (0.2.21) its command, both saved with a
+// restart, and its crash policy, nothing else the engine manages. The
+// node picker says why a node cannot take it, the Move dialog says what
+// happens (downtime with its size, the same
 // internal address and who loses it on another node, the exposed port and
 // timed expose moving to the new address, the services reading EXPOSED_*
 // that need a deploy, backups, the old copy), and the database's menu has
@@ -17,6 +18,7 @@
 // Screenshots: $SHOTS_DIR/database-move/*.png.
 
 import { mkdirSync } from "node:fs";
+import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
@@ -60,9 +62,15 @@ test.describe("database move", () => {
     await page.keyboard.press("Escape");
 
     const main = page.getByRole("main");
-    await expect(main.getByRole("heading", { name: "Resource limits" })).toBeVisible();
-    await expect(main.getByRole("button", { name: "Save and restart" })).toBeVisible();
-    await expect(page.getByText("The database restarts with them, offline for a few seconds.")).toBeVisible();
+    const limits = card(page, "Resource limits");
+    await expect(limits.getByRole("button", { name: "Save and restart" })).toBeVisible();
+    await expect(limits.getByText("The database restarts with them, offline for a few seconds.")).toBeVisible();
+    // Its command (0.2.21), also saved with a restart.
+    const command = card(page, "Command");
+    await expect(command.getByLabel("Command")).toHaveValue("");
+    await expect(command.getByLabel("Command")).toHaveAttribute("placeholder", "Empty runs the image's own command.");
+    await expect(command.getByText("For example: postgres -c max_connections=200")).toBeVisible();
+    await expect(command.getByRole("button", { name: "Save and restart" })).toBeVisible();
     await expect(main.getByRole("heading", { name: "Crash policy" })).toBeVisible();
     // What the engine manages is not offered.
     for (const title of ["Health check and deploys", "Replicas and nodes", "Container"]) {
@@ -335,7 +343,7 @@ test.describe("database move", () => {
     await page.goto(advanced);
     const main = page.getByRole("main");
     await main.getByLabel("Memory limit (MB)").fill("512");
-    await main.getByRole("button", { name: "Save and restart" }).click();
+    await card(page, "Resource limits").getByRole("button", { name: "Save and restart" }).click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog.getByRole("heading", { name: "Restart db with these limits?" })).toBeVisible();
     await expect(dialog).toContainText("offline for a few seconds; its data stays");
@@ -346,4 +354,64 @@ test.describe("database move", () => {
     expect(inputs[0]).toMatchObject({ serviceId: svc.db, memoryLimitBytes: 512_000_000 });
     expect(inputs[1]).toEqual({ serviceId: svc.db });
   });
+
+  test("the Command card saves server options, then restarts the database with them after a confirm; a refusal shows", async ({
+    page,
+  }) => {
+    const sent: string[] = [];
+    const inputs: Record<string, unknown>[] = [];
+    let refuse = false;
+    await installDemo(page, {
+      overrides: {
+        "services.update": (input) => {
+          if (refuse)
+            throw new DemoRefusal(
+              400,
+              "BAD_REQUEST",
+              'Keep --requirepass "$REDIS_PASSWORD" in the command: without it Redis takes connections without a password, and a new password would not apply.',
+              { field: "container.command" },
+            );
+          sent.push("services.update");
+          inputs.push(input);
+          return serviceHandlers["services.get"]?.({ serviceId: input.serviceId });
+        },
+        "deployments.deploy": (input) => {
+          sent.push("deployments.deploy");
+          inputs.push(input);
+          return { id: "d000000000000097", serviceId: input.serviceId, generation: 44, status: "queued", trigger: "manual" };
+        },
+      },
+    });
+    await page.goto(advanced);
+    const command = card(page, "Command");
+    await command.getByLabel("Command").fill("postgres -c max_connections=200 -c 'shared_buffers=1GB'");
+    await command.getByRole("button", { name: "Save and restart" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByRole("heading", { name: "Restart db with this command?" })).toBeVisible();
+    await expect(dialog).toContainText("If it does not start with it, the deploy fails and it starts again as it was.");
+    expect(sent).toEqual([]);
+    await page.screenshot({ path: `${shots}/command-confirm.png` });
+    await dialog.getByRole("button", { name: "Save and restart" }).click();
+    await expect(page.getByText("db restarts with the new command")).toBeVisible();
+    expect(sent).toEqual(["services.update", "deployments.deploy"]);
+    expect(inputs[0]).toEqual({ serviceId: svc.db, container: { command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=1GB"] } });
+    expect(inputs[1]).toEqual({ serviceId: svc.db });
+
+    // A Redis command without its password variable: the panel says why, and nothing restarts.
+    refuse = true;
+    await page.goto(`/p/${ids.acme}/s/${svc.redis}/advanced`);
+    const redis = card(page, "Command");
+    await expect(redis.getByText('Keep --requirepass "$REDIS_PASSWORD": without it Redis takes connections without a password.')).toBeVisible();
+    await redis.getByLabel("Command").fill("redis-server --appendonly yes");
+    await redis.getByRole("button", { name: "Save and restart" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Save and restart" }).click();
+    await expect(page.getByText("in the command: without it Redis takes connections without a password").first()).toBeVisible();
+    expect(sent).toEqual(["services.update", "deployments.deploy"]);
+    await page.screenshot({ path: `${shots}/command-refused.png`, fullPage: true });
+  });
 });
+
+/** A card on the page by its heading. */
+function card(page: Page, title: string) {
+  return page.locator("section").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+}
