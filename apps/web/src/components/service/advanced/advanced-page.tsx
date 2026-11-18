@@ -510,7 +510,8 @@ function DatabaseCommandCard({ service }: { service: ServiceDetail }) {
     toast.success(t("serviceAdvanced.dbCommand.restarted", { name: service.name }));
   };
   const hints = [t(`serviceAdvanced.dbCommand.examples.${engine}`)];
-  if (engine === "mysql" && service.container.command.includes(nativePasswordFlag)) hints.push(t("serviceAdvanced.dbCommand.nativePassword"));
+  if (engine === "mysql" && service.container.command.includes(nativePasswordFlag))
+    hints.push(t("serviceAdvanced.dbCommand.nativePassword"));
   return (
     <SectionCard
       title={t("serviceAdvanced.dbCommand.title")}

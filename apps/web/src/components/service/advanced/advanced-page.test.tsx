@@ -106,10 +106,15 @@ test("a database's Command card shows the command it runs, saved with a restart,
 
   // Redis says what must stay; MySQL with mysql_native_password on says to keep it.
   const redis = await page("redis", impact(), {
-    container: { ...service("redis").container, command: ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'] },
+    container: {
+      ...service("redis").container,
+      command: ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'],
+    },
   });
   expect(redis).toContain(t("serviceAdvanced.dbCommand.examples.redis").replace(/"/g, "&quot;"));
-  const mysql = await page("mysql", impact(), { container: { ...service("mysql").container, command: ["mysqld", "--mysql-native-password=ON"] } });
+  const mysql = await page("mysql", impact(), {
+    container: { ...service("mysql").container, command: ["mysqld", "--mysql-native-password=ON"] },
+  });
   expect(mysql).toContain(t("serviceAdvanced.dbCommand.nativePassword"));
   expect(own).not.toContain(t("serviceAdvanced.dbCommand.nativePassword"));
 });

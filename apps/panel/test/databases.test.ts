@@ -180,7 +180,12 @@ describe("databases ops", () => {
   test("a database's command (its Advanced tab): server options are saved; a Redis command without its password is refused", async () => {
     const maria = await createDb("mariadb");
     const options = ["mariadbd", "--max-connections=5000", "--net-write-timeout=120"];
-    const set = await callOp(panel, serviceOps.update, { serviceId: maria.res.body.serviceId, container: { command: options } }, { cookie });
+    const set = await callOp(
+      panel,
+      serviceOps.update,
+      { serviceId: maria.res.body.serviceId, container: { command: options } },
+      { cookie },
+    );
     expect(set.status).toBe(200);
     expect(set.body.container.command).toEqual(options);
     // Back to the image's own command.
@@ -189,7 +194,12 @@ describe("databases ops", () => {
 
     const redis = await createDb("redis");
     const serviceId = redis.res.body.serviceId;
-    const open = await callOp(panel, serviceOps.update, { serviceId, container: { command: ["redis-server", "--appendonly", "yes"] } }, { cookie });
+    const open = await callOp(
+      panel,
+      serviceOps.update,
+      { serviceId, container: { command: ["redis-server", "--appendonly", "yes"] } },
+      { cookie },
+    );
     expect(open.status).toBe(400);
     expect(open.body.error.message).toContain('Keep --requirepass "$REDIS_PASSWORD"');
     expect(open.body.error.details.field).toBe("container.command");
