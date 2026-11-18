@@ -112,6 +112,11 @@ dockers_v2:
       org.opencontainers.image.source: "https://github.com/{{ .Env.BRAND_GITHUB_ORG }}/{{ .Env.BRAND_GITHUB_REPO }}"
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.created: "{{ .Date }}"
+      # Without these the base image's own (Bun's) describe the panel.
+      org.opencontainers.image.title: "{{ .Env.BRAND_DISPLAY_NAME }} panel"
+      org.opencontainers.image.description: "The {{ .Env.BRAND_DISPLAY_NAME }} panel: web app, API and MCP server"
+      org.opencontainers.image.url: "{{ .Env.BRAND_SITE_URL }}"
+      org.opencontainers.image.documentation: "{{ .Env.BRAND_DOCS_URL }}"
 
 # With an rc and its final tag on the same commit, pick the final one (the
 # release workflow names the tag outright with GORELEASER_CURRENT_TAG).
