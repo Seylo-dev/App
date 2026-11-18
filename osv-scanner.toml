@@ -6,3 +6,8 @@
 id = "GHSA-67mh-4wv8-2f99"
 ignoreUntil = 2027-02-01
 reason = "esbuild <=0.24.2 dev-server CORS issue; only drizzle-kit/@esbuild-kit pull esbuild 0.18.20, at dev time, and nothing runs esbuild's dev server"
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2027-01-15
+reason = "picomatch <=4.0.7 ReDoS needs an attacker's glob pattern; only build tools pull it (vite, tinyglobby, fdir, unplugin for the router plugin) with this repo's own patterns, the panel bundle and the web assets do not contain it, and watch paths use packages/ops/src/watch-paths.ts. No fixed version yet (4.0.7 is the latest on 2026-11-18): look again by the date"
