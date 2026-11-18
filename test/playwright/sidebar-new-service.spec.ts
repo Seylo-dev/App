@@ -28,6 +28,57 @@ test.describe("sidebar new service", () => {
     await expect(dialog.getByText("Project", { exact: true })).toHaveCount(0);
   });
 
+  test("the count and the row's buttons never show together, after a menu or a dialog closed with the mouse", async ({ page }) => {
+    await installDemo(page);
+    await page.goto("/");
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+    const link = sidebar.getByRole("link", { name: /acme-shop/ });
+    const count = link.locator("span.ml-auto");
+    const plus = sidebar.getByRole("button", { name: "New service in acme-shop" });
+    const actions = plus.locator("xpath=..");
+    // Settled opacities, buttons/count: one of them shows, never both.
+    const shown = async () => {
+      const [a, c] = await Promise.all([actions, count].map((l) => l.evaluate((e) => Math.round(Number(getComputedStyle(e).opacity)))));
+      return `${a}/${c}`;
+    };
+    const away = () => page.mouse.move(900, 600);
+
+    // + -> App -> the New app dialog, closed with the mouse: focus goes back to the +, not from the keyboard.
+    await link.hover();
+    await plus.click();
+    await page.getByRole("menuitem", { name: /^App/ }).click();
+    const dialog = page.getByRole("dialog", { name: "New app" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: /^(Close|Cancel)$/ }).first().click();
+    await expect(dialog).toHaveCount(0);
+    await away();
+    await expect.poll(shown, { timeout: 3000 }).toMatch(/^(0\/1|1\/0)$/);
+    await page.screenshot({
+      path: `${process.env.SHOTS_DIR ?? "test/playwright/shots"}/sidebar-after-dialog.png`,
+      clip: { x: 0, y: 0, width: 300, height: 640 },
+    });
+
+    // A menu closed with a click outside.
+    await link.hover();
+    await plus.click();
+    await expect(page.getByRole("menuitem", { name: /^App/ })).toBeVisible();
+    await page.mouse.click(900, 600);
+    await expect(page.getByRole("menuitem", { name: /^App/ })).toHaveCount(0);
+    await expect.poll(shown, { timeout: 3000 }).toMatch(/^(0\/1|1\/0)$/);
+
+    // Clicked straight on, then the pointer leaves: plain focus, not from the keyboard.
+    await link.hover();
+    await plus.evaluate((b) => (b as HTMLButtonElement).focus());
+    await away();
+    await expect.poll(shown, { timeout: 3000 }).toMatch(/^(0\/1|1\/0)$/);
+
+    // From the keyboard the buttons show over a hidden count.
+    await link.focus();
+    await page.keyboard.press("Tab");
+    await expect(plus).toBeFocused();
+    await expect.poll(shown, { timeout: 3000 }).toBe("1/0");
+  });
+
   test("the logo and panel name go to the dashboard", async ({ page }) => {
     await installDemo(page);
     await page.goto("/nodes");

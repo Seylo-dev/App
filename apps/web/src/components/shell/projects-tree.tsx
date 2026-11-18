@@ -202,8 +202,10 @@ function ProjectRow({
               </>
             )}
           </Link>
-          {/* New service (+) and More (...): shown on hover or keyboard focus, always on touch screens. */}
-          <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100">
+          {/* New service (+) and More (...): shown on hover, keyboard focus or while a menu is open, always on
+              touch screens; the count hides on exactly those. Not on any focus: a menu closed with the mouse
+              leaves focus on its button, and the buttons stayed on top of the count. */}
+          <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100">
             {!project.protected && (
               <NewServiceMenu
                 projectId={project.id}
