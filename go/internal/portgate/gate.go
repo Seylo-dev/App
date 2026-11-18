@@ -48,6 +48,12 @@ type Listener struct {
 	// database's listeners, exposed and timed alike, use
 	// DatabaseIdleTimeout: connection pools keep idle connections open.
 	IdleTimeout time.Duration
+	// MaxConns and MaxConnsPerSource cap the listener's clients, in all
+	// and from one address; zero takes Config.MaxConns and
+	// MaxConnsPerSource. A database's listeners use DatabaseMaxConns and
+	// DatabaseMaxConnsPerSource.
+	MaxConns          int
+	MaxConnsPerSource int
 	// TerminateTLS makes the gate speak TLS to clients and relay plain TCP
 	// to the container (exposed Mongo and Redis, which use TLS from the
 	// first byte). TLSHost names the certificate (Config.Certificate).

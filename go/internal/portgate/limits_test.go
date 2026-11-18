@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -145,6 +147,70 @@ func TestConnectionCaps(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// TestListenerCapsAndTheFullWarning: a listener's own caps (a database's)
+// win over the Config's, a resync changes them in place, and a full
+// listener says so in the agent log, once a minute, instead of closing
+// clients without a word.
+func TestListenerCapsAndTheFullWarning(t *testing.T) {
+	var logs safeBuffer
+	m := newManager(t, echoServer(t), func(c *Config) {
+		c.MaxConns, c.MaxConnsPerSource = 3, 2
+		c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	})
+	l := Listener{ID: "database", ContainerPort: 5432, MaxConns: 10, MaxConnsPerSource: 4}
+	ports, err := m.Sync(context.Background(), "db1", []Listener{l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ports["database"]
+	// Four from one address, past the Config's 2 per source and 3 in all.
+	for i := range 4 {
+		c, err := dialEcho(t, port)
+		if err != nil {
+			t.Fatalf("connection %d: %v", i+1, err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+	}
+	if c := dialRaw(t, port); !closedSoon(c, time.Second) {
+		t.Fatal("a fifth connection from one address was kept")
+	}
+	if c := dialRaw(t, port); !closedSoon(c, time.Second) {
+		t.Fatal("a sixth connection from one address was kept")
+	}
+	warned := strings.Count(logs.String(), "portgate listener is full")
+	if warned != 1 || !strings.Contains(logs.String(), `cap="per source" limit=4 open=4`) {
+		t.Fatalf("%d warnings, log:\n%s", warned, logs.String())
+	}
+	// The same socket with higher caps (a newer agent's): the next one gets in.
+	l.MaxConnsPerSource = 5
+	if p, err := m.Sync(context.Background(), "db1", []Listener{l}); err != nil || p["database"] != port {
+		t.Fatalf("resync: %v, port %d (was %d)", err, p["database"], port)
+	}
+	c, err := dialEcho(t, port)
+	if err != nil {
+		t.Fatalf("after raising the cap: %v", err)
+	}
+	_ = c.Close()
+}
+
+// safeBuffer is a bytes.Buffer for a logger written from several goroutines.
+type safeBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func TestIdleConnectionsAreCut(t *testing.T) {

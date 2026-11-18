@@ -263,8 +263,17 @@ func TestListenersForAndSyncAll(t *testing.T) {
 	if l := byID["database"]; l.IdleTimeout != DatabaseIdleTimeout {
 		t.Fatalf("database idle timeout: %v", l.IdleTimeout)
 	}
+	// A database's listeners take connection pools, often from one address: far above an app's caps.
+	for _, id := range []string{"database", "expose-t1"} {
+		if l := byID[id]; l.MaxConns != DatabaseMaxConns || l.MaxConnsPerSource != DatabaseMaxConnsPerSource {
+			t.Fatalf("%s caps: %d, %d per source", id, l.MaxConns, l.MaxConnsPerSource)
+		}
+	}
+	if l := byID["public-3000"]; l.MaxConns != 0 || l.MaxConnsPerSource != 0 {
+		t.Fatalf("public port caps: %+v", l)
+	}
 	app := &agentv1.ServiceSpec{Id: "web1", DevAccess: spec.GetDevAccess()}
-	if ls, _ := ListenersFor(app); len(ls) != 1 || ls[0].IdleTimeout != 0 {
+	if ls, _ := ListenersFor(app); len(ls) != 1 || ls[0].IdleTimeout != 0 || ls[0].MaxConns != 0 || ls[0].MaxConnsPerSource != 0 {
 		t.Fatalf("an app's timed expose: %+v", ls)
 	}
 

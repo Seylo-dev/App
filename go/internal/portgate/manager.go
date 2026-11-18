@@ -80,7 +80,17 @@ type Config struct {
 const (
 	DefaultMaxConns          = 1024
 	DefaultMaxConnsPerSource = 256
-	DefaultIdleTimeout       = 15 * time.Minute
+	// DatabaseMaxConns and DatabaseMaxConnsPerSource cap a database's
+	// listeners (its exposed port and timed exposes) far higher: connection
+	// pools reach it, often from a few addresses (game servers behind one
+	// node's address keep hundreds of connections), and the database's own
+	// max_connections is the limit that counts. At 1024 and 256 a busy
+	// MySQL lost new connections without a word. They still bound the
+	// agent's sockets (two per connection; the unit sets LimitNOFILE to
+	// 1048576).
+	DatabaseMaxConns          = 16384
+	DatabaseMaxConnsPerSource = 8192
+	DefaultIdleTimeout        = 15 * time.Minute
 	// DatabaseIdleTimeout is longer: connection pools keep idle
 	// connections open between queries.
 	DatabaseIdleTimeout = 2 * time.Hour
@@ -102,6 +112,9 @@ const (
 	// tries again, twice as long each time up to retryPauseMax.
 	retryPause    = 50 * time.Millisecond
 	retryPauseMax = 400 * time.Millisecond
+	// fullWarnEvery limits the warning about clients a full listener
+	// refuses to one per listener per minute.
+	fullWarnEvery = time.Minute
 	// unreachableWarnEvery limits the warning about connections a listener
 	// gave up on (each one is logged at debug level).
 	unreachableWarnEvery = time.Minute
@@ -170,6 +183,9 @@ type active struct {
 	clients map[net.Conn]struct{}
 	// sources counts clients per source address (MaxConnsPerSource).
 	sources map[netip.Addr]int
+	// maxConns and maxPerSource are the listener's caps (Listener
+	// MaxConns and MaxConnsPerSource, else the Config's).
+	maxConns, maxPerSource int
 	// plainClients are the clients relayed without TLS, with their
 	// connection to the container; turning plain off closes both.
 	plainClients map[net.Conn]net.Conn
@@ -178,6 +194,9 @@ type active struct {
 	// warnedAt is when the last "cannot reach the service" warning went
 	// out (UnixNano).
 	warnedAt atomic.Int64
+	// fullWarnedAt is when the last "listener is full" warning went out
+	// (UnixNano).
+	fullWarnedAt atomic.Int64
 }
 
 // New returns a manager. It loads picked ports from cfg.PortsFile.
@@ -257,6 +276,7 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			// A database client's pool keeps connections idle between queries.
 			// The relay is plain TCP: the database's own TLS, if it has any.
 			l.IdleTimeout = DatabaseIdleTimeout
+			l.MaxConns, l.MaxConnsPerSource = DatabaseMaxConns, DatabaseMaxConnsPerSource
 		}
 		if e.GetExpiresAt() != nil {
 			l.ExpiresAt = e.GetExpiresAt().AsTime()
@@ -275,10 +295,12 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			ID: "database", ServiceID: id, HostPort: db.GetExposure().GetHostPort(), ContainerPort: port,
 			AllowedSourceCIDRs: db.GetExposure().GetAllowedSourceCidrs(),
 			TerminateTLS:       dbengine.TLSAtGate(db.GetEngine()), TLSHost: db.GetExposure().GetTlsHostname(),
-			AgentCertificate: dbengine.AgentCertificate(db.GetEngine()),
-			RequireTLS:       tlsCheckFor(db.GetEngine()),
-			IdleTimeout:      DatabaseIdleTimeout,
-			AllowPlain:       db.GetExposure().GetAllowPlain(),
+			AgentCertificate:  dbengine.AgentCertificate(db.GetEngine()),
+			RequireTLS:        tlsCheckFor(db.GetEngine()),
+			IdleTimeout:       DatabaseIdleTimeout,
+			MaxConns:          DatabaseMaxConns,
+			MaxConnsPerSource: DatabaseMaxConnsPerSource,
+			AllowPlain:        db.GetExposure().GetAllowPlain(),
 		})
 	}
 	return out, errs
@@ -350,6 +372,7 @@ func (m *Manager) Sync(ctx context.Context, serviceID string, wanted []Listener)
 			// Same port and mode: update the rest in place.
 			a.mu.Lock()
 			a.allowed = allowed
+			a.maxConns, a.maxPerSource = m.caps(w)
 			a.mu.Unlock()
 			a.dropDisallowed()
 			if a.setPlain(w.AllowPlain) {
@@ -442,6 +465,7 @@ func (m *Manager) start(w Listener, allowed []netip.Prefix) (*active, error) {
 	a := &active{svc: w.ServiceID, lid: w.ID, redirect: w.RedirectURL, cport: w.ContainerPort, check: w.RequireTLS, idle: w.IdleTimeout,
 		want: w, port: bound, ln: ln, allowed: allowed, plain: w.AllowPlain, conns: map[net.Conn]struct{}{},
 		clients: map[net.Conn]struct{}{}, sources: map[netip.Addr]int{}, plainClients: map[net.Conn]net.Conn{}}
+	a.maxConns, a.maxPerSource = m.caps(w)
 	if w.TerminateTLS {
 		// Per connection (serveTLS), so a port that takes plain clients too can tell them apart.
 		a.tlsConf = m.tlsConfig(w.ServiceID, w.TLSHost)
@@ -574,20 +598,65 @@ func (a *active) track(c net.Conn) bool {
 	return true
 }
 
+// caps are a listener's connection caps: its own, else the Config's.
+func (m *Manager) caps(w Listener) (total, perSource int) {
+	total, perSource = m.cfg.MaxConns, m.cfg.MaxConnsPerSource
+	if w.MaxConns > 0 {
+		total = w.MaxConns
+	}
+	if w.MaxConnsPerSource > 0 {
+		perSource = w.MaxConnsPerSource
+	}
+	return total, perSource
+}
+
+// refusal is why admit turned a client away while the listener was open:
+// it had maxConns clients in all, or maxPerSource from the client's
+// address.
+type refusal struct {
+	cap         string // "total" or "per source"
+	limit, open int
+}
+
 // admit registers an accepted client connection unless the listener is
 // closing or full: at most maxConns clients, maxPerSource from one
-// address.
-func (a *active) admit(c net.Conn, maxConns, maxPerSource int) bool {
+// address. A full listener returns why (nil while it closes).
+func (a *active) admit(c net.Conn) (bool, *refusal) {
 	src := sourceOf(c.RemoteAddr())
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.done || len(a.clients) >= maxConns || a.sources[src] >= maxPerSource {
-		return false
+	switch {
+	case a.done:
+		return false, nil
+	case len(a.clients) >= a.maxConns:
+		return false, &refusal{cap: "total", limit: a.maxConns, open: len(a.clients)}
+	case a.sources[src] >= a.maxPerSource:
+		return false, &refusal{cap: "per source", limit: a.maxPerSource, open: a.sources[src]}
 	}
 	a.conns[c] = struct{}{}
 	a.clients[c] = struct{}{}
 	a.sources[src]++
-	return true
+	return true, nil
+}
+
+// accept says whether to serve a client the listener just accepted: from
+// its allow list, and with room for it. A full listener closes the client
+// without a word to it, so the agent log says so, once a minute per
+// listener.
+func (m *Manager) accept(a *active, c net.Conn) bool {
+	if !a.allows(c.RemoteAddr()) {
+		return false
+	}
+	ok, full := a.admit(c)
+	if full != nil {
+		// Clients refused together race here: only the one whose swap wins writes the warning.
+		now, last := time.Now().UnixNano(), a.fullWarnedAt.Load()
+		if now-last > int64(fullWarnEvery) && a.fullWarnedAt.CompareAndSwap(last, now) {
+			m.log.Warn("portgate listener is full; refusing new connections", "service_id", a.svc, "listener", a.lid, "port", a.port,
+				"cap", full.cap, "limit", full.limit, "open", full.open, "source", sourceOf(c.RemoteAddr()).String())
+		}
+	}
+	return ok
 }
 
 func (a *active) untrack(c net.Conn) {
@@ -667,7 +736,7 @@ func (m *Manager) acceptLoop(a *active) {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		if !a.allows(c.RemoteAddr()) || !a.admit(c, m.cfg.MaxConns, m.cfg.MaxConnsPerSource) {
+		if !m.accept(a, c) {
 			_ = c.Close()
 			continue
 		}
@@ -1009,7 +1078,7 @@ func (f *filtered) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if f.a.allows(c.RemoteAddr()) && f.a.admit(c, f.m.cfg.MaxConns, f.m.cfg.MaxConnsPerSource) {
+		if f.m.accept(f.a, c) {
 			return c, nil
 		}
 		_ = c.Close()
