@@ -41,6 +41,9 @@ Template logos, served by the panel at /api/templates/<slug>/logo.<ext>:
   templates/uptime-kuma/logo.svg      svg/uptime-kuma.svg
   templates/vaultwarden/logo.svg      svg/vaultwarden.svg
 
+Not from dashboard-icons: templates/mailroom/logo.svg is Mailroom's own mark,
+drawn for this catalog by the Mailroom project (https://github.com/ShiNxz/Mailroom).
+
 Popular images logos, bundled into the web app
 (apps/web/src/components/docker-hub/logos/):
 

@@ -1,0 +1,35 @@
+name: "Mailroom"
+description: "Mail client for many brands and clients: IMAP push sync, shared mailboxes and domain health checks."
+category: "Communication"
+tags: ["email", "imap", "mail-client"]
+creates: "Web + API + Worker + Postgres + Redis"
+links:
+  - label: "Source"
+    url: "https://github.com/ShiNxz/Mailroom"
+body: |
+  Mailroom connects existing IMAP/SMTP mailboxes, groups them into projects (one per brand or client) and keeps
+  them in sync with IMAP IDLE, so new mail shows up in seconds. People get a whole project or single mailboxes.
+  Each domain gets an MX, SPF, DKIM and DMARC check with the records to add.
+
+  It creates the web app on the node's domain, an API and a sync worker (one image), Postgres and Redis.
+  Open the web app after the first deploy and create the owner account with the setup token
+  (`SETUP_TOKEN` in the API service's environment). `APP_SECRET` encrypts the saved mailbox passwords:
+  changing it makes them unreadable.
+schema:
+  type: object
+  required: ["serverImage", "webImage"]
+  properties:
+    serverImage:
+      type: "string"
+      title: "Server image"
+      description: "Runs the API and the sync worker."
+      default: "ghcr.io/shinxz/mailroom-server:0.1.0"
+    webImage:
+      type: "string"
+      title: "Web image"
+      default: "ghcr.io/shinxz/mailroom-web:0.1.0"
+    setupToken:
+      type: "string"
+      format: "password"
+      title: "Setup token"
+      description: "Asked for when you create the owner account, so nobody else can claim the install."
