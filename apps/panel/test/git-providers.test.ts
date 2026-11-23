@@ -552,8 +552,15 @@ describe("Gitea pushes", () => {
     );
     expect(deploymentsOf(id)).toHaveLength(1);
 
+    // A new head: the head the API reports is what deploys, and since 0.2.23 the same commit again does not.
+    const nextHead = "3".repeat(40);
+    fake.override((r) =>
+      r.path === "/api/v1/repos/acme/shop/branches/main"
+        ? { body: { name: "main", commit: { id: nextHead, message: "Next\n" } } }
+        : undefined,
+    );
     fake.override((r) => (r.path.includes("/compare/") ? { status: 500, body: { message: "boom" } } : undefined));
-    const next = { ...truncated, before: giteaHead, after: "3".repeat(40) };
+    const next = { ...truncated, before: giteaHead, after: nextHead };
     await deliver("gitea", hook, secret, "push", next);
     const all = deploymentsOf(id);
     expect(all).toHaveLength(2);

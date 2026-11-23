@@ -130,7 +130,7 @@ export async function deployProviderPush(
     const what = sha ? sha.slice(0, 7) : `the head of ${source.branch}`;
     switch (queued.kind) {
       case "same":
-        return record("ignored", "A deploy of this commit was already queued.", queued.deployment.id);
+        return record("ignored", "A deploy of this commit is already queued, running or live.", queued.deployment.id);
       case "joined":
         return record("ignored", `A deploy was already queued; it builds ${what} now.`, queued.deployment.id);
       case "queued":

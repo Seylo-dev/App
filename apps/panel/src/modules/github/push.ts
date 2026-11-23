@@ -168,7 +168,7 @@ export async function handlePush(
         .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { branch: push.branch, lastSha: push.sha, checkedAt: new Date() } })
         .run();
       if (queued.kind === "same") {
-        record("ignored", "A deploy of this commit was already queued.", queued.deployment.id);
+        record("ignored", "A deploy of this commit is already queued, running or live.", queued.deployment.id);
       } else if (queued.kind === "joined") {
         record("ignored", `A deploy was already queued; it builds ${push.sha.slice(0, 7)} now.`, queued.deployment.id);
       } else {

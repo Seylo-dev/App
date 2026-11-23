@@ -295,6 +295,51 @@ describe("deploys", () => {
     await fleet.settle();
   });
 
+  test("the same push delivered twice deploys once, also after its deploy started", async () => {
+    const id = await createApp("api", inline);
+    setDockerfile(id);
+    fleet.buildScript = () => ({ result: "hang" });
+    const first = queuePushDeploy(panel.deps, { serviceId: id, actor: "lee", branch: "main", commitSha: "abc1234" });
+    expect(first.kind).toBe("queued");
+    await fleet.settle();
+    expect((await getDeployment(id, first.deployment.id)).status).toBe("building");
+    // The GitHub App's copy of the push, seconds after the repository webhook's: it used to queue a second build of
+    // the same commit behind the first (every Next-il-App push built twice, 2026-11-23).
+    const again = queuePushDeploy(panel.deps, { serviceId: id, actor: null, branch: "main", commitSha: "abc1234" });
+    expect(again.kind).toBe("same");
+    expect(again.deployment.id).toBe(first.deployment.id);
+    // A newer push still queues behind it, and a late copy of the older push does not take the newer one over.
+    const newer = queuePushDeploy(panel.deps, { serviceId: id, actor: "lee", branch: "main", commitSha: "def5678" });
+    expect(newer.kind).toBe("queued");
+    const late = queuePushDeploy(panel.deps, { serviceId: id, actor: null, branch: "main", commitSha: "abc1234" });
+    expect(late.kind).toBe("same");
+    expect((await getDeployment(id, newer.deployment.id)).commit.sha).toBe("def5678");
+    expect((await callOp(panel, deploymentOps.list, { serviceId: id }, { cookie })).body.deployments).toHaveLength(2);
+    for (const deploymentId of [newer.deployment.id, first.deployment.id])
+      await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId }, { cookie });
+    await fleet.settle();
+  });
+
+  test("a push deploy that went live answers a second delivery of its commit for a while", async () => {
+    const id = await createApp("api", inline);
+    setDockerfile(id);
+    const first = queuePushDeploy(panel.deps, { serviceId: id, actor: "lee", branch: "main", commitSha: "abc1234" });
+    await fleet.settle();
+    fleet.reportRunning(nodeA, id, first.deployment.generation);
+    await fleet.settle();
+    expect((await getDeployment(id, first.deployment.id)).status).toBe("live");
+    expect(queuePushDeploy(panel.deps, { serviceId: id, actor: null, branch: "main", commitSha: "abc1234" }).kind).toBe("same");
+    // Long after, the same commit pushed again (a branch reset back to it) deploys.
+    panel.deps.db
+      .update(deployments)
+      .set({ createdAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(deployments.id, first.deployment.id))
+      .run();
+    const later = queuePushDeploy(panel.deps, { serviceId: id, actor: "lee", branch: "main", commitSha: "abc1234" });
+    expect(later.kind).toBe("queued");
+    await fleet.settle();
+  });
+
   test("a dropped build stream is followed again; the build keeps its id", async () => {
     const id = await createApp("api", inline);
     setDockerfile(id);

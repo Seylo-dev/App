@@ -3,7 +3,7 @@
 // queueDeploy, which writes a queued deployment and kicks the runner.
 
 import { OpError } from "@seylo/ops";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { type DeploymentTrigger, deployments, type PortMove, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { panelServiceId } from "../nodes/panel-service";
@@ -151,8 +151,15 @@ export type PushDeploy =
   | { kind: "queued"; deployment: DeploymentRow }
   /** A push deploy of the branch that had not started yet builds this commit now. */
   | { kind: "joined"; deployment: DeploymentRow }
-  /** A push deploy of this very commit is waiting already. */
+  /** A deploy of this very commit is waiting, running, or went live a moment ago. */
   | { kind: "same"; deployment: DeploymentRow };
+
+/**
+ * How long a push deploy that went live still answers a second delivery of its commit. Two
+ * deliveries of one push arrive seconds apart (a service's repository webhook and the GitHub
+ * App both send it); a build that fast can be live before the second one lands.
+ */
+const samePushWindowMs = 10 * 60 * 1000;
 
 /**
  * Deploys a push to the branch a service follows (webhooks and branch
@@ -168,6 +175,29 @@ export function queuePushDeploy(deps: Deps, input: Omit<QueueDeployInput, "trigg
   const copy = activeCopy(deps.db, input.serviceId);
   if (copy?.role === "clone") throw new OpError("CONFLICT", heldPushMessage(copy.row.sourceName), { reason: "copying" });
   const sha = input.commitSha ?? null;
+  // The same push delivered twice. A service with a repository webhook hears every push from that
+  // webhook and again, seconds later, from the GitHub App; the first delivery's deploy has usually
+  // started by then, so it is no longer "queued" and the check below missed it - every push built
+  // twice. Checked before the waiting deploy too: a late copy of an older push must not take over
+  // the newer push that is waiting.
+  if (sha) {
+    const same = deps.db
+      .select()
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.serviceId, input.serviceId),
+          eq(deployments.commitSha, sha),
+          eq(deployments.branch, input.branch),
+          isNull(deployments.rollbackOf),
+          inArray(deployments.status, ["building", "deploying", "live"]),
+        ),
+      )
+      .orderBy(asc(deployments.createdAt))
+      .all()
+      .find((d) => d.status !== "live" || (d.trigger === "push" && d.createdAt.getTime() >= Date.now() - samePushWindowMs));
+    if (same) return { kind: "same", deployment: same };
+  }
   const waiting = deps.db
     .select()
     .from(deployments)
