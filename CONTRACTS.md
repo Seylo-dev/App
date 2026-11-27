@@ -65,7 +65,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 21 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.13, with a lookup from a test container on seylo-edge since 0.2.17, see "Container DNS check"), DNS cache (`docker.dnscache`, since 0.2.17, see "Node DNS cache"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 22 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, Container DNS (`docker.dns`, since 0.2.13, with a lookup from a test container on seylo-edge since 0.2.17, see "Container DNS check"), DNS cache (`docker.dnscache`, since 0.2.17, see "Node DNS cache"), visitor country header (`proxy.country`, since 0.2.24, see "Visitor country header"), firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, since 0.2.13 `set-panel`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI; `NodeStatus.RouteErrors` (0.2.13) lists the services whose route file reconcile cannot write, and `seylo status` prints them under Recent errors after the last 5 connection errors, whatever their number | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -100,6 +100,8 @@ packages use. "Built" means implemented and tested.
 | `update` | Signed agent self-update with a systemd rollback guard, panel swap (snapshot, health check, restore), Docker update and the daily Docker version check (`DockerUpdater.Check`, `RunChecks`, since 0.2.5), reboot, release manifest builder (`releasetool`) | Built; see "Releases and updates" (the version check is unit tested with scripted apt/dnf answers; no real apt run yet) |
 
 | `dnscache` | The node's DNS cache for containers (since 0.2.17, see "Node DNS cache"): a forwarding cache on one link-local address (`Server`, golang.org/x/net/dns/dnsmessage), the dummy interface through `ip` (`Link`), its upstreams and the containers' fallbacks (`Sources`), the gate, states and status (`Manager`) | Built (unit and fuzz tests; VM tests on Docker 29.5) |
+| `geoip` | The visitor country header (since 0.2.24, see "Visitor country header"): a country database in memory (`DB`, github.com/oschwald/maxminddb-golang/v2), which address a forwardAuth request is about (`ClientIP`: X-Real-Ip, CF-Connecting-IP from Cloudflare's addresses), the lookup server `seylo geoip serve` runs (`Server`, `Listener` with systemd's socket), the monthly download (`Fetcher`: DB-IP, else MaxMind GeoLite2 with an account), the socket and service units (`Units`), and `geoiptest`, which writes small databases for tests | Built (unit tests; real Traefik, real systemd and the real DB-IP download in the test VM) |
+| `cloudflare` | Cloudflare's proxy networks (`Ranges`, `Contains`), for proxy's DNS check and geoip's CF-Connecting-IP | Built |
 
 Naming note: the node health check package is `nodecheck` (not `doctor`)
 because `health` is the per-service probe package.
@@ -482,6 +484,141 @@ resolved); the panel's text says so.
   builders; Traefik), and the e2e on Ubuntu 22.04/24.04 with ufw, Debian
   12, Rocky 9 with firewalld and Docker 28 (the VM tests ran on Ubuntu
   24.04, Docker 29.5, nftables).
+
+Visitor country header (`NodeSettings.country_header`, `Routing.no_country_header`,
+since 0.2.24; `go/internal/geoip`, `wire_geoip.go`, route middlewares in
+`proxy/routes.go` `country`, check `proxy.country` in
+`nodecheck/countryheader.go`, panel module `countryHeader` and
+`services.setCountryHeader`). Why: an app (the first was Vitrina's
+storefront, which picks a market from the visitor's country) needs a
+country it can trust without Cloudflare in front, the same way the panel
+already gives it certificates.
+
+- Traefik adds `X-Seylo-Country` (ISO 3166-1 alpha-2, upper case, `XX`
+  when unknown) to every request it sends to an app: a forwardAuth
+  middleware (`seylo-<svc>-country`) on every router to the app (not the
+  HTTP-to-HTTPS redirect, the pages, the tool hosts, the origin and probe
+  routers), after the redirects, allowlist, rate limit and basic auth and
+  before the retry, `trustForwardHeader: true` (keeps the entry point's
+  X-Real-Ip), `authRequestHeaders: [Cf-Connecting-Ip]` (no cookies or
+  credentials leave Traefik), `authResponseHeadersRegex`
+  `geoip.HeaderPattern` (deletes the header and every alias of it, the name
+  with any non-alphanumeric character between its words, before copying
+  the server's: CGI, PHP, WSGI and nginx read `X_Seylo_Country` as the
+  same variable, and neither Traefik offers `aliasHeadersStrategy` without
+  static configuration, which the Wings fork's Traefik does not take from
+  us) and `maxResponseBodySize: 1024` where Traefik knows it (3.6.9 and
+  later: our own always, the Wings fork's by its image tag,
+  `traefikAtLeast`; an older Traefik refuses a file with an unknown
+  option). The LB routers keep the middleware: the serving node looks the
+  visitor up again from the X-Real-Ip the forwarding node set, so a header
+  an older forwarding node passed on never sticks. Off for the node, off
+  for the service, or a server that does not answer: a headers middleware
+  (`-country-strip`) deletes `X-Seylo-Country` and its dash and underscore
+  spellings only.
+- Why forwardAuth to a server and not a Traefik plugin: plugins are static
+  configuration, which the Wings fork's Traefik (il-ra, il-tlv) does not
+  take from Seylo; forwardAuth is dynamic configuration, in our own route
+  files, and the same on both. Why a server apart from the agent:
+  forwardAuth answers 500 when its server cannot be reached, and the
+  agent's unit restarts it 5 s after a crash (and on every update), so a
+  lookup inside the agent would fail every app's requests meanwhile.
+- The server: `seylo geoip serve --db <datadir>/geoip/country.mmdb` in
+  `seylo-geoip.service`, started by `seylo-geoip.socket`
+  (`ListenStream=<seylo-edge gateway>:5758`, `FreeBind=yes`): systemd
+  holds the port, so a restart or a crash of the server delays requests
+  instead of failing them (VM test: 127,078 lookups across a restart and a
+  SIGKILL, none failed), and the socket comes up at boot before Docker
+  made the bridge. The service has no network of its own
+  (`PrivateNetwork=yes`, the socket is handed in), no capabilities,
+  `ProtectSystem=strict`, `MemoryMax=512M` (it peaks at about 12 MB). It
+  answers every lookup 200 with an empty body (forwardAuth hands any other
+  answer to the visitor), `Cache-Control: no-store`; `/health` answers
+  `geoip.Health` (protocol, version, database, last load error). It
+  reloads the file when it changes (stat every 30 s) and keeps the old one
+  when the new one does not open. The address: `geoip.ClientIP`, X-Real-Ip
+  as the entry point set it (`web`/`websecure` trust no forwarded
+  headers, so it is the connection; `seylo-lb` keeps the forwarding
+  node's), else the last X-Forwarded-For hop; when that address is one of
+  Cloudflare's (`cloudflare.Ranges`), `CF-Connecting-IP`. Private,
+  reserved and unknown addresses are `XX`; a network without
+  `country.iso_code` falls back to `registered_country`. A lookup takes
+  about 200 ns.
+- The agent (`wire_geoip.go`, a component): while the setting is on and
+  the edge gateway is known, it writes the units (`geoip.Units.Ensure`: a
+  new socket file stops the service and restarts the socket, a new service
+  file `try-restart`s it), asks `/health` every 10 s, and points the route
+  files at the server (`FileRouter.SetCountry`) only while it answers; two
+  failed checks in a row take it out of the route files and write the
+  units again. The agent's own check goes over the host's loopback, which
+  a host firewall on the edge bridge does not touch, so before the route
+  files ask the server (and every 10 minutes after) the agent also asks it
+  from inside the Traefik container that reads them (ours or the Wings
+  fork's, `docker exec` busybox `wget -T 5`, `networkParts.traefikReaches`):
+  without the installer's ufw rule for 5758 (nodes installed before
+  0.2.24) ufw drops Traefik's connections, and forwardAuth would make every
+  request wait 30 s and fail. When that check fails and ufw is active, the
+  agent adds the installer's rule itself (`ufw allow in on seylo-edge to
+  any port 5758 proto tcp comment "seylo geoip"`, `allowGeoIPInUFW`) and
+  checks again; still failing, the route files do not ask the server and
+  the health check fails with what to allow (`Report.Unreachable`). A
+  check that cannot run (no such container, no wget) leaves it to the
+  agent's own. The rule stays when the header is turned off, like the
+  edge listener's. A server that reports an older `geoip.ServerProtocol` is
+  restarted (an update leaves the server it started on the old binary).
+  Before the first route files after an agent start, a server left
+  running is asked once (1.5 s) so the files keep the lookup. Off: the
+  route files stop asking at once and the units go 30 s later.
+  `CountryHeaderCapability` (`routing.country-header.v1`) is advertised
+  for the panel's node list.
+- The database (`geoip.Fetcher`, `<datadir>/geoip/country.mmdb` and
+  `state.json`): DB-IP's IP to Country Lite
+  (`https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.mmdb.gz`,
+  CC BY 4.0, no account; about 8.5 MB, 1.4 million search tree nodes) of
+  the current month, or last month's while this month's is not published
+  and none is installed. Due when there is none, when a DB-IP file is from
+  an earlier month, or a GeoLite2 file is older than 7 days; asked every
+  6 hours plus up to 10 minutes (every 15 minutes while there is none).
+  MaxMind's GeoLite2 Country
+  (`https://download.maxmind.com/geoip/databases/GeoLite2-Country/download`,
+  basic auth with the account ID and license key, SHA-256 from
+  `?suffix=tar.gz.sha256`) only when DB-IP fails and an account is set,
+  never while last month's DB-IP file is fine and this month's is not out.
+  Every file is checked before it is installed atomically: a country
+  database with IPv6, `Verify` (the whole tree and data), at least 10,000
+  search tree nodes. Downloads go through `netguard` (public addresses
+  only). A failed download keeps the installed file; without one, apps
+  get `XX`.
+- Panel: the setting `countryHeader` (`{enabled, maxmindAccountId,
+  maxmindLicenseKeySealed}`, purpose `country-header.maxmind`), on when
+  missing; `countryHeader.get` / `countryHeader.update` (settings.view /
+  settings.manage, the key `sensitive`, never returned); the contributor
+  fills `NodeSettings.country_header` (the account only when both parts
+  are set and the setting is on) and `Routing.no_country_header` from the
+  service spec's `countryHeader` (true by default, exported, cloned).
+  `services.setCountryHeader` changes it (`services.update`). UI: the
+  **Visitor country** card in Settings > General (switch, nodes on older
+  agents, MaxMind account, DB-IP's credit) and on the service's Domains
+  tab.
+- Installer: `open_firewall` adds `ufw allow in on seylo-edge to any port
+  5758 proto tcp` next to 5756 (firewalld needs nothing: Docker's bridges
+  are in its accepting docker zone). Uninstall: the installer disables the
+  socket and deletes both unit files; a plain uninstall leaves the running units serving (the route
+  files still ask them) until a reboot, `--purge` stops them.
+- Tests: `geoip` unit tests (lookups, addresses, the server, downloads
+  from a fake DB-IP and MaxMind, units), golden route files
+  (`country-header*`), `TestCountryOnEveryAppRouter`, the agent's upkeep
+  (`TestGeoIPUpkeep`), the panel (`country-header.test.ts`), and in the
+  test VM: `TestIntegrationCountryHeader` (real Traefik 3.7.15: forged
+  headers in five spellings, IPv4, IPv6, a visitor from Cloudflare's
+  addresses, another node's LB entry point, the header off for the
+  service), `TestIntegrationSystemdUnits` (real systemd 255: FreeBind,
+  the sandbox, a restart and a crash under load),
+  `TestIntegrationGeoIPProbeFromTraefik` (the check from a Traefik
+  container sees an iptables DROP on the bridge in 5 s) and, with
+  `SEYLO_IT_GEOIP_DOWNLOAD=1`, `TestIntegrationRealDownload` (DB-IP's real
+  file). Not tested: the Wings fork's Traefik itself (the same Traefik
+  image), and an agent update on a real node (0.2.24's first rollout).
 
 Find every unfinished feature with:
 
@@ -3678,6 +3815,7 @@ the node is offline (`modules/databases/capability.ts`).
 
 | Capability | Means |
 |---|---|
+| `routing.country-header.v1` (0.2.24, `agent.CountryHeaderCapability`, `wire_geoip.go`) | The agent follows `NodeSettings.country_header` and `Routing.no_country_header` (the visitor country header). The panel only lists nodes without it in Settings > General (they add no header); nothing is refused |
 | `database.engines.v2` | Valkey, KeyDB, Dragonfly and ClickHouse (`DatabaseEngine` 6-9): shells, web UIs, backups and TLS on the exposed port. The panel creates, moves or clones such a database only onto a node that advertised it, refuses exposure elsewhere, and the desired state never sends their exposure to an agent without it (an older one would relay the port without TLS) |
 | `database.exposure.v2` (0.2.9, `dbengine.ExposureCapability`, `wire_jobs.go`) | The exposed port uses the database's own user over TLS for every engine: the portgate refuses Postgres, MySQL and MariaDB clients that do not ask for TLS (`portgate.TLSCheck`), `dbtools.ExposedTLS` turns TLS on in Postgres and MySQL without a user, and the agent retires `DatabaseSpec.retired_exposed_user`. The panel sends exposure on for Postgres, MySQL and MariaDB only to agents that advertised it (`missingExposureCapability`), reads an exposure there as closed (`databases.get exposure.state` `waitingForNodeUpdate`, no exposed URL) and `databases.setExposure` refuses them elsewhere (CONFLICT `agentTooOld`): an older agent would relay them without the check, and with no user sent it skips the TLS job too. Mongo, ClickHouse and the Redis-like engines keep their exposure on older agents (TLS at the gate; no user sent, so an older agent's user job skips them) |
 | `database.exposure.plain.v1` (0.2.16, `dbengine.PlainExposureCapability`, `wire_jobs.go`) | The agent reads `DatabaseExposure.allow_plain`: the portgate relays a client that does not ask for TLS to the database instead of refusing it, for every engine (Postgres, MySQL and MariaDB through the first-packet check, the gate-terminated ones by their first bytes), TLS clients connect as before, and turning it off closes the plain sessions only. An older agent ignores the field and keeps the port TLS only; the panel sends `allow_plain` only to agents that advertised this (`databases/info.ts` `plainNeedsNodeUpdate`), `databases.setExposure` refuses turning it on elsewhere (CONFLICT `agentTooOld`, field `allowPlain`), and a setting kept from before reads as TLS only there (`exposure.plainNeedsNodeUpdate`, `connection.exposed.allowPlain` false) |

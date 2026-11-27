@@ -1,5 +1,6 @@
 // The Domains tab (Domains.dc.html): the domain list with DNS help, then
-// IP:port access, maintenance pages and dev access. A compose stack or a
+// IP:port access, maintenance pages, the visitor country header and dev
+// access. A compose stack or a
 // cron service takes no domains: it shows this tab only for the domains it
 // has from before (service-tabs.ts), each saying where it belongs, with
 // nothing to add.
@@ -16,7 +17,7 @@ import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
 import { RowsSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
-import { DevAccessCard, FirstRunCard, MaintenanceCard } from "./access-cards";
+import { CountryHeaderCard, DevAccessCard, FirstRunCard, MaintenanceCard } from "./access-cards";
 import { toastAutoAdded } from "./added-toast";
 import { AccessRulesSheet, AddDomainDialog, CertificateDialog, RoutingDialog } from "./domain-dialogs";
 import { type DomainDialog, DomainRow } from "./domain-row";
@@ -104,6 +105,7 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
           <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
             <FirstRunCard service={service} />
             <MaintenanceCard service={service} />
+            <CountryHeaderCard service={service} />
           </div>
           <DevAccessCard service={service} />
         </>

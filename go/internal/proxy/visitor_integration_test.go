@@ -52,12 +52,24 @@ type visitor struct {
 
 func newVisitor(t *testing.T, e *itEnv) *visitor {
 	t.Helper()
+	var b [2]byte
+	_, _ = rand.Read(b[:])
+	return newVisitorIn(t, e, fmt.Sprintf("198.%d.%d", 18+int(b[0]&1), b[1])) // 198.18.0.0/15, for tests
+}
+
+// newVisitorIn is a visitor with an IPv4 address in the /24 net4 ("198.18.7"):
+// .2 is the visitor, .1 the VM's end.
+func newVisitorIn(t *testing.T, e *itEnv, net4 string) *visitor {
+	t.Helper()
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	id := hex.EncodeToString(b[:3])
-	net4 := fmt.Sprintf("198.%d.%d", 18+int(b[0]&1), b[1]) // 198.18.0.0/15, for tests
 	net6 := fmt.Sprintf("2001:db8:%s", hex.EncodeToString(b[1:3]))
-	v := &visitor{ns: e.prefix + "-vis", v4: net4 + ".2", hostV4: net4 + ".1", v6: net6 + "::2", hostV6: net6 + "::1"}
+	ns := e.prefix + "-vis"
+	if _, err := os.Stat("/run/netns/" + ns); err == nil {
+		ns += "-" + id
+	}
+	v := &visitor{ns: ns, v4: net4 + ".2", hostV4: net4 + ".1", v6: net6 + "::2", hostV6: net6 + "::1"}
 	hostIf, nsIf := "sv"+id+"h", "sv"+id+"n"
 	run := func(args ...string) {
 		t.Helper()

@@ -1,8 +1,8 @@
 // The cards under the domain list (Domains.dc.html): first-run IP:port
-// access, maintenance and down pages, and dev access (timed expose and the
-// Cloudflare tunnel).
+// access, maintenance and down pages, the visitor country header, and dev
+// access (timed expose and the Cloudflare tunnel).
 
-import { exposures, maintenance, type OpOutput, tunnels } from "@seylo/ops";
+import { countryHeader, exposures, maintenance, type OpOutput, services, tunnels } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
@@ -14,6 +14,7 @@ import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui
 import { Switch } from "@seylo/ui/components/switch";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
+import { Link } from "@tanstack/react-router";
 import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
@@ -483,5 +484,42 @@ function TunnelCard({ service }: { service: ServiceDetail }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The visitor country header (X-Seylo-Country) for this service. The
+ * panel-wide switch is in Settings > General; people who cannot read
+ * settings see only this service's switch.
+ */
+export function CountryHeaderCard({ service }: { service: ServiceDetail }) {
+  const global = useOp(countryHeader.get, {}, { retry: false });
+  const invalidate = useInvalidate();
+  const set = useOpMutation(services.setCountryHeader, {
+    onSuccess: () => {
+      invalidate(services.get);
+      toast.success(t("service.saved"));
+    },
+    onError: fail,
+  });
+  const on = set.isPending && set.variables ? set.variables.enabled : service.countryHeader;
+  const globalOff = global.data?.enabled === false;
+  return (
+    <Panel label={t("serviceDomains.country.title")} title={t("serviceDomains.country.title")}>
+      <p className="m-0 text-[13px] leading-[1.55] text-ink-strong">
+        {t("serviceDomains.country.body", { name: service.name, header: countryHeader.countryHeaderName })}
+      </p>
+      {globalOff && (
+        <p className="m-0 text-xs text-chip-amber-fg">
+          {t("serviceDomains.country.globalOff")}{" "}
+          <Link to="/settings/general" className="text-link hover:text-link-hover">
+            {t("serviceDomains.country.globalOffLink")}
+          </Link>
+        </p>
+      )}
+      <SwitchLabel checked={on} disabled={set.isPending} onCheckedChange={(enabled) => set.mutate({ serviceId: service.id, enabled })}>
+        {t("serviceDomains.country.toggle")}
+      </SwitchLabel>
+    </Panel>
   );
 }

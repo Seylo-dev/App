@@ -15,6 +15,7 @@ import (
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
+	"github.com/seylo-dev/app/go/internal/geoip"
 )
 
 // ErrInvalidRoute means the spec holds something that cannot go into a
@@ -72,7 +73,29 @@ type BuildInput struct {
 	// configuration, which makes Traefik run ACME again for the route's
 	// hosts without a certificate (see certretry.go).
 	CertRetries map[string]string
+	// Country is how routes reach the visitor country lookup. Without an
+	// address the routes to the app only delete what clients send as
+	// geoip.Header.
+	Country CountryLookup
 }
+
+// CountryLookup is where route files ask for the visitor's country
+// (geoip.Server) and what the Traefik that reads them supports.
+type CountryLookup struct {
+	// Address is the lookup server's URL, for example
+	// "http://172.30.0.1:5758/"; empty while the header is off on the node
+	// or the server does not answer.
+	Address string
+	// MaxResponseBodySize says the Traefik supports forwardAuth's
+	// maxResponseBodySize (3.6.9 and later). Without it Traefik warns
+	// about every router with the middleware; with it an older Traefik
+	// refuses the whole file.
+	MaxResponseBodySize bool
+}
+
+// countryBodyLimit is forwardAuth's maxResponseBodySize: the lookup
+// answers with an empty body.
+const countryBodyLimit = 1024
 
 // Built is one rendered route file.
 type Built struct {
@@ -94,7 +117,9 @@ func Build(in BuildInput) (Built, error) {
 		return Built{}, fmt.Errorf("%w: no service", ErrInvalidRoute)
 	}
 	if in.LBOnly {
+		// The LB Traefik is always ours (TraefikImage).
 		in.LBEntryPoint, in.ProbeSecret = true, ""
+		in.Country.MaxResponseBodySize = true
 	}
 	if err := checkID("service", spec.GetId()); err != nil {
 		return Built{}, err
@@ -663,7 +688,11 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		// could not be checked against the other node.
 		lbChain := []string{}
 		for _, mwName := range chain {
-			if strings.HasSuffix(mwName, "-auth") || strings.HasSuffix(mwName, "-strip") || strings.HasSuffix(mwName, "-unreachable") {
+			// The country is looked up again from the X-Real-Ip the
+			// forwarding node set (geoip.ClientIP), so an older node that
+			// passed on a client's header cannot make it stick.
+			if strings.HasSuffix(mwName, "-auth") || strings.HasSuffix(mwName, "-strip") || strings.HasSuffix(mwName, "-unreachable") ||
+				strings.HasSuffix(mwName, "-country") {
 				lbChain = append(lbChain, mwName)
 			}
 		}
@@ -946,6 +975,7 @@ func (b *builder) chain(r *agentv1.Route, m mode) (string, []string, error) {
 		page := b.mw(b.n.svc("down"), &middleware{ReplacePath: &replacePath{Path: StatusPath + "/" + spec.GetId()}})
 		return edge, append(chain, page), nil
 	}
+	chain = append(chain, b.country())
 	if b.in.Edge != "" {
 		// The status page replaces a gateway error: the replica went away
 		// or does not answer.
@@ -957,6 +987,35 @@ func (b *builder) chain(r *agentv1.Route, m mode) (string, []string, error) {
 		chain = append(chain, b.mw(b.n.route(r.GetId(), "strip"), &middleware{StripPrefix: &stripPrefix{Prefixes: []string{r.GetPathPrefix()}}}))
 	}
 	return b.upstreamService(r, false), chain, nil
+}
+
+// country is the middleware that gives the app the visitor's country
+// (geoip.Header): forwardAuth to the lookup server, which also deletes
+// every spelling of the header the client sent (geoip.HeaderPattern). With
+// the header off for the node or the service, or the server not answering,
+// a headers middleware only deletes what the client sent. After the
+// allowlist, the rate limit and basic auth, so refused requests cost no
+// lookup; before the retry, so a retried request is looked up once.
+func (b *builder) country() string {
+	c := b.in.Country
+	if c.Address == "" || b.spec().GetRouting().GetNoCountryHeader() {
+		strip := map[string]string{}
+		for _, name := range geoip.HeaderAliases() {
+			strip[name] = ""
+		}
+		return b.mw(b.n.svc("country-strip"), &middleware{Headers: &headers{CustomRequestHeaders: strip}})
+	}
+	fa := &forwardAuth{
+		Address:                  c.Address,
+		TrustForwardHeader:       true,
+		AuthRequestHeaders:       []string{geoip.CloudflareClientHeader},
+		AuthResponseHeadersRegex: geoip.HeaderPattern,
+	}
+	if c.MaxResponseBodySize {
+		limit := int64(countryBodyLimit)
+		fa.MaxResponseBodySize = &limit
+	}
+	return b.mw(b.n.svc("country"), &middleware{ForwardAuth: fa})
 }
 
 // buildDatabaseCert adds a router for an exposed database's TLS host name

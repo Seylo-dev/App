@@ -1021,6 +1021,9 @@
             "stickySessions": {
               "type": "boolean"
             },
+            "countryHeader": {
+              "type": "boolean"
+            },
             "watchPaths": {
               "maxItems": 50,
               "type": "array",

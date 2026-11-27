@@ -249,6 +249,8 @@ export const PortableSpec = Type.Object({
   deploy: DeployStrategy,
   cron: Type.Union([CronSettings, Type.Null()]),
   stickySessions: Type.Boolean(),
+  /** The visitor country header (services.setCountryHeader); missing in exports before 0.2.24, which means on. */
+  countryHeader: Type.Optional(Type.Boolean()),
   watchPaths: WatchPaths,
   /** Imported with previews off. */
   previews: Type.Object({ enabled: Type.Boolean(), maxPreviews: Type.Integer({ minimum: 1, maximum: 50 }) }),

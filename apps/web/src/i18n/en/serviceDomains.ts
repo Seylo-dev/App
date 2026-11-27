@@ -200,6 +200,13 @@ export default {
     closeNow: "Close now",
     status: { open: "Open", redirecting: "Redirecting", closed: "Closed", none: "Off" },
   },
+  country: {
+    title: "Visitor country",
+    body: "Requests to {name} carry {header}: the visitor's country as two letters, XX when unknown. Visitors cannot set it themselves.",
+    toggle: "Add the header",
+    globalOff: "It is off for the whole panel.",
+    globalOffLink: "Settings > General",
+  },
   maintenance: {
     title: "Maintenance and down pages",
     body: "Shown when {name} is stopped, deploying for the first time, or unreachable. Uses the global page from Settings unless you upload one.",

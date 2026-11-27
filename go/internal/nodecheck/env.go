@@ -10,6 +10,7 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/conn"
 	"github.com/seylo-dev/app/go/internal/dnscache"
+	"github.com/seylo-dev/app/go/internal/geoip"
 	"github.com/seylo-dev/app/go/internal/systemd"
 )
 
@@ -65,7 +66,11 @@ type Env struct {
 	// (dnscache.Manager.Check): nil when the cache is off and unused. Nil
 	// func: not checked (the CLI runs without the agent).
 	DNSCache func(ctx context.Context) *dnscache.Report
-	Now      func() time.Time
+	// CountryHeader reports the visitor country header's state (the
+	// agent's geoip upkeep). Nil: not checked (the CLI runs without the
+	// agent).
+	CountryHeader func(ctx context.Context) *geoip.Report
+	Now           func() time.Time
 
 	// lookupNetwork is the network of the Container DNS check's lookup
 	// container; "" for docker.EdgeNetwork. Tests use their own.
@@ -138,6 +143,7 @@ func Default(env Env) []Check {
 		check{"network.dns", "DNS resolution", e.dns},
 		check{"docker.dns", containerDNSTitle, e.containerDNS},
 		check{"docker.dnscache", dnsCacheTitle, e.dnsCache},
+		check{"proxy.country", countryHeaderTitle, e.countryHeader},
 		check{"network.firewall", "Firewall", e.firewall},
 		check{"time.sync", "Clock", e.clock},
 		check{"panel.reachable", "Panel connection", e.panel},

@@ -284,6 +284,13 @@ const setCrashPolicy = implement(serviceOps.setCrashPolicy, (input, ctx) => {
   return { crashPolicy: readSpec(next.spec).crashPolicy, restartDelaySeconds };
 });
 
+const setCountryHeader = implement(serviceOps.setCountryHeader, (input, ctx) => {
+  const next = updateSpec(ctx, input.serviceId, (spec) => ({ ...spec, countryHeader: input.enabled }));
+  // Routing.no_country_header: the route files change, the containers do not.
+  ctx.agents.desired.markDirty({ serviceId: next.id });
+  return { countryHeader: readSpec(next.spec).countryHeader };
+});
+
 const setResources = implement(serviceOps.setResources, (input, ctx) => {
   const { serviceId: _, ...resources } = input;
   const next = updateSpec(ctx, input.serviceId, (spec) => ({ ...spec, resources }));
@@ -478,6 +485,7 @@ export const serviceOpsHandlers = [
   setWatchPaths,
   setHealthCheck,
   setCrashPolicy,
+  setCountryHeader,
   setResources,
   setVolumes,
   setPlacements,

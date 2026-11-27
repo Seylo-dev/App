@@ -13,6 +13,7 @@ import * as builds from "./builds";
 import * as cleanup from "./cleanup";
 import * as cliLogin from "./cliLogin";
 import * as compose from "./compose";
+import * as countryHeader from "./countryHeader";
 import * as cron from "./cron";
 import * as databases from "./databases";
 import * as deployments from "./deployments";
@@ -53,7 +54,7 @@ import * as uptime from "./uptime";
 import * as users from "./users";
 import * as webhooks from "./webhooks";
 
-export { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, serviceTransfer, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
+export { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, countryHeader, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, serviceTransfer, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
 
 /** Every op module by name; the name is the id prefix of its ops. */
-export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, serviceTransfer, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;
+export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, countryHeader, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, serviceTransfer, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;

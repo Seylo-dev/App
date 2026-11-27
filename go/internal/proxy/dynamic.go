@@ -74,6 +74,26 @@ type middleware struct {
 	RateLimit      *rateLimit      `yaml:"rateLimit,omitempty"`
 	Headers        *headers        `yaml:"headers,omitempty"`
 	Retry          *retryMW        `yaml:"retry,omitempty"`
+	ForwardAuth    *forwardAuth    `yaml:"forwardAuth,omitempty"`
+}
+
+// forwardAuth asks Address about each request before it goes on (the
+// visitor country lookup, geoip): a 2xx answer lets it through with the
+// answer's headers that match AuthResponseHeadersRegex, after deleting
+// every request header that matches it; anything else goes back to the
+// client instead.
+type forwardAuth struct {
+	Address string `yaml:"address"`
+	// TrustForwardHeader keeps X-Real-Ip and the X-Forwarded-* headers as
+	// the entry point left them (from the connection, or from the node on
+	// the LB entry point) and appends the connection to X-Forwarded-For.
+	TrustForwardHeader bool `yaml:"trustForwardHeader"`
+	// AuthRequestHeaders are the other request headers Address gets.
+	AuthRequestHeaders       []string `yaml:"authRequestHeaders,omitempty"`
+	AuthResponseHeadersRegex string   `yaml:"authResponseHeadersRegex,omitempty"`
+	// MaxResponseBodySize exists from Traefik 3.6.9; an older Traefik
+	// refuses a file that has it.
+	MaxResponseBodySize *int64 `yaml:"maxResponseBodySize,omitempty"`
 }
 
 // retryMW sends a request again through the router's service, so the

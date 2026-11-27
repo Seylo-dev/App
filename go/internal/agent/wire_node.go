@@ -479,6 +479,7 @@ func nodeChecksFor(d *Deps, byHand bool) []nodecheck.Check {
 			env.DNSCache = m.CheckByHand
 		}
 	}
+	env.CountryHeader = d.CountryHeader
 	return nodecheck.Default(env)
 }
 

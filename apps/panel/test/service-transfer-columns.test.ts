@@ -266,6 +266,7 @@ const specKeys: Record<string, Decision> = {
   "deploy.healthTimeoutSeconds": "exported",
   cron: "exported",
   stickySessions: "exported",
+  countryHeader: "exported",
   entryNodeId: "out: one node on import",
   previews: "exported",
   "previews.enabled": "out: imported off",

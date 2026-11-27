@@ -78,6 +78,8 @@ export const ServiceSpecJson = Type.Object({
   deploy: services.DeployStrategy,
   cron: Type.Union([services.CronSettings, Type.Null()]),
   stickySessions: Type.Boolean(),
+  /** The app gets X-Seylo-Country while the panel's setting is on (countryHeader module). added in 0.2.24 */
+  countryHeader: Type.Boolean(),
   /** Load balancing: the node that takes the public traffic; null = the first placement. */
   entryNodeId: Type.Union([Type.String(), Type.Null()]),
   previews: previews.PreviewSettings,
@@ -197,6 +199,7 @@ export function defaultSpec(): ServiceSpecJson {
     deploy: { mode: "rolling", healthTimeoutSeconds: defaultHealthTimeoutSeconds },
     cron: null,
     stickySessions: false,
+    countryHeader: true,
     entryNodeId: null,
     previews: { enabled: false, domainPattern: "", maxPreviews: 5 },
     member: null,

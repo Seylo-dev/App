@@ -7,6 +7,7 @@ http:
       rule: (Host(`lb.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 22
       middlewares:
+        - seylo-svc7-country-strip
         - seylo-svc7-unreachable
         - seylo-svc7-resend
       service: seylo-svc7
@@ -24,6 +25,7 @@ http:
         - seylo-lb
       rule: Host(`lb.example.com`)
       middlewares:
+        - seylo-svc7-country-strip
         - seylo-svc7-unreachable
       service: seylo-svc7-local
       tls:
@@ -48,12 +50,20 @@ http:
       rule: (Host(`lb.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 22
       middlewares:
+        - seylo-svc7-country-strip
         - seylo-svc7-unreachable
         - seylo-svc7-resend-idem
       service: seylo-svc7
       tls:
         certResolver: le
   middlewares:
+    seylo-svc7-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc7-https:
       redirectScheme:
         scheme: https

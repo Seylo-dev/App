@@ -430,6 +430,12 @@ export const ServiceDetail = Type.Object({
   cron: Type.Union([CronSettings, Type.Null()]),
   stickySessions: Type.Boolean(),
   /**
+   * The app gets X-Seylo-Country (the visitor's country) while the panel's
+   * country header setting is on (countryHeader.get). True unless turned off
+   * for this service. added in 0.2.24
+   */
+  countryHeader: Type.Boolean(),
+  /**
    * Load balancing over several nodes: the node whose edge takes the public
    * traffic (point domains at it) and spreads it over every placement; the
    * other nodes serve only their own replicas. Null: no entry node, every
@@ -608,6 +614,19 @@ export const setCrashPolicy = defineOp({
     "Restart on or off after a crash, and with restart on, whether to stop after N crashes in a row (0 = never). The wait between restarts is a fixed 5 seconds. Applies to running containers right away.",
   input: Type.Object({ serviceId: Id, ...CrashPolicy.properties }),
   output: Type.Object({ crashPolicy: CrashPolicy, restartDelaySeconds: Type.Integer({ minimum: 0 }) }),
+  permission: permission.service("services.update", serviceScope),
+  mcp: true,
+  audit: true,
+});
+
+export const setCountryHeader = defineOp({
+  id: "services.setCountryHeader",
+  kind: "mutation",
+  summary: "Turn the visitor country header on or off for a service",
+  description:
+    "With enabled false the service's requests no longer carry X-Seylo-Country (the visitor's country) while the panel's country header setting (countryHeader.get) is on; a client's own X-Seylo-Country is deleted either way. Applies within seconds, without a deploy.",
+  input: Type.Object({ serviceId: Id, enabled: Type.Boolean() }),
+  output: Type.Object({ countryHeader: Type.Boolean() }),
   permission: permission.service("services.update", serviceScope),
   mcp: true,
   audit: true,

@@ -6,6 +6,7 @@ http:
         - web
       rule: Host(`example.com`) && PathPrefix(`/api`)
       middlewares:
+        - seylo-svc2-country-strip
         - seylo-svc2-unreachable
         - seylo-svc2-r-api-strip
       service: seylo-svc2
@@ -28,6 +29,7 @@ http:
         - websecure
       rule: Host(`example.com`) && PathPrefix(`/docs`)
       middlewares:
+        - seylo-svc2-country-strip
         - seylo-svc2-unreachable
       service: seylo-svc2
       tls:
@@ -37,9 +39,17 @@ http:
         - web
       rule: Host(`example.com`) && PathPrefix(`/docs`)
       middlewares:
+        - seylo-svc2-country-strip
         - seylo-svc2-unreachable
       service: seylo-svc2
   middlewares:
+    seylo-svc2-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc2-r-api-strip:
       stripPrefix:
         prefixes:

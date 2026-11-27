@@ -7,6 +7,7 @@ http:
       rule: (Host(`peers.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 25
       middlewares:
+        - seylo-svc10-country-strip
         - seylo-svc10-unreachable
         - seylo-svc10-resend
       service: seylo-svc10
@@ -24,6 +25,7 @@ http:
         - seylo-lb
       rule: Host(`peers.example.com`)
       middlewares:
+        - seylo-svc10-country-strip
         - seylo-svc10-unreachable
       service: seylo-svc10-local
       tls:
@@ -48,6 +50,7 @@ http:
       rule: (Host(`peers.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 25
       middlewares:
+        - seylo-svc10-country-strip
         - seylo-svc10-unreachable
         - seylo-svc10-resend
       service: seylo-svc10-retry
@@ -59,6 +62,7 @@ http:
       rule: (Host(`admin.peers.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 31
       middlewares:
+        - seylo-svc10-country-strip
         - seylo-svc10-unreachable
         - seylo-svc10-resend
       service: seylo-svc10-p9000
@@ -67,6 +71,7 @@ http:
         - seylo-lb
       rule: Host(`admin.peers.example.com`)
       middlewares:
+        - seylo-svc10-country-strip
         - seylo-svc10-unreachable
       service: seylo-svc10-local-p9000
       tls:
@@ -90,10 +95,18 @@ http:
       rule: (Host(`admin.peers.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 31
       middlewares:
+        - seylo-svc10-country-strip
         - seylo-svc10-unreachable
         - seylo-svc10-resend
       service: seylo-svc10-p9000-retry
   middlewares:
+    seylo-svc10-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc10-https:
       redirectScheme:
         scheme: https

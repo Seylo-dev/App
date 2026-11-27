@@ -7,6 +7,7 @@ http:
       rule: (Host(`admin.x.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 27
       middlewares:
+        - seylo-svc9-country-strip
         - seylo-svc9-unreachable
         - seylo-svc9-resend
       service: seylo-svc9-p9000
@@ -15,6 +16,7 @@ http:
         - seylo-lb
       rule: Host(`admin.x.example.com`)
       middlewares:
+        - seylo-svc9-country-strip
         - seylo-svc9-unreachable
       service: seylo-svc9-local-p9000
       tls:
@@ -38,6 +40,7 @@ http:
       rule: (Host(`admin.x.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 27
       middlewares:
+        - seylo-svc9-country-strip
         - seylo-svc9-unreachable
         - seylo-svc9-resend-idem
       service: seylo-svc9-p9000
@@ -47,6 +50,7 @@ http:
       rule: (Host(`x.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 21
       middlewares:
+        - seylo-svc9-country-strip
         - seylo-svc9-unreachable
         - seylo-svc9-resend
       service: seylo-svc9
@@ -55,6 +59,7 @@ http:
         - seylo-lb
       rule: Host(`x.example.com`)
       middlewares:
+        - seylo-svc9-country-strip
         - seylo-svc9-unreachable
       service: seylo-svc9-local
       tls:
@@ -78,10 +83,18 @@ http:
       rule: (Host(`x.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 21
       middlewares:
+        - seylo-svc9-country-strip
         - seylo-svc9-unreachable
         - seylo-svc9-resend-idem
       service: seylo-svc9
   middlewares:
+    seylo-svc9-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc9-resend:
       retry:
         attempts: 3

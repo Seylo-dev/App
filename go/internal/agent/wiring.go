@@ -24,6 +24,7 @@ var owners = []owner{
 	{"dnscache", provideDNSCache, wireDNSCache},
 	{"observe", provideObserve, wireObserve},
 	{"network", provideNetwork, wireNetwork},
+	{"geoip", func(*Deps) error { return nil }, wireGeoIP},
 	{"build", provideBuild, wireBuild},
 	{"jobs", provideJobs, wireJobs},
 	{"node", provideNode, wireNode},

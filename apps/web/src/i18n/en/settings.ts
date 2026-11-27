@@ -156,6 +156,27 @@ export default {
     auditForever: "Forever",
   },
 
+  country: {
+    title: "Visitor country",
+    description:
+      "Apps get the visitor's country in the {header} request header: two letters (ISO 3166-1), XX when unknown. Visitors cannot set it themselves. Behind Cloudflare it is the visitor's country, not Cloudflare's.",
+    toggle: "Pass the visitor's country to apps",
+    toggleHint: "Each node keeps a country database in memory and refreshes it every month. Services can turn it off on their Domains tab.",
+    outdated: "These nodes add no header until their agent is updated to {version} or later: {nodes}.",
+    maxmindTitle: "MaxMind GeoLite2 (optional)",
+    maxmindHint:
+      "The database comes from DB-IP and needs no account. With a free MaxMind account, nodes use GeoLite2 Country when DB-IP cannot be downloaded.",
+    accountId: "Account ID",
+    accountIdInvalid: "Digits only.",
+    licenseKey: "License key",
+    licenseKeySet: "A key is saved. Type a new one to replace it.",
+    licenseKeyInvalid: "Letters, digits and underscores, at least 6.",
+    licenseKeyNeedsId: "Add the account ID the key belongs to.",
+    removeAccount: "Remove the account",
+    creditBefore: "Country data:",
+    creditAfter: ", CC BY 4.0.",
+  },
+
   updates: {
     title: "Updates",
     subtitle: "One switch updates the panel first, then every node one at a time.",

@@ -14,6 +14,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/edge"
 	"github.com/seylo-dev/app/go/internal/fs"
+	"github.com/seylo-dev/app/go/internal/geoip"
 	"github.com/seylo-dev/app/go/internal/health"
 	"github.com/seylo-dev/app/go/internal/logs"
 	"github.com/seylo-dev/app/go/internal/metrics"
@@ -136,6 +137,11 @@ type Deps struct {
 	// Reconcile and jobrun ask it for each container's DNS at create time.
 
 	DNSCache DNSCache
+
+	// Visitor country header (wire_geoip.go): its state for the health
+	// check; nil without the network components.
+
+	CountryHeader func(ctx context.Context) *geoip.Report
 
 	// Network (wire_network.go).
 

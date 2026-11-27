@@ -398,6 +398,8 @@ expect_ok "a join behind ufw allows DNS to the node's DNS cache from private ran
   "+ ufw allow from 172.16.0.0/12 to 169.254.53.53 port 53 comment $SLUG dns" \
   "+ ufw allow from 192.168.0.0/16 to 169.254.53.53 port 53 comment $SLUG dns"
 has "ufw allow to 169.254.53.53" && flunk "the DNS cache's rule allows any source" "$OUT" || pass "no DNS cache rule for any source"
+has "+ ufw allow in on $SLUG-edge to any port 5758 proto tcp comment $SLUG geoip" && pass "ufw allows the country lookup from the edge bridge" ||
+  flunk "ufw allows the country lookup from the edge bridge" "$OUT"
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'https://[2001:db8::7]:3443' --token t --binary "$T/local-binary"
 expect_ok "a join behind ufw allows 5757 from the panel's IPv6 address" "+ ufw allow from 2001:db8::7 to any port 5757 proto tcp"
 FAKE_UFW=1 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
@@ -654,6 +656,17 @@ expect_ok "uninstall --purge deletes the DNS cache's ufw rules" \
   "+ ufw delete allow from 192.168.0.0/16 to 169.254.20.10 port 53"
 PRESEED=$T/seed-dns-address run_installer none "$PLACEHOLDER_INSTALLER" uninstall
 has "ufw delete" && flunk "a plain uninstall deleted the DNS cache's rules" "$OUT" || pass "a plain uninstall keeps the DNS cache's ufw rules"
+# The visitor country lookup's units: disabled and their files gone, but a
+# plain uninstall leaves the running ones serving the route files.
+mkdir -p "$T/seed-geoip/etc/systemd/system"
+cp -R "$T/seed-dns-address/." "$T/seed-geoip/"
+: >"$T/seed-geoip/etc/systemd/system/$SLUG-geoip.socket"
+: >"$T/seed-geoip/etc/systemd/system/$SLUG-geoip.service"
+PRESEED=$T/seed-geoip run_installer none "$PLACEHOLDER_INSTALLER" uninstall
+expect_ok "an uninstall disables the country lookup" "+ systemctl disable $SLUG-geoip.socket"
+[ ! -e "$R/etc/systemd/system/$SLUG-geoip.socket" ] && [ ! -e "$R/etc/systemd/system/$SLUG-geoip.service" ] &&
+  pass "an uninstall removes the country lookup's units" || flunk "an uninstall removes the country lookup's units" "$(ls -la "$R/etc/systemd/system")"
+has "systemctl stop $SLUG-geoip" && flunk "a plain uninstall stopped the country lookup" "$OUT" || pass "a plain uninstall leaves the country lookup serving"
 # rerun_join <error> [<node's panel_pin> [<command's --pin>]]: the join command again on a node
 # joined to https://192.0.2.10:3443 whose seylo status says rejected with this error.
 rerun_join() {

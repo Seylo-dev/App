@@ -364,6 +364,7 @@ export function snapshotService(ctx: OpContext, svc: ServiceRow, options: { sour
       deploy: spec.deploy,
       cron: spec.cron && { ...spec.cron, schedule: normalizeCronSchedule(spec.cron.schedule) },
       stickySessions: spec.stickySessions,
+      countryHeader: spec.countryHeader,
       watchPaths: spec.watchPaths,
       previews: { enabled: false, maxPreviews: spec.previews.maxPreviews },
     },

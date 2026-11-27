@@ -366,6 +366,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     deploy: doc.spec.deploy,
     cron: null,
     stickySessions: doc.spec.stickySessions,
+    countryHeader: doc.spec.countryHeader ?? true,
     watchPaths: [],
     previews: { enabled: false, domainPattern: "", maxPreviews: doc.spec.previews.maxPreviews },
     portEnv: true,

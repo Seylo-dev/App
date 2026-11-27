@@ -14,6 +14,7 @@ http:
         - websecure
       rule: Host(`app.example.com`)
       middlewares:
+        - seylo-svc8-country-strip
         - seylo-svc8-unreachable
       service: seylo-svc8
       tls:
@@ -48,6 +49,13 @@ http:
       priority: 1999998000
       service: seylo-svc8-edge
   middlewares:
+    seylo-svc8-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc8-https:
       redirectScheme:
         scheme: https

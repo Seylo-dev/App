@@ -1,0 +1,72 @@
+# Written by the Seylo agent for service svc14. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc14-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`shop.example.com`)
+      middlewares:
+        - seylo-svc14-country-strip
+        - seylo-svc14-unreachable
+      service: seylo-svc14
+      tls:
+        certResolver: le
+    seylo-svc14-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`shop.example.com`)
+      middlewares:
+        - seylo-svc14-https
+      service: seylo-svc14
+    seylo-svc14-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`shop.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc14-edge
+      tls:
+        certResolver: le
+    seylo-svc14-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`shop.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc14-edge
+  middlewares:
+    seylo-svc14-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
+    seylo-svc14-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc14-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc14-edge
+        query: /_seylo/page/status/svc14
+  services:
+    seylo-svc14:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc14-1:3000
+        serversTransport: seylo-svc14-local
+    seylo-svc14-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc14-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc14-1:3000
+        serversTransport: seylo-svc14-local
+  serversTransports:
+    seylo-svc14-local:
+      forwardingTimeouts:
+        dialTimeout: 2s

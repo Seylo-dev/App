@@ -74,6 +74,7 @@ type FileRouter struct {
 	// lbTLS is the rendered LBTLSFile (nil: none written).
 	lbTLS       []byte
 	edge        string
+	country     CountryLookup
 	probeAddr   string
 	probeSource string
 
@@ -130,6 +131,7 @@ func (r *FileRouter) input(spec *agentv1.ServiceSpec, upstreams []Upstream) Buil
 		ProbeSource:  r.probeSource,
 		LBEntryPoint: r.cfg.LBEntryPoint,
 		CertRetries:  r.retryNames(spec.GetId()),
+		Country:      r.country,
 	}
 }
 
@@ -337,6 +339,25 @@ func (r *FileRouter) SetEdge(url string) {
 	}
 	r.edge = url
 	r.rerenderLocked()
+}
+
+// SetCountry sets where the route files ask for the visitor's country
+// (BuildInput.Country) and re-renders every file when it changed.
+func (r *FileRouter) SetCountry(c CountryLookup) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.country == c {
+		return
+	}
+	r.country = c
+	r.rerenderLocked()
+}
+
+// Country is what SetCountry set last.
+func (r *FileRouter) Country() CountryLookup {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.country
 }
 
 // SetProbe sets where Verify reaches Traefik's web entry point ("ip:80")

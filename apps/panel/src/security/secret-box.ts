@@ -18,6 +18,7 @@ export const sealPurposes = [
   "backup.destination",
   "cloudflare.tunnel",
   "compose.file",
+  "country-header.maxmind",
   "deployment.env",
   "domain.certificate",
   "edge.ticket-key",

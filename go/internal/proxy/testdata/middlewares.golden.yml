@@ -10,6 +10,7 @@ http:
         - seylo-svc3-r-r1-allow
         - seylo-svc3-r-r1-ratelimit
         - seylo-svc3-r-r1-auth
+        - seylo-svc3-country-strip
         - seylo-svc3-unreachable
       service: seylo-svc3
       tls:
@@ -44,6 +45,13 @@ http:
       priority: 1999998000
       service: seylo-svc3-edge
   middlewares:
+    seylo-svc3-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc3-https:
       redirectScheme:
         scheme: https

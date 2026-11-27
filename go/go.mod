@@ -49,6 +49,7 @@ require (
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/oschwald/maxminddb-golang/v2 v2.8.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect

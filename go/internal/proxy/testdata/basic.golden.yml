@@ -4,7 +4,7 @@ http:
     seylo-svc1-probe:
       entryPoints:
         - web
-      rule: PathPrefix(`/_seylo/probe/svc1/7b4ac1e10de8434a`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
+      rule: PathPrefix(`/_seylo/probe/svc1/25983dc5d3496754`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
       priority: 2000000000
       middlewares:
         - seylo-svc1-probe-mark
@@ -16,6 +16,7 @@ http:
       rule: ((Host(`app.example.com`) || Host(`www.example.com`))) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 52
       middlewares:
+        - seylo-svc1-country-strip
         - seylo-svc1-unreachable
         - seylo-svc1-resend
       service: seylo-svc1
@@ -55,12 +56,20 @@ http:
       rule: ((Host(`app.example.com`) || Host(`www.example.com`))) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
       priority: 52
       middlewares:
+        - seylo-svc1-country-strip
         - seylo-svc1-unreachable
         - seylo-svc1-resend-idem
       service: seylo-svc1
       tls:
         certResolver: le
   middlewares:
+    seylo-svc1-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
     seylo-svc1-https:
       redirectScheme:
         scheme: https
@@ -68,7 +77,7 @@ http:
     seylo-svc1-probe-mark:
       headers:
         customResponseHeaders:
-          X-Seylo-Route: 7b4ac1e10de8434a
+          X-Seylo-Route: 25983dc5d3496754
     seylo-svc1-probe-path:
       replacePath:
         path: /

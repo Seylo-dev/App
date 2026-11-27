@@ -67,6 +67,25 @@ message NodeSettings {
   // The node's DNS cache for containers (dns_cache.proto). Unset (older
   // panels) means off. Added in 0.2.17.
   DnsCache dns_cache = 13;
+  // The visitor's country as a request header for the apps on this node.
+  // Unset (older panels) means off. Added in 0.2.24.
+  CountryHeader country_header = 14;
+}
+
+// CountryHeader is the visitor country request header (X-Seylo-Country,
+// ISO 3166-1 alpha-2, XX when unknown) Traefik adds to every request it
+// sends to an app, from the client's address (the CF-Connecting-IP a
+// request from Cloudflare's addresses carries). The agent keeps a country
+// database (DB-IP's IP to Country Lite, monthly) and a small lookup server
+// that Traefik asks (geoip package); Routing.no_country_header leaves a
+// service out. Off: the agent stops the server and only deletes the header
+// clients send. Added in 0.2.24.
+message CountryHeader {
+  bool enabled = 1;
+  // A MaxMind account (GeoLite2 Country), used only when DB-IP's file
+  // cannot be downloaded. Both or neither.
+  string maxmind_account_id = 2;
+  string maxmind_license_key = 3;
 }
 
 // DnsCache is the per-node DNS cache: a forwarding cache in the agent on

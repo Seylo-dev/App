@@ -1,0 +1,104 @@
+# Written by the Seylo agent for service svc11. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc11-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`shop.example.com`)
+      middlewares:
+        - seylo-svc11-r-r1-allow
+        - seylo-svc11-country
+        - seylo-svc11-unreachable
+      service: seylo-svc11
+      tls:
+        certResolver: le
+    seylo-svc11-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`shop.example.com`)
+      middlewares:
+        - seylo-svc11-https
+      service: seylo-svc11
+    seylo-svc11-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`shop.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc11-edge
+      tls:
+        certResolver: le
+    seylo-svc11-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`shop.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc11-edge
+    seylo-svc11-r-r2:
+      entryPoints:
+        - web
+      rule: Host(`api.example.com`)
+      middlewares:
+        - seylo-svc11-country
+        - seylo-svc11-unreachable
+      service: seylo-svc11-p8080
+    seylo-svc11-r-r2-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`api.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc11-edge
+      tls: {}
+    seylo-svc11-r-r2-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`api.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc11-edge
+  middlewares:
+    seylo-svc11-country:
+      forwardAuth:
+        address: http://172.30.0.1:5758/
+        trustForwardHeader: true
+        authRequestHeaders:
+          - Cf-Connecting-Ip
+        authResponseHeadersRegex: (?i)^x[^a-z0-9]seylo[^a-z0-9]country$
+        maxResponseBodySize: 1024
+    seylo-svc11-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc11-r-r1-allow:
+      ipAllowList:
+        sourceRange:
+          - 0.0.0.0/0
+    seylo-svc11-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc11-edge
+        query: /_seylo/page/status/svc11
+  services:
+    seylo-svc11:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc11-1:3000
+        serversTransport: seylo-svc11-local
+    seylo-svc11-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc11-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc11-1:3000
+        serversTransport: seylo-svc11-local
+    seylo-svc11-p8080:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc11-1:8080
+        serversTransport: seylo-svc11-local
+  serversTransports:
+    seylo-svc11-local:
+      forwardingTimeouts:
+        dialTimeout: 2s

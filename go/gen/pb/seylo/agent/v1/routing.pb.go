@@ -85,9 +85,15 @@ type Routing struct {
 	Maintenance *Maintenance `protobuf:"bytes,2,opt,name=maintenance,proto3" json:"maintenance,omitempty"`
 	// Page shown while no instance is healthy (stopped, crashed, deploying
 	// for the first time).
-	StatusPage    *StatusPage `protobuf:"bytes,3,opt,name=status_page,json=statusPage,proto3" json:"status_page,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	StatusPage *StatusPage `protobuf:"bytes,3,opt,name=status_page,json=statusPage,proto3" json:"status_page,omitempty"`
+	// Leave the visitor's country (X-Seylo-Country) out of this service's
+	// requests while NodeSettings.country_header is on. Either way every
+	// route deletes what a client sends under that name. false (older
+	// panels) gets the header whenever the node setting is on. Added in
+	// 0.2.24.
+	NoCountryHeader bool `protobuf:"varint,4,opt,name=no_country_header,json=noCountryHeader,proto3" json:"no_country_header,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Routing) Reset() {
@@ -139,6 +145,13 @@ func (x *Routing) GetStatusPage() *StatusPage {
 		return x.StatusPage
 	}
 	return nil
+}
+
+func (x *Routing) GetNoCountryHeader() bool {
+	if x != nil {
+		return x.NoCountryHeader
+	}
+	return false
 }
 
 // Route maps hosts (and optionally a path) to a container port.
@@ -708,12 +721,13 @@ var File_seylo_agent_v1_routing_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_routing_proto_rawDesc = "" +
 	"\n" +
-	"\x1cseylo/agent/v1/routing.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\"\xb4\x01\n" +
+	"\x1cseylo/agent/v1/routing.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\"\xe0\x01\n" +
 	"\aRouting\x12-\n" +
 	"\x06routes\x18\x01 \x03(\v2\x15.seylo.agent.v1.RouteR\x06routes\x12=\n" +
 	"\vmaintenance\x18\x02 \x01(\v2\x1b.seylo.agent.v1.MaintenanceR\vmaintenance\x12;\n" +
 	"\vstatus_page\x18\x03 \x01(\v2\x1a.seylo.agent.v1.StatusPageR\n" +
-	"statusPage\"\xe0\x04\n" +
+	"statusPage\x12*\n" +
+	"\x11no_country_header\x18\x04 \x01(\bR\x0fnoCountryHeader\"\xe0\x04\n" +
 	"\x05Route\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05hosts\x18\x02 \x03(\tR\x05hosts\x12\x1f\n" +

@@ -179,6 +179,52 @@ func TestBuildGolden(t *testing.T) {
 			Upstreams: ups("http://seylo-svc8-2:3000"),
 			Edge:      testEdge,
 		}},
+		// The visitor country header on: forwardAuth on every router to
+		// the app (after the allowlist and basic auth), none on the
+		// redirect, the pages or the origin routers.
+		{"country-header", BuildInput{
+			Service: func() *agentv1.ServiceSpec {
+				r := route("r1", "shop.example.com")
+				r.AllowedSourceCidrs = []string{"0.0.0.0/0"}
+				return app("svc11", r, &agentv1.Route{Id: "r2", Hosts: []string{"api.example.com"}, TargetPort: 8080, Https: agentv1.HttpsMode_HTTPS_MODE_OFF})
+			}(),
+			Upstreams: ups("http://seylo-svc11-1:3000"),
+			Edge:      testEdge,
+			Country:   CountryLookup{Address: "http://172.30.0.1:5758/", MaxResponseBodySize: true},
+		}},
+		// With the LB entry point the node looks the country up again from
+		// the X-Real-Ip the forwarding node set.
+		{"country-header-lb", BuildInput{
+			Service: func() *agentv1.ServiceSpec {
+				s := app("svc12", route("r1", "shop.example.com"))
+				s.LoadBalancer = &agentv1.LoadBalancer{RemoteUpstreams: []*agentv1.RemoteUpstream{{NodeId: "n2", Url: "https://198.51.100.2:5757"}}}
+				return s
+			}(),
+			Upstreams:    ups("http://seylo-svc12-1:3000"),
+			Settings:     &agentv1.NodeSettings{LbTls: fakeLBTLS},
+			Edge:         testEdge,
+			LBEntryPoint: true,
+			Country:      CountryLookup{Address: "http://172.30.0.1:5758/", MaxResponseBodySize: true},
+		}},
+		// A Traefik older than 3.6.9 (the Wings fork's, maybe) gets no
+		// maxResponseBodySize.
+		{"country-header-old-traefik", BuildInput{
+			Service:   app("svc13", route("r1", "shop.example.com")),
+			Upstreams: ups("http://seylo-svc13-1:3000"),
+			Edge:      testEdge,
+			Country:   CountryLookup{Address: "http://172.30.0.1:5758/"},
+		}},
+		// The service turned the header off: only the strip.
+		{"country-header-service-off", BuildInput{
+			Service: func() *agentv1.ServiceSpec {
+				s := app("svc14", route("r1", "shop.example.com"))
+				s.Routing.NoCountryHeader = true
+				return s
+			}(),
+			Upstreams: ups("http://seylo-svc14-1:3000"),
+			Edge:      testEdge,
+			Country:   CountryLookup{Address: "http://172.30.0.1:5758/", MaxResponseBodySize: true},
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

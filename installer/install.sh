@@ -1200,8 +1200,10 @@ panel_ip() {
 }
 
 # open_firewall adds the rules a node needs when ufw or firewalld is
-# active: 80 and 443 for domains, the agent's edge listener (5756) for
-# Traefik on the seylo-edge bridge, DNS to the node's DNS cache (its
+# active: 80 and 443 for domains, the agent's edge listener (5756) and the
+# visitor country lookup (5758, since 0.2.24; the agent adds it itself on
+# nodes installed before) for Traefik on the seylo-edge bridge, DNS to the
+# node's DNS cache (its
 # address port 53, UDP and TCP, from the private ranges Docker's bridges
 # use only, so the provider's network cannot reach it; added whatever the
 # cache's setting, which lives in the panel, and harmless while it is off:
@@ -1256,6 +1258,7 @@ open_firewall() {
 		run ufw allow 80/tcp comment "$SLUG http"
 		run ufw allow 443/tcp comment "$SLUG https"
 		run ufw allow in on "$SLUG-edge" to any port 5756 proto tcp comment "$SLUG edge"
+		run ufw allow in on "$SLUG-edge" to any port 5758 proto tcp comment "$SLUG geoip"
 		dns=$(dns_cache_address)
 		for src in $DNS_CACHE_SOURCES; do
 			run ufw allow from "$src" to "$dns" port 53 comment "$SLUG dns"
@@ -1694,10 +1697,14 @@ uninstall() {
 	step "Removing the agent"
 	run systemctl disable --now "$SLUG.service" || true
 	run systemctl stop "$SLUG-update-guard.timer" || true
+	# The visitor country lookup (X-Seylo-Country): Traefik's route files ask
+	# it on every request, so like the services it keeps running until a
+	# reboot (disabled, so it does not come back); --purge stops it.
+	run systemctl disable "$SLUG-geoip.socket" || true
 	if can_write; then
-		rm -f "$UNIT_DIR/$SLUG.service" "$UNIT_DIR/$SLUG.slice"
+		rm -f "$UNIT_DIR/$SLUG.service" "$UNIT_DIR/$SLUG.slice" "$UNIT_DIR/$SLUG-geoip.socket" "$UNIT_DIR/$SLUG-geoip.service"
 	else
-		trace "rm $UNIT_DIR/$SLUG.service $UNIT_DIR/$SLUG.slice"
+		trace "rm $UNIT_DIR/$SLUG.service $UNIT_DIR/$SLUG.slice $UNIT_DIR/$SLUG-geoip.socket $UNIT_DIR/$SLUG-geoip.service"
 	fi
 	run systemctl daemon-reload
 	if [ -n "$PURGE" ]; then
@@ -1715,6 +1722,7 @@ uninstall() {
 			ip link del "$SLUG-dns" 2>/dev/null || true
 			# The slice stays loaded until stopped, even with its unit file gone.
 			systemctl stop "$SLUG.slice" 2>/dev/null || true
+			systemctl stop "$SLUG-geoip.socket" "$SLUG-geoip.service" 2>/dev/null || true
 		else
 			trace "docker rm/network rm/volume rm everything labeled $SLUG.managed=true"
 		fi

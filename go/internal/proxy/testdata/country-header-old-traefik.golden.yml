@@ -1,0 +1,72 @@
+# Written by the Seylo agent for service svc13. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc13-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`shop.example.com`)
+      middlewares:
+        - seylo-svc13-country
+        - seylo-svc13-unreachable
+      service: seylo-svc13
+      tls:
+        certResolver: le
+    seylo-svc13-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`shop.example.com`)
+      middlewares:
+        - seylo-svc13-https
+      service: seylo-svc13
+    seylo-svc13-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`shop.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc13-edge
+      tls:
+        certResolver: le
+    seylo-svc13-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`shop.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc13-edge
+  middlewares:
+    seylo-svc13-country:
+      forwardAuth:
+        address: http://172.30.0.1:5758/
+        trustForwardHeader: true
+        authRequestHeaders:
+          - Cf-Connecting-Ip
+        authResponseHeadersRegex: (?i)^x[^a-z0-9]seylo[^a-z0-9]country$
+    seylo-svc13-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc13-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc13-edge
+        query: /_seylo/page/status/svc13
+  services:
+    seylo-svc13:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc13-1:3000
+        serversTransport: seylo-svc13-local
+    seylo-svc13-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc13-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc13-1:3000
+        serversTransport: seylo-svc13-local
+  serversTransports:
+    seylo-svc13-local:
+      forwardingTimeouts:
+        dialTimeout: 2s

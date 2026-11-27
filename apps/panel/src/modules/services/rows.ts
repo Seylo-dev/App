@@ -244,6 +244,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     deploy: spec.deploy,
     cron: spec.cron && { ...spec.cron, schedule: normalizeCronSchedule(spec.cron.schedule) },
     stickySessions: spec.stickySessions,
+    countryHeader: spec.countryHeader,
     entryNodeId: entryNodeOf(spec.entryNodeId, summary.placements),
     notes: row.notes,
     members: all.slice(1).map((m) => ({

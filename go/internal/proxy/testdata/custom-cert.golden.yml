@@ -5,13 +5,25 @@ http:
       entryPoints:
         - websecure
       rule: Host(`corp.example.com`)
+      middlewares:
+        - seylo-svc4-country-strip
       service: seylo-svc4
       tls: {}
     seylo-svc4-r-r1-http:
       entryPoints:
         - web
       rule: Host(`corp.example.com`)
+      middlewares:
+        - seylo-svc4-country-strip
       service: seylo-svc4
+  middlewares:
+    seylo-svc4-country-strip:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Country: ""
+          X-Seylo_Country: ""
+          X_Seylo-Country: ""
+          X_Seylo_Country: ""
   services:
     seylo-svc4:
       loadBalancer:

@@ -17531,6 +17531,7 @@
                         "deploy",
                         "cron",
                         "stickySessions",
+                        "countryHeader",
                         "entryNodeId",
                         "notes",
                         "members",
@@ -18688,6 +18689,9 @@
                           ]
                         },
                         "stickySessions": {
+                          "type": "boolean"
+                        },
+                        "countryHeader": {
                           "type": "boolean"
                         },
                         "entryNodeId": {
@@ -20275,6 +20279,220 @@
         },
         "x-op-kind": "destructive",
         "x-permission": "service:services.update",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/countryHeader.get": {
+      "get": {
+        "operationId": "countryHeader.get",
+        "summary": "Get the visitor country header setting",
+        "description": "Traefik adds X-Seylo-Country (the visitor's country, ISO 3166-1 alpha-2, XX when unknown) to every request it sends to an app, and deletes any X-Seylo-Country (or an alias like X_Seylo_Country) the client sent, so apps can trust it. The country comes from the client's address; for a request from Cloudflare's addresses, the CF-Connecting-IP Cloudflare set. Each node keeps DB-IP's IP to Country Lite database (monthly, no account) in memory; MaxMind's GeoLite2 Country is the fallback when DB-IP cannot be downloaded and a MaxMind account is set. Nodes before 0.2.24 add no header. Returns whether it is on, whether a MaxMind account is set (never the key) and which nodes support it.",
+        "tags": [
+          "countryHeader"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "maxmindAccountId",
+                    "maxmindLicenseKeySet",
+                    "nodes"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "maxmindAccountId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[0-9]{1,12}$",
+                          "description": "A MaxMind account ID (digits).",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxmindLicenseKeySet": {
+                      "type": "boolean"
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "supported"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "supported": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "settings.view",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/countryHeader.update": {
+      "post": {
+        "operationId": "countryHeader.update",
+        "summary": "Turn the visitor country header on or off, or set a MaxMind account",
+        "description": "Traefik adds X-Seylo-Country (the visitor's country, ISO 3166-1 alpha-2, XX when unknown) to every request it sends to an app, and deletes any X-Seylo-Country (or an alias like X_Seylo_Country) the client sent, so apps can trust it. The country comes from the client's address; for a request from Cloudflare's addresses, the CF-Connecting-IP Cloudflare set. Each node keeps DB-IP's IP to Country Lite database (monthly, no account) in memory; MaxMind's GeoLite2 Country is the fallback when DB-IP cannot be downloaded and a MaxMind account is set. Nodes before 0.2.24 add no header. Omitted fields keep their value; null removes the MaxMind account ID or license key. Nodes apply it within seconds. Off: nodes stop the lookup and only delete what clients send.",
+        "tags": [
+          "countryHeader"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "maxmindAccountId": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[0-9]{1,12}$",
+                        "description": "A MaxMind account ID (digits).",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxmindLicenseKey": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[A-Za-z0-9_]{6,128}$",
+                        "description": "A MaxMind license key.",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "maxmindAccountId",
+                    "maxmindLicenseKeySet",
+                    "nodes"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "maxmindAccountId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[0-9]{1,12}$",
+                          "description": "A MaxMind account ID (digits).",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxmindLicenseKeySet": {
+                      "type": "boolean"
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "supported"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "supported": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
         "x-mcp": true
       }
     },
@@ -30416,6 +30634,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -31573,6 +31792,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -44014,6 +44236,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -45171,6 +45394,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -47252,6 +47478,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -48409,6 +48636,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -68602,6 +68832,7 @@
                         "deploy",
                         "cron",
                         "stickySessions",
+                        "countryHeader",
                         "entryNodeId",
                         "notes",
                         "members",
@@ -69759,6 +69990,9 @@
                           ]
                         },
                         "stickySessions": {
+                          "type": "boolean"
+                        },
+                        "countryHeader": {
                           "type": "boolean"
                         },
                         "entryNodeId": {
@@ -71147,6 +71381,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -72304,6 +72539,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -72895,6 +73133,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -74052,6 +74291,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -76187,6 +76429,75 @@
         "x-mcp": true
       }
     },
+    "/api/v1/services.setCountryHeader": {
+      "post": {
+        "operationId": "services.setCountryHeader",
+        "summary": "Turn the visitor country header on or off for a service",
+        "description": "With enabled false the service's requests no longer carry X-Seylo-Country (the visitor's country) while the panel's country header setting (countryHeader.get) is on; a client's own X-Seylo-Country is deleted either way. Applies within seconds, without a deploy.",
+        "tags": [
+          "services"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "enabled"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "countryHeader"
+                  ],
+                  "properties": {
+                    "countryHeader": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:services.update",
+        "x-mcp": true
+      }
+    },
     "/api/v1/services.setCrashPolicy": {
       "post": {
         "operationId": "services.setCrashPolicy",
@@ -77332,6 +77643,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -78489,6 +78801,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -79526,6 +79841,7 @@
                     "deploy",
                     "cron",
                     "stickySessions",
+                    "countryHeader",
                     "entryNodeId",
                     "notes",
                     "members",
@@ -80683,6 +80999,9 @@
                       ]
                     },
                     "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "countryHeader": {
                       "type": "boolean"
                     },
                     "entryNodeId": {
@@ -82422,6 +82741,7 @@
                         "deploy",
                         "cron",
                         "stickySessions",
+                        "countryHeader",
                         "entryNodeId",
                         "notes",
                         "members",
@@ -83579,6 +83899,9 @@
                           ]
                         },
                         "stickySessions": {
+                          "type": "boolean"
+                        },
+                        "countryHeader": {
                           "type": "boolean"
                         },
                         "entryNodeId": {
