@@ -9,6 +9,7 @@
 import { Resolver } from "node:dns/promises";
 import { isIPv4, isIPv6 } from "node:net";
 import { isCloudflareAddress } from "../../http/cloudflare";
+import { isWildcardHost, probeHost, wildcardBase } from "./wildcard";
 import { findZone, registrableDomain, registrableMissingMessage } from "./zone";
 
 /** An address in Cloudflare's published proxy ranges (one list, http/cloudflare.ts): a record there means the orange cloud is on. */
@@ -108,6 +109,8 @@ export interface DnsResult {
   zoneMissing: boolean;
   cloudflareManaged: boolean;
   cloudflareDnsUrl: string | null;
+  /** A wildcard host's: the random name under its base that was looked up in its place (wildcard.ts probeHost). */
+  probe?: string;
 }
 
 type DnsNode = { ipv4: string | null; ipv6: string | null; publicAddress?: string | null };
@@ -133,9 +136,15 @@ export function pointsTo(nodes: readonly DnsNode[]): string[] {
 
 /**
  * Looks a host up and classifies it against the nodes it should point at.
- * A failed lookup (resolver timeout) is "unknown", never an exception.
+ * A failed lookup (resolver timeout) is "unknown", never an exception. A
+ * wildcard host (*.example.com) is looked up through a random name under
+ * its base (probe), which only the * record answers; its records are named
+ * "*" in the zone.
  */
 export async function checkHost(host: string, nodes: readonly DnsNode[], dns: DnsLookups): Promise<DnsResult> {
+  const probe = isWildcardHost(host) ? probeHost(host) : null;
+  const asked = probe ?? host;
+  const probed = probe ? { probe } : {};
   const nodeIps = new Set(
     nodes
       .flatMap((n) => [n.ipv4, n.ipv6, addressesOf(n).ipv4, addressesOf(n).ipv6])
@@ -144,9 +153,9 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
   );
   try {
     const [v4, v6, cname, zoneInfo] = await Promise.all([
-      dns.resolve4(host),
-      dns.resolve6(host),
-      dns.resolveCname(host),
+      dns.resolve4(asked),
+      dns.resolve6(asked),
+      dns.resolveCname(asked),
       findZone(host, dns),
     ]);
     const zone = zoneInfo.zone;
@@ -167,7 +176,12 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
     const zoneMissing = zoneInfo.registrableMissing && found.length === 0;
     return {
       status,
-      message: zoneMissing && zoneInfo.registrable ? registrableMissingMessage(zoneInfo.registrable) : dnsMessage(status, host, expected),
+      message:
+        zoneMissing && zoneInfo.registrable
+          ? registrableMissingMessage(zoneInfo.registrable)
+          : probe
+            ? wildcardMessage(status, host, probe, expected)
+            : dnsMessage(status, host, expected),
       expected,
       found,
       zone,
@@ -175,6 +189,7 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
       zoneMissing,
       cloudflareManaged: zoneInfo.cloudflare,
       cloudflareDnsUrl: zoneInfo.cloudflare && zone ? cloudflareDnsUrl(zone) : null,
+      ...probed,
     };
   } catch {
     return {
@@ -187,7 +202,25 @@ export async function checkHost(host: string, nodes: readonly DnsNode[], dns: Dn
       zoneMissing: false,
       cloudflareManaged: false,
       cloudflareDnsUrl: null,
+      ...probed,
     };
+  }
+}
+
+function wildcardMessage(status: DnsStatus | "unknown", host: string, probe: string, expected: DnsRecord[]): string {
+  const target = expected.map((r) => r.value).join(" or ") || "the node";
+  const base = wildcardBase(host);
+  switch (status) {
+    case "ok":
+      return `${host} points at the node: every name under ${base} without a record of its own reaches it (checked with ${probe}).`;
+    case "missing":
+      return `No wildcard record for ${base} yet: ${probe} does not resolve. Create an A record named * pointing at ${target}.`;
+    case "proxied":
+      return `${host} is proxied by Cloudflare, so the panel cannot see where it points. In Cloudflare, point the * record at ${target}. Visitors get Cloudflare's certificate; the node answers Cloudflare with its default certificate, which SSL/TLS Full accepts and Full (strict) refuses unless you upload a wildcard origin certificate.`;
+    case "wrongTarget":
+      return `${host} points somewhere else: ${probe} resolves to another address. Change the * record to ${target}.`;
+    case "unknown":
+      return `The node's public address is not known yet, so ${host} cannot be checked.`;
   }
 }
 

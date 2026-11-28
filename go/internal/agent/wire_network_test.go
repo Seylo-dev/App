@@ -367,6 +367,10 @@ func TestWireNetworkOriginProof(t *testing.T) {
 	if slices.Contains(reg.Capabilities(), edge.OriginCapability) {
 		t.Fatal("advertised without a node key")
 	}
+	// Wildcard hosts are route rendering only: advertised with or without the key.
+	if !slices.Contains(reg.Capabilities(), proxy.WildcardCapability) {
+		t.Fatalf("%s not advertised: %v", proxy.WildcardCapability, reg.Capabilities())
+	}
 
 	pub, key, _ := ed25519.GenerateKey(nil)
 	d, _ = newTestDeps(t)

@@ -13,7 +13,9 @@
 // counts when the domain itself is the problem (on a compose stack or a
 // cron service, or a node that cannot write the routes), not while its
 // service has not deployed yet: the deploy is what to fix, and its record
-// may well be right. Every row that counts says why (domain-row.tsx).
+// may well be right. A wildcard domain whose * record points straight at
+// the node counts while it has no certificate (https acme): browsers warn.
+// Every row that counts says why (domain-row.tsx).
 
 import type { domains, OpOutput } from "@seylo/ops";
 
@@ -23,7 +25,14 @@ type Domain = OpOutput<typeof domains.list>["domains"][number];
 export const originUnknownLongMs = 30 * 60_000;
 
 /** Why a domain counts (the first that applies), for its row and tests. */
-export type SetupReason = "noRoute" | "dnsMissing" | "dnsWrongTarget" | "originElsewhere" | "certificateFailed" | "originUnknown";
+export type SetupReason =
+  | "noRoute"
+  | "dnsMissing"
+  | "dnsWrongTarget"
+  | "originElsewhere"
+  | "certificateFailed"
+  | "originUnknown"
+  | "wildcardNoCertificate";
 
 /** A custom domain whose origin the panel checks: not automatic, not a forward, with a route, behind the proxy. */
 function checkedThroughCloudflare(d: Domain): boolean {
@@ -54,6 +63,8 @@ export function setupReason(d: Domain, now = Date.now()): SetupReason | null {
   if (d.origin === "elsewhere") return "originElsewhere";
   if (d.certificate.status === "failed") return "certificateFailed";
   if (originUnknownLong(d, now)) return "originUnknown";
+  // A wildcard whose record goes straight to the node: HTTPS warns in browsers (no Let's Encrypt for wildcards).
+  if (d.certificate.wildcard === "noCertificate" && d.dnsStatus === "ok") return "wildcardNoCertificate";
   return null;
 }
 

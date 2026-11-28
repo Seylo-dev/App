@@ -5,6 +5,7 @@
 import { createPrivateKey, createPublicKey, X509Certificate } from "node:crypto";
 import { isIP } from "node:net";
 import { OpError } from "@seylo/ops";
+import { certificateNames } from "./ownership";
 
 /** Parses and normalizes an IP or CIDR ("10.0.0.1" -> "10.0.0.1/32"); BAD_REQUEST when it is not one. */
 export function normalizeCidr(value: string, field = "allowedCidrs"): string {
@@ -70,7 +71,9 @@ export function checkCertificate(host: string, certPem: string, keyPem: string, 
   if (!certPublic || !keyPublic || !certPublic.equals(keyPublic)) {
     throw new OpError("BAD_REQUEST", "The private key does not belong to this certificate.", { field: "privateKey" });
   }
-  if (!cert.checkHost(host)) {
+  // A wildcard host is covered only by a certificate that names that wildcard (a name under it is not enough).
+  const covers = host.startsWith("*.") ? certificateNames(certPem).includes(host.toLowerCase()) : !!cert.checkHost(host);
+  if (!covers) {
     throw new OpError("BAD_REQUEST", `The certificate does not cover ${host}.`, { field: "certPem" });
   }
   const expiresAt = new Date(cert.validTo);

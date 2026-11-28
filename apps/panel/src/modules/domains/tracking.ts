@@ -12,7 +12,9 @@
 // date: it is cleared and the origin is checked again a few seconds later.
 // Before 0.2.16 it was only cleared, and a domain with its certificate was
 // never checked again, so it kept no origin for good (and behind
-// Cloudflare's proxy the Domains tab counted it as needing setup).
+// Cloudflare's proxy the Domains tab counted it as needing setup). A
+// wildcard domain with https acme has no certificate to follow: a report
+// that its route serves sets liveAt, nothing else.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { domains as domainOps, exposures as exposureOps } from "@seylo/ops";
@@ -26,6 +28,7 @@ import { acmeHeld } from "./acme-hold";
 import { invalidateService } from "./lookup";
 import { checkWaitingDomains } from "./no-route";
 import { enqueueOriginCheck } from "./origin";
+import { isWildcardHost } from "./wildcard";
 
 /** Applies one service's route reports; returns true when a row changed. */
 export function applyRouteStatus(
@@ -46,6 +49,15 @@ export function applyRouteStatus(
     if (!row) continue;
     const set: Partial<typeof domains.$inferInsert> = {};
     const held = acmeHeld(row);
+    if (row.https === "acme" && isWildcardHost(row.host)) {
+      // A wildcard asks Let's Encrypt nothing (wildcard.ts): its route serving is all a report says. Not about
+      // DNS either: the agent checks no wildcard record, the panel's own check does.
+      if (route.state === RouteState.ACTIVE && !row.liveAt) {
+        deps.db.update(domains).set({ liveAt: now }).where(eq(domains.id, row.id)).run();
+        changed = true;
+      }
+      continue;
+    }
     switch (route.state) {
       case RouteState.ACTIVE:
         // A held route asks the CA nothing (acme-hold.ts): that it serves says nothing about a

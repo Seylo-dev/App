@@ -313,3 +313,54 @@ test("every row the Domains tab counts says why on the row, with a way to check 
     if (!d.noRoute) expect(shown).toMatch(/Check again|Check now|Regenerate certificate/);
   }
 });
+
+// Wildcard domains (0.2.25): no link (the URL keeps the *), a Wildcard chip, never "Make primary", and no
+// Let's Encrypt certificate: behind Cloudflare's proxy visitors get Cloudflare's certificate (fine, green),
+// straight to the node HTTPS warns, which the row says with what to do, and the Domains tab counts it.
+const wildcard = (over: Partial<Domain> = {}): Domain =>
+  domain({
+    host: "*.starsell.net",
+    url: "https://*.starsell.net",
+    primary: false,
+    wildcard: true,
+    origin: "node",
+    originCheckedAt: new Date(Date.now() - 60_000).toISOString(),
+    liveAt: new Date(Date.now() - day).toISOString(),
+    certificate: { status: "none", expiresAt: null, issuer: null, error: null, wildcard: "cloudflareEdge" },
+    ...over,
+  });
+
+test("a wildcard behind Cloudflare's proxy: Wildcard chip, Cloudflare's certificate, no link, nothing to fix", async () => {
+  const d = wildcard();
+  const html = await render(d);
+  const shown = text(html);
+  expect(html).toContain('data-testid="wildcard-chip"');
+  expect(shown).toContain("Wildcard");
+  expect(shown).toContain("Cloudflare's certificate");
+  expect(html).toContain('data-state="cloudflareEdge"');
+  expect(html).not.toContain('href="https://*.starsell.net"');
+  expect(shown).not.toContain("Generating SSL certificate");
+  expect(shown).not.toContain("No certificate");
+  expect(html).toContain("bg-chip-green-bg");
+  expect(domainNeedsSetup(d)).toBe(false);
+});
+
+test("a wildcard pointing straight at the node: no certificate, the note says what to do, and it counts", async () => {
+  const d = wildcard({
+    dnsStatus: "ok",
+    certificate: { status: "none", expiresAt: null, issuer: null, error: null, wildcard: "noCertificate" },
+  });
+  const html = await render(d);
+  const shown = text(html);
+  expect(html).toContain('data-state="noCertificate"');
+  expect(html).toContain('data-testid="wildcard-cert-note"');
+  expect(shown).toContain("Let's Encrypt cannot issue *.starsell.net over the HTTP check");
+  expect(shown).toContain("Turn on Cloudflare's proxy for the * record");
+  expect(domainNeedsSetup(d)).toBe(true);
+});
+
+test("a wildcard on a node whose agent is too old says to update that node", async () => {
+  const shown = text(await render(wildcard({ noRoute: { reason: "agentTooOld", nodeId: "nod0000000000001", nodeName: "il-ra" } })));
+  expect(shown).toContain("Update il-ra");
+  expect(shown).toContain("il-ra runs an agent that does not route wildcard domains yet");
+});

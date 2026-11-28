@@ -103,6 +103,64 @@ func checkHost(host string) error {
 	return nil
 }
 
+// WildcardCapability is advertised by agents whose route files take a
+// wildcard host ("*.example.com", Route.hosts): any one label under the
+// base, below every exact host (wildcardPriority), with HTTPS mode ACME
+// served on Traefik's default certificate (HTTP-01 cannot issue a wildcard
+// certificate). An older agent refuses the whole route file of a service
+// with such a host, so the panel sends wildcard routes only to agents that
+// advertised it.
+const WildcardCapability = "routing.wildcard-hosts.v1"
+
+// wildcardBase returns "example.com" for the route host "*.example.com"
+// and ok; ok is false for every other host.
+func wildcardBase(host string) (string, bool) {
+	return strings.CutPrefix(host, "*.")
+}
+
+// checkRouteHost accepts what a route's hosts may be: a host name
+// (checkHost), or a wildcard "*.<base>" with exactly one leading "*"
+// label and a base of at least two labels that passes checkHost. Only
+// route hosts take wildcards: tool hosts, database certificate hosts and
+// LB names stay plain host names.
+func checkRouteHost(host string) error {
+	base, wild := wildcardBase(host)
+	if !wild {
+		return checkHost(host)
+	}
+	if len(host) > 253 || !strings.Contains(base, ".") || checkHost(base) != nil {
+		return fmt.Errorf("%w: wildcard host %q", ErrInvalidRoute, host)
+	}
+	return nil
+}
+
+// wildcardHostRegexp is the HostRegexp pattern of "*.<base>": exactly one
+// DNS label under base. Traefik lower-cases the request's host before it
+// matches (requestdecorator, types.CanonicalDomain) and keeps a trailing
+// dot, which Host() also accepts, so the pattern takes one too.
+func wildcardHostRegexp(base string) string {
+	return `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.` + regexp.QuoteMeta(base) + `\.?$`
+}
+
+// wildcardPriority is the priority of every router of a wildcard route
+// ("*.<base>" with the path prefix path). Traefik ranks routers by
+// priority, by default the rule's length, so a HostRegexp rule could
+// outrank an exact Host rule for a name under the base. The band sits
+// below every exact router that can match such a name: its rule is at
+// least Host(`<label>.<base>`), len(base)+10 characters. And above the
+// Wings fork's catch-all on web (HostRegexp(`^.+$`), priority 1, which
+// redirects plain HTTP to HTTPS), so a wildcard with HTTPS off or held
+// serves plain HTTP. Within the band a longer path prefix comes first;
+// paths longer than the band (len(base)+8 characters) tie at its top.
+// Two wildcards with different bases never match the same name (one
+// label only), so their bands need no order between them.
+func wildcardPriority(base, path string) int {
+	if path == "" {
+		path = "/"
+	}
+	return min(max(1+len(path), 2), len(base)+9)
+}
+
 func checkPath(path string) error {
 	if !pathPattern.MatchString(path) || strings.Contains(path, "//") {
 		return fmt.Errorf("%w: path %q", ErrInvalidRoute, path)

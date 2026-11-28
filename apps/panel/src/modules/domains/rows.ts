@@ -8,6 +8,7 @@ import type { PanelDb } from "../../db/client";
 import { domains } from "../../db/schema";
 import { acmeHeld } from "./acme-hold";
 import { lastOriginReason, originApplies } from "./origin";
+import { isWildcardHost, wildcardCertificate } from "./wildcard";
 
 export type DomainRow = typeof domains.$inferSelect;
 export type Domain = Static<typeof domainOps.Domain>;
@@ -37,7 +38,16 @@ function originReasonOf(domainId: string): Pick<Domain, "originReason"> {
 
 export function toDomain(row: DomainRow): Domain {
   const m = row.middlewares ?? {};
-  const issuer = row.certIssuer ? issuerName(row.certIssuer) : row.https === "acme" && row.certStatus === "valid" ? "Let's Encrypt" : null;
+  // A wildcard with https acme has no certificate of its own: how visitors get HTTPS instead (wildcard.ts).
+  const wildcardTls = wildcardCertificate(row);
+  const certStatus = row.https === "off" || wildcardTls ? "none" : row.certStatus;
+  const issuer = wildcardTls
+    ? null
+    : row.certIssuer
+      ? issuerName(row.certIssuer)
+      : row.https === "acme" && row.certStatus === "valid"
+        ? "Let's Encrypt"
+        : null;
   return {
     id: row.id,
     serviceId: row.serviceId,
@@ -48,6 +58,7 @@ export function toDomain(row: DomainRow): Domain {
     https: row.https,
     redirectToHttps: row.redirectToHttps,
     auto: row.auto,
+    ...(isWildcardHost(row.host) ? { wildcard: true } : {}),
     primary: row.isPrimary,
     forward: row.forward ?? null,
     middlewares: {
@@ -68,11 +79,12 @@ export function toDomain(row: DomainRow): Domain {
         }
       : {}),
     certificate: {
-      status: row.https === "off" ? "none" : row.certStatus,
-      expiresAt: row.certExpiresAt?.toISOString() ?? null,
+      status: certStatus,
+      expiresAt: wildcardTls ? null : (row.certExpiresAt?.toISOString() ?? null),
       issuer,
-      error: row.https !== "off" && row.certStatus === "failed" ? (row.certError ?? null) : null,
+      error: certStatus === "failed" ? (row.certError ?? null) : null,
       ...(acmeHeld(row) ? { waitingForDns: true } : {}),
+      ...(wildcardTls ? { wildcard: wildcardTls } : {}),
     },
     liveAt: row.liveAt?.toISOString() ?? null,
     url: domainUrl(row),

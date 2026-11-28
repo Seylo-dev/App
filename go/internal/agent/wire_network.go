@@ -277,7 +277,7 @@ func handoffLocation(h *edge.Handoffs) portgate.Handoff {
 
 // wireNetwork: RetryCertificate (cert_retry.go) is the area's only
 // AgentService method (routes and ports arrive in ServiceSpec), and it
-// advertises lb.tls.peers.v1 and, with the node key, routing.origin-proof.v1
+// advertises lb.tls.peers.v1, routing.wildcard-hosts.v1 and, with the node key, routing.origin-proof.v1
 // (the edge answers the panel's origin check); the edge listener, Traefik (own or the Wings
 // fork's) and the desired-state follower run as components, the edge
 // ticket key comes from each handshake, and Wings is reported in d.Facts.
@@ -290,6 +290,10 @@ func wireNetwork(reg *Registry, d *Deps) error {
 	// The route files and the LB TLS file of this build answer the node's
 	// own LB name and take LoadBalancerTls.peers (proxy/lbtls.go).
 	reg.Advertise(proxy.LBPeersCapability)
+	// Route files take wildcard hosts (*.example.com) below every exact
+	// host, served on Traefik's default certificate with ACME (proxy
+	// wildcardPriority); the panel sends them to no other agent.
+	reg.Advertise(proxy.WildcardCapability)
 	// Every route file sends proxy.OriginPath to the edge, which signs the
 	// panel's challenge with the node key (edge/origin.go).
 	if d.Identity != nil {

@@ -10,6 +10,8 @@ export default {
   addedLive: "Domain added. It is live.",
   addedWaiting: "Domain added. Create the DNS record shown on its row.",
   addedNotDeployed: "Domain added. It goes live once {name} deploys.",
+  addedWildcard: "Wildcard domain added. Every name under {base} without a domain of its own reaches {name}.",
+  addedAgentTooOld: "Domain added. It goes live once {node} is updated.",
   addAuto: "Add",
   autoAdded: "Automatic domain added.",
   autoHint: "from the node's wildcard record, no DNS change needed",
@@ -17,6 +19,17 @@ export default {
   emptyHint: "Add a custom domain. Nodes with a wildcard record also offer an automatic one.",
   primary: "Primary",
   auto: "Auto",
+  // A wildcard domain (*.example.com): every name one level under its base that no other domain routes.
+  wildcard: "Wildcard",
+  wildcardHint: "Every name one level under {base} (for example shop.{base}) that no other domain routes. Exact domains always win.",
+  wildcardCert: {
+    cloudflareEdge: "Cloudflare's certificate",
+    cloudflareEdgeHint:
+      "Visitors get Cloudflare's certificate. The node answers Cloudflare with its default certificate, which SSL/TLS Full accepts. For Full (strict), upload a Cloudflare Origin CA certificate for {host}.",
+    noCertificate: "No certificate",
+    noCertificateHint:
+      "Let's Encrypt cannot issue {host} over the HTTP check, so HTTPS shows a browser warning. Turn on Cloudflare's proxy for the * record (SSL/TLS Full), upload a certificate for {host}, or switch the domain to HTTP only.",
+  },
   actions: "Actions for {host}",
   forwardTo: "Redirect {code} to {url}",
   fromWildcard: "From the node wildcard *.{host}",
@@ -72,6 +85,8 @@ export default {
       "Cloudflare cannot reach the node on port 443/80. Its record for {host} must point at {ip}, and a firewall in front of the node must let Cloudflare in on those ports. Then Check again.",
     cloudflareChallenge:
       "Cloudflare's security answered the check with a challenge or a block instead of passing it to the node (Bot Fight Mode, Under Attack mode, or a WAF or rate limiting rule), and it can stop Let's Encrypt the same way. Let requests to /.well-known/ on {host} through (a WAF skip rule, or Bot Fight Mode off), then Check again.",
+    cloudflareCertificateWildcard:
+      "Cloudflare's SSL mode Full (strict) refuses the node's default certificate, and Let's Encrypt cannot issue one for a wildcard. Set SSL/TLS to Full, or upload a Cloudflare Origin CA certificate for {host}, then Check again.",
     notFound:
       "Requests to {host} through Cloudflare get 404 from the server they reach, not the node's answer: its record in Cloudflare must point at {ip}. If it already does, the node may not have the domain yet: Check again in a minute.",
   },
@@ -83,6 +98,7 @@ export default {
       stackParent: "No route",
       cronService: "No route",
       routeWriteFailed: "No route on {node}",
+      agentTooOld: "Update {node}",
     },
     notDeployed: "{name} has not deployed yet: its domains go live, and their certificates are asked for, once a deployment goes live.",
     deploying:
@@ -92,6 +108,8 @@ export default {
     cronService: "{name} is a cron service: it runs on its schedule and serves no requests, so this domain routes nowhere. Remove it here.",
     routeWriteFailed: "{node} could not write this service's routes: {error}",
     routeWriteFailedHint: "The node keeps serving the routes it wrote before and tries again every 10 seconds.",
+    agentTooOld:
+      "{node} runs an agent that does not route wildcard domains yet, so it leaves this domain out and keeps serving the rest of {name}. Update the node (Updates in Settings, or the node's menu); the domain goes live there right after.",
     openDeployments: "Deployments",
   },
   theNode: "the node",
@@ -156,6 +174,8 @@ export default {
     https: "HTTPS",
     strip: "Strip the path before forwarding",
     makePrimary: "Make it the primary domain",
+    wildcardHint:
+      "Routes every name one level under {base} (shop.{base}, not a.b.{base}) that no other domain routes. Create a DNS record named * pointing at the node. Let's Encrypt cannot issue wildcard certificates, so put that record behind Cloudflare's proxy (SSL/TLS Full) or upload a certificate for *.{base} afterwards. A wildcard is never the primary domain.",
     redirectToHttps: "Redirect HTTP to HTTPS",
     redirectOnly: "Redirect only",
     redirectOnlyHint: "Send every request to another URL instead of the service, for example www to the bare domain.",

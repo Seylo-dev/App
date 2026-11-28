@@ -79,6 +79,8 @@ export interface DomainMenuSubject {
   forward: unknown;
   auto: boolean;
   primary: boolean;
+  /** A wildcard (*.example.com) is never primary. */
+  wildcard?: boolean;
 }
 
 export function domainMenuEntries(
@@ -98,7 +100,7 @@ export function domainMenuEntries(
   if (!d.forward) entries.push(item("access", t("serviceDomains.menu.access")));
   if (!d.auto) entries.push(item("certificate", t("serviceDomains.menu.certificate")));
   if (ctx.canRegenerate) entries.push(item("regenerate", t("serviceDomains.regenerate"), undefined, { disabled: ctx.regenerating }));
-  if (!d.primary && !d.forward) entries.push(item("primary", t("serviceDomains.menu.primary")));
+  if (!d.primary && !d.forward && !d.wildcard) entries.push(item("primary", t("serviceDomains.menu.primary")));
   entries.push(
     { type: "separator", id: "sep:copy" },
     item("copyDomain", t("menus.copyDomain")),

@@ -27,7 +27,9 @@ type HttpsMode int32
 const (
 	HttpsMode_HTTPS_MODE_UNSPECIFIED HttpsMode = 0
 	HttpsMode_HTTPS_MODE_OFF         HttpsMode = 1
-	// Let's Encrypt certificate per host via HTTP-01. The default.
+	// Let's Encrypt certificate per host via HTTP-01. The default. On a
+	// wildcard host (Route.hosts) no certificate is asked for: Traefik's
+	// default one is served.
 	HttpsMode_HTTPS_MODE_ACME               HttpsMode = 2
 	HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE HttpsMode = 3
 )
@@ -160,7 +162,19 @@ type Route struct {
 	// Stable id from the panel, used in Traefik router names.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// One or more host names, for example "app.example.com" or the auto
-	// domain "<svc>.<node wildcard>".
+	// domain "<svc>.<node wildcard>". Or, since 0.2.25, exactly one
+	// wildcard host "*.<base>" (a single leading "*" label, a base of two
+	// labels or more) that matches any one label under the base
+	// (shop.example.com, not a.b.example.com nor example.com itself). Its
+	// routers rank below every exact host's on the node, in any file, so an
+	// exact host always wins; with HTTPS_MODE_ACME it asks the CA for
+	// nothing (HTTP-01 cannot issue a wildcard certificate) and serves
+	// HTTPS with Traefik's default certificate, which Cloudflare's proxy
+	// accepts with SSL/TLS Full; HTTPS_MODE_CUSTOM_CERTIFICATE serves an
+	// uploaded wildcard certificate. acme_hold and acme_challenge_on_https
+	// are ignored for it. Only for agents that advertise
+	// routing.wildcard-hosts.v1: an older agent refuses the service's whole
+	// route file.
 	Hosts []string `protobuf:"bytes,2,rep,name=hosts,proto3" json:"hosts,omitempty"`
 	// Only requests under this prefix match. Empty means the whole host.
 	PathPrefix string `protobuf:"bytes,3,opt,name=path_prefix,json=pathPrefix,proto3" json:"path_prefix,omitempty"`

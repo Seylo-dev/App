@@ -58,7 +58,9 @@
 // service's deployment going live runs the job (checkWaitingDomains).
 // Requests go only to public addresses or a node's own (vettedFetch): a
 // name that resolves into the panel's network gets no request and reads
-// as unknown.
+// as unknown. A wildcard domain (*.example.com) is asked through a random
+// name under its base (wildcard.ts probeHost), and the proof signs that
+// name.
 
 import { randomBytes } from "node:crypto";
 import { slug } from "@seylo/brand";
@@ -76,6 +78,7 @@ import { settleHold } from "./acme-hold";
 import { invalidateService } from "./lookup";
 import { unroutableDomain } from "./no-route";
 import type { DomainRow } from "./rows";
+import { probeHost } from "./wildcard";
 
 /** Advertised by agents whose edge answers the origin path (go/internal/edge OriginCapability). */
 export const originCapability = "routing.origin-proof.v1";
@@ -278,7 +281,8 @@ export async function checkOrigin(
     });
   const waiting = placed.some((n) => n.capable && !n.routed && deps.agents.isOnline(n.id));
   if (!placed.some((n) => n.capable)) return { origin: "unknown", waiting: false, provable: false };
-  const answer = await probeOrigin(row.host, placed, fetcher);
+  // A wildcard is asked through a random name under its base, which its route (and nothing exact) answers.
+  const answer = await probeOrigin(probeHost(row.host), placed, fetcher);
   if (answer.kind === "proof") return { origin: "node", waiting: false, provable: true };
   const reason = answer.reason ? { reason: answer.reason } : {};
   // Only a node that answers the check and has the route gives the proof for certain.

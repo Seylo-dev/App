@@ -1481,8 +1481,8 @@
               "host": {
                 "minLength": 3,
                 "maxLength": 253,
-                "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
-                "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                "description": "Lower-case host name without scheme or port, for example shop.example.com, or a wildcard *.example.com for every name one level under example.com.",
                 "type": "string"
               },
               "pathPrefix": {

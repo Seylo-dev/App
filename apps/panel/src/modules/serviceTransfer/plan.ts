@@ -47,6 +47,7 @@ import { compareVersions, customImage, imageRelease } from "../databases/version
 import { hasBuildx } from "../deployments/source";
 import { checkCertificate, checkRedirects, normalizeCidrs } from "../domains/checks";
 import { assertCertificateNames, hostConflict } from "../domains/ownership";
+import { isWildcardHost, wildcardProblem } from "../domains/wildcard";
 import { buildEnvGraph } from "../env/graph";
 import { checkEnvReferences } from "../env/ops";
 import { readProjectEnv } from "../env/store";
@@ -559,7 +560,12 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     } else {
       const checked = fileMiddlewares(d, hashes);
       middlewares = checked.middlewares;
-      if (checked.problem !== null) {
+      // A wildcard goes through domains.add's checks too (public suffix, a node's automatic-domain wildcard, the panel's domain).
+      const wildcard = wildcardProblem(ctx.db, d.host, null);
+      if (wildcard) {
+        status = "invalid";
+        note = wildcard.message;
+      } else if (checked.problem !== null) {
         status = "invalid";
         note = checked.problem;
       } else if (checked.needsPassword) {
@@ -625,7 +631,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
         isPrimary: false,
         middlewares,
         dnsStatus: "unknown",
-        certStatus: https === "off" ? "none" : https === "custom" ? "valid" : "pending",
+        certStatus: https === "off" ? "none" : https === "custom" ? "valid" : isWildcardHost(d.host) ? "none" : "pending",
       });
     }
   }
@@ -669,8 +675,10 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
   }
   // The primary: the file's when it is added, else the first that is not a redirect (domains.add's rule).
   const primary =
-    domainInserts.find((d) => !d.forward && doc.domains.some((f) => f.isPrimary && f.host === d.host && f.pathPrefix === d.pathPrefix)) ??
-    domainInserts.find((d) => !d.forward);
+    domainInserts.find(
+      (d) =>
+        !d.forward && !isWildcardHost(d.host) && doc.domains.some((f) => f.isPrimary && f.host === d.host && f.pathPrefix === d.pathPrefix),
+    ) ?? domainInserts.find((d) => !d.forward && !isWildcardHost(d.host));
   if (primary) primary.isPrimary = true;
   for (const r of domainRows) r.primary = !!primary && primary.host === r.host && primary.pathPrefix === r.pathPrefix;
 

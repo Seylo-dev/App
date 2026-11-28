@@ -9,7 +9,8 @@
 // points elsewhere. A domain whose certificate waits for DNS
 // (acme-hold.ts) has no ACME route on its nodes: the checks here release
 // it once they prove it, and the desired state that follows starts the
-// certificate instead of a retry.
+// certificate instead of a retry. A wildcard domain asks Let's Encrypt
+// nothing (wildcard.ts): refused.
 
 import { domains as domainOps, OpError, type OpOutput } from "@seylo/ops";
 import { eq } from "drizzle-orm";
@@ -23,6 +24,7 @@ import { noRouteMessage, unroutable } from "./no-route";
 import { requireDomain } from "./ops";
 import { checkOrigin, originApplies, originProvable, saveOrigin } from "./origin";
 import { toDomain } from "./rows";
+import { isWildcardHost } from "./wildcard";
 
 /** "203.0.113.10" or "203.0.113.10 or 198.51.100.4": where the record should point. */
 function nodeAddressText(nodes: PlacedNode[]): string {
@@ -72,6 +74,13 @@ export const retryCertificate = implement(domainOps.retryCertificate, async (inp
         ? "This domain uses an uploaded certificate. Upload a new one to replace it."
         : "This domain is served over plain HTTP, so it has no certificate.",
       { reason: "notAcme" },
+    );
+  }
+  if (isWildcardHost(row.host)) {
+    throw new OpError(
+      "CONFLICT",
+      `Let's Encrypt cannot issue ${row.host} over HTTP-01, so there is no certificate to regenerate. Behind Cloudflare's proxy the node's default certificate is enough (SSL/TLS Full); otherwise upload a wildcard certificate.`,
+      { reason: "wildcard" },
     );
   }
   if (row.certStatus === "valid") {

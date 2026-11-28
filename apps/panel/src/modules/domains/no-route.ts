@@ -18,7 +18,10 @@
 // The fourth comes from the node: routeWriteFailed, its agent could not
 // write the service's route file (ServiceStatus.route_write_error, agents
 // from 0.2.13), so it serves the routes of the file it wrote last, and a
-// domain missing from the routes it reports has none there.
+// domain missing from the routes it reports has none there. The fifth is
+// for wildcard domains: agentTooOld, a node whose agent does not route
+// wildcard hosts yet (wildcard.ts), for which the desired state leaves the
+// route out.
 //
 // domains.add, addAuto and update refuse a stack or a cron service, and
 // domains.retryCertificate a domain with one of the panel's own reasons.
@@ -38,6 +41,7 @@ import { acmeHeld } from "./acme-hold";
 import { type ServiceRow, serviceNodes } from "./lookup";
 import { enqueueOriginCheck, originApplies } from "./origin";
 import type { DomainRow } from "./rows";
+import { isWildcardHost, nodeRoutesWildcards } from "./wildcard";
 
 export type NoRoute = Static<typeof domainOps.NoRoute>;
 
@@ -82,7 +86,14 @@ export function noRoutes(deps: Pick<Deps, "db" | "agents">, service: ServiceRow,
     for (const row of rows) out.set(row.id, own);
     return out;
   }
+  const wildcards = rows.filter((row) => isWildcardHost(row.host));
   for (const node of serviceNodes(deps.db, service.id)) {
+    // The desired state leaves a wildcard out for an agent that would refuse it (desired.ts), online or not.
+    if (wildcards.length > 0 && !nodeRoutesWildcards(deps.db, deps.agents, node.id)) {
+      for (const row of wildcards) {
+        if (!out.has(row.id)) out.set(row.id, { reason: "agentTooOld", nodeId: node.id, nodeName: node.name });
+      }
+    }
     if (!deps.agents.isOnline(node.id)) continue;
     const status = deps.agents.state.get(node.id)?.services.get(service.id);
     const error = status?.routeWriteError?.message;
@@ -107,6 +118,8 @@ export function noRouteMessage(service: Pick<ServiceRow, "name">, reason: NoRout
       return `${service.name} is a cron service: it runs on its schedule and serves no requests, so a domain cannot reach it.`;
     case "routeWriteFailed":
       return `A node of ${service.name} could not write its routes.`;
+    case "agentTooOld":
+      return `A node of ${service.name} runs an agent that does not route wildcard domains yet. Update the node.`;
   }
 }
 

@@ -532,9 +532,13 @@ func (r *FileRouter) Status(ctx context.Context, serviceID string) ([]*agentv1.R
 			out = append(out, st)
 			continue
 		}
+		_, wild := routeWildcard(route)
 		switch route.GetHttps() {
 		case agentv1.HttpsMode_HTTPS_MODE_ACME, agentv1.HttpsMode_HTTPS_MODE_UNSPECIFIED:
-			if r.cfg.AcmeFile != "" {
+			// A wildcard route asks for no certificate (it serves Traefik's
+			// default one): active once its file is written, with nothing to
+			// say about a certificate.
+			if r.cfg.AcmeFile != "" && !wild {
 				r.acmeStatus(st, route.GetHosts())
 			}
 		case agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE:
@@ -587,12 +591,17 @@ func setCertInfo(st *agentv1.RouteStatus, info certInfo) {
 // hosts behind Cloudflare's proxy: they resolve to Cloudflare's addresses
 // whatever their record there points at, so only the certificate tells
 // (Let's Encrypt reached this node through the proxy), and a mismatch
-// would hide it: the route would never report ACTIVE.
+// would hide it: the route would never report ACTIVE. A wildcard host
+// (*.example.com) is not looked up: it is no name to resolve, and the
+// panel checks its record through a name under it.
 func (r *FileRouter) dnsMismatch(ctx context.Context, hosts, nodeAddrs []string) (string, []string) {
 	if len(nodeAddrs) == 0 {
 		return "", nil
 	}
 	for _, host := range hosts {
+		if _, wild := wildcardBase(strings.ToLower(host)); wild {
+			continue
+		}
 		addrs, err := r.lookup(ctx, host)
 		if err != nil || len(addrs) == 0 {
 			continue

@@ -9,12 +9,29 @@ import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Empty, Id, Timestamp } from "../schemas";
 
-/** Lower-case host name, no scheme, no port. Wildcards are not allowed on services. */
+/** Lower-case host name, no scheme, no port, no wildcard. */
 export const Hostname = Type.String({
   minLength: 3,
   maxLength: 253,
   pattern: "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
   description: "Lower-case host name without scheme or port, for example shop.example.com.",
+});
+
+/**
+ * A domain's host: a Hostname, or a single-level wildcard `*.<base>`
+ * (*.example.com) that routes every name one label under base
+ * (shop.example.com, north.example.com, but not a.b.example.com, nor
+ * example.com itself). Exact hosts always win over a wildcard, on any
+ * service. The base must be a registrable domain or below one (never a
+ * public suffix such as com or co.il), must not be a node's automatic-domain
+ * wildcard, and must not cover the panel's own domain.
+ */
+export const DomainHost = Type.String({
+  minLength: 3,
+  maxLength: 253,
+  pattern: "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+  description:
+    "Lower-case host name without scheme or port, for example shop.example.com, or a wildcard *.example.com for every name one level under example.com.",
 });
 
 /** Path prefix starting with "/"; "/" means the whole host. */
@@ -98,19 +115,24 @@ export const OriginReason = Type.Union([
  * routeWriteFailed: a node of the service could not write the service's
  * route file (nodes on 0.2.13 report it): it still serves the routes of
  * the file it wrote last, which do not have this domain.
+ * agentTooOld: a wildcard domain on a node whose agent does not route
+ * wildcard hosts yet (routing.wildcard-hosts.v1, 0.2.25): the panel leaves
+ * the route out there until the node updates, since an older agent would
+ * refuse the service's whole route file.
  */
 export const NoRouteReason = Type.Union([
   Type.Literal("notDeployed"),
   Type.Literal("stackParent"),
   Type.Literal("cronService"),
   Type.Literal("routeWriteFailed"),
+  Type.Literal("agentTooOld"),
 ]);
 
 export const NoRoute = Type.Object({
   reason: NoRouteReason,
   /** notDeployed: the service's deployment that is queued or building now, if one is. */
   deploymentId: Type.Optional(Id),
-  /** routeWriteFailed: the node that could not write the route file. */
+  /** routeWriteFailed: the node that could not write the route file. agentTooOld: the node to update. */
   nodeId: Type.Optional(Id),
   nodeName: Type.Optional(Type.String()),
   /** routeWriteFailed: what the node's agent said, one line. */
@@ -118,6 +140,23 @@ export const NoRoute = Type.Object({
 });
 
 export const CertificateStatus = Type.Union([Type.Literal("none"), Type.Literal("pending"), Type.Literal("valid"), Type.Literal("failed")]);
+
+/**
+ * How visitors get HTTPS on a wildcard domain with https acme. Let's
+ * Encrypt's HTTP-01 challenge cannot issue wildcard certificates and the
+ * panel has no DNS provider token for DNS-01, so the node asks for no
+ * certificate and answers HTTPS with its default (self-signed) one;
+ * certificate.status is "none".
+ * cloudflareEdge: the wildcard record is proxied by Cloudflare. Visitors get
+ * Cloudflare's edge certificate, and Cloudflare's SSL/TLS mode Full accepts
+ * the node's default certificate. Full (strict) refuses it: upload a
+ * wildcard origin certificate (Cloudflare Origin CA) with
+ * domains.setCertificate instead.
+ * noCertificate: the record points straight at the node (or is not set up
+ * yet): browsers warn on HTTPS. Turn Cloudflare's proxy on for the record,
+ * upload a wildcard certificate (https custom), or set https off.
+ */
+export const WildcardCertificate = Type.Union([Type.Literal("cloudflareEdge"), Type.Literal("noCertificate")]);
 
 export const DomainRedirect = Type.Object({
   /** RE2 regular expression matched against the full request URL. */
@@ -171,7 +210,7 @@ export const DomainWarning = Type.Object({
 export const Domain = Type.Object({
   id: Id,
   serviceId: Id,
-  host: Hostname,
+  host: DomainHost,
   pathPrefix: PathPrefix,
   stripPrefix: Type.Boolean(),
   targetPort: ContainerPort,
@@ -179,7 +218,12 @@ export const Domain = Type.Object({
   redirectToHttps: Type.Boolean(),
   /** Generated from a node's wildcard domain. */
   auto: Type.Boolean(),
-  /** The domain other addresses (IP:port, redirects, ${{svc.URL}}) point to. One per service. */
+  /**
+   * Set (true) for a wildcard host (*.example.com): it routes every name one
+   * level under its base that no exact domain routes. Never primary.
+   */
+  wildcard: Type.Optional(Type.Boolean()),
+  /** The domain other addresses (IP:port, redirects, ${{svc.URL}}) point to. One per service, never a wildcard. */
   primary: Type.Boolean(),
   /** Set when this domain only redirects (for example www to the apex). */
   forward: Type.Union([DomainForward, Type.Null()]),
@@ -244,14 +288,16 @@ export const Domain = Type.Object({
      * HTTPS only with Traefik's default certificate), and failed
      * validations do not use up Let's Encrypt's limits. A DNS lookup that
      * fails leaves a waiting domain waiting. The first check that proves it (domains.checkDns)
-     * starts the certificate. Never set for automatic domains, HTTPS modes
-     * custom and off, or a domain that has had a certificate.
+     * starts the certificate. Never set for automatic domains, wildcard
+     * domains, HTTPS modes custom and off, or a domain that has had a certificate.
      */
     waitingForDns: Type.Optional(Type.Boolean()),
+    /** Wildcard domains with https acme only: how visitors get HTTPS (see WildcardCertificate). */
+    wildcard: Type.Optional(WildcardCertificate),
   }),
-  /** First time the route served with a valid certificate. */
+  /** First time the route served with a valid certificate (a wildcard domain: first time a node served its route). */
   liveAt: Type.Union([Timestamp, Type.Null()]),
-  /** Full URL, for example https://shop.example.com/admin. */
+  /** Full URL, for example https://shop.example.com/admin; a wildcard domain's keeps the * (https://*.example.com). */
   url: Type.String(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -266,11 +312,17 @@ export const DnsRecord = Type.Object({
 
 export const DnsCheck = Type.Object({
   domainId: Id,
-  host: Hostname,
+  host: DomainHost,
   status: DnsStatus,
   /** Plain sentence for the UI, for example "No A record for admin.example.com yet". */
   message: Type.String(),
-  /** Records to create; one A (and AAAA when the node has IPv6) pointing at the node. */
+  /**
+   * Wildcard domains only: the name looked up (and asked by the origin
+   * check) in the wildcard's place, a random label under its base such as
+   * seylo-check-k3x9q2.example.com, which only the wildcard record answers.
+   */
+  probe: Type.Optional(Hostname),
+  /** Records to create; one A (and AAAA when the node has IPv6) pointing at the node. A wildcard's are named "*". */
   expected: Type.Array(DnsRecord),
   /** What public resolvers answered. */
   found: Type.Array(DnsRecord),
@@ -332,7 +384,7 @@ export const list = defineOp({
   kind: "query",
   summary: "List a service's domains",
   description:
-    "Lists the domains of a service, primary first, with DNS and certificate status. Also says which automatic domain can be added from the node's wildcard record, if any.",
+    "Lists the domains of a service, primary first, with DNS and certificate status. Also says which automatic domain can be added from the node's wildcard record, if any. A wildcard domain (*.example.com) has wildcard true and, with https acme, certificate.wildcard saying how visitors get HTTPS (cloudflareEdge or noCertificate).",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     domains: Type.Array(Domain),
@@ -368,10 +420,10 @@ export const add = defineOp({
   kind: "mutation",
   summary: "Add a custom domain",
   description:
-    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService). A host whose registrable domain does not exist (no name servers: not registered, or a typo) is still added, with domain.warning (reason registrableMissing, with didYouMean when a domain the caller can see is a likely spelling) and dns.zoneMissing.",
+    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list); for a service that has not deployed yet (domain.noRoute) it checks once a deployment goes live. Refused on a compose stack, which runs no container of its own (put the domain on the member that serves it), and on a cron service (reason stackParent or cronService). A host whose registrable domain does not exist (no name servers: not registered, or a typo) is still added, with domain.warning (reason registrableMissing, with didYouMean when a domain the caller can see is a likely spelling) and dns.zoneMissing. A wildcard host *.example.com routes every name one level under example.com (shop.example.com, not a.b.example.com) with the same port, path, middlewares and HTTPS redirect, below every exact domain on any service; it needs a DNS record named * (dns.expected), checked through a random name under the base (dns.probe). Let's Encrypt cannot issue wildcard certificates over HTTP-01 and the panel has no DNS-01, so with https acme the node serves its default certificate: fine behind Cloudflare's proxy with SSL/TLS Full (certificate.wildcard cloudflareEdge), a browser warning otherwise (noCertificate); upload a wildcard certificate with domains.setCertificate for Full (strict) or DNS straight to the node. A wildcard is never primary (primary true is refused, reason wildcardPrimary), and is refused (BAD_REQUEST, field host) when its base is a public suffix (reason wildcardPublicSuffix), a node's automatic-domain wildcard (wildcardNodeDomain), covers the panel's own domain (wildcardPanelDomain), or the service is the panel itself (wildcardPanelService). Nodes whose agent is older than 0.2.25 get no route for it (domain.noRoute reason agentTooOld) until they update.",
   input: Type.Object({
     serviceId: Id,
-    host: Hostname,
+    host: DomainHost,
     pathPrefix: Type.Optional(PathPrefix),
     stripPrefix: Type.Optional(Type.Boolean()),
     /** Defaults to the service's main port. */
@@ -392,7 +444,7 @@ export const checkDns = defineOp({
   kind: "query",
   summary: "Check a domain's DNS",
   description:
-    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. The zone is never above the host's registrable domain; when that domain has no name servers, zoneMissing says so instead of a zone (with didYouMean when a domain the caller can see is a likely spelling). For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
+    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. The zone is never above the host's registrable domain; when that domain has no name servers, zoneMissing says so instead of a zone (with didYouMean when a domain the caller can see is a likely spelling). For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node; not while the service's nodes cannot have a route for it (Domain.noRoute notDeployed, stackParent or cronService). Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away. For a wildcard domain it looks up a random name under the base (probe), so only the * record answers, and names the record to create *.",
   input: Type.Object(DomainRef),
   output: DnsCheck,
   permission: byService("domains.view"),
@@ -405,7 +457,7 @@ export const update = defineOp({
   kind: "mutation",
   summary: "Change a domain's routing",
   description:
-    "Changes path prefix, strip prefix, target port, HTTPS mode, the HTTP to HTTPS redirect or the forward target of a domain. Fields left out keep their value; forward null turns a redirect-only domain back into a normal one. Refused on a compose stack or a cron service (reason stackParent or cronService), whose domains route nowhere: remove them there and add them to the service that serves the requests.",
+    "Changes path prefix, strip prefix, target port, HTTPS mode, the HTTP to HTTPS redirect or the forward target of a domain. Fields left out keep their value; forward null turns a redirect-only domain back into a normal one. Refused on a compose stack or a cron service (reason stackParent or cronService), whose domains route nowhere: remove them there and add them to the service that serves the requests. On a wildcard domain, https custom needs a certificate that names the wildcard itself (*.example.com).",
   input: Type.Object({
     ...DomainRef,
     pathPrefix: Type.Optional(PathPrefix),
@@ -454,7 +506,7 @@ export const setCertificate = defineOp({
   kind: "mutation",
   summary: "Upload a custom certificate",
   description:
-    "Stores a PEM certificate chain and private key for a domain and switches it to HTTPS mode custom. Fails when the key does not match the certificate or the certificate does not cover the host.",
+    "Stores a PEM certificate chain and private key for a domain and switches it to HTTPS mode custom. Fails when the key does not match the certificate or the certificate does not cover the host. For a wildcard domain the certificate must name the wildcard itself (*.example.com), for example a Cloudflare Origin CA certificate, which Cloudflare's SSL/TLS Full (strict) accepts.",
   input: Type.Object({
     ...DomainRef,
     certPem: Type.String({ minLength: 100, maxLength: 65536 }),
@@ -473,7 +525,7 @@ export const setPrimary = defineOp({
   summary: "Make a domain primary",
   description:
     // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
-    "Makes this the service's primary domain: IP:port access redirects here once it is live, and ${{svc.URL}} references resolve to it. The previous primary stays as a normal domain.",
+    "Makes this the service's primary domain: IP:port access redirects here once it is live, and ${{svc.URL}} references resolve to it. The previous primary stays as a normal domain. A wildcard domain cannot be primary (reason wildcardPrimary).",
   input: Type.Object(DomainRef),
   output: Domain,
   permission: byService("domains.edit"),
@@ -486,7 +538,7 @@ export const retryCertificate = defineOp({
   kind: "mutation",
   summary: "Regenerate a domain's certificate",
   description:
-    "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise); behind Cloudflare's proxy the origin check runs too, and the op refuses (reason originElsewhere) while something other than the node answers, and (reason waitingForDns) while a domain whose certificate waits for DNS is not seen reaching the node; when the check shows it reaching the node, the certificate starts. Refused (reason notDeployed, stackParent or cronService, as in Domain.noRoute) while the service's nodes cannot have a route for the domain. Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
+    "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise); behind Cloudflare's proxy the origin check runs too, and the op refuses (reason originElsewhere) while something other than the node answers, and (reason waitingForDns) while a domain whose certificate waits for DNS is not seen reaching the node; when the check shows it reaching the node, the certificate starts. Refused (reason notDeployed, stackParent or cronService, as in Domain.noRoute) while the service's nodes cannot have a route for the domain. Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure. Refused for a wildcard domain (reason wildcard): Let's Encrypt cannot issue it over HTTP-01.",
   input: Type.Object(DomainRef),
   output: Domain,
   permission: byService("domains.edit"),

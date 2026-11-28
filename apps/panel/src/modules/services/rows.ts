@@ -158,7 +158,8 @@ function loadContext(db: PanelDb, rows: readonly ServiceRow[]): Context {
     .where(inArray(domains.serviceId, ids))
     .orderBy(desc(domains.isPrimary), asc(domains.createdAt))
     .all()) {
-    if (ctx.primaryHosts.has(d.serviceId)) continue;
+    // A wildcard (*.example.com) is no address to show or open.
+    if (ctx.primaryHosts.has(d.serviceId) || d.host.startsWith("*.")) continue;
     ctx.primaryHosts.set(d.serviceId, d.pathPrefix && d.pathPrefix !== "/" ? `${d.host}${d.pathPrefix}` : d.host);
   }
   return ctx;

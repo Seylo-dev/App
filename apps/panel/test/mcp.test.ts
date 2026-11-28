@@ -15,10 +15,12 @@ import { eq } from "drizzle-orm";
 import { approvals, auditLog, mcpAuthCodes, mcpClients, nodes, projects, services, sessions } from "../src/db/schema";
 import { runOpAs } from "../src/modules/approvals/run-as";
 import { enginesCapability } from "../src/modules/databases/engines";
+import { setDnsLookups } from "../src/modules/domains/dns";
+import { wildcardCapability } from "../src/modules/domains/wildcard";
 import { writeServiceEnv } from "../src/modules/env/store";
 import { setSetting } from "../src/settings";
 import { callOp, createUser, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
-import { seedNode, seedProject, settleDeploys } from "./seed-helpers";
+import { seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
@@ -26,6 +28,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await settleDeploys(panel);
+  setDnsLookups(null);
   panel.close();
 });
 
@@ -663,4 +666,72 @@ test("registration is rate limited per address and junk clients cannot block a r
   const statuses: number[] = [];
   for (let i = 0; i < 12; i++) statuses.push((await register()).status);
   expect(statuses).toContain(429);
+});
+
+test("wildcard domains over MCP: domains_add takes *.<base>, domains_list and domains_checkDns say what it is", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  const { cookie } = await createUser(panel, "owner");
+  const tokens = await connect(cookie, "write");
+  const node = seedNode(panel, { ipv4: "88.214.55.20", wildcard: "il-1.sey.lue.my" });
+  panel.deps.db
+    .update(nodes)
+    .set({ facts: { capabilities: [wildcardCapability] } })
+    .where(eq(nodes.id, node.id))
+    .run();
+  const project = seedProject(panel);
+  const service = seedService(panel, { projectId: project.id, name: "web", ports: [3700], nodeIds: [node.id], deployed: true });
+  // Cloudflare answers every name under starsell.net (a proxied * record).
+  setDnsLookups({
+    resolve4: async (name) => (name.endsWith(".starsell.net") && name.split(".").length === 3 ? ["104.21.10.10"] : []),
+    resolve6: async () => [],
+    resolveCname: async () => [],
+    resolveNs: async (name) => (name === "starsell.net" ? ["ada.ns.cloudflare.com"] : []),
+  });
+
+  const list = await rpc(tokens.access_token, "tools/list");
+  const tool = (name: string) => list.body.result.tools.find((t: { name: string }) => t.name === name);
+  const pattern = new RegExp(tool("domains_add").inputSchema.properties.host.pattern);
+  for (const host of ["*.starsell.net", "shop.starsell.net", "*.shop.starsell.net"])
+    expect([host, pattern.test(host)]).toEqual([host, true]);
+  for (const host of ["a.*.starsell.net", "**.starsell.net", "*starsell.net", "*.com"])
+    expect([host, pattern.test(host)]).toEqual([host, false]);
+  expect(tool("domains_add").description).toContain("*.example.com");
+  expect(tool("domains_add").inputSchema.properties.host.description).toContain("wildcard");
+  expect(tool("domains_update")).toBeDefined();
+
+  const added = await rpc(tokens.access_token, "tools/call", {
+    name: "domains_add",
+    arguments: { serviceId: service.id, host: "*.starsell.net" },
+  });
+  expect(added.body.result.isError).toBe(false);
+  const out = added.body.result.structuredContent;
+  expect(out.domain).toMatchObject({
+    host: "*.starsell.net",
+    wildcard: true,
+    primary: false,
+    certificate: { status: "none", wildcard: "cloudflareEdge" },
+  });
+  expect(out.dns).toMatchObject({ status: "proxied", expected: [{ type: "A", name: "*", value: "88.214.55.20" }] });
+  expect(out.dns.probe).toMatch(/^seylo-check-[0-9a-f]{12}\.starsell\.net$/);
+
+  const listed = await rpc(tokens.access_token, "tools/call", { name: "domains_list", arguments: { serviceId: service.id } });
+  expect(listed.body.result.structuredContent.domains).toEqual([expect.objectContaining({ host: "*.starsell.net", wildcard: true })]);
+
+  const updated = await rpc(tokens.access_token, "tools/call", {
+    name: "domains_update",
+    arguments: { serviceId: service.id, domainId: out.domain.id, pathPrefix: "/store" },
+  });
+  expect(updated.body.result.isError).toBe(false);
+  expect(updated.body.result.structuredContent).toMatchObject({
+    host: "*.starsell.net",
+    pathPrefix: "/store",
+    url: "https://*.starsell.net/store",
+  });
+
+  const refused = await rpc(tokens.access_token, "tools/call", {
+    name: "domains_add",
+    arguments: { serviceId: service.id, host: "*.co.il" },
+  });
+  expect(refused.body.result.isError).toBe(true);
+  expect(refused.body.result.content[0].text).toContain("public suffix");
 });

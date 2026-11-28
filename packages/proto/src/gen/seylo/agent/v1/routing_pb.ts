@@ -76,7 +76,19 @@ export type Route = Message<"seylo.agent.v1.Route"> & {
 
   /**
    * One or more host names, for example "app.example.com" or the auto
-   * domain "<svc>.<node wildcard>".
+   * domain "<svc>.<node wildcard>". Or, since 0.2.25, exactly one
+   * wildcard host "*.<base>" (a single leading "*" label, a base of two
+   * labels or more) that matches any one label under the base
+   * (shop.example.com, not a.b.example.com nor example.com itself). Its
+   * routers rank below every exact host's on the node, in any file, so an
+   * exact host always wins; with HTTPS_MODE_ACME it asks the CA for
+   * nothing (HTTP-01 cannot issue a wildcard certificate) and serves
+   * HTTPS with Traefik's default certificate, which Cloudflare's proxy
+   * accepts with SSL/TLS Full; HTTPS_MODE_CUSTOM_CERTIFICATE serves an
+   * uploaded wildcard certificate. acme_hold and acme_challenge_on_https
+   * are ignored for it. Only for agents that advertise
+   * routing.wildcard-hosts.v1: an older agent refuses the service's whole
+   * route file.
    *
    * @generated from field: repeated string hosts = 2;
    */
@@ -379,7 +391,9 @@ export enum HttpsMode {
   OFF = 1,
 
   /**
-   * Let's Encrypt certificate per host via HTTP-01. The default.
+   * Let's Encrypt certificate per host via HTTP-01. The default. On a
+   * wildcard host (Route.hosts) no certificate is asked for: Traefik's
+   * default one is served.
    *
    * @generated from enum value: HTTPS_MODE_ACME = 2;
    */

@@ -36,8 +36,9 @@
 // a redirect-only domain, which gets no origin check, or one whose nodes
 // all run agents that do not answer the check. A domain that has or had a
 // certificate (valid, an expiry on record, or live) is never held either,
-// and neither are automatic (wildcard) domains or HTTPS modes custom and
-// off. When a check or a route report changes whether a domain is held,
+// and neither are automatic domains (from a node's wildcard record),
+// wildcard domains (*.example.com, which ask Let's Encrypt nothing:
+// wildcard.ts) or HTTPS modes custom and off. When a check or a route report changes whether a domain is held,
 // the service's desired state goes to its nodes again at once, so the
 // certificate starts right away (or the failing attempts stop).
 //
@@ -53,11 +54,12 @@ import { type DnsStatus, domains, type OriginStatus } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { invalidateService } from "./lookup";
 import type { DomainRow } from "./rows";
+import { isWildcardHost } from "./wildcard";
 
 type HoldFacts = Pick<
   DomainRow,
   "https" | "auto" | "forward" | "dnsStatus" | "originStatus" | "acmeReleasedAt" | "certStatus" | "certExpiresAt" | "liveAt"
->;
+> & { host?: string };
 
 /** The domain had a certificate or a check released it: its route keeps asking Let's Encrypt whatever later checks say. */
 function releasedForGood(row: Pick<HoldFacts, "acmeReleasedAt" | "certStatus" | "certExpiresAt" | "liveAt">): boolean {
@@ -66,7 +68,7 @@ function releasedForGood(row: Pick<HoldFacts, "acmeReleasedAt" | "certStatus" | 
 
 /** Whether the domain's route waits for DNS before asking Let's Encrypt (see the top of this file). */
 export function acmeHeld(row: HoldFacts): boolean {
-  if (row.https !== "acme" || row.auto || releasedForGood(row)) return false;
+  if (row.https !== "acme" || row.auto || (row.host !== undefined && isWildcardHost(row.host)) || releasedForGood(row)) return false;
   switch (row.dnsStatus) {
     case "missing":
     case "wrongTarget":
@@ -91,9 +93,11 @@ export function acmeHeld(row: HoldFacts): boolean {
  * Straight to the node it reaches port 80, where Traefik answers it, and
  * the app keeps /.well-known/acme-challenge/ over https (Traefik's handler
  * answers only its own tokens and never falls through). Automatic domains
- * are on the node's wildcard record, which is never checked: always.
+ * are on the node's wildcard record, which is never checked: always. A
+ * wildcard domain asks Let's Encrypt nothing: never.
  */
-export function acmeChallengeOnHttps(row: Pick<DomainRow, "auto" | "dnsStatus">): boolean {
+export function acmeChallengeOnHttps(row: Pick<DomainRow, "auto" | "dnsStatus"> & { host?: string }): boolean {
+  if (row.host !== undefined && isWildcardHost(row.host)) return false;
   return row.auto || row.dnsStatus !== "ok";
 }
 

@@ -25,7 +25,17 @@ import { AlertRuleEvent } from "./alerts";
 import { BackupSelection, DestinationProvider } from "./backups";
 import { BuildSettings } from "./builds";
 import { Command, CronConcurrency, CronSchedule, JobName, TimeZone } from "./cron";
-import { Cidr, ContainerPort, DomainForward, DomainRateLimit, DomainRedirect, Hostname, HttpsMode, PathPrefix } from "./domains";
+import {
+  Cidr,
+  ContainerPort,
+  DomainForward,
+  DomainHost,
+  DomainRateLimit,
+  DomainRedirect,
+  Hostname,
+  HttpsMode,
+  PathPrefix,
+} from "./domains";
 import { StreamTicket } from "./logs";
 import { Message, PageHtml } from "./maintenance";
 import { ChannelKind } from "./notifications";
@@ -260,7 +270,7 @@ export const PortableSpec = Type.Object({
 const strict = { additionalProperties: false } as const;
 
 export const PortableDomain = Type.Object({
-  host: Hostname,
+  host: DomainHost,
   pathPrefix: PathPrefix,
   stripPrefix: Type.Boolean(),
   targetPort: ContainerPort,
@@ -709,7 +719,7 @@ export const ImportChoices = Type.Object({
   /** Push deploys arrive off unless this is on. */
   deployOnPush: Type.Optional(Type.Boolean()),
   domains: Type.Optional(
-    Type.Array(Type.Object({ host: Hostname, pathPrefix: PathPrefix, action: Type.Union([Type.Literal("add"), Type.Literal("skip")]) }), {
+    Type.Array(Type.Object({ host: DomainHost, pathPrefix: PathPrefix, action: Type.Union([Type.Literal("add"), Type.Literal("skip")]) }), {
       maxItems: 100,
     }),
   ),
@@ -941,7 +951,7 @@ export const importService = defineOp({
     passwords: Type.Optional(
       Type.Array(
         Type.Object({
-          host: Hostname,
+          host: DomainHost,
           pathPrefix: PathPrefix,
           username: Type.String({ minLength: 1, maxLength: 100 }),
           password: Type.String({ minLength: 8, maxLength: 200 }),

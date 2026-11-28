@@ -24,6 +24,7 @@ import { effectiveToken, tunnelActive, tunnelRow } from "../tunnels/logic";
 import { acmeChallengeOnHttps, acmeHeld } from "./acme-hold";
 import { serviceNodes } from "./lookup";
 import { type DomainRow, serviceDomains } from "./rows";
+import { isWildcardHost, nodeRoutesWildcards, wildcardBase } from "./wildcard";
 
 type Routing = MessageInitShape<typeof RoutingSchema>;
 type Route = MessageInitShape<typeof RouteSchema>;
@@ -48,6 +49,11 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** The host part of a forward's regular expression: a wildcard matches one label under its base (non-capturing, so $1 stays the path). */
+function hostPattern(host: string): string {
+  return isWildcardHost(host) ? `(?:[A-Za-z0-9-]+)\\.${escapeRegex(wildcardBase(host))}` : escapeRegex(host);
+}
+
 export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route {
   const m = row.middlewares ?? {};
   const redirects = [...(m.redirects ?? [])];
@@ -55,7 +61,7 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
     // Redirect-only domain: send everything to the target before it reaches the service.
     const target = row.forward.url.replace(/\/$/, "");
     redirects.unshift({
-      from: `^https?://${escapeRegex(row.host)}(?::\\d+)?(/.*)?$`,
+      from: `^https?://${hostPattern(row.host)}(?::\\d+)?(/.*)?$`,
       to: row.forward.keepPath ? `${target}$1` : target,
       permanent: row.forward.permanent,
     });
@@ -106,8 +112,12 @@ export function serviceNetworking(
   const { db } = deps;
   const own = servicePageRow(db, serviceId);
   const page = effectivePage(db, serviceId).html;
+  // A wildcard host only to agents that route it (wildcard.ts): an older one refuses "*", and with it the whole route file.
+  const wildcards = nodeRoutesWildcards(db, null, nodeId);
   const routing: Routing = {
-    routes: serviceDomains(db, serviceId).map((row) => domainRoute(deps, row)),
+    routes: serviceDomains(db, serviceId)
+      .filter((row) => wildcards || !isWildcardHost(row.host))
+      .map((row) => domainRoute(deps, row)),
     maintenance: { enabled: own?.enabled ?? false, html: page },
     statusPage: { enabled: true, html: page },
   };

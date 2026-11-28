@@ -98,7 +98,13 @@ func (r *FileRouter) RetryCertificate(ctx context.Context, serviceID, routeID st
 	return st, hosts, nil
 }
 
+// usesACME reports whether Traefik asks the CA for the route's
+// certificate: ACME on host names. A wildcard route with ACME asks for
+// none (HTTP-01 cannot issue a wildcard), so there is nothing to retry.
 func usesACME(route *agentv1.Route) bool {
+	if _, wild := routeWildcard(route); wild {
+		return false
+	}
 	switch route.GetHttps() {
 	case agentv1.HttpsMode_HTTPS_MODE_ACME, agentv1.HttpsMode_HTTPS_MODE_UNSPECIFIED:
 		return true

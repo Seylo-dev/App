@@ -349,7 +349,10 @@ func TestBuildRejectsUnsafeInput(t *testing.T) {
 		{Service: app("svc1", route("r1", "evil.com`) || Host(`x"))},
 		{Service: app("SVC1", route("r1", "a.example.com"))},
 		{Service: app("svc1", route("r 1", "a.example.com"))},
-		{Service: app("svc1", route("r1", "*.example.com"))},
+		// Wildcards take one leading "*." label over a base of two labels or more (wildcard_test.go).
+		{Service: app("svc1", route("r1", "*.com"))},
+		{Service: app("svc1", route("r1", "a.*.example.com"))},
+		{Service: app("svc1", route("r1", "*.example.com", "a.example.com"))},
 		{Service: app("svc1", &agentv1.Route{Id: "r1", Hosts: []string{"a.example.com"}, PathPrefix: "/a`b"})},
 		{Service: app("svc1", route("r1", "a.example.com")), Upstreams: ups("ftp://x")},
 		{Service: app("svc1", &agentv1.Route{Id: "r1", Hosts: []string{"a.example.com"}, BasicAuth: &agentv1.BasicAuth{Users: []*agentv1.BasicAuthUser{{Username: "u", PasswordHash: "plain"}}}}), Upstreams: ups("http://x:1")},

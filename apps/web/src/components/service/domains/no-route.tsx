@@ -4,8 +4,9 @@
 // was right all along. A service that has not deployed yet (with a link to
 // its Deployments tab, and "deploying for the first time" while its first
 // deployment is on its way), a compose stack or a cron service, which take
-// no domains, and a node that could not write the service's routes, with
-// its own error.
+// no domains, a node that could not write the service's routes, with
+// its own error, and a node whose agent does not route wildcard domains
+// yet (agentTooOld).
 
 import type { domains, OpOutput } from "@seylo/ops";
 import { Button } from "@seylo/ui/components/button";
@@ -76,7 +77,7 @@ export function NoRouteNote({
         </p>
       ) : (
         <p className="m-0 min-w-0 flex-1 basis-64 text-xs text-muted-foreground">
-          {t(`serviceDomains.noRoute.${shown}`, { name: serviceName })}
+          {t(`serviceDomains.noRoute.${shown}`, { name: serviceName, node: noRoute.nodeName ?? t("serviceDomains.theNode") })}
         </p>
       )}
       {noRoute.reason === "notDeployed" && (

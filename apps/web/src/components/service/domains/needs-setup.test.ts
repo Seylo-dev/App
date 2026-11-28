@@ -80,3 +80,14 @@ test("a domain with no route counts when the domain is the problem, not while it
   // No route: nothing to check, so neither checking nor unknown for long.
   expect(originChecking(d({ dnsStatus: "proxied", origin: undefined, noRoute: { reason: "notDeployed" } }), now)).toBe(false);
 });
+
+test("a wildcard counts only while its * record goes straight to the node without a certificate", () => {
+  const w = (over: Record<string, unknown>) => d({ host: "*.starsell.net", wildcard: true, ...over });
+  const none = (wildcard: string) => ({ status: "none", wildcard });
+  expect(setupReason(w({ dnsStatus: "ok", certificate: none("noCertificate") }), now)).toBe("wildcardNoCertificate");
+  expect(domainNeedsSetup(w({ dnsStatus: "proxied", certificate: none("cloudflareEdge") }), now)).toBe(false);
+  expect(setupReason(w({ dnsStatus: "missing", certificate: none("noCertificate") }), now)).toBe("dnsMissing");
+  // An uploaded wildcard certificate or HTTP only: nothing to do.
+  expect(domainNeedsSetup(w({ dnsStatus: "ok", certificate: { status: "valid" } }), now)).toBe(false);
+  expect(domainNeedsSetup(w({ dnsStatus: "ok", https: "off", certificate: { status: "none" } }), now)).toBe(false);
+});

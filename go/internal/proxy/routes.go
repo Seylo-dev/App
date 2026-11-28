@@ -135,7 +135,7 @@ func Build(in BuildInput) (Built, error) {
 		}
 	}
 
-	b := &builder{in: in, n: newNamer(spec.GetId()), cfg: &dynamicConfig{HTTP: &httpConfig{
+	b := &builder{in: in, n: newNamer(spec.GetId()), wild: map[string]bool{}, cfg: &dynamicConfig{HTTP: &httpConfig{
 		Routers:     map[string]*router{},
 		Middlewares: map[string]*middleware{},
 		Services:    map[string]*service{},
@@ -177,6 +177,9 @@ type builder struct {
 	cfg *dynamicConfig
 	// remotes are the copies on other nodes this node balances to.
 	remotes []remoteCopy
+	// wild names the routers of wildcard routes, which stay in their
+	// band (wildcardPriority) and are never raised (raiseOwned).
+	wild map[string]bool
 }
 
 // remoteCopy is a copy of the service on another node. Each has a Traefik
@@ -215,13 +218,15 @@ func (b *builder) remoteCopies() []remoteCopy {
 }
 
 // raiseOwned gives the routers of owned hosts priorityOwned plus their
-// usual priority (the probe and handoff routers stay above).
+// usual priority (the probe and handoff routers stay above). The routers
+// of a wildcard route keep their band, also on the panel's own service:
+// raised, it would take every name under its base on the node.
 func (b *builder) raiseOwned() {
 	spec := b.spec()
 	panel := docker.IsPanelService(spec.GetId(), spec.GetProtected())
 	tool := b.n.route(toolRouteID, "")
 	for name, rt := range b.cfg.HTTP.Routers {
-		if rt.Priority >= priorityOwned {
+		if rt.Priority >= priorityOwned || b.wild[name] {
 			continue
 		}
 		if !panel && name != tool && !strings.HasPrefix(name, tool+"-") && name != b.n.svc("dbcert") {
@@ -556,7 +561,20 @@ func hasRedirectPort(spec *agentv1.ServiceSpec) bool {
 	return false
 }
 
-// rule is the Traefik rule for a route's hosts and path.
+// routeWildcard returns the base of a route's wildcard host
+// ("example.com" for "*.example.com") and true; false for a route of host
+// names. rule() makes sure a wildcard is a route's only host.
+func routeWildcard(r *agentv1.Route) (string, bool) {
+	if len(r.GetHosts()) != 1 {
+		return "", false
+	}
+	return wildcardBase(strings.ToLower(strings.TrimSuffix(r.GetHosts()[0], ".")))
+}
+
+// rule is the Traefik rule for a route's hosts and path: Host() for each
+// host name, or for a wildcard host (*.example.com) a HostRegexp() that
+// takes exactly one label under its base, so a.b.example.com is not
+// matched.
 func rule(r *agentv1.Route) (string, error) {
 	if len(r.GetHosts()) == 0 {
 		return "", fmt.Errorf("%w: route %q has no host", ErrInvalidRoute, r.GetId())
@@ -564,8 +582,17 @@ func rule(r *agentv1.Route) (string, error) {
 	hosts := make([]string, 0, len(r.GetHosts()))
 	for _, h := range r.GetHosts() {
 		h = strings.ToLower(strings.TrimSuffix(h, "."))
-		if err := checkHost(h); err != nil {
+		if err := checkRouteHost(h); err != nil {
 			return "", err
+		}
+		if base, wild := wildcardBase(h); wild {
+			// Its routers take the wildcard band (wildcardPriority), which a
+			// rule with exact hosts in it must not share.
+			if len(r.GetHosts()) > 1 {
+				return "", fmt.Errorf("%w: route %q has the wildcard host %q with other hosts", ErrInvalidRoute, r.GetId(), h)
+			}
+			hosts = append(hosts, fmt.Sprintf("HostRegexp(`%s`)", wildcardHostRegexp(base)))
+			continue
 		}
 		hosts = append(hosts, fmt.Sprintf("Host(`%s`)", h))
 	}
@@ -594,16 +621,28 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	if https == agentv1.HttpsMode_HTTPS_MODE_UNSPECIFIED {
 		https = agentv1.HttpsMode_HTTPS_MODE_ACME
 	}
+	// A wildcard route's routers rank below every exact host's
+	// (wildcardPriority); 0 leaves Traefik's default, the rule's length.
+	base, wild := routeWildcard(r)
+	priority := 0
+	if wild {
+		priority = wildcardPriority(base, r.GetPathPrefix())
+	}
 	var tls *routerTLS
 	// The panel holds the certificate back until the host reaches this
 	// node (Route.acme_hold): HTTPS with Traefik's default certificate and
 	// no resolver, so the origin routers answer on 443 too, and plain HTTP
-	// without the redirect.
-	held := https == agentv1.HttpsMode_HTTPS_MODE_ACME && r.GetAcmeHold()
+	// without the redirect. A wildcard host has nothing to hold: Let's
+	// Encrypt's HTTP-01 challenge cannot issue a wildcard certificate (and
+	// Traefik asks for none for a HostRegexp rule), so with ACME it is
+	// served on Traefik's default certificate for good, with the redirect
+	// to HTTPS as the route asks. Behind Cloudflare's proxy that is what
+	// SSL/TLS Full accepts; a real certificate is an uploaded one (custom).
+	held := https == agentv1.HttpsMode_HTTPS_MODE_ACME && r.GetAcmeHold() && !wild
 	switch https {
 	case agentv1.HttpsMode_HTTPS_MODE_ACME:
 		tls = &routerTLS{CertResolver: CertResolver}
-		if held {
+		if held || wild {
 			tls = &routerTLS{}
 		}
 	case agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE:
@@ -631,11 +670,18 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		retry = b.resendPlan(r, target)
 	}
 
+	if wild {
+		// Never raised to priorityOwned (raiseOwned): above priorityOwned
+		// the wildcard would take every name under its base on the node.
+		for _, n := range []string{name, name + "-retry", name + "-http", name + "-http-retry", b.n.route(r.GetId(), "lb")} {
+			b.wild[n] = true
+		}
+	}
 	if tls == nil {
-		b.putRouter(name, &router{EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Middlewares: chain, Service: target}, retry)
+		b.putRouter(name, &router{EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Priority: priority, Middlewares: chain, Service: target}, retry)
 	} else {
-		b.putRouter(name, &router{EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Middlewares: chain, Service: target, TLS: tls}, retry)
-		httpRouter := &router{EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Middlewares: chain, Service: target}
+		b.putRouter(name, &router{EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Priority: priority, Middlewares: chain, Service: target, TLS: tls}, retry)
+		httpRouter := &router{EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Priority: priority, Middlewares: chain, Service: target}
 		if r.GetRedirectToHttps() && !held {
 			// Plain HTTP only redirects (after the route's own redirects);
 			// the service is never reached.
@@ -662,7 +708,8 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	if b.in.Edge != "" && r.GetId() != toolRouteID {
 		b.addOrigin(r.GetId(), ruleText, tls)
 	}
-	if https == agentv1.HttpsMode_HTTPS_MODE_ACME && r.GetAcmeChallengeOnHttps() {
+	// A wildcard route asks the CA for nothing, so there is no challenge to answer.
+	if https == agentv1.HttpsMode_HTTPS_MODE_ACME && r.GetAcmeChallengeOnHttps() && !wild {
 		b.addAcmeChallenge(r.GetId(), ruleText)
 	}
 
@@ -674,6 +721,7 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		b.cfg.HTTP.Routers[b.n.route(r.GetId(), "lb")] = &router{
 			EntryPoints: []string{EntryPointLB},
 			Rule:        ruleText,
+			Priority:    priority,
 			Service:     b.n.svc("none"),
 			TLS:         &routerTLS{Options: LBTLSOptions},
 		}
@@ -699,6 +747,7 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		b.cfg.HTTP.Routers[b.n.route(r.GetId(), "lb")] = &router{
 			EntryPoints: []string{EntryPointLB},
 			Rule:        ruleText,
+			Priority:    priority,
 			Middlewares: lbChain,
 			Service:     b.upstreamService(r, true),
 			TLS:         &routerTLS{Options: LBTLSOptions},
@@ -812,14 +861,18 @@ const idempotentMethods = "(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`)
 // middleware last in the chain: a request is sent to another copy after a
 // 502-504 only when it is safe to send twice, and after a copy that could
 // not be reached at all (nothing was sent) for every method. Both halves
-// keep the priority Traefik would give the original rule (its length), so
-// the order against other routes does not change.
+// keep the priority Traefik would give the original rule (its length, or
+// the router's own priority when it has one: a wildcard route's), so the
+// order against other routes does not change.
 func (b *builder) putRouter(name string, rt *router, plan *resendPlan) {
 	if plan == nil {
 		b.cfg.HTTP.Routers[name] = rt
 		return
 	}
-	priority := len(rt.Rule)
+	priority := rt.Priority
+	if priority == 0 {
+		priority = len(rt.Rule)
+	}
 	idem := *rt
 	idem.Rule = "(" + rt.Rule + ") && " + idempotentMethods
 	idem.Service = plan.idemService

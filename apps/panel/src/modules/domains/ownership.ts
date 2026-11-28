@@ -5,7 +5,11 @@
 // when the caller may edit that service's domains (owners and admins may).
 // Hosts that are not service domains are never available: the panel's own
 // domain, a database's TLS host name, and the agents' tool hosts
-// (<slug>-db-<id>.<wildcard>, <slug>-box-<id>.<wildcard>).
+// (<slug>-db-<id>.<wildcard>, <slug>-box-<id>.<wildcard>). A wildcard
+// domain (*.example.com, wildcard.ts) routes every name one label under its
+// base that no exact host routes, and an exact host always outranks it, so
+// an exact name under another service's wildcard is that service's to give
+// as well.
 
 import { X509Certificate } from "node:crypto";
 import { slug } from "@seylo/brand";
@@ -55,6 +59,43 @@ export function hostConflict(caller: HostCaller, host: string, serviceId: string
   for (const owner of owners) {
     if (!caller.access.can("domains.edit", { type: "service", id: owner.serviceId })) {
       return { message: `${name} is used by another service.`, reason: "hostTaken" };
+    }
+  }
+  // An exact host outranks a wildcard on the node, so a name under another
+  // service's wildcard (*.example.com) would take that name's requests from
+  // it: only for callers who may edit that service's domains.
+  const dot = name.indexOf(".");
+  if (!name.startsWith("*.") && dot > 0) {
+    const wildcard = `*.${name.slice(dot + 1)}`;
+    const covering = caller.db
+      .selectDistinct({ serviceId: domains.serviceId })
+      .from(domains)
+      .where(and(sql`lower(${domains.host}) = ${wildcard}`, ne(domains.serviceId, serviceId)))
+      .all();
+    for (const owner of covering) {
+      if (!caller.access.can("domains.edit", { type: "service", id: owner.serviceId })) {
+        return { message: `${name} is covered by ${wildcard}, a wildcard domain of another service.`, reason: "hostTaken" };
+      }
+    }
+  }
+  // And the other way: a wildcard over names another service already routes
+  // is that service's domain too, so nobody claims it who may not edit it
+  // (exact hosts keep their requests, but every later name would be taken).
+  if (name.startsWith("*.")) {
+    const base = name.slice(2);
+    const under = caller.db
+      .selectDistinct({ serviceId: domains.serviceId, host: domains.host })
+      .from(domains)
+      .where(and(sql`lower(${domains.host}) like ${`%.${base}`}`, ne(domains.serviceId, serviceId)))
+      .all()
+      .filter((d) => {
+        const host = d.host.toLowerCase();
+        return !host.startsWith("*.") && host.slice(host.indexOf(".") + 1) === base;
+      });
+    for (const owner of under) {
+      if (!caller.access.can("domains.edit", { type: "service", id: owner.serviceId })) {
+        return { message: `${owner.host} is a domain of another service, so ${name} is not available.`, reason: "hostTaken" };
+      }
     }
   }
   // A custom certificate on another service that names this host would be

@@ -188,7 +188,8 @@ function HttpsSelect({ value, onChange }: { value: HttpsMode; onChange: (v: Http
   );
 }
 
-const hostPattern = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/;
+/** domains.add's DomainHost: a host name, or a wildcard "*.example.com". */
+const hostPattern = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/;
 
 export function AddDomainDialog({
   service,
@@ -224,6 +225,8 @@ export function AddDomainDialog({
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/\/.*$/, "");
+  // A wildcard is never primary (domains.add refuses primary true for one).
+  const wildcard = cleanHost.startsWith("*.");
   return (
     <DialogFrame
       open={open}
@@ -240,7 +243,7 @@ export function AddDomainDialog({
           pathPrefix,
           stripPrefix,
           https,
-          primary: primary || becomesPrimary,
+          primary: !wildcard && (primary || becomesPrimary),
           // Empty: the service's port (servicePort), which for a portless app built from a repository is its PORT.
           targetPort: port || servicePort(service),
           ...(redirect && forwardUrl ? { forward: { url: forwardUrl, permanent: true, keepPath: true } } : {}),
@@ -257,6 +260,11 @@ export function AddDomainDialog({
           autoFocus
         />
       </Field>
+      {wildcard && hostPattern.test(cleanHost) && (
+        <p className="m-0 text-xs text-muted-foreground" data-testid="wildcard-hint">
+          {t("serviceDomains.form.wildcardHint", { base: cleanHost.slice(2) })}
+        </p>
+      )}
       <ToggleRow
         title={t("serviceDomains.form.redirectOnly")}
         description={t("serviceDomains.form.redirectOnlyHint")}
@@ -294,9 +302,9 @@ export function AddDomainDialog({
             </CheckLabel>
             <CheckLabel
               className="flex items-center gap-2"
-              checked={primary || becomesPrimary}
+              checked={!wildcard && (primary || becomesPrimary)}
               onCheckedChange={(v) => setPrimary(v === true)}
-              disabled={becomesPrimary}
+              disabled={becomesPrimary || wildcard}
             >
               {t("serviceDomains.form.makePrimary")}
             </CheckLabel>

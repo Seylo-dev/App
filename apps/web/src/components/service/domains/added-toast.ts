@@ -3,7 +3,9 @@
 // registrable domain does not exist (Domain.warning registrableMissing:
 // not registered, no name servers yet, or a typo), with "Did you mean"
 // when the panel named a likely spelling. An automatic domain gets the
-// same warning when the node's wildcard domain does not exist.
+// same warning when the node's wildcard domain does not exist. A wildcard
+// domain that works (its * record ok, or behind Cloudflare's proxy) says
+// what it now routes; one on a node to update says so.
 
 import type { domains, OpOutput } from "@seylo/ops";
 import { toast } from "@seylo/ui/components/toast";
@@ -26,12 +28,18 @@ function warnMissing(warning: Warning): string {
 /** After domains.add. */
 export function toastAdded(res: Added, serviceName: string): string {
   if (res.domain.warning) return warnMissing(res.domain.warning);
+  const reason = res.domain.noRoute?.reason;
+  const working = res.dns.status === "ok" || (res.domain.wildcard === true && res.dns.status === "proxied");
   return toast.success(
-    res.domain.noRoute?.reason === "notDeployed"
+    reason === "notDeployed"
       ? t("serviceDomains.addedNotDeployed", { name: serviceName })
-      : res.dns.status === "ok"
-        ? t("serviceDomains.addedLive")
-        : t("serviceDomains.addedWaiting"),
+      : reason === "agentTooOld"
+        ? t("serviceDomains.addedAgentTooOld", { node: res.domain.noRoute?.nodeName ?? t("serviceDomains.theNode") })
+        : working && res.domain.wildcard
+          ? t("serviceDomains.addedWildcard", { base: res.domain.host.replace(/^\*\./, ""), name: serviceName })
+          : working
+            ? t("serviceDomains.addedLive")
+            : t("serviceDomains.addedWaiting"),
   );
 }
 

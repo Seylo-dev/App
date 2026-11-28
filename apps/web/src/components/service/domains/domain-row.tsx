@@ -27,6 +27,11 @@
 // Domains tab counts does (needs-setup.ts). The
 // row's "..." and its right-click menu are one list (menus/row-items.tsx);
 // the notes under the row keep the browser's menu, for their records and links.
+// A wildcard domain (*.example.com) is no link and never primary; it has a
+// Wildcard chip, its record is named *, and with Let's Encrypt chosen it
+// has no certificate of its own: behind Cloudflare's proxy the row says
+// visitors get Cloudflare's certificate, straight to the node a note says
+// HTTPS warns and what to do (wildcardCert.*).
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -88,8 +93,15 @@ function domainTone(d: Domain): Tone {
   // A failure from before the certificate waited for DNS is not what holds it up now.
   if (d.dnsStatus === "wrongTarget" || (d.certificate.status === "failed" && !waitsForDns(d)) || elsewhere(d)) return "error";
   if (!d.auto && d.dnsStatus !== "ok" && d.dnsStatus !== "proxied") return "busy";
+  // A wildcard has no certificate of its own: fine behind Cloudflare's proxy, a browser warning straight to the node.
+  if (d.certificate.wildcard) return d.certificate.wildcard === "cloudflareEdge" ? "ok" : "busy";
   if (d.https !== "off" && d.certificate.status !== "valid") return "busy";
   return "ok";
+}
+
+/** "example.com" for "*.example.com". */
+function wildcardBase(host: string): string {
+  return host.replace(/^\*\./, "");
 }
 
 /** The origin check found that requests to the domain reach another server, not this service's node. */
@@ -151,8 +163,9 @@ export function DomainRow({
         return setConfirm(true);
     }
   };
+  const wildcard = d.wildcard === true;
   const menu = domainMenuEntries(d, {
-    linkable: !(d.forward || waiting || d.noRoute),
+    linkable: !(d.forward || waiting || d.noRoute || wildcard),
     canRegenerate: canRegenerate(d),
     regenerating: regenerate.isPending,
     act,
@@ -183,7 +196,7 @@ export function DomainRow({
               <Icon size={14} stroke={2.2} />
             </span>
             <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
-              {d.forward || waiting || d.noRoute ? (
+              {d.forward || waiting || d.noRoute || wildcard ? (
                 <span className="font-mono text-[13px] font-medium">{d.url}</span>
               ) : (
                 <a href={d.url} target="_blank" rel="noreferrer" className="font-mono text-[13px] font-medium">
@@ -192,6 +205,11 @@ export function DomainRow({
               )}
               {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
               {d.auto && <Chip tone="gray">{t("serviceDomains.auto")}</Chip>}
+              {wildcard && (
+                <Chip tone="gray" title={t("serviceDomains.wildcardHint", { base: wildcardBase(d.host) })} data-testid="wildcard-chip">
+                  {t("serviceDomains.wildcard")}
+                </Chip>
+              )}
               <span className="flex items-center gap-3">
                 <IconArrowRight size={14} stroke={2} className="text-ink-ghost" aria-hidden="true" />
                 {d.forward ? (
@@ -244,6 +262,11 @@ export function DomainRow({
             {rateLimited && <RateLimitNote />}
             {(generating || held) && !d.noRoute && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} held={held} />}
             {!(generating || held) && originUnknownLong(d) && <OriginUnknownNote serviceId={serviceId} d={d} />}
+            {!waiting && !d.noRoute && d.certificate.wildcard === "noCertificate" && (
+              <p className="m-0 text-xs text-muted-foreground" data-testid="wildcard-cert-note">
+                {t("serviceDomains.wildcardCert.noCertificateHint", { host: d.host })}
+              </p>
+            )}
           </div>
         </div>
       </RowMenu>
@@ -340,7 +363,7 @@ function OriginUnknownNote({ serviceId, d }: { serviceId: string; d: Domain }) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="origin-unknown-note" data-reason={reason}>
       <p className="m-0 min-w-0 flex-1 basis-64 text-xs text-muted-foreground">
         {reason
-          ? t(`serviceDomains.originReason.${reason}`, { host: d.host, ip })
+          ? originReasonText(d, reason, ip)
           : t("serviceDomains.originUnknownHint", { host: d.host, ip, minutes: originUnknownLongMs / 60_000 })}
       </p>
       <CheckAgainButton check={check} />
@@ -358,6 +381,13 @@ const slowCertMs = 10 * 60_000;
  */
 function originReason(d: Domain, check: OpOutput<typeof domains.checkDns> | undefined): Domain["originReason"] {
   return check ? check.originReason : d.originReason;
+}
+
+/** What Cloudflare's answer means for this domain: a wildcard never gets a Let's Encrypt certificate to wait for. */
+function originReasonText(d: Domain, reason: NonNullable<Domain["originReason"]>, ip: string): string {
+  if (reason === "cloudflareCertificate" && d.wildcard)
+    return t("serviceDomains.originReason.cloudflareCertificateWildcard", { host: d.host });
+  return t(`serviceDomains.originReason.${reason}`, { host: d.host, ip });
 }
 
 /**
@@ -399,7 +429,7 @@ function PendingCertNote({ serviceId, d, held }: { serviceId: string; d: Domain;
   );
   // What Cloudflare answered the last check says more than the general note.
   const reason = proxied && !reaches ? originReason(d, check.data) : undefined;
-  if (reason) return note(t(`serviceDomains.originReason.${reason}`, { host: d.host, ip }), reason);
+  if (reason) return note(originReasonText(d, reason, ip), reason);
   if (held) return note(t(proxied ? "serviceDomains.certWaitsProxiedHint" : "serviceDomains.certWaitsHint", { host: d.host, ip }));
   if (proxied && !reaches) return note(t("serviceDomains.certProxiedHint", { host: d.host, ip }));
   if (Date.now() - Date.parse(d.createdAt) < slowCertMs) return null;
@@ -435,7 +465,7 @@ function OriginHelp({ serviceId, d, held }: { serviceId: string; d: Domain; held
       </span>
       {reason && (
         <span className="w-full text-xs text-muted-foreground" data-testid="origin-reason" data-reason={reason}>
-          {t(`serviceDomains.originReason.${reason}`, { host: d.host, ip })}
+          {originReasonText(d, reason, ip)}
         </span>
       )}
       {proxied && record && (
@@ -531,6 +561,29 @@ function RowStatus({
       </span>
     );
   if (d.https === "off") return <span className="text-xs text-muted-foreground">{t("serviceDomains.httpOnly")}</span>;
+  if (d.certificate.wildcard === "cloudflareEdge")
+    return (
+      <span
+        className="text-xs text-muted-foreground"
+        title={t("serviceDomains.wildcardCert.cloudflareEdgeHint", { host: d.host })}
+        data-testid="wildcard-cert"
+        data-state="cloudflareEdge"
+      >
+        {t("serviceDomains.wildcardCert.cloudflareEdge")}
+      </span>
+    );
+  if (d.certificate.wildcard === "noCertificate")
+    return (
+      <Chip
+        tone="amber"
+        title={t("serviceDomains.wildcardCert.noCertificateHint", { host: d.host })}
+        data-testid="wildcard-cert"
+        data-state="noCertificate"
+      >
+        <StatusDot status="busy" />
+        {t("serviceDomains.wildcardCert.noCertificate")}
+      </Chip>
+    );
   const cert = d.certificate;
   if (cert.status === "valid" && cert.expiresAt) {
     const soon = Date.parse(cert.expiresAt) - Date.now() < expiringSoonMs;

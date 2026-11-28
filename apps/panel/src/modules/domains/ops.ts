@@ -19,6 +19,7 @@ import { enqueueOriginCheck, originApplies, originProvable } from "./origin";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
 import { checkDomain } from "./recheck";
 import { type DomainRow, getDomain, primaryDomain, serviceDomains, toDomain } from "./rows";
+import { assertNotWildcardPrimary, assertWildcardAllowed, isWildcardHost } from "./wildcard";
 
 const changedOps = [domainOps.list.id, exposureOps.get.id, envOps.references.id];
 
@@ -140,6 +141,10 @@ export const add = implement(domainOps.add, async (input, ctx) => {
       field: "https",
     });
   }
+  // A wildcard: not over a public suffix, a node's automatic-domain wildcard or the panel's domain, never primary (wildcard.ts).
+  const wildcard = isWildcardHost(input.host);
+  assertWildcardAllowed(ctx.db, input.host, service.id);
+  if (wildcard && input.primary === true) assertNotWildcardPrimary(input.host);
   const targetPort = targetPortFor(ctx.db, service, input.targetPort);
   const nodes = serviceNodes(ctx.db, service.id);
   // A registrable domain that does not exist is a warning, not a refusal: the owner may register it later.
@@ -149,7 +154,7 @@ export const add = implement(domainOps.add, async (input, ctx) => {
   const answer = { dnsStatus: dns.status, origin: null, provable: originProvable(ctx, service.id) };
   const now = new Date();
   const row = ctx.db.transaction((tx) => {
-    const makePrimary = !input.forward && (input.primary === true || !primaryDomain(tx, service.id));
+    const makePrimary = !input.forward && !wildcard && (input.primary === true || !primaryDomain(tx, service.id));
     if (makePrimary) tx.update(domains).set({ isPrimary: false }).where(eq(domains.serviceId, service.id)).run();
     return insertDomain(ctx, tx, {
       serviceId: service.id,
@@ -162,14 +167,16 @@ export const add = implement(domainOps.add, async (input, ctx) => {
       isPrimary: makePrimary,
       dnsStatus: dns.status,
       dnsCheckedAt: now,
-      certStatus: https === "off" ? "none" : "pending",
+      // A wildcard asks Let's Encrypt nothing (HTTP-01 cannot issue it): no certificate to wait for.
+      certStatus: https === "off" || wildcard ? "none" : "pending",
       acmeReleasedAt: releases({ forward: input.forward ?? null }, answer) ? now : null,
     });
   });
   afterChange(ctx, service.id);
   // The node writes the route a moment from now; the origin check waits for it (origin.ts). A service that
   // has not deployed yet has no route to check: its deployment going live starts the check (no-route.ts).
-  const noRoute = unroutable(ctx.db, service);
+  // A wildcard has none either on a node whose agent does not route wildcards yet (no-route.ts agentTooOld).
+  const noRoute = unroutable(ctx.db, service) ?? (wildcard ? (noRoutes(ctx, service, [row]).get(row.id) ?? null) : null);
   if (originApplies(row, dns.status) && !noRoute) enqueueOriginCheck(ctx, row.id);
   return {
     domain: { ...toDomain(row), ...(noRoute ? { noRoute } : {}), ...(warning ? { warning } : {}) },
@@ -223,8 +230,10 @@ export const update = implement(domainOps.update, (input, ctx) => {
       https,
       redirectToHttps: input.redirectToHttps ?? row.redirectToHttps,
       forward: input.forward === undefined ? row.forward : input.forward,
-      // A new HTTPS mode needs a new certificate state; custom certificates are valid on upload.
-      ...(https !== row.https ? { certStatus: https === "off" ? "none" : https === "custom" ? "valid" : "pending" } : {}),
+      // A new HTTPS mode needs a new certificate state; custom certificates are valid on upload, a wildcard gets none from ACME.
+      ...(https !== row.https
+        ? { certStatus: https === "off" ? "none" : https === "custom" ? "valid" : isWildcardHost(row.host) ? "none" : "pending" }
+        : {}),
     })
     .where(eq(domains.id, row.id))
     .returning()
@@ -294,6 +303,7 @@ export const setCertificate = implement(domainOps.setCertificate, (input, ctx) =
 export const setPrimary = implement(domainOps.setPrimary, (input, ctx) => {
   const row = requireDomain(ctx.db, input.serviceId, input.domainId);
   if (row.forward) throw new OpError("BAD_REQUEST", "A redirect-only domain cannot be primary.", { field: "domainId" });
+  assertNotWildcardPrimary(row.host, "domainId");
   const updated = ctx.db.transaction((tx) => {
     tx.update(domains).set({ isPrimary: false }).where(eq(domains.serviceId, input.serviceId)).run();
     const next = tx.update(domains).set({ isPrimary: true }).where(eq(domains.id, row.id)).returning().get();
@@ -316,7 +326,7 @@ export const remove = implement(domainOps.remove, (input, ctx) => {
         .where(eq(domains.serviceId, input.serviceId))
         .orderBy(asc(domains.createdAt))
         .all()
-        .find((d) => !d.forward);
+        .find((d) => !d.forward && !isWildcardHost(d.host));
       if (promote) tx.update(domains).set({ isPrimary: true }).where(eq(domains.id, promote.id)).run();
     }
   });

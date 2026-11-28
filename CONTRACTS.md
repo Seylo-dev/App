@@ -3823,6 +3823,7 @@ the node is offline (`modules/databases/capability.ts`).
 | `panel.publish-bind.v1` (0.2.1, `reconcile.PanelPublishBindCapability`, `wire_runtime.go`) | The agent publishes the protected panel's ports on `PublicPort.bind_address` (empty = every address; only a loopback address, only on the protected panel service: `validateSpec` refuses anything else), adopts an installer-started panel container only when its actual bindings match the desired list (HostIP included; otherwise it rolls), and reports the bindings in `seylo panel status`. The panel closes IP access only on a panel node that is online and advertised it (`panelNodeState.capable`; else block `agentTooOld` and `decidePanelIpAccess` keeps it open); an older agent ignores the field and keeps every address |
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
 | `routing.origin-proof.v1` (`edge.OriginCapability`, `wire_network.go`, only with the node key) | Every route file sends `GET /.well-known/<slug>-origin/<challenge>` on the route's hosts to the edge (`proxy` `addOrigin`), which answers with the node key's signature (`edge/origin.go`). The panel's origin check (`modules/domains/origin.ts`) asks only when a node of the service advertised it, and calls an answer without the proof "elsewhere" only when every node of the service did and reported the domain's route; otherwise "unknown" |
+| `routing.wildcard-hosts.v1` (0.2.25, `proxy.WildcardCapability`, `wire_network.go`) | Route files take a wildcard host (`Route.hosts` = `*.<base>`, the route's only host): exactly one label under base, ranked below every exact host on the node, and with HTTPS mode ACME the agent asks the CA for nothing and serves Traefik's default certificate. An older agent refuses `*`, and with it the service's whole route file, so the panel sends wildcard routes only to agents that advertised this (`modules/domains/wildcard.ts`; elsewhere `noRoute` `agentTooOld`) |
 | `node.docker-check.v1` (0.2.5, `update.DockerCheckCapability`, `wire_node.go`) | The agent looks for a newer Docker Engine by itself and reports it in every NodeFacts as `docker_update` (see "Releases and updates", Docker version check). The panel keeps the newest report per node and shows it as the node's `docker` only for agents that advertised it; an older agent's node has no `docker`, so the Machine card and Update Docker stay as before |
 | `volume.import-limits.v1` (0.2.10, `volumes.ImportLimitsCapability`, `wire_runtime.go`) | `ImportVolumeRequest.max_bytes`, `max_entries` and `sha256` hold: at most that many file bytes and archive headers, the whole stream hashes to `sha256`, and the data folder keeps `max_bytes` plus a floor (a tenth of the disk, 1 to 5 GiB) free (RESOURCE_EXHAUSTED `reason: noSpace`, `tooLarge`, `tooMany`; INVALID_ARGUMENT `reason: checksum`); with any limit set, a failure after writing started empties the volume and the agent answers at once instead of draining the stream. Imports into one volume run one after another (a second one waits for the first, its cleanup included). `ExportVolumeResponse.entries` counts what an export wrote. The panel sends an uploaded export file's volume data only to an agent that advertised it (an older one would ignore the limits); moves and clones send none and work on `volume.transfer.v1` as before |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
@@ -7088,6 +7089,101 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `notDeployed` out. A compose stack or a cron service shows the Domains
   tab only while it has domains (`tabsFor(kind, { strayDomains })`), with
   no Add domain button and no access cards.
+- Wildcard domains (0.2.25, `modules/domains/wildcard.ts`): a domain's
+  host may be `*.<base>` (`DomainHost` in `packages/ops/src/ops/domains.ts`:
+  `Hostname` with an optional leading `*.`, so `a.*.b`, `**.b`, `*b.c`
+  and `*.com` fail the schema). It routes every name one label under base
+  (`shop.example.com`, not `a.b.example.com`, not `example.com`) with the
+  domain's port, path, middlewares and HTTPS redirect, below every exact
+  domain of any service on the node (the agent's priority band, see
+  `routing.wildcard-hosts.v1`). `domains.add` also refuses (BAD_REQUEST,
+  field `host`) a base that is a public suffix (`registrableDomain` null,
+  ICANN section as `zone.ts`: `*.co.il`; `*.github.io` passes) with reason
+  `wildcardPublicSuffix`, a base equal to a node's `wildcard_domain`
+  (`wildcardNodeDomain`: its names are automatic domains and tool hosts),
+  a wildcard covering the panel's domain (`wildcardPanelDomain`;
+  `*.panel.example.com` does not cover `panel.example.com`) and the
+  protected panel service (`wildcardPanelService`, whose routers the agent
+  raises). A wildcard is never primary: `primary: true` and
+  `domains.setPrimary` answer BAD_REQUEST `wildcardPrimary`, it is skipped
+  when the first domain becomes primary, when the primary is removed, by
+  the import's primary pick and by the service list's address; `DOMAINS`
+  lists it as written, `DOMAIN` and `URL` never are one. `Domain.wildcard`
+  is set (true) for one; `Domain.url` keeps the `*`. Ownership
+  (`ownership.ts hostConflict`): an exact host is refused (CONFLICT
+  `hostTaken`) under another service's identical-base wildcard
+  (`north.example.com` under `*.example.com`) unless the caller may edit
+  that service's domains, since the exact host would take that name's
+  requests; an identical wildcard on two services is the same host, as
+  before; and a wildcard is refused (CONFLICT `hostTaken`) while another
+  service the caller may not edit routes a name one label under its base
+  (`shop.example.com` blocks `*.example.com`, not `*.eu.example.com`):
+  those exact hosts keep their requests, but every later name would go to
+  the squatter. Forwards match one label under base
+  (`(?:[A-Za-z0-9-]+)\.<base>`, non-capturing so `$1` stays the path).
+  DNS (`dns.ts checkHost`) and the origin check (`origin.ts checkOrigin`)
+  ask `probeHost`: `<slug>-check-<12 hex>.<base>`, fresh per check, which
+  only the `*` record answers (an exact record under the base never
+  decides); `DnsCheck.probe` names it, `expected` and `found` are named
+  `*`, the zone comes from the base, and the message is the wildcard's
+  (`wildcardMessage`). HTTPS: Let's Encrypt's HTTP-01 cannot issue a
+  wildcard and the panel has no DNS provider token for DNS-01, so a
+  wildcard with `https: acme` is stored with `cert_status` none, is never
+  held (`acmeHeld` false), gets no challenge router
+  (`acmeChallengeOnHttps` false), keeps `redirect_to_https`, and the node
+  serves it with Traefik's default certificate. `Domain.certificate` is
+  `{status: "none", expiresAt: null, issuer: null, error: null, wildcard}`
+  with `wildcard` `cloudflareEdge` while DNS is proxied (visitors get
+  Cloudflare's certificate; SSL/TLS Full accepts the node's, Full (strict)
+  needs an uploaded origin certificate) and `noCertificate` otherwise (a
+  browser warning; the Domains tab counts it while DNS is ok,
+  `needs-setup.ts` `wildcardNoCertificate`). `domains.retryCertificate`
+  refuses (CONFLICT `wildcard`). `domains.setCertificate` takes only a
+  certificate naming the wildcard itself (`checkCertificate`: the exact
+  SAN `*.<base>`; a name under it is not enough), for example a Cloudflare
+  Origin CA certificate; it serves like any custom certificate. Route
+  reports (`tracking.ts`) of a wildcard with `https: acme` only set
+  `liveAt` on ACTIVE; pending, failed and DNS states are ignored (the
+  agent checks no wildcard record). Nodes: `desired.ts serviceNetworking`
+  leaves a wildcard route out for a node whose stored facts lack
+  `routing.wildcard-hosts.v1` (an older agent refuses `*` and with it the
+  service's whole route file), and `noRoutes` (so `domains.list` and
+  `domains.add`) answers `noRoute` `{reason: "agentTooOld", nodeId,
+  nodeName}` for it (live capabilities while online, else the stored
+  ones); the connect sync sends the route once the updated agent's hello
+  stored the capability. No schema change: `domains.host` is text. The
+  web: the add dialog takes `*.` (a hint under the field, primary
+  unticked and locked), the row has a Wildcard chip, no link, no Make
+  primary, "Cloudflare's certificate" or an amber "No certificate" with a
+  note, "Update `<node>`" for `agentTooOld`, and the Full (strict) 525/526
+  reason in its wildcard wording (`originReason.cloudflareCertificateWildcard`).
+  Tests: `test/wildcard-domains.test.ts`, the MCP shape in `test/mcp.test.ts`,
+  `domain-row.test.tsx`, `needs-setup.test.ts`. The agent
+  (`go/internal/proxy`): `checkRouteHost` takes `*.<base>` for route hosts
+  only (one leading `*` label, base of two or more labels; tool hosts,
+  database certificate hosts and LB names stay `checkHost`), and a
+  wildcard must be its route's only host (`ErrInvalidRoute`). `rule()`
+  renders ``HostRegexp(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.<QuoteMeta(base)>\.?$`)``
+  (Traefik matches the lower-cased host and keeps a trailing dot, as
+  `Host()` accepts one). `wildcardPriority(base, path)` =
+  `min(max(1+len(path or "/"), 2), len(base)+9)`: below every exact rule
+  that could match a name under base (at least `Host(`<label>.<base>`)`,
+  `len(base)+10`) and above the Wings fork's catch-all on web
+  (`HostRegexp(`^.+$`)`, priority 1); a longer path first, paths over
+  `len(base)+8` characters tie at the top. It is set on the websecure,
+  `-http`, both `-retry` halves (`putRouter` keeps an explicit priority)
+  and `-lb` routers; origin, handoff and probe routers keep theirs, and
+  `raiseOwned` never raises a wildcard router, the panel service's
+  included. ACME on a wildcard: `tls: {}` with no resolver, the redirect
+  to HTTPS as asked, `acme_hold` ignored, no acme-challenge router;
+  custom: the uploaded certificate by SNI. `Status` reports a wildcard
+  ACME route ACTIVE without certificate facts, `dnsMismatch` skips
+  wildcards, `RetryCertificate` answers `ErrNotACME`. Tests:
+  `wildcard_test.go`, and `wildcard_integration_test.go` against real
+  Traefik with a priority-1 catch-all (exact host in another file wins on
+  every path, one label only, upper case and a trailing dot match, `/api`
+  before `/`, the default certificate on 443, a custom wildcard
+  certificate by SNI).
 
 ## Web app
 
